@@ -1,4 +1,3 @@
-// cmd/bot/main.go
 package main
 
 import (
@@ -10,31 +9,38 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 )
 
-func RunMainBot() {
-	main() // Просто вызываем основную функцию
-}
-
 func main() {
 	// Загружаем конфигурацию
 	cfg, err := config.LoadConfig(".env")
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatalf("Не удалось загрузить конфигурацию: %v", err)
 	}
 
 	// Выводим информацию о конфигурации
-	printHeader("Crypto Exchange Screener Bot - FULL MODE")
+	printHeader("МОНИТОР РОСТА КРИПТОВАЛЮТНЫХ ФЬЮЧЕРСОВ")
 	fmt.Printf("🔧 Конфигурация:\n")
 	fmt.Printf("   Сеть: %s\n", map[bool]string{true: "Testnet 🧪", false: "Mainnet ⚡"}[cfg.UseTestnet])
 	fmt.Printf("   Категория: %s фьючерсы\n", cfg.FuturesCategory)
 	fmt.Printf("   Интервал обновления: %d секунд\n", cfg.UpdateInterval)
-	fmt.Printf("   Отслеживаемые интервалы: %s\n", formatIntervals(cfg.TrackedIntervals))
-	fmt.Printf("   Порог сигнала: %.2f%%\n", cfg.AlertThreshold)
+	fmt.Printf("   Периоды роста: %s\n", formatGrowthPeriods(cfg.GrowthPeriods))
+	fmt.Printf("   Порог роста: %.2f%%\n", cfg.GrowthThreshold)
+	fmt.Printf("   Порог падения: %.2f%%\n", cfg.FallThreshold)
+
+	// Показываем настройки фильтров
+	if cfg.SymbolFilter == "all" {
+		fmt.Printf("   Режим: ВСЕ СИМВОЛЫ\n")
+	} else if cfg.SymbolFilter != "" {
+		fmt.Printf("   Фильтр символов: %s\n", cfg.SymbolFilter)
+	}
+	if cfg.MaxSymbolsToMonitor > 0 {
+		fmt.Printf("   Макс. символов: %d\n", cfg.MaxSymbolsToMonitor)
+	}
+	fmt.Printf("   Мин. объем: $%.0f\n", cfg.MinVolumeFilter)
 	fmt.Println()
 
 	// Переменные для статистики
@@ -45,49 +51,110 @@ func main() {
 	// Создаем монитор цен
 	priceMonitor := monitor.NewPriceMonitor(cfg)
 
-	// Получаем все фьючерсные USDT пары
+	// Получаем все фьючерсные USDT пары с фильтрацией
 	fmt.Println("📈 Получение фьючерсных торговых пар...")
-	pairs, err := priceMonitor.FetchAllFuturesPairs()
-	if err != nil {
-		log.Fatalf("Failed to fetch futures pairs: %v", err)
+
+	var pairs []string
+	if cfg.SymbolFilter == "all" {
+		// Режим ALL - получаем все пары с фильтрацией по объему
+		allPairs, err := priceMonitor.GetAllFuturesPairs(
+			cfg.MinVolumeFilter,
+			0,    // Без ограничения по количеству
+			true, // Сортировать по объему
+		)
+		if err != nil {
+			log.Fatalf("Не удалось получить фьючерсные пары: %v", err)
+		}
+		pairs = allPairs
+
+		// Ограничиваем количество если указано
+		if cfg.MaxSymbolsToMonitor > 0 && len(pairs) > cfg.MaxSymbolsToMonitor {
+			pairs = pairs[:cfg.MaxSymbolsToMonitor]
+			fmt.Printf("⚠️  Ограничено %d символами (MAX_SYMBOLS_TO_MONITOR)\n", cfg.MaxSymbolsToMonitor)
+		}
+	} else if cfg.SymbolFilter != "" {
+		// Фильтр по конкретным символам
+		allPairs, err := priceMonitor.GetAllFuturesPairs(
+			cfg.MinVolumeFilter,
+			0,    // Без ограничения по количеству
+			true, // Сортировать по объему
+		)
+		if err != nil {
+			log.Fatalf("Не удалось получить фьючерсные пары: %v", err)
+		}
+
+		// Фильтруем по SYMBOL_FILTER
+		filterMap := make(map[string]bool)
+		filterParts := strings.Split(strings.ToUpper(cfg.SymbolFilter), ",")
+		for _, part := range filterParts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			filterMap[part] = true
+			// Также добавляем версию с USDT если не указана
+			if !strings.HasSuffix(part, "USDT") {
+				filterMap[part+"USDT"] = true
+			}
+		}
+
+		for _, pair := range allPairs {
+			baseSymbol := strings.TrimSuffix(strings.ToUpper(pair), "USDT")
+			if filterMap[pair] || filterMap[baseSymbol] {
+				pairs = append(pairs, pair)
+			}
+		}
+
+		// Если после фильтрации нет пар, используем первые N
+		if len(pairs) == 0 && len(allPairs) > 0 {
+			maxPairs := cfg.MaxSymbolsToMonitor
+			if maxPairs <= 0 {
+				maxPairs = 10
+			}
+			if maxPairs > len(allPairs) {
+				maxPairs = len(allPairs)
+			}
+			pairs = allPairs[:maxPairs]
+			fmt.Printf("⚠️  Фильтр не дал результатов, используем первые %d пар\n", maxPairs)
+		}
+	} else {
+		// Если фильтр не задан, получаем ограниченное количество
+		maxPairs := cfg.MaxSymbolsToMonitor
+		if maxPairs <= 0 {
+			maxPairs = 50
+		}
+		pairs, err = priceMonitor.GetAllFuturesPairs(
+			cfg.MinVolumeFilter,
+			maxPairs,
+			true,
+		)
+		if err != nil {
+			log.Fatalf("Не удалось получить фьючерсные пары: %v", err)
+		}
 	}
 
-	fmt.Printf("✅ Найдено %d фьючерсных USDT-пар\n", len(pairs))
+	fmt.Printf("✅ Найдено %d фьючерсных USDT-пар (фильтр: $%.0f)\n",
+		len(pairs), cfg.MinVolumeFilter)
+
+	// Показываем топ-10 символов по объему
+	if len(pairs) > 0 {
+		showCount := 10
+		if len(pairs) < showCount {
+			showCount = len(pairs)
+		}
+		fmt.Printf("   Топ-%d по объему: %s\n",
+			showCount,
+			strings.Join(pairs[:showCount], ", "))
+	}
 	fmt.Println()
 
-	// Выбираем символы для мониторинга
-	symbolsToMonitor := selectSymbolsForMonitoring(pairs, 15)
-	fmt.Printf("🎯 Отслеживается %d символов:\n", len(symbolsToMonitor))
-	for i, symbol := range symbolsToMonitor {
-		fmt.Printf("   %d. %s\n", i+1, symbol)
-	}
-	fmt.Println()
-
-	// Конвертируем интервалы
-	var intervals []monitor.Interval
-	trackedIntervals := cfg.TrackedIntervals
-	if len(trackedIntervals) > 3 {
-		trackedIntervals = trackedIntervals[:3] // Берем только первые 3 интервала для теста
-	}
-
-	for _, interval := range trackedIntervals {
-		intervals = append(intervals, monitor.Interval(fmt.Sprintf("%d", interval)))
-	}
-
-	fmt.Printf("⏱️  Отслеживаемые интервалы: %s\n", formatIntervals(trackedIntervals))
-	fmt.Println()
+	// Создаем монитор роста
+	fmt.Println("📈 Инициализация монитора роста...")
+	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
 
 	// Запускаем мониторинг цен
 	priceMonitor.StartMonitoring(time.Duration(cfg.UpdateInterval) * time.Second)
 	fmt.Printf("🔄 Мониторинг цен запущен (обновление каждые %d сек)\n", cfg.UpdateInterval)
-
-	// Создаем монитор сигналов
-	signalMonitor := monitor.NewSignalMonitor(priceMonitor, cfg.AlertThreshold)
-	fmt.Println("🚨 Мониторинг сигналов инициализирован")
-
-	// Создаем монитор роста
-	fmt.Println("📈 Growth monitoring initializing...")
-	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
 
 	// Даем время на первоначальную загрузку данных
 	fmt.Println("📥 Загрузка первоначальных данных...")
@@ -97,31 +164,30 @@ func main() {
 
 	// Запускаем мониторинг роста
 	growthMonitor.Start()
-	fmt.Println("🚀 Growth monitoring started")
+	fmt.Println("🚀 Мониторинг роста запущен")
 
 	// Обработка сигналов роста в отдельной горутине
 	go func() {
 		for signal := range growthMonitor.GetSignals() {
-			// Обработка сигналов роста
-			log.Printf("🎯 Growth signal: %s %s %.2f%% (period: %d min)",
-				signal.Symbol, signal.Direction,
-				signal.GrowthPercent+signal.FallPercent,
-				signal.PeriodMinutes)
-
 			// Увеличиваем счетчик сигналов
 			atomic.AddInt32(&signalCount, 1)
+
+			// Выводим информацию о сигнале в новом формате
+			timestamp := time.Now().Format("2006/01/02 15:04:05")
+			changePercent := signal.GrowthPercent + signal.FallPercent
+
+			fmt.Printf("📈 [%s] Получен сигнал: %s %s %.2f%% (период: %d мин)\n",
+				timestamp,
+				signal.Symbol,
+				signal.Direction,
+				changePercent,
+				signal.PeriodMinutes)
 		}
 	}()
 
 	// Обработка сигналов для graceful shutdown
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Переменные для статистики
-	totalSymbols := len(pairs)
-
-	// Канал для сигналов (пока не используется, но оставим)
-	signalChan := make(chan monitor.Signal, 100)
 
 	// Запускаем HTTP сервер (если включен)
 	if cfg.HttpEnabled {
@@ -132,37 +198,6 @@ func main() {
 		fmt.Printf("   API доступен по адресу: http://localhost:%s\n", cfg.HttpPort)
 		fmt.Println()
 	}
-
-	// Горутина для проверки сигналов
-	go func() {
-		fmt.Println("🔍 Горутина проверки сигналов запущена")
-
-		ticker := time.NewTicker(10 * time.Second) // Проверяем каждые 10 секунд
-		defer ticker.Stop()
-
-		checkCounter := 1
-
-		for range ticker.C {
-			fmt.Printf("👁️  Проверка #%d в %s\n",
-				checkCounter, time.Now().Format("15:04:05"))
-			fmt.Println(strings.Repeat("─", 40))
-
-			var wg sync.WaitGroup
-			for _, symbol := range symbolsToMonitor {
-				for _, interval := range intervals {
-					wg.Add(1)
-					go func(s string, i monitor.Interval) {
-						defer wg.Done()
-						signalMonitor.CheckSignalNow(s, i)
-					}(symbol, interval)
-				}
-			}
-			wg.Wait()
-
-			checkCounter++
-			fmt.Println()
-		}
-	}()
 
 	// Горутина для сбора статистики обновлений
 	go func() {
@@ -188,16 +223,16 @@ func main() {
 			stats := growthMonitor.GetGrowthStats()
 			detailedStats := growthMonitor.GetDetailedStats()
 
-			fmt.Printf("📈 Growth Stats: %d signals (↑%d ↓%d)\n",
+			fmt.Printf("📈 Статистика роста: %d сигналов (↑%d ↓%d)\n",
 				stats["total_signals"],
 				stats["growth_signals"],
 				stats["fall_signals"])
 
 			// Выводим детальную статистику по периодам
 			if periodStats, ok := detailedStats["period_stats"].(map[int]int); ok {
-				fmt.Printf("   Periods: ")
+				fmt.Printf("   Периоды: ")
 				for period, count := range periodStats {
-					fmt.Printf("%dmin:%d ", period, count)
+					fmt.Printf("%dмин:%d ", period, count)
 				}
 				fmt.Println()
 			}
@@ -216,7 +251,7 @@ func main() {
 			growthStats := growthMonitor.GetGrowthStats()
 
 			printStats(startTime, int(currentUpdates), int(currentSignals),
-				cfg, totalSymbols, iteration, growthStats)
+				cfg, len(pairs), iteration, growthStats)
 			iteration++
 		}
 	}()
@@ -228,7 +263,7 @@ func main() {
 	printSeparator()
 
 	fmt.Println("══════════════════════════════════════════════════")
-	fmt.Println("                СИСТЕМА СИГНАЛОВ                  ")
+	fmt.Println("           МОНИТОР РОСТА - BYBIT FUTURES         ")
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Println()
 
@@ -239,11 +274,11 @@ func main() {
 	printHeader("Завершение работы")
 	fmt.Printf("⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
 	fmt.Printf("📊 Всего обновлений цен: %d\n", atomic.LoadInt32(&updateCount))
-	fmt.Printf("🚨 Всего обнаружено сигналов: %d\n", atomic.LoadInt32(&signalCount))
+	fmt.Printf("📈 Всего обнаружено сигналов: %d\n", atomic.LoadInt32(&signalCount))
 
 	// Получаем финальную статистику по сигналам роста
 	growthStats := growthMonitor.GetGrowthStats()
-	fmt.Printf("📈 Growth signals: %d (↑%d ↓%d)\n",
+	fmt.Printf("📈 Сигналы роста: %d (↑%d ↓%d)\n",
 		growthStats["total_signals"],
 		growthStats["growth_signals"],
 		growthStats["fall_signals"])
@@ -251,70 +286,23 @@ func main() {
 	// Остановка мониторинга
 	priceMonitor.StopMonitoring()
 	growthMonitor.Stop()
-	close(signalChan)
 
 	fmt.Println("✅ Бот остановлен корректно")
 }
 
-// Вспомогательные функции
-func selectSymbolsForMonitoring(pairs []string, limit int) []string {
-	popularSymbols := []string{
-		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-		"ADAUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT",
-		"LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT",
-	}
-
-	var selected []string
-	for _, symbol := range popularSymbols {
-		for _, pair := range pairs {
-			if pair == symbol && !contains(selected, symbol) {
-				selected = append(selected, symbol)
-				break
-			}
-		}
-		if len(selected) >= limit {
-			break
-		}
-	}
-
-	// Если не нашли достаточно популярных, добавляем первые из списка
-	if len(selected) < limit {
-		for _, pair := range pairs {
-			if !contains(selected, pair) {
-				selected = append(selected, pair)
-				if len(selected) >= limit {
-					break
-				}
-			}
-		}
-	}
-
-	return selected
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// ОБНОВЛЯЕМ функцию printStats для поддержки статистики роста
 func printStats(startTime time.Time, updates int, signals int,
 	cfg *config.Config, totalSymbols int, iteration int,
 	growthStats map[string]interface{}) {
 
-	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println(strings.Repeat("─", 80))
 	fmt.Printf("📊 СТАТУС СИСТЕМЫ (итерация #%d)\n", iteration)
 	fmt.Printf("   ⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
 	fmt.Printf("   🔄 Обновлений цен: %d\n", updates)
-	fmt.Printf("   🚨 Всего сигналов: %d\n", signals)
+	fmt.Printf("   📈 Всего сигналов: %d\n", signals)
 
 	// Добавляем статистику роста
 	if growthStats != nil {
-		fmt.Printf("   📈 Growth signals: %d (↑%d ↓%d)\n",
+		fmt.Printf("   📊 Сигналы роста: %d (↑%d ↓%d)\n",
 			growthStats["total_signals"],
 			growthStats["growth_signals"],
 			growthStats["fall_signals"])
@@ -327,15 +315,18 @@ func printStats(startTime time.Time, updates int, signals int,
 	fmt.Printf("   💾 Память: %.2f MB\n", float64(m.Alloc)/1024/1024)
 	fmt.Printf("   🧵 Горутин: %d\n", runtime.NumGoroutine())
 	fmt.Printf("   🕐 Текущее время: %s\n", time.Now().Format("15:04:05"))
-	fmt.Printf("   ⏭️  След. проверка: %s\n",
-		time.Now().Add(10*time.Second).Format("15:04:05"))
-	fmt.Println(strings.Repeat("─", 50))
-	fmt.Println() // Добавляем пустую строку в конце
+	fmt.Println(strings.Repeat("─", 80))
+	fmt.Println()
 }
 
 func printHeader(text string) {
-	width := 50
+	width := 80
 	padding := (width - len(text)) / 2
+
+	if padding < 0 {
+		padding = 0
+	}
+
 	fmt.Println(strings.Repeat("═", width))
 	fmt.Printf("%s%s%s\n",
 		strings.Repeat(" ", padding),
@@ -345,41 +336,20 @@ func printHeader(text string) {
 }
 
 func printSeparator() {
-	fmt.Println(strings.Repeat("─", 50))
+	fmt.Println(strings.Repeat("─", 80))
 }
 
-func formatIntervals(intervals []int) string {
+func formatGrowthPeriods(periods []int) string {
 	var result []string
-	for _, interval := range intervals {
-		switch interval {
-		case 1:
-			result = append(result, "1м")
-		case 5:
-			result = append(result, "5м")
-		case 10:
-			result = append(result, "10м")
-		case 15:
-			result = append(result, "15м")
-		case 30:
-			result = append(result, "30м")
-		case 60:
+	for _, period := range periods {
+		if period < 60 {
+			result = append(result, fmt.Sprintf("%dм", period))
+		} else if period == 60 {
 			result = append(result, "1ч")
-		case 120:
-			result = append(result, "2ч")
-		case 240:
-			result = append(result, "4ч")
-		case 480:
-			result = append(result, "8ч")
-		case 720:
-			result = append(result, "12ч")
-		case 1440:
-			result = append(result, "1д")
-		case 10080:
-			result = append(result, "7д")
-		case 43200:
-			result = append(result, "30д")
-		default:
-			result = append(result, fmt.Sprintf("%dм", interval))
+		} else if period < 1440 {
+			result = append(result, fmt.Sprintf("%dч", period/60))
+		} else {
+			result = append(result, fmt.Sprintf("%dд", period/1440))
 		}
 	}
 	return strings.Join(result, ", ")

@@ -7,32 +7,40 @@ import (
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 // GrowthMonitor - монитор непрерывного роста/падения
 type GrowthMonitor struct {
-	client       *api.BybitClient
-	config       *config.Config
-	priceMonitor *PriceMonitor
-	signals      chan types.GrowthSignal // Используем types.GrowthSignal
-	mu           sync.RWMutex
-	stopChan     chan bool
-	active       bool
-	lastCheck    map[int]time.Time // Кэш времени последней проверки по периоду
+	client         *api.BybitClient
+	config         *config.Config
+	priceMonitor   *PriceMonitor
+	signals        chan types.GrowthSignal
+	filter         *SignalFilter // Добавляем фильтр
+	mu             sync.RWMutex
+	stopChan       chan bool
+	active         bool
+	lastCheck      map[int]time.Time
+	signalsHistory []types.GrowthSignal
+	signalsCount   map[string]int
 }
 
 // NewGrowthMonitor создает новый монитор роста
 func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMonitor {
 	return &GrowthMonitor{
-		client:       api.NewBybitClient(cfg),
-		config:       cfg,
-		priceMonitor: priceMonitor,
-		signals:      make(chan types.GrowthSignal, 100),
-		stopChan:     make(chan bool),
-		active:       false,
-		lastCheck:    make(map[int]time.Time),
+		client:         api.NewBybitClient(cfg),
+		config:         cfg,
+		priceMonitor:   priceMonitor,
+		signals:        make(chan types.GrowthSignal, 100),
+		filter:         NewSignalFilter(cfg), // Инициализируем фильтр
+		stopChan:       make(chan bool),
+		active:         false,
+		lastCheck:      make(map[int]time.Time),
+		signalsHistory: make([]types.GrowthSignal, 0),
+		signalsCount:   make(map[string]int),
 	}
 }
 
@@ -44,7 +52,7 @@ func (gm *GrowthMonitor) Start() {
 
 	gm.active = true
 	go gm.monitoringLoop()
-	log.Println("🚀 Growth monitor started")
+	log.Println("🚀 Монитор роста запущен")
 }
 
 // Stop останавливает мониторинг роста
@@ -56,7 +64,7 @@ func (gm *GrowthMonitor) Stop() {
 	gm.active = false
 	gm.stopChan <- true
 	close(gm.signals)
-	log.Println("🛑 Growth monitor stopped")
+	log.Println("🛑 Монитор роста остановлен")
 }
 
 // monitoringLoop основной цикл мониторинга
@@ -76,45 +84,30 @@ func (gm *GrowthMonitor) monitoringLoop() {
 
 // checkAllSymbols проверяет все символы
 func (gm *GrowthMonitor) checkAllSymbols() {
-	// Используем ТЕ ЖЕ символы, что и основной монитор
-	// Получаем символы из priceMonitor
-	symbols := gm.priceMonitor.GetSymbols()
-
-	if len(symbols) == 0 {
+	// Получаем символы с учетом фильтров
+	symbols, err := gm.GetSymbolsToMonitor()
+	if err != nil {
+		log.Printf("❌ Ошибка получения символов: %v", err)
 		return
 	}
 
-	// Ограничиваем ТОП-15 популярными парами
-	popularSymbols := []string{
-		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-		"ADAUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT",
-		"LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT",
+	if len(symbols) == 0 {
+		log.Println("⚠️ Нет символов для мониторинга")
+		return
 	}
 
-	// Фильтруем только те, что есть в нашем списке
-	var filteredSymbols []string
-	for _, symbol := range popularSymbols {
-		for _, availableSymbol := range symbols {
-			if symbol == availableSymbol {
-				filteredSymbols = append(filteredSymbols, symbol)
-				break
-			}
-		}
+	log.Printf("📊 Монитор роста проверяет %d символов", len(symbols))
+
+	// Выводим список отслеживаемых символов (первые 20)
+	if len(symbols) > 20 {
+		log.Printf("   Отслеживаемые символы: %s...", strings.Join(symbols[:20], ", "))
+	} else {
+		log.Printf("   Отслеживаемые символы: %s", strings.Join(symbols, ", "))
 	}
 
-	// Если не нашли достаточно, берем первые 15 из доступных
-	if len(filteredSymbols) < 10 {
-		maxSymbols := 15
-		if len(symbols) < maxSymbols {
-			maxSymbols = len(symbols)
-		}
-		filteredSymbols = symbols[:maxSymbols]
-	}
-
-	log.Printf("📊 Growth monitor checking %d popular symbols", len(filteredSymbols))
-
+	// Проверяем каждый период
 	for _, period := range gm.config.GrowthPeriods {
-		gm.checkPeriod(filteredSymbols, period)
+		gm.checkPeriod(symbols, period)
 	}
 }
 
@@ -133,7 +126,7 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 		}
 	}
 
-	log.Printf("🔍 Checking growth for period %d minutes", periodMinutes)
+	log.Printf("🔍 Проверка роста за период %d минут", periodMinutes)
 
 	signals, err := gm.client.FindGrowthSignals(
 		symbols,
@@ -144,7 +137,7 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 	)
 
 	if err != nil {
-		log.Printf("❌ Error checking growth signals: %v", err)
+		log.Printf("❌ Ошибка при проверке сигналов роста: %v", err)
 		return
 	}
 
@@ -160,15 +153,28 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 
 // processSignal обрабатывает сигнал роста
 func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
+	// Применяем фильтры
+	if gm.config.SignalFilters.Enabled && !gm.filter.ApplyFilters(signal) {
+		log.Printf("⚠️ Сигнал для %s отфильтрован", signal.Symbol)
+		return
+	}
+
 	gm.mu.Lock()
 	defer gm.mu.Unlock()
+
+	// Сохраняем сигнал в историю
+	gm.signalsHistory = append(gm.signalsHistory, signal)
+
+	// Увеличиваем счетчик сигналов
+	key := fmt.Sprintf("%s_%s", signal.Direction, signal.Symbol)
+	gm.signalsCount[key] = gm.signalsCount[key] + 1
 
 	// Отправляем сигнал в канал
 	select {
 	case gm.signals <- signal:
 		gm.printSignal(signal)
 	default:
-		log.Printf("⚠️ Signal channel full, dropping signal for %s", signal.Symbol)
+		log.Printf("⚠️ Канал сигналов переполнен, сигнал для %s пропущен", signal.Symbol)
 	}
 }
 
@@ -178,29 +184,26 @@ func (gm *GrowthMonitor) printSignal(signal types.GrowthSignal) {
 
 	if signal.Direction == "growth" {
 		icon = "🟢"
-		direction = "Continuous GROWTH"
+		direction = "Непрерывный РОСТ"
 		changeStr = fmt.Sprintf("+%.2f%%", signal.GrowthPercent)
 	} else {
 		icon = "🔴"
-		direction = "Continuous FALL"
+		direction = "Непрерывное ПАДЕНИЕ"
 		changeStr = fmt.Sprintf("-%.2f%%", signal.FallPercent)
 	}
 
 	periodStr := gm.formatPeriod(signal.PeriodMinutes)
-
-	// Форматируем время сигнала
 	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
 
-	// Выводим напрямую, без среза строк
-	fmt.Println("══════════════════════════════════════════════════")
+	fmt.Println(strings.Repeat("═", 80)) // Изменил с 50 до 80
 	fmt.Printf("%s %s - %s - %s\n", icon, direction, periodStr, signal.Symbol)
-	fmt.Printf("🕐 %s\n", timeStr) // Добавляем время сигнала
-	fmt.Printf("📈 Change: %s\n", changeStr)
-	fmt.Printf("🎯 Period: %d minutes\n", signal.PeriodMinutes)
-	fmt.Printf("📊 Confidence: %.1f%%\n", signal.Confidence)
-	fmt.Printf("💰 Price: %.4f → %.4f\n", signal.StartPrice, signal.EndPrice)
+	fmt.Printf("🕐 %s\n", timeStr)
+	fmt.Printf("📈 Изменение: %s\n", changeStr)
+	fmt.Printf("🎯 Период: %d минут\n", signal.PeriodMinutes)
+	fmt.Printf("📊 Уверенность: %.1f%%\n", signal.Confidence)
+	fmt.Printf("💰 Цена: %.4f → %.4f\n", signal.StartPrice, signal.EndPrice)
 	fmt.Printf("🔗 https://www.bybit.com/trade/usdt/%s\n", signal.Symbol)
-	fmt.Println("══════════════════════════════════════════════════")
+	fmt.Println(strings.Repeat("═", 80)) // Изменил с 50 до 80
 	fmt.Println()
 
 	// Логируем в файл
@@ -211,22 +214,27 @@ func (gm *GrowthMonitor) printSignal(signal types.GrowthSignal) {
 func (gm *GrowthMonitor) formatPeriod(minutes int) string {
 	switch {
 	case minutes < 60:
-		return fmt.Sprintf("%d min", minutes)
+		return fmt.Sprintf("%d мин", minutes)
 	case minutes == 60:
-		return "1 hour"
+		return "1 час"
 	case minutes < 1440:
-		return fmt.Sprintf("%d hours", minutes/60)
+		return fmt.Sprintf("%d часов", minutes/60)
 	default:
-		return fmt.Sprintf("%d days", minutes/1440)
+		return fmt.Sprintf("%d дней", minutes/1440)
 	}
 }
 
 // logSignal логирует сигнал в файл
 func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
-	// Логирование в файл (можно реализовать)
-	log.Printf("📝 Signal logged: %s %s %.2f%%",
-		signal.Symbol, signal.Direction,
-		signal.GrowthPercent+signal.FallPercent)
+	timestamp := time.Now().Format("2006/01/02 15:04:05")
+	changePercent := signal.GrowthPercent + signal.FallPercent
+
+	fmt.Printf("📝 [%s] Сигнал записан: %s %s %.2f%% (период: %d мин)\n",
+		timestamp,
+		signal.Symbol,
+		signal.Direction,
+		changePercent,
+		signal.PeriodMinutes)
 }
 
 // GetSignals возвращает канал сигналов
@@ -234,21 +242,73 @@ func (gm *GrowthMonitor) GetSignals() <-chan types.GrowthSignal {
 	return gm.signals
 }
 
-// GetActiveSignals возвращает активные сигналы
-func (gm *GrowthMonitor) GetActiveSignals() []types.GrowthSignal {
+// GetGrowthStats возвращает статистику по мониторингу роста
+func (gm *GrowthMonitor) GetGrowthStats() map[string]interface{} {
 	gm.mu.RLock()
 	defer gm.mu.RUnlock()
 
-	// Собираем все сигналы из канала
-	var signals []types.GrowthSignal
-	for {
-		select {
-		case signal := <-gm.signals:
-			signals = append(signals, signal)
-		default:
-			return signals
+	totalSignals := len(gm.signalsHistory)
+	growthSignals := 0
+	fallSignals := 0
+
+	// Считаем сигналы за последние 5 минут
+	now := time.Now()
+	fiveMinutesAgo := now.Add(-5 * time.Minute)
+
+	for _, signal := range gm.signalsHistory {
+		if signal.Timestamp.After(fiveMinutesAgo) {
+			if signal.Direction == "growth" {
+				growthSignals++
+			} else {
+				fallSignals++
+			}
 		}
 	}
+
+	return map[string]interface{}{
+		"total_signals":      totalSignals,
+		"growth_signals":     growthSignals,
+		"fall_signals":       fallSignals,
+		"monitoring_periods": gm.config.GrowthPeriods,
+		"growth_threshold":   gm.config.GrowthThreshold,
+		"fall_threshold":     gm.config.FallThreshold,
+		"active":             gm.active,
+	}
+}
+
+// GetDetailedStats возвращает детальную статистику
+func (gm *GrowthMonitor) GetDetailedStats() map[string]interface{} {
+	gm.mu.RLock()
+	defer gm.mu.RUnlock()
+
+	stats := map[string]interface{}{
+		"total_signals":  len(gm.signalsHistory),
+		"growth_signals": 0,
+		"fall_signals":   0,
+		"active":         gm.active,
+		"last_check":     time.Now(),
+	}
+
+	// Группируем по периодам
+	periodStats := make(map[int]int)
+
+	// Считаем сигналы за последние 5 минут
+	now := time.Now()
+	fiveMinutesAgo := now.Add(-5 * time.Minute)
+
+	for _, signal := range gm.signalsHistory {
+		if signal.Timestamp.After(fiveMinutesAgo) {
+			if signal.Direction == "growth" {
+				stats["growth_signals"] = stats["growth_signals"].(int) + 1
+			} else {
+				stats["fall_signals"] = stats["fall_signals"].(int) + 1
+			}
+			periodStats[signal.PeriodMinutes] = periodStats[signal.PeriodMinutes] + 1
+		}
+	}
+
+	stats["period_stats"] = periodStats
+	return stats
 }
 
 // AnalyzeSymbol анализирует конкретный символ
@@ -274,72 +334,149 @@ func (gm *GrowthMonitor) AnalyzeSymbol(symbol string) ([]types.GrowthSignal, err
 	return allSignals, nil
 }
 
-// GetGrowthStats возвращает статистику по мониторингу роста
-func (gm *GrowthMonitor) GetGrowthStats() map[string]interface{} {
-	gm.mu.RLock()
-	defer gm.mu.RUnlock()
+// GetSymbolsToMonitor возвращает список символов для мониторинга с учетом конфигурации
+func (gm *GrowthMonitor) GetSymbolsToMonitor() ([]string, error) {
+	// Получаем все символы из priceMonitor
+	allSymbols := gm.priceMonitor.GetSymbols()
 
-	signals := gm.GetActiveSignals()
+	// Если в конфигурации указаны конкретные символы для мониторинга
+	if gm.config.SymbolFilter != "" {
+		// Парсим фильтр символов
+		filterSymbols := gm.parseSymbolFilter(gm.config.SymbolFilter)
 
-	growthCount := 0
-	fallCount := 0
-	var avgGrowth, avgFall float64
+		// Если фильтр "all" или пустой массив, используем все символы
+		if len(filterSymbols) == 0 {
+			// Используем все символы, но с ограничением по количеству если указано
+			symbols := allSymbols
 
-	for _, signal := range signals {
-		if signal.Direction == "growth" {
-			growthCount++
-			avgGrowth += signal.GrowthPercent
-		} else {
-			fallCount++
-			avgFall += signal.FallPercent
+			// Ограничиваем количество если указано
+			if gm.config.MaxSymbolsToMonitor > 0 && len(symbols) > gm.config.MaxSymbolsToMonitor {
+				// Сортируем по объему и берем топ-N
+				symbols = gm.filterByVolume(symbols, gm.config.MaxSymbolsToMonitor)
+			}
+
+			return symbols, nil
 		}
+
+		// Фильтруем только те, что есть в общем списке
+		var symbols []string
+		for _, symbol := range filterSymbols {
+			for _, availableSymbol := range allSymbols {
+				if strings.EqualFold(symbol, availableSymbol) {
+					symbols = append(symbols, availableSymbol)
+					break
+				}
+			}
+		}
+
+		if len(symbols) == 0 {
+			log.Printf("⚠️ Не найдено символов по фильтру, использую все доступные")
+			symbols = allSymbols
+		}
+
+		// Ограничиваем количество если указано
+		if gm.config.MaxSymbolsToMonitor > 0 && len(symbols) > gm.config.MaxSymbolsToMonitor {
+			// Сортируем по объему и берем топ-N
+			symbols = gm.filterByVolume(symbols, gm.config.MaxSymbolsToMonitor)
+		}
+
+		return symbols, nil
 	}
 
-	if growthCount > 0 {
-		avgGrowth /= float64(growthCount)
-	}
-	if fallCount > 0 {
-		avgFall /= float64(fallCount)
+	// Если фильтр не указан, используем все символы с ограничением
+	symbols := allSymbols
+
+	// Ограничиваем количество если указано
+	if gm.config.MaxSymbolsToMonitor > 0 && len(symbols) > gm.config.MaxSymbolsToMonitor {
+		// Сортируем по объему и берем топ-N
+		symbols = gm.filterByVolume(symbols, gm.config.MaxSymbolsToMonitor)
 	}
 
-	return map[string]interface{}{
-		"total_signals":      len(signals),
-		"growth_signals":     growthCount,
-		"fall_signals":       fallCount,
-		"avg_growth":         avgGrowth,
-		"avg_fall":           avgFall,
-		"monitoring_periods": gm.config.GrowthPeriods,
-		"growth_threshold":   gm.config.GrowthThreshold,
-		"fall_threshold":     gm.config.FallThreshold,
-		"active":             gm.active,
-	}
+	return symbols, nil
 }
-func (gm *GrowthMonitor) GetDetailedStats() map[string]interface{} {
-	gm.mu.RLock()
-	defer gm.mu.RUnlock()
 
-	signals := gm.GetActiveSignals()
-
-	stats := map[string]interface{}{
-		"total_signals":  len(signals),
-		"growth_signals": 0,
-		"fall_signals":   0,
-		"active":         gm.active,
-		"last_check":     time.Now(),
+// parseSymbolFilter парсит фильтр символов
+func (gm *GrowthMonitor) parseSymbolFilter(filter string) []string {
+	// Если фильтр "all", возвращаем пустой массив - это будет означать все символы
+	if strings.ToUpper(strings.TrimSpace(filter)) == "ALL" {
+		return []string{} // Пустой массив = все символы
 	}
 
-	// Группируем по периодам
-	periodStats := make(map[int]int)
-	for _, signal := range signals {
-		if signal.Direction == "growth" {
-			stats["growth_signals"] = stats["growth_signals"].(int) + 1
-		} else {
-			stats["fall_signals"] = stats["fall_signals"].(int) + 1
+	var symbols []string
+
+	// Поддерживаем несколько форматов:
+	// 1. Через запятую: BTCUSDT,ETHUSDT,BNBUSDT
+	// 2. Через пробел: BTCUSDT ETHUSDT BNBUSDT
+	// 3. С префиксом: BTC,ETH,BNB (автоматически добавляем USDT)
+
+	// Разделяем по запятой
+	if strings.Contains(filter, ",") {
+		parts := strings.Split(filter, ",")
+		for _, part := range parts {
+			symbol := strings.TrimSpace(part)
+			if symbol != "" {
+				// Автоматически добавляем USDT если нужно
+				if !strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+					symbol = strings.ToUpper(symbol) + "USDT"
+				}
+				symbols = append(symbols, symbol)
+			}
 		}
-		periodStats[signal.PeriodMinutes] = periodStats[signal.PeriodMinutes] + 1
+	} else {
+		// Разделяем по пробелу
+		parts := strings.Fields(filter)
+		for _, part := range parts {
+			symbol := strings.TrimSpace(part)
+			if symbol != "" && strings.ToUpper(symbol) != "ALL" {
+				if !strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+					symbol = strings.ToUpper(symbol) + "USDT"
+				}
+				symbols = append(symbols, symbol)
+			}
+		}
 	}
 
-	stats["period_stats"] = periodStats
+	return symbols
+}
 
-	return stats
+// filterByVolume фильтрует символы по объему
+func (gm *GrowthMonitor) filterByVolume(symbols []string, maxCount int) []string {
+	if len(symbols) <= maxCount {
+		return symbols
+	}
+
+	// Получаем объемы для символов
+	volumes, err := gm.client.GetSymbolVolume(symbols)
+	if err != nil {
+		log.Printf("⚠️ Не удалось получить объемы: %v, использую первые %d символов", err, maxCount)
+		return symbols[:maxCount]
+	}
+
+	// Создаем структуру для сортировки
+	type SymbolVolume struct {
+		Symbol string
+		Volume float64
+	}
+
+	var sv []SymbolVolume
+	for _, symbol := range symbols {
+		if volume, ok := volumes[symbol]; ok {
+			sv = append(sv, SymbolVolume{symbol, volume})
+		} else {
+			sv = append(sv, SymbolVolume{symbol, 0})
+		}
+	}
+
+	// Сортируем по объему (по убыванию)
+	sort.Slice(sv, func(i, j int) bool {
+		return sv[i].Volume > sv[j].Volume
+	})
+
+	// Берем топ-N
+	result := make([]string, maxCount)
+	for i := 0; i < maxCount; i++ {
+		result[i] = sv[i].Symbol
+	}
+
+	return result
 }

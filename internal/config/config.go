@@ -71,6 +71,21 @@ type Config struct {
 	FallThreshold   float64 `json:"fall_threshold"`   // Порог падения в процентах
 	CheckContinuity bool    `json:"check_continuity"` // Проверять непрерывность
 	MinDataPoints   int     `json:"min_data_points"`  // Минимальное количество точек дан
+
+	// Фильтры символов
+	SymbolFilter        string  `json:"symbol_filter"`          // Фильтр символов (например: BTC,ETH,BNB или BTCUSDT,ETHUSDT)
+	ExcludeSymbols      string  `json:"exclude_symbols"`        // Символы для исключения
+	MaxSymbolsToMonitor int     `json:"max_symbols_to_monitor"` // Максимальное количество символов для мониторинга
+	MinVolumeFilter     float64 `json:"min_volume_filter"`      // Минимальный объем для фильтрации
+
+	// Фильтры сигналов
+	SignalFilters struct {
+		Enabled          bool     `json:"enabled"`             // Включить фильтрацию сигналов
+		IncludePatterns  []string `json:"include_patterns"`    // Паттерны для включения (например: BTC*, ETH*)
+		ExcludePatterns  []string `json:"exclude_patterns"`    // Паттерны для исключения
+		MinConfidence    float64  `json:"min_confidence"`      // Минимальная уверенность сигнала
+		MaxSignalsPerMin int      `json:"max_signals_per_min"` // Максимум сигналов в минуту
+	} `json:"signal_filters"`
 }
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -159,6 +174,27 @@ func LoadConfig(envPath string) (*Config, error) {
 		FallThreshold:   getEnvFloat("FALL_THRESHOLD", 2.0),
 		CheckContinuity: getEnvBool("CHECK_CONTINUITY", true),
 		MinDataPoints:   getEnvInt("MIN_DATA_POINTS", 3),
+
+		// Фильтры символов
+		SymbolFilter:        getEnvString("SYMBOL_FILTER", ""),
+		ExcludeSymbols:      getEnvString("EXCLUDE_SYMBOLS", ""),
+		MaxSymbolsToMonitor: getEnvInt("MAX_SYMBOLS_TO_MONITOR", 0),   // 0 = без ограничений
+		MinVolumeFilter:     getEnvFloat("MIN_VOLUME_FILTER", 100000), // $100K по умолчанию
+
+		// Фильтры сигналов
+		SignalFilters: struct {
+			Enabled          bool     `json:"enabled"`
+			IncludePatterns  []string `json:"include_patterns"`
+			ExcludePatterns  []string `json:"exclude_patterns"`
+			MinConfidence    float64  `json:"min_confidence"`
+			MaxSignalsPerMin int      `json:"max_signals_per_min"`
+		}{
+			Enabled:          getEnvBool("SIGNAL_FILTERS_ENABLED", false),
+			IncludePatterns:  parsePatterns(getEnvString("SIGNAL_INCLUDE_PATTERNS", "")),
+			ExcludePatterns:  parsePatterns(getEnvString("SIGNAL_EXCLUDE_PATTERNS", "")),
+			MinConfidence:    getEnvFloat("MIN_CONFIDENCE", 50.0),
+			MaxSignalsPerMin: getEnvInt("MAX_SIGNALS_PER_MIN", 5),
+		},
 	}
 
 	return config, nil
@@ -296,4 +332,21 @@ func parseGrowthPeriods(periodsStr string) []int {
 	}
 
 	return periods
+}
+func parsePatterns(patternsStr string) []string {
+	if patternsStr == "" {
+		return []string{}
+	}
+
+	patterns := strings.Split(patternsStr, ",")
+	result := make([]string, 0, len(patterns))
+
+	for _, pattern := range patterns {
+		trimmed := strings.TrimSpace(pattern)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+
+	return result
 }

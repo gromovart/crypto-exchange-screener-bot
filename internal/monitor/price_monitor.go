@@ -2,8 +2,7 @@
 package monitor
 
 import (
-	// "crypto-exchange-screener-bot/internal/api"
-	api "crypto-exchange-screener-bot/internal/api"
+	"crypto-exchange-screener-bot/internal/api"
 	"crypto-exchange-screener-bot/internal/config"
 	"encoding/json"
 	"fmt"
@@ -15,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
 // PriceMonitor - монитор цен
@@ -30,8 +27,6 @@ type PriceMonitor struct {
 	mu            sync.RWMutex
 	updateTicker  *time.Ticker
 	stopChan      chan bool
-	signalMonitor *SignalMonitor // Новое поле
-	cronScheduler *cron.Cron     // Для запуска по расписанию
 	symbolInfo    map[string]api.InstrumentInfo
 }
 
@@ -51,7 +46,7 @@ func NewPriceMonitor(cfg *config.Config) *PriceMonitor {
 		Interval24Hour: 24 * time.Hour,
 	}
 
-	pm := &PriceMonitor{
+	return &PriceMonitor{
 		client:        api.NewBybitClient(cfg),
 		config:        cfg,
 		priceHistory:  make(map[string][]PriceData),
@@ -59,50 +54,12 @@ func NewPriceMonitor(cfg *config.Config) *PriceMonitor {
 		intervals:     intervals,
 		stopChan:      make(chan bool),
 		symbolInfo:    make(map[string]api.InstrumentInfo),
-		cronScheduler: cron.New(cron.WithSeconds()), // Инициализируем cron scheduler
 	}
-	// Инициализируем SignalMonitor
-	pm.signalMonitor = NewSignalMonitor(pm, cfg.AlertThreshold)
-
-	return pm
 }
 
 // FetchAllFuturesPairs получает все фьючерсные USDT пары (линейные фьючерсы)
 func (pm *PriceMonitor) FetchAllFuturesPairs() ([]string, error) {
-	// Получаем информацию об инструментах фьючерсов
-	instruments, err := pm.client.GetInstrumentsInfo(pm.client.Category(), "", "Trading")
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch futures instruments: %w", err)
-	}
-
-	var futuresPairs []string
-	pm.mu.Lock()
-
-	for _, instrument := range instruments {
-		// Фильтруем только USDT линейные фьючерсы
-		if instrument.ContractType == "LinearPerpetual" &&
-			strings.HasSuffix(instrument.Symbol, "USDT") {
-
-			futuresPairs = append(futuresPairs, instrument.Symbol)
-
-			// Сохраняем информацию о символе
-			pm.symbolInfo[instrument.Symbol] = instrument
-		}
-	}
-
-	pm.symbols = futuresPairs
-
-	// Инициализируем историю цен для каждого символа
-	for _, symbol := range futuresPairs {
-		if _, exists := pm.priceHistory[symbol]; !exists {
-			pm.priceHistory[symbol] = make([]PriceData, 0)
-		}
-	}
-
-	pm.mu.Unlock()
-
-	sort.Strings(futuresPairs)
-	return futuresPairs, nil
+	return pm.GetActiveFuturesPairs(0) // Без фильтра по объему
 }
 
 // FetchAllUSDTPairs получает все USDT пары
@@ -162,7 +119,7 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 		// Парсим цену
 		price, err := strconv.ParseFloat(ticker.LastPrice, 64)
 		if err != nil {
-			log.Printf("⚠️  Ошибка парсинга цены для %s: %v", symbol, err)
+			log.Printf("⚠️ Ошибка парсинга цены для %s: %v", symbol, err)
 			continue
 		}
 		updatedCount++
@@ -216,7 +173,7 @@ func (pm *PriceMonitor) StartMonitoring(updateInterval time.Duration) {
 
 	// Первоначальное обновление
 	if err := pm.UpdateAllPrices(); err != nil {
-		log.Printf("Initial price update failed: %v", err)
+		log.Printf("Первоначальное обновление цен не удалось: %v", err)
 	}
 
 	go func() {
@@ -224,9 +181,9 @@ func (pm *PriceMonitor) StartMonitoring(updateInterval time.Duration) {
 			select {
 			case <-pm.updateTicker.C:
 				if err := pm.UpdateAllPrices(); err != nil {
-					log.Printf("Price update failed: %v", err)
+					log.Printf("Обновление цен не удалось: %v", err)
 				} else {
-					log.Printf("Prices updated at %s", time.Now().Format("15:04:05"))
+					log.Printf("Цены обновлены в %s", time.Now().Format("15:04:05"))
 				}
 			case <-pm.stopChan:
 				if pm.updateTicker != nil {
@@ -472,7 +429,7 @@ func (pm *PriceMonitor) StartHTTPServer(port string) {
 	})
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatal("HTTP server failed:", err)
+		log.Fatal("HTTP сервер не запустился:", err)
 	}
 }
 
@@ -495,61 +452,156 @@ func (pm *PriceMonitor) GetSymbols() []string {
 	return pm.symbols
 }
 
-// StartSignalMonitoring запускает мониторинг сигналов
-func (pm *PriceMonitor) StartSignalMonitoring() {
-	// Конвертируем интервалы из конфига
-	var intervals []Interval
-	for _, interval := range pm.config.TrackedIntervals {
-		intervals = append(intervals, Interval(fmt.Sprintf("%d", interval)))
-	}
-
-	// Запускаем мониторинг сигналов в отдельной горутине
-	go pm.signalMonitor.MonitorSymbols(pm.symbols, intervals,
-		time.Duration(pm.config.UpdateInterval)*time.Second)
-
-	// Настраиваем cron задания для проверки в конце каждого интервала
-	pm.setupCronJobs(intervals)
-
-	pm.cronScheduler.Start()
+// GetClient возвращает API клиент (для тестирования)
+func (pm *PriceMonitor) GetClient() *api.BybitClient {
+	return pm.client
 }
 
-// setupCronJobs настраивает задания cron для проверки в конце интервалов
-func (pm *PriceMonitor) setupCronJobs(intervals []Interval) {
-	for _, interval := range intervals {
-		minutes, err := parseIntervalToMinutes(string(interval))
-		if err != nil {
+// Config возвращает конфигурацию
+func (pm *PriceMonitor) Config() *config.Config {
+	return pm.config
+}
+
+// GetActiveFuturesPairs получает все активные фьючерсные пары с фильтрацией
+func (pm *PriceMonitor) GetActiveFuturesPairs(minVolume float64) ([]string, error) {
+	// Получаем информацию об инструментах фьючерсов
+	instruments, err := pm.client.GetInstrumentsInfo(pm.client.Category(), "", "Trading")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch futures instruments: %w", err)
+	}
+
+	var futuresPairs []string
+	var futuresData []FuturesPairInfo
+
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+
+	// Сначала собираем все данные
+	for _, instrument := range instruments {
+		// Фильтруем только USDT линейные фьючерсы
+		if instrument.ContractType == "LinearPerpetual" &&
+			strings.HasSuffix(instrument.Symbol, "USDT") &&
+			instrument.Status == "Trading" {
+
+			// Получаем 24-часовой объем
+			volume24h, err := pm.client.Get24hVolume(instrument.Symbol)
+			if err != nil {
+				// Если не удалось получить объем, используем 0
+				volume24h = 0
+			}
+
+			futuresData = append(futuresData, FuturesPairInfo{
+				Symbol:     instrument.Symbol,
+				Volume24h:  volume24h,
+				Instrument: instrument,
+			})
+		}
+	}
+
+	// Сортируем по объему (по убыванию)
+	sort.Slice(futuresData, func(i, j int) bool {
+		return futuresData[i].Volume24h > futuresData[j].Volume24h
+	})
+
+	// Фильтруем по минимальному объему
+	for _, data := range futuresData {
+		if data.Volume24h >= minVolume {
+			futuresPairs = append(futuresPairs, data.Symbol)
+
+			// Сохраняем информацию о символе
+			pm.symbolInfo[data.Symbol] = data.Instrument
+		}
+	}
+
+	pm.symbols = futuresPairs
+
+	// Инициализируем историю цен для каждого символа
+	for _, symbol := range futuresPairs {
+		if _, exists := pm.priceHistory[symbol]; !exists {
+			pm.priceHistory[symbol] = make([]PriceData, 0)
+		}
+	}
+
+	return futuresPairs, nil
+}
+
+// Новый метод для получения фьючерсов с параметрами
+func (pm *PriceMonitor) GetAllFuturesPairs(minVolume float64, maxPairs int, sortByVolume bool) ([]string, error) {
+	// Используем API клиент для получения тикеров
+	tickerResp, err := pm.client.GetTickers(pm.client.Category())
+	if err != nil {
+		return nil, err
+	}
+
+	type SymbolVolume struct {
+		Symbol string
+		Volume float64
+	}
+
+	var symbolsWithVolume []SymbolVolume
+
+	// Собираем все USDT фьючерсы с объемом
+	for _, ticker := range tickerResp.Result.List {
+		symbol := ticker.Symbol
+
+		// Фильтруем только USDT пары
+		if !strings.HasSuffix(symbol, "USDT") {
 			continue
 		}
 
-		// Создаем cron выражение для запуска каждые N минут
-		cronExpr := fmt.Sprintf("*/%d * * * *", minutes)
+		// Парсим объем
+		volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
+		if err != nil {
+			volume = 0
+		}
 
-		pm.cronScheduler.AddFunc(cronExpr, func() {
-			pm.checkIntervalEnd(interval)
+		// Фильтруем по минимальному объему
+		if volume >= minVolume {
+			symbolsWithVolume = append(symbolsWithVolume, SymbolVolume{
+				Symbol: symbol,
+				Volume: volume,
+			})
+		}
+	}
+
+	// Сортируем по объему если нужно
+	if sortByVolume {
+		sort.Slice(symbolsWithVolume, func(i, j int) bool {
+			return symbolsWithVolume[i].Volume > symbolsWithVolume[j].Volume
+		})
+	} else {
+		// Или сортируем по алфавиту
+		sort.Slice(symbolsWithVolume, func(i, j int) bool {
+			return symbolsWithVolume[i].Symbol < symbolsWithVolume[j].Symbol
 		})
 	}
-}
 
-// checkIntervalEnd проверяет сигналы в конце интервала
-func (pm *PriceMonitor) checkIntervalEnd(interval Interval) {
-	pm.mu.RLock()
-	symbols := make([]string, len(pm.symbols))
-	copy(symbols, pm.symbols)
-	pm.mu.RUnlock()
+	// Ограничиваем количество пар если указано
+	if maxPairs > 0 && len(symbolsWithVolume) > maxPairs {
+		symbolsWithVolume = symbolsWithVolume[:maxPairs]
+	}
 
-	// Проверяем все символы для данного интервала
+	// Извлекаем только символы
+	symbols := make([]string, len(symbolsWithVolume))
+	for i, sv := range symbolsWithVolume {
+		symbols[i] = sv.Symbol
+	}
+
+	pm.mu.Lock()
+	pm.symbols = symbols
 	for _, symbol := range symbols {
-		pm.signalMonitor.checkSignal(symbol, interval)
+		if _, exists := pm.priceHistory[symbol]; !exists {
+			pm.priceHistory[symbol] = make([]PriceData, 0)
+		}
 	}
+	pm.mu.Unlock()
+
+	return symbols, nil
 }
 
-// StopSignalMonitoring останавливает мониторинг сигналов
-func (pm *PriceMonitor) StopSignalMonitoring() {
-	if pm.cronScheduler != nil {
-		pm.cronScheduler.Stop()
-	}
-}
-
-func (pm *PriceMonitor) Config() *config.Config {
-	return pm.config
+// Дополнительные структуры данных
+type FuturesPairInfo struct {
+	Symbol     string
+	Volume24h  float64
+	Instrument api.InstrumentInfo
 }
