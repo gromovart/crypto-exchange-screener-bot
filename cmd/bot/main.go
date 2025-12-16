@@ -152,6 +152,10 @@ func main() {
 	fmt.Println("📈 Инициализация монитора роста...")
 	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
 
+	fmt.Println("🎯 Режим вывода: КОМПАКТНЫЙ")
+	fmt.Println("   Каждые 2 секунды будет групповой вывод сигналов")
+	fmt.Println()
+
 	// Запускаем мониторинг цен
 	priceMonitor.StartMonitoring(time.Duration(cfg.UpdateInterval) * time.Second)
 	fmt.Printf("🔄 Мониторинг цен запущен (обновление каждые %d сек)\n", cfg.UpdateInterval)
@@ -164,24 +168,35 @@ func main() {
 
 	// Запускаем мониторинг роста
 	growthMonitor.Start()
+
 	fmt.Println("🚀 Мониторинг роста запущен")
+
+	// Горутина для периодического вывода накопленных сигналов
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			growthMonitor.FlushDisplay()
+		}
+	}()
 
 	// Обработка сигналов роста в отдельной горутине
 	go func() {
-		for signal := range growthMonitor.GetSignals() {
+		for range growthMonitor.GetSignals() {
 			// Увеличиваем счетчик сигналов
 			atomic.AddInt32(&signalCount, 1)
 
 			// Выводим информацию о сигнале в новом формате
-			timestamp := time.Now().Format("2006/01/02 15:04:05")
-			changePercent := signal.GrowthPercent + signal.FallPercent
-
-			fmt.Printf("📈 [%s] Получен сигнал: %s %s %.2f%% (период: %d мин)\n",
-				timestamp,
-				signal.Symbol,
-				signal.Direction,
-				changePercent,
-				signal.PeriodMinutes)
+			// ВЫВОД ТЕПЕРЬ ДЕЛАЕТ DisplayManager - УДАЛИТЬ ЭТОТ ВЫВОД
+			// timestamp := time.Now().Format("2006/01/02 15:04:05")
+			// changePercent := signal.GrowthPercent + signal.FallPercent
+			// fmt.Printf("📈 [%s] Получен сигнал: %s %s %.2f%% (период: %d мин)\n",
+			//     timestamp,
+			//     signal.Symbol,
+			//     signal.Direction,
+			//     changePercent,
+			//     signal.PeriodMinutes)
 		}
 	}()
 

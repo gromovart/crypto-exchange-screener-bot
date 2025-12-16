@@ -19,7 +19,8 @@ type GrowthMonitor struct {
 	config         *config.Config
 	priceMonitor   *PriceMonitor
 	signals        chan types.GrowthSignal
-	filter         *SignalFilter // Добавляем фильтр
+	filter         *SignalFilter
+	display        *DisplayManager // Добавляем DisplayManager
 	mu             sync.RWMutex
 	stopChan       chan bool
 	active         bool
@@ -35,7 +36,8 @@ func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMon
 		config:         cfg,
 		priceMonitor:   priceMonitor,
 		signals:        make(chan types.GrowthSignal, 100),
-		filter:         NewSignalFilter(cfg), // Инициализируем фильтр
+		filter:         NewSignalFilter(cfg),
+		display:        NewDisplayManager(true, 0.5, 50.0, 15), // Компактный режим
 		stopChan:       make(chan bool),
 		active:         false,
 		lastCheck:      make(map[int]time.Time),
@@ -155,7 +157,6 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 	// Применяем фильтры
 	if gm.config.SignalFilters.Enabled && !gm.filter.ApplyFilters(signal) {
-		log.Printf("⚠️ Сигнал для %s отфильтрован", signal.Symbol)
 		return
 	}
 
@@ -169,10 +170,13 @@ func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 	key := fmt.Sprintf("%s_%s", signal.Direction, signal.Symbol)
 	gm.signalsCount[key] = gm.signalsCount[key] + 1
 
+	// Добавляем в DisplayManager для группового вывода
+	gm.display.AddSignal(signal)
+
 	// Отправляем сигнал в канал
 	select {
 	case gm.signals <- signal:
-		gm.printSignal(signal)
+		// Сигнал отправлен, вывод через DisplayManager
 	default:
 		log.Printf("⚠️ Канал сигналов переполнен, сигнал для %s пропущен", signal.Symbol)
 	}
@@ -180,34 +184,18 @@ func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 
 // printSignal выводит сигнал в терминал
 func (gm *GrowthMonitor) printSignal(signal types.GrowthSignal) {
-	var icon, direction, changeStr string
+	var icon string
+	changePercent := signal.GrowthPercent + signal.FallPercent
 
 	if signal.Direction == "growth" {
 		icon = "🟢"
-		direction = "Непрерывный РОСТ"
-		changeStr = fmt.Sprintf("+%.2f%%", signal.GrowthPercent)
+		fmt.Printf("%s %s ↑%.2f%% (%dмин)\n",
+			icon, signal.Symbol, changePercent, signal.PeriodMinutes)
 	} else {
 		icon = "🔴"
-		direction = "Непрерывное ПАДЕНИЕ"
-		changeStr = fmt.Sprintf("-%.2f%%", signal.FallPercent)
+		fmt.Printf("%s %s ↓%.2f%% (%dмин)\n",
+			icon, signal.Symbol, -changePercent, signal.PeriodMinutes)
 	}
-
-	periodStr := gm.formatPeriod(signal.PeriodMinutes)
-	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
-
-	fmt.Println(strings.Repeat("═", 80)) // Изменил с 50 до 80
-	fmt.Printf("%s %s - %s - %s\n", icon, direction, periodStr, signal.Symbol)
-	fmt.Printf("🕐 %s\n", timeStr)
-	fmt.Printf("📈 Изменение: %s\n", changeStr)
-	fmt.Printf("🎯 Период: %d минут\n", signal.PeriodMinutes)
-	fmt.Printf("📊 Уверенность: %.1f%%\n", signal.Confidence)
-	fmt.Printf("💰 Цена: %.4f → %.4f\n", signal.StartPrice, signal.EndPrice)
-	fmt.Printf("🔗 https://www.bybit.com/trade/usdt/%s\n", signal.Symbol)
-	fmt.Println(strings.Repeat("═", 80)) // Изменил с 50 до 80
-	fmt.Println()
-
-	// Логируем в файл
-	gm.logSignal(signal)
 }
 
 // formatPeriod форматирует период для отображения
@@ -225,16 +213,21 @@ func (gm *GrowthMonitor) formatPeriod(minutes int) string {
 }
 
 // logSignal логирует сигнал в файл
-func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
-	timestamp := time.Now().Format("2006/01/02 15:04:05")
-	changePercent := signal.GrowthPercent + signal.FallPercent
+// func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
+// 	timestamp := time.Now().Format("2006/01/02 15:04:05")
+// 	changePercent := signal.GrowthPercent + signal.FallPercent
 
-	fmt.Printf("📝 [%s] Сигнал записан: %s %s %.2f%% (период: %d мин)\n",
-		timestamp,
-		signal.Symbol,
-		signal.Direction,
-		changePercent,
-		signal.PeriodMinutes)
+// 	fmt.Printf("📝 [%s] Сигнал записан: %s %s %.2f%% (период: %d мин)\n",
+// 		timestamp,
+// 		signal.Symbol,
+// 		signal.Direction,
+// 		changePercent,
+// 		signal.PeriodMinutes)
+// }
+
+func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
+	// Только для логирования в файл, не выводить в консоль
+	// Это поможет избежать дублирования вывода
 }
 
 // GetSignals возвращает канал сигналов
@@ -479,4 +472,11 @@ func (gm *GrowthMonitor) filterByVolume(symbols []string, maxCount int) []string
 	}
 
 	return result
+}
+
+// FlushDisplay очищает и выводит накопленные сигналы
+func (gm *GrowthMonitor) FlushDisplay() {
+	if gm.display != nil {
+		gm.display.Flush()
+	}
 }
