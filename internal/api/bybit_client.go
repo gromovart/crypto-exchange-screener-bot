@@ -684,10 +684,32 @@ func (c *BybitClient) checkContinuousFall(dataPoints []types.PriceDataPoint) boo
 }
 
 // FindGrowthSignals ищет сигналы роста/падения
-func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int, growthThreshold, fallThreshold float64, checkContinuity bool) ([]types.GrowthSignal, error) {
+func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int,
+	growthThreshold, fallThreshold float64, checkContinuity bool) ([]types.GrowthSignal, error) {
+
 	var signals []types.GrowthSignal
 
+	// Получаем тикеры для всех символов одним запросом
+	tickerResp, err := c.GetTickers("linear")
+	if err != nil {
+		return nil, err
+	}
+
+	// Создаем мапу объемов для быстрого поиска
+	volumeMap := make(map[string]float64)
+	for _, ticker := range tickerResp.Result.List {
+		volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
+		if err == nil {
+			volumeMap[ticker.Symbol] = volume
+		}
+	}
+
 	for _, symbol := range symbols {
+		// Фильтруем по объему (минимум $100,000)
+		if volume, ok := volumeMap[symbol]; !ok || volume < 100000 {
+			continue
+		}
+
 		analysis, err := c.AnalyzeGrowth(symbol, periodMinutes, checkContinuity)
 		if err != nil {
 			continue // Пропускаем символы с недостаточными данными
@@ -799,4 +821,63 @@ func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string
 	}
 
 	return &klineResp, nil
+}
+
+// Get24hVolume получает 24-часовой объем для символа
+func (c *BybitClient) Get24hVolume(symbol string) (float64, error) {
+	tickers, err := c.GetTickers(c.category)
+	if err != nil {
+		return 0, err
+	}
+
+	for _, ticker := range tickers.Result.List {
+		if ticker.Symbol == symbol {
+			volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
+			if err != nil {
+				return 0, fmt.Errorf("failed to parse volume: %w", err)
+			}
+			return volume, nil
+		}
+	}
+
+	return 0, fmt.Errorf("symbol %s not found", symbol)
+}
+
+// GetSymbolVolume получает объем для нескольких символов за один запрос
+func (c *BybitClient) GetSymbolVolume(symbols []string) (map[string]float64, error) {
+	params := url.Values{}
+	params.Set("category", c.category)
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/tickers", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Result struct {
+			List []struct {
+				Symbol      string `json:"symbol"`
+				Turnover24h string `json:"turnover24h"`
+			} `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse volume response: %w", err)
+	}
+
+	volumes := make(map[string]float64)
+	for _, symbol := range symbols {
+		for _, ticker := range response.Result.List {
+			if ticker.Symbol == symbol && ticker.Turnover24h != "" {
+				volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
+				if err == nil {
+					volumes[symbol] = volume
+				}
+				break
+			}
+		}
+	}
+
+	return volumes, nil
 }

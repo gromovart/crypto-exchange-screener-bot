@@ -16,10 +16,11 @@ type GrowthMonitor struct {
 	client       *api.BybitClient
 	config       *config.Config
 	priceMonitor *PriceMonitor
-	signals      chan types.GrowthSignal // Используем GrowthSignal из monitor пакета
+	signals      chan types.GrowthSignal // Используем types.GrowthSignal
 	mu           sync.RWMutex
 	stopChan     chan bool
 	active       bool
+	lastCheck    map[int]time.Time // Кэш времени последней проверки по периоду
 }
 
 // NewGrowthMonitor создает новый монитор роста
@@ -28,9 +29,10 @@ func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMon
 		client:       api.NewBybitClient(cfg),
 		config:       cfg,
 		priceMonitor: priceMonitor,
-		signals:      make(chan types.GrowthSignal, 100), // types.GrowthSignal
+		signals:      make(chan types.GrowthSignal, 100),
 		stopChan:     make(chan bool),
 		active:       false,
+		lastCheck:    make(map[int]time.Time),
 	}
 }
 
@@ -74,25 +76,63 @@ func (gm *GrowthMonitor) monitoringLoop() {
 
 // checkAllSymbols проверяет все символы
 func (gm *GrowthMonitor) checkAllSymbols() {
+	// Используем ТЕ ЖЕ символы, что и основной монитор
+	// Получаем символы из priceMonitor
 	symbols := gm.priceMonitor.GetSymbols()
 
 	if len(symbols) == 0 {
 		return
 	}
 
-	// Ограничиваем количество символов для проверки
-	maxSymbols := 20
-	if len(symbols) > maxSymbols {
-		symbols = symbols[:maxSymbols]
+	// Ограничиваем ТОП-15 популярными парами
+	popularSymbols := []string{
+		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+		"ADAUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT",
+		"LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT",
 	}
 
+	// Фильтруем только те, что есть в нашем списке
+	var filteredSymbols []string
+	for _, symbol := range popularSymbols {
+		for _, availableSymbol := range symbols {
+			if symbol == availableSymbol {
+				filteredSymbols = append(filteredSymbols, symbol)
+				break
+			}
+		}
+	}
+
+	// Если не нашли достаточно, берем первые 15 из доступных
+	if len(filteredSymbols) < 10 {
+		maxSymbols := 15
+		if len(symbols) < maxSymbols {
+			maxSymbols = len(symbols)
+		}
+		filteredSymbols = symbols[:maxSymbols]
+	}
+
+	log.Printf("📊 Growth monitor checking %d popular symbols", len(filteredSymbols))
+
 	for _, period := range gm.config.GrowthPeriods {
-		gm.checkPeriod(symbols, period)
+		gm.checkPeriod(filteredSymbols, period)
 	}
 }
 
 // checkPeriod проверяет символы для конкретного периода
 func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
+	// Проверяем, не слишком ли часто проверяем этот период
+	gm.mu.RLock()
+	lastCheck, exists := gm.lastCheck[periodMinutes]
+	gm.mu.RUnlock()
+
+	if exists {
+		// Не проверяем период чаще, чем половина его длительности
+		minInterval := time.Duration(periodMinutes/2) * time.Minute
+		if time.Since(lastCheck) < minInterval {
+			return
+		}
+	}
+
 	log.Printf("🔍 Checking growth for period %d minutes", periodMinutes)
 
 	signals, err := gm.client.FindGrowthSignals(
@@ -107,6 +147,11 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 		log.Printf("❌ Error checking growth signals: %v", err)
 		return
 	}
+
+	// Обновляем время последней проверки
+	gm.mu.Lock()
+	gm.lastCheck[periodMinutes] = time.Now()
+	gm.mu.Unlock()
 
 	for _, signal := range signals {
 		gm.processSignal(signal)
@@ -143,8 +188,13 @@ func (gm *GrowthMonitor) printSignal(signal types.GrowthSignal) {
 
 	periodStr := gm.formatPeriod(signal.PeriodMinutes)
 
+	// Форматируем время сигнала
+	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
+
+	// Выводим напрямую, без среза строк
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Printf("%s %s - %s - %s\n", icon, direction, periodStr, signal.Symbol)
+	fmt.Printf("🕐 %s\n", timeStr) // Добавляем время сигнала
 	fmt.Printf("📈 Change: %s\n", changeStr)
 	fmt.Printf("🎯 Period: %d minutes\n", signal.PeriodMinutes)
 	fmt.Printf("📊 Confidence: %.1f%%\n", signal.Confidence)
@@ -263,4 +313,33 @@ func (gm *GrowthMonitor) GetGrowthStats() map[string]interface{} {
 		"fall_threshold":     gm.config.FallThreshold,
 		"active":             gm.active,
 	}
+}
+func (gm *GrowthMonitor) GetDetailedStats() map[string]interface{} {
+	gm.mu.RLock()
+	defer gm.mu.RUnlock()
+
+	signals := gm.GetActiveSignals()
+
+	stats := map[string]interface{}{
+		"total_signals":  len(signals),
+		"growth_signals": 0,
+		"fall_signals":   0,
+		"active":         gm.active,
+		"last_check":     time.Now(),
+	}
+
+	// Группируем по периодам
+	periodStats := make(map[int]int)
+	for _, signal := range signals {
+		if signal.Direction == "growth" {
+			stats["growth_signals"] = stats["growth_signals"].(int) + 1
+		} else {
+			stats["fall_signals"] = stats["fall_signals"].(int) + 1
+		}
+		periodStats[signal.PeriodMinutes] = periodStats[signal.PeriodMinutes] + 1
+	}
+
+	stats["period_stats"] = periodStats
+
+	return stats
 }

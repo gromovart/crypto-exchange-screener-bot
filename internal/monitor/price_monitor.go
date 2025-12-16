@@ -59,6 +59,7 @@ func NewPriceMonitor(cfg *config.Config) *PriceMonitor {
 		intervals:     intervals,
 		stopChan:      make(chan bool),
 		symbolInfo:    make(map[string]api.InstrumentInfo),
+		cronScheduler: cron.New(cron.WithSeconds()), // Инициализируем cron scheduler
 	}
 	// Инициализируем SignalMonitor
 	pm.signalMonitor = NewSignalMonitor(pm, cfg.AlertThreshold)
@@ -119,6 +120,7 @@ func (pm *PriceMonitor) FetchAllUSDTPairs() ([]string, error) {
 			usdtPairs = append(usdtPairs, symbol)
 		}
 	}
+	fmt.Println(usdtPairs)
 
 	sort.Strings(usdtPairs)
 

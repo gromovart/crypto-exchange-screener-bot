@@ -37,25 +37,13 @@ func main() {
 	fmt.Printf("   Порог сигнала: %.2f%%\n", cfg.AlertThreshold)
 	fmt.Println()
 
+	// Переменные для статистики
+	startTime := time.Now()
+	var updateCount int32 = 0
+	var signalCount int32 = 0
+
 	// Создаем монитор цен
 	priceMonitor := monitor.NewPriceMonitor(cfg)
-
-	// Создаем монитор роста
-	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
-
-	// Запускаем мониторинг роста
-	growthMonitor.Start()
-	fmt.Println("📈 Growth monitoring started")
-
-	// Обработка сигналов роста в отдельной горутине
-	go func() {
-		for signal := range growthMonitor.GetSignals() {
-			// Обработка сигналов роста
-			log.Printf("🎯 Growth signal: %s %s %.2f%%",
-				signal.Symbol, signal.Direction,
-				signal.GrowthPercent+signal.FallPercent)
-		}
-	}()
 
 	// Получаем все фьючерсные USDT пары
 	fmt.Println("📈 Получение фьючерсных торговых пар...")
@@ -96,13 +84,44 @@ func main() {
 	// Создаем монитор сигналов
 	signalMonitor := monitor.NewSignalMonitor(priceMonitor, cfg.AlertThreshold)
 	fmt.Println("🚨 Мониторинг сигналов инициализирован")
-	fmt.Println()
+
+	// Создаем монитор роста
+	fmt.Println("📈 Growth monitoring initializing...")
+	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
 
 	// Даем время на первоначальную загрузку данных
 	fmt.Println("📥 Загрузка первоначальных данных...")
 	time.Sleep(5 * time.Second)
 	fmt.Println("✅ Данные загружены")
 	fmt.Println()
+
+	// Запускаем мониторинг роста
+	growthMonitor.Start()
+	fmt.Println("🚀 Growth monitoring started")
+
+	// Обработка сигналов роста в отдельной горутине
+	go func() {
+		for signal := range growthMonitor.GetSignals() {
+			// Обработка сигналов роста
+			log.Printf("🎯 Growth signal: %s %s %.2f%% (period: %d min)",
+				signal.Symbol, signal.Direction,
+				signal.GrowthPercent+signal.FallPercent,
+				signal.PeriodMinutes)
+
+			// Увеличиваем счетчик сигналов
+			atomic.AddInt32(&signalCount, 1)
+		}
+	}()
+
+	// Обработка сигналов для graceful shutdown
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Переменные для статистики
+	totalSymbols := len(pairs)
+
+	// Канал для сигналов (пока не используется, но оставим)
+	signalChan := make(chan monitor.Signal, 100)
 
 	// Запускаем HTTP сервер (если включен)
 	if cfg.HttpEnabled {
@@ -113,19 +132,6 @@ func main() {
 		fmt.Printf("   API доступен по адресу: http://localhost:%s\n", cfg.HttpPort)
 		fmt.Println()
 	}
-
-	// Обработка сигналов для graceful shutdown
-	stopChan := make(chan os.Signal, 1)
-	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Переменные для статистики
-	startTime := time.Now()
-	var updateCount int32 = 0
-	var signalCount int32 = 0
-	totalSymbols := len(pairs)
-
-	// Канал для сигналов (пока не используется, но оставим)
-	signalChan := make(chan monitor.Signal, 100)
 
 	// Горутина для проверки сигналов
 	go func() {
@@ -173,16 +179,28 @@ func main() {
 		}
 	}()
 
+	// Горутина для статистики роста
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for range ticker.C {
 			stats := growthMonitor.GetGrowthStats()
-			fmt.Printf("📊 Growth Stats: %d signals (↑%d ↓%d)\n",
+			detailedStats := growthMonitor.GetDetailedStats()
+
+			fmt.Printf("📈 Growth Stats: %d signals (↑%d ↓%d)\n",
 				stats["total_signals"],
 				stats["growth_signals"],
 				stats["fall_signals"])
+
+			// Выводим детальную статистику по периодам
+			if periodStats, ok := detailedStats["period_stats"].(map[int]int); ok {
+				fmt.Printf("   Periods: ")
+				for period, count := range periodStats {
+					fmt.Printf("%dmin:%d ", period, count)
+				}
+				fmt.Println()
+			}
 		}
 	}()
 
@@ -195,8 +213,10 @@ func main() {
 		for range ticker.C {
 			currentUpdates := atomic.LoadInt32(&updateCount)
 			currentSignals := atomic.LoadInt32(&signalCount)
+			growthStats := growthMonitor.GetGrowthStats()
 
-			printStats(startTime, int(currentUpdates), int(currentSignals), cfg, totalSymbols, iteration)
+			printStats(startTime, int(currentUpdates), int(currentSignals),
+				cfg, totalSymbols, iteration, growthStats)
 			iteration++
 		}
 	}()
@@ -221,8 +241,16 @@ func main() {
 	fmt.Printf("📊 Всего обновлений цен: %d\n", atomic.LoadInt32(&updateCount))
 	fmt.Printf("🚨 Всего обнаружено сигналов: %d\n", atomic.LoadInt32(&signalCount))
 
+	// Получаем финальную статистику по сигналам роста
+	growthStats := growthMonitor.GetGrowthStats()
+	fmt.Printf("📈 Growth signals: %d (↑%d ↓%d)\n",
+		growthStats["total_signals"],
+		growthStats["growth_signals"],
+		growthStats["fall_signals"])
+
 	// Остановка мониторинга
 	priceMonitor.StopMonitoring()
+	growthMonitor.Stop()
 	close(signalChan)
 
 	fmt.Println("✅ Бот остановлен корректно")
@@ -273,12 +301,25 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-func printStats(startTime time.Time, updates int, signals int, cfg *config.Config, totalSymbols int, iteration int) {
+// ОБНОВЛЯЕМ функцию printStats для поддержки статистики роста
+func printStats(startTime time.Time, updates int, signals int,
+	cfg *config.Config, totalSymbols int, iteration int,
+	growthStats map[string]interface{}) {
+
 	fmt.Println(strings.Repeat("─", 50))
 	fmt.Printf("📊 СТАТУС СИСТЕМЫ (итерация #%d)\n", iteration)
 	fmt.Printf("   ⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
 	fmt.Printf("   🔄 Обновлений цен: %d\n", updates)
-	fmt.Printf("   🚨 Сигналов: %d\n", signals)
+	fmt.Printf("   🚨 Всего сигналов: %d\n", signals)
+
+	// Добавляем статистику роста
+	if growthStats != nil {
+		fmt.Printf("   📈 Growth signals: %d (↑%d ↓%d)\n",
+			growthStats["total_signals"],
+			growthStats["growth_signals"],
+			growthStats["fall_signals"])
+	}
+
 	fmt.Printf("   📈 Всего пар: %d\n", totalSymbols)
 
 	var m runtime.MemStats
@@ -289,7 +330,7 @@ func printStats(startTime time.Time, updates int, signals int, cfg *config.Confi
 	fmt.Printf("   ⏭️  След. проверка: %s\n",
 		time.Now().Add(10*time.Second).Format("15:04:05"))
 	fmt.Println(strings.Repeat("─", 50))
-	fmt.Println()
+	fmt.Println() // Добавляем пустую строку в конце
 }
 
 func printHeader(text string) {

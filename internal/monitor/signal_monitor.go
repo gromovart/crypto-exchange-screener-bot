@@ -285,14 +285,18 @@ func (sm *SignalMonitor) printTerminalMessage(message TerminalMessage, isContinu
 		directionStr = "Dump"
 	}
 
-	// Формируем сообщение
+	// Форматируем время сигнала
+	timeStr := message.Timestamp.Format("2006/01/02 15:04:05")
+
+	// Формируем сообщение (используем fmt.Sprintf для форматирования строк)
 	lines := []string{
-		fmt.Sprintf("══════════════════════════════════════════════════"),
+		"══════════════════════════════════════════════════",
 		fmt.Sprintf("⚫ %s - %s - %s", message.Exchange, intervalStr, message.Symbol),
+		fmt.Sprintf("🕐 %s", timeStr), // Добавляем время сигнала
 		fmt.Sprintf("%s %s: %s", icon, directionStr, changeStr),
 		fmt.Sprintf("📡 Signal 24h: %d", message.Signal24h),
 		fmt.Sprintf("🔗 %s", message.SymbolURL),
-		fmt.Sprintf("══════════════════════════════════════════════════"),
+		"══════════════════════════════════════════════════",
 		"", // Пустая строка для разделения
 	}
 
@@ -400,6 +404,13 @@ func (sm *SignalMonitor) GetActiveSignals() map[string]Signal {
 
 // CheckSignalNow принудительно проверяет сигнал сейчас
 func (sm *SignalMonitor) CheckSignalNow(symbol string, interval Interval) bool {
+	// Получаем данные об объеме
+	volume24h, _ := sm.priceMonitor.client.Get24hVolume(symbol)
+
+	// Фильтруем по минимальному объему (например, $100,000)
+	if volume24h < 100000 {
+		return false
+	}
 	// Создаем ключ для cooldown
 	cooldownKey := fmt.Sprintf("%s_%s", symbol, interval)
 
@@ -545,13 +556,14 @@ func (sm *SignalMonitor) printSignalMessage(signal Signal, signalCount int, isCo
 
 	// Ссылка на торговую пару
 	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
-
+	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
 	// Выводим сообщение
 	fmt.Println("══════════════════════════════════════════════════")
 	fmt.Printf("⚫ Bybit - %s - %s\n", intervalStr, signal.Symbol)
 	fmt.Printf("%s %s: %s\n", icon, direction, changeStr)
 	fmt.Printf("📡 Signal 24h: %d\n", signalCount)
 	fmt.Printf("🔗 %s\n", symbolURL)
+	fmt.Printf("🕐 %s\n", timeStr) // Добавляем время сигнала
 	fmt.Println("══════════════════════════════════════════════════")
 
 	// Добавляем указание на продолжение тренда

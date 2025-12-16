@@ -30,3 +30,23 @@ func FormatPercent(value float64) string {
 	}
 	return fmt.Sprintf("%.2f%%", value)
 }
+
+// FormatSignalTime форматирует время для вывода в сигналах
+func FormatSignalTime(t time.Time) string {
+	return t.Format("2006/01/02 15:04:05")
+}
+
+// FormatRelativeTime форматирует время относительно текущего момента
+func FormatRelativeTime(t time.Time) string {
+	now := time.Now()
+	diff := now.Sub(t)
+
+	if diff < time.Minute {
+		return fmt.Sprintf("%d сек. назад", int(diff.Seconds()))
+	} else if diff < time.Hour {
+		return fmt.Sprintf("%d мин. назад", int(diff.Minutes()))
+	} else if diff < 24*time.Hour {
+		return fmt.Sprintf("%d ч. назад", int(diff.Hours()))
+	}
+	return t.Format("2006/01/02 15:04:05")
+}
