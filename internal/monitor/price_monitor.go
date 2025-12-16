@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // PriceMonitor - монитор цен
@@ -26,6 +28,8 @@ type PriceMonitor struct {
 	mu            sync.RWMutex
 	updateTicker  *time.Ticker
 	stopChan      chan bool
+	signalMonitor *SignalMonitor // Новое поле
+	cronScheduler *cron.Cron     // Для запуска по расписанию
 }
 
 // NewPriceMonitor создает новый монитор
@@ -44,14 +48,20 @@ func NewPriceMonitor(cfg *config.Config) *PriceMonitor {
 		Interval24Hour: 24 * time.Hour,
 	}
 
-	return &PriceMonitor{
+	pm := &PriceMonitor{
 		client:        api.NewBybitClient(cfg),
 		config:        cfg,
 		priceHistory:  make(map[string][]PriceData),
 		currentPrices: make(map[string]float64),
 		intervals:     intervals,
 		stopChan:      make(chan bool),
+		cronScheduler: cron.New(),
 	}
+
+	// Инициализируем SignalMonitor
+	pm.signalMonitor = NewSignalMonitor(pm, cfg.AlertThreshold)
+
+	return pm
 }
 
 // FetchAllUSDTPairs получает все USDT пары
@@ -430,3 +440,60 @@ func (pm *PriceMonitor) GetSymbols() []string {
 	defer pm.mu.RUnlock()
 	return pm.symbols
 }
+
+// StartSignalMonitoring запускает мониторинг сигналов
+func (pm *PriceMonitor) StartSignalMonitoring() {
+	// Конвертируем интервалы из конфига
+	var intervals []Interval
+	for _, interval := range pm.config.TrackedIntervals {
+		intervals = append(intervals, Interval(fmt.Sprintf("%d", interval)))
+	}
+
+	// Запускаем мониторинг сигналов в отдельной горутине
+	go pm.signalMonitor.MonitorSymbols(pm.symbols, intervals,
+		time.Duration(pm.config.UpdateInterval)*time.Second)
+
+	// Настраиваем cron задания для проверки в конце каждого интервала
+	pm.setupCronJobs(intervals)
+
+	pm.cronScheduler.Start()
+}
+
+// setupCronJobs настраивает задания cron для проверки в конце интервалов
+func (pm *PriceMonitor) setupCronJobs(intervals []Interval) {
+	for _, interval := range intervals {
+		minutes, err := parseIntervalToMinutes(string(interval))
+		if err != nil {
+			continue
+		}
+
+		// Создаем cron выражение для запуска каждые N минут
+		cronExpr := fmt.Sprintf("*/%d * * * *", minutes)
+
+		pm.cronScheduler.AddFunc(cronExpr, func() {
+			pm.checkIntervalEnd(interval)
+		})
+	}
+}
+
+// checkIntervalEnd проверяет сигналы в конце интервала
+func (pm *PriceMonitor) checkIntervalEnd(interval Interval) {
+	pm.mu.RLock()
+	symbols := make([]string, len(pm.symbols))
+	copy(symbols, pm.symbols)
+	pm.mu.RUnlock()
+
+	// Проверяем все символы для данного интервала
+	for _, symbol := range symbols {
+		pm.signalMonitor.checkSignal(symbol, interval)
+	}
+}
+
+// StopSignalMonitoring останавливает мониторинг сигналов
+func (pm *PriceMonitor) StopSignalMonitoring() {
+	if pm.cronScheduler != nil {
+		pm.cronScheduler.Stop()
+	}
+}
+
+

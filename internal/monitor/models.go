@@ -1,4 +1,4 @@
-// models.go
+// internal/monitor/models.go
 package monitor
 
 import (
@@ -39,4 +39,35 @@ type PriceChange struct {
 	Interval      string  `json:"interval"`
 	Volume24h     float64 `json:"volume_24h"`
 	Timestamp     string  `json:"timestamp"`
+}
+
+// Signal - структура для хранения информации о сигнале
+type Signal struct {
+	Symbol        string
+	Interval      Interval
+	ChangePercent float64
+	Direction     string // "pump" или "dump"
+	Timestamp     time.Time
+	SignalID      int // Уникальный ID сигнала в рамках 24 часов
+}
+
+// SignalHistory - история сигналов за 24 часа
+type SignalHistory struct {
+	Symbol       string
+	Interval     Interval
+	Signals      []Signal
+	LastSignalID int
+	LastTrend    string // "pump", "dump", или "neutral"
+}
+
+// TerminalMessage - сообщение для отправки в терминал
+type TerminalMessage struct {
+	Exchange      string
+	Interval      string
+	Symbol        string
+	SymbolURL     string
+	ChangePercent float64
+	Direction     string // "pump" или "dump"
+	Signal24h     int
+	Timestamp     time.Time
 }
