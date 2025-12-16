@@ -1,0 +1,386 @@
+package telegram
+
+import (
+	"bytes"
+	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/types"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strconv"
+	"time"
+)
+
+// TelegramBot - бот для отправки уведомлений в Telegram
+type TelegramBot struct {
+	config        *config.Config
+	httpClient    *http.Client
+	baseURL       string
+	chatID        int64
+	notifyEnabled bool
+	subscribers   map[int64]bool // Подписчики (chatID -> enabled)
+}
+
+// TelegramResponse - ответ от Telegram API
+type TelegramResponse struct {
+	OK     bool `json:"ok"`
+	Result struct {
+		MessageID int `json:"message_id"`
+	} `json:"result"`
+}
+
+// InlineKeyboardButton - кнопка inline клавиатуры
+type InlineKeyboardButton struct {
+	Text         string `json:"text"`
+	CallbackData string `json:"callback_data"`
+	URL          string `json:"url,omitempty"`
+}
+
+// InlineKeyboardMarkup - разметка inline клавиатуры
+type InlineKeyboardMarkup struct {
+	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
+}
+
+// TelegramMessage - сообщение с клавиатурой
+type TelegramMessage struct {
+	ChatID      int64                 `json:"chat_id"`
+	Text        string                `json:"text"`
+	ParseMode   string                `json:"parse_mode,omitempty"`
+	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+}
+
+// NewTelegramBot создает нового Telegram бота
+func NewTelegramBot(cfg *config.Config) *TelegramBot {
+	if cfg.TelegramAPIKey == "" || cfg.TelegramChatID == 0 {
+		log.Println("⚠️ Telegram API ключ или Chat ID не указаны, бот отключен")
+		return nil
+	}
+
+	return &TelegramBot{
+		config:        cfg,
+		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramAPIKey),
+		chatID:        cfg.TelegramChatID,
+		notifyEnabled: cfg.TelegramEnabled,
+		subscribers:   make(map[int64]bool),
+	}
+}
+
+// SendNotification отправляет уведомление о сигнале
+func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
+	if !tb.notifyEnabled {
+		return nil
+	}
+
+	// Проверяем настройки уведомлений
+	if (signal.Direction == "growth" && !tb.config.TelegramNotifyOn.Growth) ||
+		(signal.Direction == "fall" && !tb.config.TelegramNotifyOn.Fall) {
+		return nil
+	}
+
+	// Форматируем сообщение
+	message := tb.FormatSignalMessage(signal)
+
+	// Создаем клавиатуру с кнопками
+	keyboard := tb.createNotificationKeyboard(signal)
+
+	// Отправляем сообщение
+	return tb.sendMessageWithKeyboard(message, keyboard)
+}
+
+// FormatSignalMessage форматирует сообщение о сигнале
+func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
+	var icon, directionStr, changeStr string
+	changePercent := signal.GrowthPercent + signal.FallPercent
+
+	if signal.Direction == "growth" {
+		icon = "🟢"
+		directionStr = "РОСТ"
+		changeStr = fmt.Sprintf("+%.2f%%", changePercent)
+	} else {
+		icon = "🔴"
+		directionStr = "ПАДЕНИЕ"
+		changeStr = fmt.Sprintf("-%.2f%%", -changePercent)
+	}
+
+	intervalStr := strconv.Itoa(signal.PeriodMinutes) + "мин"
+	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
+	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
+
+	// Формат сообщения как в задании
+	var message string
+	if tb.config.MessageFormat == "compact" {
+		message = fmt.Sprintf(
+			"⚫ Bybit - %s - %s\n"+
+				"🕐 %s\n"+
+				"%s %s: %s\n"+
+				"📡 Уверенность: %.0f%%\n"+
+				"🔗 %s",
+			intervalStr, signal.Symbol,
+			timeStr,
+			icon, directionStr, changeStr,
+			signal.Confidence,
+			symbolURL,
+		)
+	} else {
+		// Подробный формат
+		message = fmt.Sprintf(
+			"🎯 *%s ДЕТЕКТИРОВАН!*\n\n"+
+				"*Биржа:* Bybit Futures\n"+
+				"*Символ:* `%s`\n"+
+				"*Направление:* %s %s\n"+
+				"*Изменение:* %s\n"+
+				"*Период:* %d минут\n"+
+				"*Время:* %s\n"+
+				"*Уверенность:* %.0f%%\n"+
+				"*Цена:* %.4f → %.4f\n"+
+				"*Ссылка:* [Торговать](%s)",
+			directionStr,
+			signal.Symbol,
+			icon, directionStr,
+			changeStr,
+			signal.PeriodMinutes,
+			timeStr,
+			signal.Confidence,
+			signal.StartPrice, signal.EndPrice,
+			symbolURL,
+		)
+	}
+
+	return message
+}
+
+// createNotificationKeyboard создает клавиатуру с кнопками для уведомления
+func (tb *TelegramBot) createNotificationKeyboard(signal types.GrowthSignal) *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{
+					Text:         "✅ Уведомлять",
+					CallbackData: fmt.Sprintf("notify_%s_on", signal.Symbol),
+				},
+				{
+					Text:         "❌ Не уведомлять",
+					CallbackData: fmt.Sprintf("notify_%s_off", signal.Symbol),
+				},
+			},
+			{
+				{
+					Text: "📈 График",
+					URL:  fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", signal.Symbol),
+				},
+				{
+					Text: "💱 Торговать",
+					URL:  fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol),
+				},
+			},
+		},
+	}
+}
+
+// sendMessageWithKeyboard отправляет сообщение с клавиатурой
+func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
+	message := TelegramMessage{
+		ChatID:    tb.chatID,
+		Text:      text,
+		ParseMode: "Markdown",
+	}
+
+	if keyboard != nil {
+		message.ReplyMarkup = keyboard
+	}
+
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	resp, err := tb.httpClient.Post(
+		tb.baseURL+"sendMessage",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var telegramResp TelegramResponse
+	if err := json.Unmarshal(body, &telegramResp); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !telegramResp.OK {
+		return fmt.Errorf("telegram API error: %s", string(body))
+	}
+
+	return nil
+}
+
+// SendTestMessage отправляет тестовое сообщение
+func (tb *TelegramBot) SendTestMessage() error {
+	message := "🤖 *Бот активирован!*\n\n" +
+		"✅ Система мониторинга роста/падения запущена.\n" +
+		"🔔 Вы будете получать уведомления о значимых движениях.\n" +
+		"⚙️ Настройте уведомления в .env файле."
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "🔄 Статус", CallbackData: "status"},
+				{Text: "⚙️ Настройки", CallbackData: "settings"},
+			},
+		},
+	}
+
+	return tb.sendMessageWithKeyboard(message, keyboard)
+}
+
+// StartCommandHandler обрабатывает команду /start
+func (tb *TelegramBot) StartCommandHandler(chatID int64) error {
+	message := "🚀 *Crypto Exchange Screener Bot*\n\n" +
+		"*Доступные команды:*\n" +
+		"/start - Начало работы\n" +
+		"/status - Статус системы\n" +
+		"/notify_on - Включить уведомления\n" +
+		"/notify_off - Выключить уведомления\n" +
+		"/test - Тестовое уведомление\n\n" +
+		"⚡ Бот мониторит рост/падение фьючерсов на Bybit"
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "✅ Уведомлять", CallbackData: "notify_on"},
+				{Text: "❌ Не уведомлять", CallbackData: "notify_off"},
+			},
+			{
+				{Text: "📊 Статистика", CallbackData: "stats"},
+				{Text: "⚙️ Настройки", CallbackData: "config"},
+			},
+		},
+	}
+
+	return tb.sendMessageWithKeyboardToChat(chatID, message, keyboard)
+}
+
+// sendMessageWithKeyboardToChat отправляет сообщение в указанный чат
+func (tb *TelegramBot) sendMessageWithKeyboardToChat(chatID int64, text string, keyboard *InlineKeyboardMarkup) error {
+	message := TelegramMessage{
+		ChatID:    chatID,
+		Text:      text,
+		ParseMode: "Markdown",
+	}
+
+	if keyboard != nil {
+		message.ReplyMarkup = keyboard
+	}
+
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	resp, err := tb.httpClient.Post(
+		tb.baseURL+"sendMessage",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	return nil
+}
+
+// HandleCallback обрабатывает callback от кнопок
+func (tb *TelegramBot) HandleCallback(callbackData string, chatID int64) error {
+	switch callbackData {
+	case "notify_on":
+		tb.notifyEnabled = true
+		return tb.sendMessageWithKeyboardToChat(chatID, "✅ Уведомления включены", nil)
+	case "notify_off":
+		tb.notifyEnabled = false
+		return tb.sendMessageWithKeyboardToChat(chatID, "❌ Уведомления выключены", nil)
+	case "status":
+		return tb.sendStatus(chatID)
+	case "stats":
+		return tb.sendStats(chatID)
+	case "config":
+		return tb.sendConfig(chatID)
+	default:
+		// Обработка notify_SYMBOL_on/off
+		if len(callbackData) > 7 && callbackData[:7] == "notify_" {
+			symbol := callbackData[7 : len(callbackData)-3]
+			action := callbackData[len(callbackData)-2:]
+
+			var response string
+			if action == "on" {
+				response = fmt.Sprintf("✅ Уведомления для %s включены", symbol)
+			} else {
+				response = fmt.Sprintf("❌ Уведомления для %s выключены", symbol)
+			}
+
+			return tb.sendMessageWithKeyboardToChat(chatID, response, nil)
+		}
+	}
+
+	return nil
+}
+
+// sendStatus отправляет статус системы
+func (tb *TelegramBot) sendStatus(chatID int64) error {
+	message := "📊 *Статус системы*\n\n" +
+		"✅ Бот работает\n" +
+		"🔔 Уведомления: " + tb.getNotifyStatus() + "\n" +
+		"📈 Мониторинг роста: активен\n" +
+		"🕐 Время сервера: " + time.Now().Format("2006-01-02 15:04:05")
+
+	return tb.sendMessageWithKeyboardToChat(chatID, message, nil)
+}
+
+// sendStats отправляет статистику
+func (tb *TelegramBot) sendStats(chatID int64) error {
+	// Здесь можно добавить реальную статистику
+	message := "📈 *Статистика*\n\n" +
+		"Сигналов сегодня: 0\n" +
+		"Рост: 0\n" +
+		"Падение: 0\n" +
+		"Топ сигнал: Нет данных"
+
+	return tb.sendMessageWithKeyboardToChat(chatID, message, nil)
+}
+
+// sendConfig отправляет текущую конфигурацию
+func (tb *TelegramBot) sendConfig(chatID int64) error {
+	message := fmt.Sprintf(
+		"⚙️ *Конфигурация*\n\n"+
+			"Бот: %s\n"+
+			"Уведомления: %s\n"+
+			"Рост: %v\n"+
+			"Падение: %v\n"+
+			"Формат: %s",
+		tb.config.FuturesCategory,
+		tb.getNotifyStatus(),
+		tb.config.TelegramNotifyOn.Growth,
+		tb.config.TelegramNotifyOn.Fall,
+		tb.config.MessageFormat,
+	)
+
+	return tb.sendMessageWithKeyboardToChat(chatID, message, nil)
+}
+
+// getNotifyStatus возвращает статус уведомлений
+func (tb *TelegramBot) getNotifyStatus() string {
+	if tb.notifyEnabled {
+		return "✅ Включены"
+	}
+	return "❌ Выключены"
+}

@@ -86,6 +86,21 @@ type Config struct {
 		MinConfidence    float64  `json:"min_confidence"`      // Минимальная уверенность сигнала
 		MaxSignalsPerMin int      `json:"max_signals_per_min"` // Максимум сигналов в минуту
 	} `json:"signal_filters"`
+
+	// Telegram Bot Configuration
+	TelegramAPIKey   string `json:"telegram_api_key"`
+	TelegramChatID   int64  `json:"telegram_chat_id"`
+	TelegramEnabled  bool   `json:"telegram_enabled"`
+	TelegramNotifyOn struct {
+		Growth bool `json:"notify_on_growth"`
+		Fall   bool `json:"notify_on_fall"`
+	} `json:"telegram_notify_on"`
+	TelegramWebhookPort string `json:"telegram_webhook_port"`
+	TelegramWebhookURL  string `json:"telegram_webhook_url"`
+
+	// Message Formatting
+	MessageFormat   string `json:"message_format"` // "compact" | "detailed"
+	Include24hStats bool   `json:"include_24h_stats"`
 }
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -195,6 +210,24 @@ func LoadConfig(envPath string) (*Config, error) {
 			MinConfidence:    getEnvFloat("MIN_CONFIDENCE", 50.0),
 			MaxSignalsPerMin: getEnvInt("MAX_SIGNALS_PER_MIN", 5),
 		},
+
+		// Telegram Configuration
+		TelegramAPIKey:  getEnvString("TG_API_KEY", ""),
+		TelegramChatID:  getEnvInt64("TG_CHAT_ID", 0),
+		TelegramEnabled: getEnvBool("TELEGRAM_ENABLED", false),
+		TelegramNotifyOn: struct {
+			Growth bool `json:"notify_on_growth"`
+			Fall   bool `json:"notify_on_fall"`
+		}{
+			Growth: getEnvBool("TELEGRAM_NOTIFY_GROWTH", true),
+			Fall:   getEnvBool("TELEGRAM_NOTIFY_FALL", true),
+		},
+		TelegramWebhookPort: getEnvString("TELEGRAM_WEBHOOK_PORT", "8443"),
+		TelegramWebhookURL:  getEnvString("TELEGRAM_WEBHOOK_URL", ""),
+
+		// Message Formatting
+		MessageFormat:   getEnvString("MESSAGE_FORMAT", "compact"),
+		Include24hStats: getEnvBool("INCLUDE_24H_STATS", false),
 	}
 
 	return config, nil
@@ -349,4 +382,12 @@ func parsePatterns(patternsStr string) []string {
 	}
 
 	return result
+}
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value, exists := os.LookupEnv(key); exists {
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
 }

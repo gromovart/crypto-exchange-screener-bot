@@ -4,6 +4,7 @@ package monitor
 import (
 	"crypto-exchange-screener-bot/internal/api"
 	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
@@ -20,7 +21,8 @@ type GrowthMonitor struct {
 	priceMonitor   *PriceMonitor
 	signals        chan types.GrowthSignal
 	filter         *SignalFilter
-	display        *DisplayManager // Добавляем DisplayManager
+	display        *DisplayManager
+	telegramBot    *telegram.TelegramBot // Добавляем Telegram бота
 	mu             sync.RWMutex
 	stopChan       chan bool
 	active         bool
@@ -31,13 +33,25 @@ type GrowthMonitor struct {
 
 // NewGrowthMonitor создает новый монитор роста
 func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMonitor {
+	// Настройки отображения
+	minChange := 0.5
+	maxSignals := 15
+
+	// Создаем Telegram бота если включен
+	var telegramBot *telegram.TelegramBot
+	if cfg.TelegramEnabled && cfg.TelegramAPIKey != "" && cfg.TelegramChatID != 0 {
+		telegramBot = telegram.NewTelegramBot(cfg)
+		log.Printf("🤖 Telegram бот инициализирован для чата ID: %d", cfg.TelegramChatID)
+	}
+
 	return &GrowthMonitor{
 		client:         api.NewBybitClient(cfg),
 		config:         cfg,
 		priceMonitor:   priceMonitor,
 		signals:        make(chan types.GrowthSignal, 100),
 		filter:         NewSignalFilter(cfg),
-		display:        NewDisplayManager(true, 0.5, 50.0, 15), // Компактный режим
+		display:        NewDisplayManager(true, minChange, 50.0, maxSignals),
+		telegramBot:    telegramBot, // Сохраняем бота
 		stopChan:       make(chan bool),
 		active:         false,
 		lastCheck:      make(map[int]time.Time),
@@ -173,10 +187,19 @@ func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 	// Добавляем в DisplayManager для группового вывода
 	gm.display.AddSignal(signal)
 
+	// Отправляем в Telegram если бот активен
+	if gm.telegramBot != nil {
+		go func(s types.GrowthSignal) {
+			if err := gm.telegramBot.SendNotification(s); err != nil {
+				log.Printf("❌ Ошибка отправки в Telegram: %v", err)
+			}
+		}(signal)
+	}
+
 	// Отправляем сигнал в канал
 	select {
 	case gm.signals <- signal:
-		// Сигнал отправлен, вывод через DisplayManager
+		// Сигнал отправлен
 	default:
 		log.Printf("⚠️ Канал сигналов переполнен, сигнал для %s пропущен", signal.Symbol)
 	}
@@ -479,4 +502,12 @@ func (gm *GrowthMonitor) FlushDisplay() {
 	if gm.display != nil {
 		gm.display.Flush()
 	}
+}
+
+// SendTelegramTest отправляет тестовое сообщение в Telegram
+func (gm *GrowthMonitor) SendTelegramTest() error {
+	if gm.telegramBot != nil {
+		return gm.telegramBot.SendTestMessage()
+	}
+	return fmt.Errorf("telegram bot not initialized")
 }

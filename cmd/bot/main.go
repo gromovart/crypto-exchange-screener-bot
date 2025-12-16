@@ -3,6 +3,7 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/monitor"
+	"crypto-exchange-screener-bot/internal/telegram"
 	"fmt"
 	"log"
 	"os"
@@ -151,6 +152,55 @@ func main() {
 	// Создаем монитор роста
 	fmt.Println("📈 Инициализация монитора роста...")
 	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
+
+	// Инициализируем Telegram бота если включен
+	if cfg.TelegramEnabled && cfg.TelegramAPIKey != "" {
+		fmt.Println("🤖 Telegram бот инициализирован")
+
+		// Запускаем webhook сервер если указан порт
+		if cfg.TelegramWebhookPort != "" && cfg.TelegramWebhookURL != "" {
+			telegramBot := telegram.NewTelegramBot(cfg)
+			webhookServer := telegram.NewWebhookServer(
+				telegramBot,
+				cfg.TelegramWebhookPort,
+				cfg.TelegramWebhookURL,
+			)
+
+			go func() {
+				if err := webhookServer.Start(); err != nil {
+					log.Printf("❌ Ошибка запуска Telegram webhook: %v", err)
+				}
+			}()
+
+			fmt.Printf("🌐 Telegram webhook сервер запущен на порту %s\n", cfg.TelegramWebhookPort)
+		}
+
+		// Отправляем тестовое сообщение
+		if cfg.TelegramChatID != 0 {
+			go func() {
+				time.Sleep(3 * time.Second) // Даем время на запуск
+				if err := growthMonitor.SendTelegramTest(); err != nil {
+					log.Printf("❌ Ошибка отправки тестового сообщения: %v", err)
+				} else {
+					fmt.Println("✅ Тестовое сообщение отправлено в Telegram")
+				}
+			}()
+		}
+	}
+
+	fmt.Println("🎯 Режим вывода: КОМПАКТНЫЙ")
+	fmt.Println("   Каждые 2 секунды будет групповой вывод сигналов")
+
+	if cfg.TelegramEnabled {
+		fmt.Printf("🤖 Telegram уведомления: ВКЛ\n")
+		if cfg.TelegramNotifyOn.Growth {
+			fmt.Printf("   Уведомления о росте: ВКЛ\n")
+		}
+		if cfg.TelegramNotifyOn.Fall {
+			fmt.Printf("   Уведомления о падении: ВКЛ\n")
+		}
+	}
+	fmt.Println()
 
 	fmt.Println("🎯 Режим вывода: КОМПАКТНЫЙ")
 	fmt.Println("   Каждые 2 секунды будет групповой вывод сигналов")
