@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -48,18 +49,15 @@ func main() {
 
 	// Запускаем мониторинг
 	priceMonitor.StartMonitoring(time.Duration(cfg.UpdateInterval) * time.Second)
+	fmt.Printf("🔄 Мониторинг запущен (обновление каждые %d сек)\n", cfg.UpdateInterval)
 
 	// Запускаем HTTP сервер (если включен)
 	if cfg.HttpEnabled {
 		go func() {
+			fmt.Printf("🌐 Запуск HTTP сервера на порту %s...\n", cfg.HttpPort)
 			priceMonitor.StartHTTPServer(cfg.HttpPort)
 		}()
-		fmt.Printf("🌐 HTTP сервер запущен: http://localhost:%s\n", cfg.HttpPort)
-		fmt.Printf("   API Endpoints:\n")
-		fmt.Printf("     GET /api/prices                    - Все текущие цены\n")
-		fmt.Printf("     GET /api/change?symbol=...         - Изменение цены\n")
-		fmt.Printf("     GET /api/top?interval=...          - Топ монет\n")
-		fmt.Printf("     GET /api/overview?interval=...     - Статистика рынка\n")
+		fmt.Printf("   API доступен по адресу: http://localhost:%s\n", cfg.HttpPort)
 		fmt.Println()
 	}
 
@@ -69,7 +67,8 @@ func main() {
 
 	// Переменные для статистики
 	startTime := time.Now()
-	updateCount := 0
+	var updateCount int32 = 0
+	totalSymbols := len(pairs)
 
 	// Демонстрационная работа - выводим после первой загрузки данных
 	go func() {
@@ -78,24 +77,43 @@ func main() {
 		fmt.Println()
 	}()
 
-	// Горутина для периодического вывода статистики каждые 10 секунд
+	// Горутина для сбора статистики обновлений
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
+		fmt.Println("📊 Статус-горутина запущена")
 
-		for range ticker.C {
-			stats := getSystemStats(priceMonitor, cfg, startTime, updateCount)
-			printStatus(stats)
-		}
-	}()
-
-	// Горутина для обновления счетчиков при каждом обновлении цен
-	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.UpdateInterval) * time.Second)
 		defer ticker.Stop()
 
+		counter := 1
 		for range ticker.C {
-			updateCount++
+			atomic.AddInt32(&updateCount, 1)
+			current := atomic.LoadInt32(&updateCount)
+			fmt.Printf("🔄 Обновление #%d завершено в %s (всего: %d)\n",
+				counter,
+				time.Now().Format("15:04:05"),
+				current)
+			counter++
+		}
+	}()
+
+	// Горутина для периодического вывода статистики каждые 10 секунд
+	go func() {
+		fmt.Println("📈 Статус-монитор запущен")
+
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		iteration := 1
+		for range ticker.C {
+			currentCount := atomic.LoadInt32(&updateCount)
+
+			// Получаем упрощенную статистику (без блокировок)
+			stats := getSimpleStats(startTime, int(currentCount), cfg, totalSymbols)
+
+			// Выводим статус
+			printSimpleStatus(stats, iteration)
+
+			iteration++
 		}
 	}()
 
@@ -134,7 +152,7 @@ func main() {
 	fmt.Println()
 	printHeader("Завершение работы")
 	fmt.Printf("⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
-	fmt.Printf("📊 Всего обновлений: %d\n", updateCount)
+	fmt.Printf("📊 Всего обновлений: %d\n", atomic.LoadInt32(&updateCount))
 
 	// Остановка мониторинга
 	priceMonitor.StopMonitoring()
@@ -252,42 +270,39 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dс", seconds)
 }
 
-func getSystemStats(priceMonitor *monitor.PriceMonitor, cfg *config.Config, startTime time.Time, updateCount int) map[string]interface{} {
+func getSimpleStats(startTime time.Time, updateCount int, cfg *config.Config, totalSymbols int) map[string]interface{} {
 	stats := make(map[string]interface{})
 
 	// Базовые метрики
 	stats["uptime"] = formatDuration(time.Since(startTime))
 	stats["updates"] = updateCount
-
-	// Данные монитора
-	symbols := priceMonitor.GetSymbols()
-	prices := priceMonitor.GetCurrentPrices()
-	stats["symbols"] = len(symbols)
-	stats["prices"] = len(prices)
+	stats["symbols"] = totalSymbols // Используем сохраненное значение
 
 	// Использование памяти
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	stats["memory_mb"] = float64(m.Alloc) / 1024 / 1024
+	stats["goroutines"] = runtime.NumGoroutine()
 
 	// Текущее время
-	stats["time"] = time.Now().Format("15:04:05")
+	now := time.Now()
+	stats["time"] = now.Format("15:04:05")
 
 	// Рассчитываем время до следующего обновления
-	stats["next_update"] = time.Now().Add(time.Duration(cfg.UpdateInterval) * time.Second).Format("15:04:05")
+	stats["next_update"] = now.Add(time.Duration(cfg.UpdateInterval) * time.Second).Format("15:04:05")
 
 	return stats
 }
 
-func printStatus(stats map[string]interface{}) {
+func printSimpleStatus(stats map[string]interface{}, iteration int) {
 	printSeparator()
-	fmt.Println("📊 СТАТУС СИСТЕМЫ")
-	fmt.Printf("   Время работы: %s\n", stats["uptime"])
-	fmt.Printf("   Всего обновлений: %d\n", stats["updates"])
-	fmt.Printf("   Отслеживаемых пар: %d\n", stats["symbols"])
-	fmt.Printf("   Цен в памяти: %d\n", stats["prices"])
-	fmt.Printf("   Использование памяти: %.2f MB\n", stats["memory_mb"])
-	fmt.Printf("   Текущее время: %s\n", stats["time"])
-	fmt.Printf("   Следующее обновление: %s\n", stats["next_update"])
+	fmt.Printf("📊 СТАТУС СИСТЕМЫ (итерация #%d)\n", iteration)
+	fmt.Printf("   ⏱️  Время работы: %s\n", stats["uptime"])
+	fmt.Printf("   🔄 Обновлений: %d\n", stats["updates"])
+	fmt.Printf("   📈 Пар: %d\n", stats["symbols"])
+	fmt.Printf("   💾 Память: %.2f MB\n", stats["memory_mb"])
+	fmt.Printf("   🧵 Горутин: %d\n", stats["goroutines"])
+	fmt.Printf("   🕐 Текущее время: %s\n", stats["time"])
+	fmt.Printf("   ⏭️  След. обновление: %s\n", stats["next_update"])
 	printSeparator()
 }

@@ -89,11 +89,15 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 	// Используем API клиент
 	tickerResp, err := pm.client.GetTickers("spot")
 	if err != nil {
+		log.Printf("❌ Ошибка получения тикеров: %v", err)
 		return err
 	}
 
+	log.Printf("📥 Получено %d тикеров от API", len(tickerResp.Result.List))
+
 	pm.mu.Lock()
 	now := time.Now()
+	updatedCount := 0
 
 	for _, ticker := range tickerResp.Result.List {
 		symbol := ticker.Symbol
@@ -106,9 +110,10 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 		// Парсим цену
 		price, err := strconv.ParseFloat(ticker.LastPrice, 64)
 		if err != nil {
-			log.Printf("Failed to parse price for %s: %v", symbol, err)
+			log.Printf("⚠️  Ошибка парсинга цены для %s: %v", symbol, err)
 			continue
 		}
+		updatedCount++
 
 		// Парсим объем
 		volume, _ := strconv.ParseFloat(ticker.Volume24h, 64)
@@ -137,6 +142,7 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 	}
 
 	pm.mu.Unlock()
+	log.Printf("✅ Обновлено %d цен в %s", updatedCount, now.Format("15:04:05"))
 	return nil
 }
 
@@ -401,7 +407,6 @@ func (pm *PriceMonitor) StartHTTPServer(port string) {
 		json.NewEncoder(w).Encode(overview)
 	})
 
-	log.Printf("Starting HTTP server on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("HTTP server failed:", err)
 	}
