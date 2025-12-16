@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -20,7 +21,16 @@ type TelegramBot struct {
 	baseURL       string
 	chatID        int64
 	notifyEnabled bool
-	subscribers   map[int64]bool // Подписчики (chatID -> enabled)
+	rateLimiter   *RateLimiter
+	lastSendTime  time.Time
+	minInterval   time.Duration
+}
+
+// RateLimiter - ограничитель частоты запросов
+type RateLimiter struct {
+	mu       sync.Mutex
+	lastSent map[string]time.Time
+	minDelay time.Duration
 }
 
 // TelegramResponse - ответ от Telegram API
@@ -51,7 +61,30 @@ type TelegramMessage struct {
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
 }
 
-// NewTelegramBot создает нового Telegram бота
+// NewRateLimiter создает новый ограничитель частоты
+func NewRateLimiter(minDelay time.Duration) *RateLimiter {
+	return &RateLimiter{
+		lastSent: make(map[string]time.Time),
+		minDelay: minDelay,
+	}
+}
+
+// CanSend проверяет, можно ли отправить сообщение
+func (rl *RateLimiter) CanSend(key string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	if last, exists := rl.lastSent[key]; exists {
+		if now.Sub(last) < rl.minDelay {
+			return false
+		}
+	}
+	rl.lastSent[key] = now
+	return true
+}
+
+// CanSend проверяет, можно ли отправить сообщение
 func NewTelegramBot(cfg *config.Config) *TelegramBot {
 	if cfg.TelegramAPIKey == "" || cfg.TelegramChatID == 0 {
 		log.Println("⚠️ Telegram API ключ или Chat ID не указаны, бот отключен")
@@ -60,15 +93,16 @@ func NewTelegramBot(cfg *config.Config) *TelegramBot {
 
 	return &TelegramBot{
 		config:        cfg,
-		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramAPIKey),
 		chatID:        cfg.TelegramChatID,
 		notifyEnabled: cfg.TelegramEnabled,
-		subscribers:   make(map[int64]bool),
+		rateLimiter:   NewRateLimiter(2 * time.Second),
+		minInterval:   2 * time.Second,
 	}
 }
 
-// SendNotification отправляет уведомление о сигнале
+// SendNotification отправляет уведомление о сигнале с проверкой частоты
 func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
 	if !tb.notifyEnabled {
 		return nil
@@ -80,14 +114,113 @@ func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
 		return nil
 	}
 
-	// Форматируем сообщение
+	// Проверяем лимит частоты для данного типа сигнала
+	key := fmt.Sprintf("signal_%s", signal.Direction)
+	if !tb.rateLimiter.CanSend(key) {
+		log.Printf("⚠️ Пропуск Telegram уведомления для %s (лимит частоты)", signal.Symbol)
+		return nil
+	}
+
+	// Форматируем сообщение в новом формате
 	message := tb.FormatSignalMessage(signal)
 
-	// Создаем клавиатуру с кнопками
+	// Создаем клавиатуру
 	keyboard := tb.createNotificationKeyboard(signal)
 
-	// Отправляем сообщение
+	// Отправляем сообщение с клавиатурой
 	return tb.sendMessageWithKeyboard(message, keyboard)
+}
+
+// SendMessage - публичный метод для отправки сообщений
+func (tb *TelegramBot) SendMessage(text string) error {
+	return tb.sendMessageWithKeyboard(text, nil)
+}
+
+// SendMessageWithKeyboard отправляет сообщение с клавиатурой
+func (tb *TelegramBot) SendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
+	return tb.sendMessageWithKeyboard(text, keyboard)
+}
+
+// sendMessage отправляет простое сообщение без клавиатуры
+func (tb *TelegramBot) sendMessage(text string) error {
+	if !tb.notifyEnabled {
+		return nil
+	}
+
+	// Проверяем лимит частоты
+	key := "message"
+	if !tb.rateLimiter.CanSend(key) {
+		return fmt.Errorf("rate limit exceeded, try again in 2 seconds")
+	}
+
+	// Проверяем минимальный интервал
+	now := time.Now()
+	if now.Sub(tb.lastSendTime) < tb.minInterval {
+		time.Sleep(tb.minInterval - now.Sub(tb.lastSendTime))
+	}
+
+	message := struct {
+		ChatID    int64  `json:"chat_id"`
+		Text      string `json:"text"`
+		ParseMode string `json:"parse_mode,omitempty"`
+	}{
+		ChatID:    tb.chatID,
+		Text:      text,
+		ParseMode: "Markdown",
+	}
+
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	resp, err := tb.httpClient.Post(
+		tb.baseURL+"sendMessage",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to send message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var telegramResp struct {
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &telegramResp); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !telegramResp.OK {
+		// Если ошибка 429, ждем указанное время
+		if telegramResp.ErrorCode == 429 {
+			retryAfter := 5 // по умолчанию 5 секунд
+			var retryResp struct {
+				Parameters struct {
+					RetryAfter int `json:"retry_after"`
+				} `json:"parameters"`
+			}
+			if json.Unmarshal(body, &retryResp) == nil && retryResp.Parameters.RetryAfter > 0 {
+				retryAfter = retryResp.Parameters.RetryAfter
+			}
+			log.Printf("⚠️ Telegram API лимит, ждем %d секунд", retryAfter)
+			time.Sleep(time.Duration(retryAfter) * time.Second)
+			// Пробуем снова один раз
+			return tb.sendMessage(text)
+		}
+		return fmt.Errorf("telegram API error %d: %s", telegramResp.ErrorCode, telegramResp.Description)
+	}
+
+	tb.lastSendTime = time.Now()
+	return nil
 }
 
 // FormatSignalMessage форматирует сообщение о сигнале
@@ -107,73 +240,46 @@ func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
 
 	intervalStr := strconv.Itoa(signal.PeriodMinutes) + "мин"
 	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
-	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
 
-	// Формат сообщения как в задании
-	var message string
-	if tb.config.MessageFormat == "compact" {
-		message = fmt.Sprintf(
-			"⚫ Bybit - %s - %s\n"+
-				"🕐 %s\n"+
-				"%s %s: %s\n"+
-				"📡 Уверенность: %.0f%%\n"+
-				"🔗 %s",
-			intervalStr, signal.Symbol,
-			timeStr,
-			icon, directionStr, changeStr,
-			signal.Confidence,
-			symbolURL,
-		)
-	} else {
-		// Подробный формат
-		message = fmt.Sprintf(
-			"🎯 *%s ДЕТЕКТИРОВАН!*\n\n"+
-				"*Биржа:* Bybit Futures\n"+
-				"*Символ:* `%s`\n"+
-				"*Направление:* %s %s\n"+
-				"*Изменение:* %s\n"+
-				"*Период:* %d минут\n"+
-				"*Время:* %s\n"+
-				"*Уверенность:* %.0f%%\n"+
-				"*Цена:* %.4f → %.4f\n"+
-				"*Ссылка:* [Торговать](%s)",
-			directionStr,
-			signal.Symbol,
-			icon, directionStr,
-			changeStr,
-			signal.PeriodMinutes,
-			timeStr,
-			signal.Confidence,
-			signal.StartPrice, signal.EndPrice,
-			symbolURL,
-		)
-	}
-
-	return message
+	// НОВЫЙ ФОРМАТ СООБЩЕНИЯ
+	return fmt.Sprintf(
+		"⚫ Bybit - %s - %s\n"+
+			"🕐 %s\n"+
+			"%s %s: %s\n"+
+			"📡 Уверенность: %.0f%%\n"+
+			"📈 Сигнал: 1",
+		intervalStr, signal.Symbol,
+		timeStr,
+		icon, directionStr, changeStr,
+		signal.Confidence,
+	)
 }
 
 // createNotificationKeyboard создает клавиатуру с кнопками для уведомления
 func (tb *TelegramBot) createNotificationKeyboard(signal types.GrowthSignal) *InlineKeyboardMarkup {
+	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
+	chartURL := fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", signal.Symbol)
+
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
 				{
-					Text:         "✅ Уведомлять",
-					CallbackData: fmt.Sprintf("notify_%s_on", signal.Symbol),
+					Text: "📈 График",
+					URL:  chartURL,
 				},
 				{
-					Text:         "❌ Не уведомлять",
-					CallbackData: fmt.Sprintf("notify_%s_off", signal.Symbol),
+					Text: "💱 Торговать",
+					URL:  symbolURL,
 				},
 			},
 			{
 				{
-					Text: "📈 График",
-					URL:  fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", signal.Symbol),
+					Text:         "🔔 Уведомлять",
+					CallbackData: fmt.Sprintf("notify_%s_on", signal.Symbol),
 				},
 				{
-					Text: "💱 Торговать",
-					URL:  fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol),
+					Text:         "🔕 Игнорировать",
+					CallbackData: fmt.Sprintf("notify_%s_off", signal.Symbol),
 				},
 			},
 		},
@@ -182,6 +288,23 @@ func (tb *TelegramBot) createNotificationKeyboard(signal types.GrowthSignal) *In
 
 // sendMessageWithKeyboard отправляет сообщение с клавиатурой
 func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
+	if !tb.notifyEnabled {
+		return nil
+	}
+
+	// Проверяем лимит частоты
+	key := "message"
+	if !tb.rateLimiter.CanSend(key) {
+		log.Printf("⚠️ Пропуск Telegram сообщения (лимит частоты)")
+		return fmt.Errorf("rate limit exceeded, try again in 2 seconds")
+	}
+
+	// Проверяем минимальный интервал
+	now := time.Now()
+	if now.Sub(tb.lastSendTime) < tb.minInterval {
+		time.Sleep(tb.minInterval - now.Sub(tb.lastSendTime))
+	}
+
 	message := TelegramMessage{
 		ChatID:    tb.chatID,
 		Text:      text,
@@ -212,15 +335,37 @@ func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyb
 		return fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var telegramResp TelegramResponse
+	var telegramResp struct {
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+	}
+
 	if err := json.Unmarshal(body, &telegramResp); err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if !telegramResp.OK {
-		return fmt.Errorf("telegram API error: %s", string(body))
+		// Если ошибка 429, ждем указанное время
+		if telegramResp.ErrorCode == 429 {
+			retryAfter := 5 // по умолчанию 5 секунд
+			var retryResp struct {
+				Parameters struct {
+					RetryAfter int `json:"retry_after"`
+				} `json:"parameters"`
+			}
+			if json.Unmarshal(body, &retryResp) == nil && retryResp.Parameters.RetryAfter > 0 {
+				retryAfter = retryResp.Parameters.RetryAfter
+			}
+			log.Printf("⚠️ Telegram API лимит, ждем %d секунд", retryAfter)
+			time.Sleep(time.Duration(retryAfter) * time.Second)
+			// Пробуем снова один раз
+			return tb.sendMessageWithKeyboard(text, keyboard)
+		}
+		return fmt.Errorf("telegram API error %d: %s", telegramResp.ErrorCode, telegramResp.Description)
 	}
 
+	tb.lastSendTime = time.Now()
 	return nil
 }
 
@@ -228,13 +373,15 @@ func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyb
 func (tb *TelegramBot) SendTestMessage() error {
 	message := "🤖 *Бот активирован!*\n\n" +
 		"✅ Система мониторинга роста/падения запущена.\n" +
-		"🔔 Вы будете получать уведомления о значимых движениях.\n" +
-		"⚙️ Настройте уведомления в .env файле."
+		"🔔 Уведомления отправляются с ограничением 1 сообщение в 2 секунды.\n" +
+		"⚡ Настройки: рост=%.2f%%, падение=%.2f%%"
+
+	message = fmt.Sprintf(message, tb.config.GrowthThreshold, tb.config.FallThreshold)
 
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "🔄 Статус", CallbackData: "status"},
+				{Text: "📊 Статус", CallbackData: "status"},
 				{Text: "⚙️ Настройки", CallbackData: "settings"},
 			},
 		},

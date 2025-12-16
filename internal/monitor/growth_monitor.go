@@ -1,4 +1,3 @@
-// internal/monitor/growth_monitor.go
 package monitor
 
 import (
@@ -16,19 +15,24 @@ import (
 
 // GrowthMonitor - монитор непрерывного роста/падения
 type GrowthMonitor struct {
-	client         *api.BybitClient
-	config         *config.Config
-	priceMonitor   *PriceMonitor
-	signals        chan types.GrowthSignal
-	filter         *SignalFilter
-	display        *DisplayManager
-	telegramBot    *telegram.TelegramBot // Добавляем Telegram бота
-	mu             sync.RWMutex
-	stopChan       chan bool
-	active         bool
-	lastCheck      map[int]time.Time
-	signalsHistory []types.GrowthSignal
-	signalsCount   map[string]int
+	client           *api.BybitClient
+	config           *config.Config
+	priceMonitor     *PriceMonitor
+	signals          chan types.GrowthSignal
+	filter           *SignalFilter
+	display          *DisplayManager
+	telegramBot      *telegram.TelegramBot
+	mu               sync.RWMutex
+	stopChan         chan bool
+	active           bool
+	lastCheck        map[int]time.Time
+	signalsHistory   []types.GrowthSignal
+	signalsCount     map[string]int
+	signalBuffer     []types.GrowthSignal
+	bufferMutex      sync.Mutex
+	telegramBuffer   []types.GrowthSignal
+	lastFlushTime    time.Time
+	lastTelegramSend map[string]time.Time // Для отслеживания времени последней отправки по символу
 }
 
 // NewGrowthMonitor создает новый монитор роста
@@ -45,18 +49,23 @@ func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMon
 	}
 
 	return &GrowthMonitor{
-		client:         api.NewBybitClient(cfg),
-		config:         cfg,
-		priceMonitor:   priceMonitor,
-		signals:        make(chan types.GrowthSignal, 100),
-		filter:         NewSignalFilter(cfg),
-		display:        NewDisplayManager(true, minChange, 50.0, maxSignals),
-		telegramBot:    telegramBot, // Сохраняем бота
-		stopChan:       make(chan bool),
-		active:         false,
-		lastCheck:      make(map[int]time.Time),
-		signalsHistory: make([]types.GrowthSignal, 0),
-		signalsCount:   make(map[string]int),
+		client:           api.NewBybitClient(cfg),
+		config:           cfg,
+		priceMonitor:     priceMonitor,
+		signals:          make(chan types.GrowthSignal, 100),
+		filter:           NewSignalFilter(cfg),
+		display:          NewDisplayManager(true, minChange, 50.0, maxSignals),
+		telegramBot:      telegramBot,
+		stopChan:         make(chan bool),
+		active:           false,
+		lastCheck:        make(map[int]time.Time),
+		signalsHistory:   make([]types.GrowthSignal, 0),
+		signalsCount:     make(map[string]int),
+		signalBuffer:     make([]types.GrowthSignal, 0),
+		bufferMutex:      sync.Mutex{},
+		telegramBuffer:   make([]types.GrowthSignal, 0),
+		lastFlushTime:    time.Now(),
+		lastTelegramSend: make(map[string]time.Time),
 	}
 }
 
@@ -112,13 +121,13 @@ func (gm *GrowthMonitor) checkAllSymbols() {
 		return
 	}
 
-	log.Printf("📊 Монитор роста проверяет %d символов", len(symbols))
-
 	// Выводим список отслеживаемых символов (первые 20)
 	if len(symbols) > 20 {
-		log.Printf("   Отслеживаемые символы: %s...", strings.Join(symbols[:20], ", "))
+		log.Printf("📊 Монитор роста проверяет %d символов: %s...",
+			len(symbols), strings.Join(symbols[:20], ", "))
 	} else {
-		log.Printf("   Отслеживаемые символы: %s", strings.Join(symbols, ", "))
+		log.Printf("📊 Монитор роста проверяет %d символов: %s",
+			len(symbols), strings.Join(symbols, ", "))
 	}
 
 	// Проверяем каждый период
@@ -141,8 +150,6 @@ func (gm *GrowthMonitor) checkPeriod(symbols []string, periodMinutes int) {
 			return
 		}
 	}
-
-	log.Printf("🔍 Проверка роста за период %d минут", periodMinutes)
 
 	signals, err := gm.client.FindGrowthSignals(
 		symbols,
@@ -175,7 +182,6 @@ func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 	}
 
 	gm.mu.Lock()
-	defer gm.mu.Unlock()
 
 	// Сохраняем сигнал в историю
 	gm.signalsHistory = append(gm.signalsHistory, signal)
@@ -184,73 +190,53 @@ func (gm *GrowthMonitor) processSignal(signal types.GrowthSignal) {
 	key := fmt.Sprintf("%s_%s", signal.Direction, signal.Symbol)
 	gm.signalsCount[key] = gm.signalsCount[key] + 1
 
-	// Добавляем в DisplayManager для группового вывода
-	gm.display.AddSignal(signal)
+	gm.mu.Unlock()
 
-	// Отправляем в Telegram если бот активен
+	// Добавляем в буфер для группового вывода в консоль
+	gm.bufferMutex.Lock()
+	gm.signalBuffer = append(gm.signalBuffer, signal)
+	gm.bufferMutex.Unlock()
+
+	// Отправляем уведомление в Telegram
 	if gm.telegramBot != nil {
+		// Проверяем, не слишком ли часто отправляем для этого символа
+		lastSend, exists := gm.lastTelegramSend[signal.Symbol]
+		if exists && time.Since(lastSend) < 30*time.Second {
+			// Не отправляем чаще чем раз в 30 секунд для одного символа
+			return
+		}
+
 		go func(s types.GrowthSignal) {
 			if err := gm.telegramBot.SendNotification(s); err != nil {
 				log.Printf("❌ Ошибка отправки в Telegram: %v", err)
+			} else {
+				// Обновляем время последней отправки
+				gm.mu.Lock()
+				gm.lastTelegramSend[s.Symbol] = time.Now()
+				gm.mu.Unlock()
 			}
 		}(signal)
 	}
-
-	// Отправляем сигнал в канал
-	select {
-	case gm.signals <- signal:
-		// Сигнал отправлен
-	default:
-		log.Printf("⚠️ Канал сигналов переполнен, сигнал для %s пропущен", signal.Symbol)
-	}
 }
 
-// printSignal выводит сигнал в терминал
-func (gm *GrowthMonitor) printSignal(signal types.GrowthSignal) {
-	var icon string
-	changePercent := signal.GrowthPercent + signal.FallPercent
+// FlushBuffers выводит все сигналы из буферов
+func (gm *GrowthMonitor) FlushBuffers() {
+	gm.bufferMutex.Lock()
+	defer gm.bufferMutex.Unlock()
 
-	if signal.Direction == "growth" {
-		icon = "🟢"
-		fmt.Printf("%s %s ↑%.2f%% (%dмин)\n",
-			icon, signal.Symbol, changePercent, signal.PeriodMinutes)
-	} else {
-		icon = "🔴"
-		fmt.Printf("%s %s ↓%.2f%% (%dмин)\n",
-			icon, signal.Symbol, -changePercent, signal.PeriodMinutes)
+	now := time.Now()
+
+	// Выводим сигналы в консоль (если прошло 2 секунды с последнего вывода)
+	if len(gm.signalBuffer) > 0 && now.Sub(gm.lastFlushTime) >= 2*time.Second {
+		// Используем DisplayManager для форматирования
+		for _, signal := range gm.signalBuffer {
+			gm.display.AddSignal(signal)
+		}
+
+		// Очищаем буфер консоли
+		gm.signalBuffer = []types.GrowthSignal{}
+		gm.lastFlushTime = now
 	}
-}
-
-// formatPeriod форматирует период для отображения
-func (gm *GrowthMonitor) formatPeriod(minutes int) string {
-	switch {
-	case minutes < 60:
-		return fmt.Sprintf("%d мин", minutes)
-	case minutes == 60:
-		return "1 час"
-	case minutes < 1440:
-		return fmt.Sprintf("%d часов", minutes/60)
-	default:
-		return fmt.Sprintf("%d дней", minutes/1440)
-	}
-}
-
-// logSignal логирует сигнал в файл
-// func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
-// 	timestamp := time.Now().Format("2006/01/02 15:04:05")
-// 	changePercent := signal.GrowthPercent + signal.FallPercent
-
-// 	fmt.Printf("📝 [%s] Сигнал записан: %s %s %.2f%% (период: %d мин)\n",
-// 		timestamp,
-// 		signal.Symbol,
-// 		signal.Direction,
-// 		changePercent,
-// 		signal.PeriodMinutes)
-// }
-
-func (gm *GrowthMonitor) logSignal(signal types.GrowthSignal) {
-	// Только для логирования в файл, не выводить в консоль
-	// Это поможет избежать дублирования вывода
 }
 
 // GetSignals возвращает канал сигналов
@@ -420,11 +406,6 @@ func (gm *GrowthMonitor) parseSymbolFilter(filter string) []string {
 
 	var symbols []string
 
-	// Поддерживаем несколько форматов:
-	// 1. Через запятую: BTCUSDT,ETHUSDT,BNBUSDT
-	// 2. Через пробел: BTCUSDT ETHUSDT BNBUSDT
-	// 3. С префиксом: BTC,ETH,BNB (автоматически добавляем USDT)
-
 	// Разделяем по запятой
 	if strings.Contains(filter, ",") {
 		parts := strings.Split(filter, ",")
@@ -499,8 +480,22 @@ func (gm *GrowthMonitor) filterByVolume(symbols []string, maxCount int) []string
 
 // FlushDisplay очищает и выводит накопленные сигналы
 func (gm *GrowthMonitor) FlushDisplay() {
-	if gm.display != nil {
+	gm.bufferMutex.Lock()
+	defer gm.bufferMutex.Unlock()
+
+	now := time.Now()
+
+	// Выводим сигналы в консоль если есть что показывать
+	if len(gm.signalBuffer) > 0 && now.Sub(gm.lastFlushTime) >= 2*time.Second {
+		// Используем DisplayManager для форматирования
+		for _, signal := range gm.signalBuffer {
+			gm.display.AddSignal(signal)
+		}
 		gm.display.Flush()
+
+		// Очищаем буфер консоли
+		gm.signalBuffer = []types.GrowthSignal{}
+		gm.lastFlushTime = now
 	}
 }
 

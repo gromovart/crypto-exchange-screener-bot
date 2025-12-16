@@ -227,10 +227,13 @@ func main() {
 		defer ticker.Stop()
 
 		for range ticker.C {
+			// Выводим сигналы в консоль через DisplayManager
 			growthMonitor.FlushDisplay()
+
+			// Отправляем групповые сообщения в Telegram
+			growthMonitor.FlushBuffers()
 		}
 	}()
-
 	// Обработка сигналов роста в отдельной горутине
 	go func() {
 		for range growthMonitor.GetSignals() {
