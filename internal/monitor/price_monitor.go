@@ -2,7 +2,8 @@
 package monitor
 
 import (
-	"crypto-exchange-screener-bot/internal/api"
+	// "crypto-exchange-screener-bot/internal/api"
+	api "crypto-exchange-screener-bot/internal/api"
 	"crypto-exchange-screener-bot/internal/config"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,6 +32,7 @@ type PriceMonitor struct {
 	stopChan      chan bool
 	signalMonitor *SignalMonitor // Новое поле
 	cronScheduler *cron.Cron     // Для запуска по расписанию
+	symbolInfo    map[string]api.InstrumentInfo
 }
 
 // NewPriceMonitor создает новый монитор
@@ -55,19 +58,56 @@ func NewPriceMonitor(cfg *config.Config) *PriceMonitor {
 		currentPrices: make(map[string]float64),
 		intervals:     intervals,
 		stopChan:      make(chan bool),
-		cronScheduler: cron.New(),
+		symbolInfo:    make(map[string]api.InstrumentInfo),
 	}
-
 	// Инициализируем SignalMonitor
 	pm.signalMonitor = NewSignalMonitor(pm, cfg.AlertThreshold)
 
 	return pm
 }
 
+// FetchAllFuturesPairs получает все фьючерсные USDT пары (линейные фьючерсы)
+func (pm *PriceMonitor) FetchAllFuturesPairs() ([]string, error) {
+	// Получаем информацию об инструментах фьючерсов
+	instruments, err := pm.client.GetInstrumentsInfo(pm.client.Category(), "", "Trading")
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch futures instruments: %w", err)
+	}
+
+	var futuresPairs []string
+	pm.mu.Lock()
+
+	for _, instrument := range instruments {
+		// Фильтруем только USDT линейные фьючерсы
+		if instrument.ContractType == "LinearPerpetual" &&
+			strings.HasSuffix(instrument.Symbol, "USDT") {
+
+			futuresPairs = append(futuresPairs, instrument.Symbol)
+
+			// Сохраняем информацию о символе
+			pm.symbolInfo[instrument.Symbol] = instrument
+		}
+	}
+
+	pm.symbols = futuresPairs
+
+	// Инициализируем историю цен для каждого символа
+	for _, symbol := range futuresPairs {
+		if _, exists := pm.priceHistory[symbol]; !exists {
+			pm.priceHistory[symbol] = make([]PriceData, 0)
+		}
+	}
+
+	pm.mu.Unlock()
+
+	sort.Strings(futuresPairs)
+	return futuresPairs, nil
+}
+
 // FetchAllUSDTPairs получает все USDT пары
 func (pm *PriceMonitor) FetchAllUSDTPairs() ([]string, error) {
 	// Используем API клиент
-	tickerResp, err := pm.client.GetTickers("spot")
+	tickerResp, err := pm.client.GetTickers("linear")
 	if err != nil {
 		return nil, err
 	}
@@ -96,14 +136,14 @@ func (pm *PriceMonitor) FetchAllUSDTPairs() ([]string, error) {
 
 // UpdateAllPrices обновляет текущие цены для всех пар
 func (pm *PriceMonitor) UpdateAllPrices() error {
-	// Используем API клиент
-	tickerResp, err := pm.client.GetTickers("spot")
+	// Используем API клиент с категорией фьючерсов
+	tickerResp, err := pm.client.GetTickers(pm.client.Category())
 	if err != nil {
-		log.Printf("❌ Ошибка получения тикеров: %v", err)
+		log.Printf("❌ Ошибка получения тикеров фьючерсов: %v", err)
 		return err
 	}
 
-	log.Printf("📥 Получено %d тикеров от API", len(tickerResp.Result.List))
+	log.Printf("📥 Получено %d тикеров фьючерсов от API", len(tickerResp.Result.List))
 
 	pm.mu.Lock()
 	now := time.Now()
@@ -113,7 +153,7 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 		symbol := ticker.Symbol
 
 		// Пропускаем не-USDT пары
-		if len(symbol) <= 4 || symbol[len(symbol)-4:] != "USDT" {
+		if len(symbol) <= 4 || !strings.HasSuffix(symbol, "USDT") {
 			continue
 		}
 
@@ -125,8 +165,8 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 		}
 		updatedCount++
 
-		// Парсим объем
-		volume, _ := strconv.ParseFloat(ticker.Volume24h, 64)
+		// Парсим объем (в USDT для фьючерсов)
+		volume, _ := strconv.ParseFloat(ticker.Turnover24h, 64)
 
 		// Обновляем текущую цену
 		pm.currentPrices[symbol] = price
@@ -139,11 +179,11 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 			Volume24h: volume,
 		}
 
-		// Сохраняем в историю (ограничиваем размер)
+		// Сохраняем в историю
 		history := pm.priceHistory[symbol]
 		history = append(history, priceData)
 
-		// Ограничиваем историю последними 10000 записями
+		// Ограничиваем историю
 		if len(history) > 10000 {
 			history = history[len(history)-10000:]
 		}
@@ -152,8 +192,20 @@ func (pm *PriceMonitor) UpdateAllPrices() error {
 	}
 
 	pm.mu.Unlock()
-	log.Printf("✅ Обновлено %d цен в %s", updatedCount, now.Format("15:04:05"))
+	log.Printf("✅ Обновлено %d цен фьючерсов в %s", updatedCount, now.Format("15:04:05"))
 	return nil
+}
+
+// GetSymbolInfo возвращает информацию о символе фьючерса
+func (pm *PriceMonitor) GetSymbolInfo(symbol string) (*api.InstrumentInfo, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	if info, exists := pm.symbolInfo[symbol]; exists {
+		return &info, nil
+	}
+
+	return nil, fmt.Errorf("информация о символе %s не найдена", symbol)
 }
 
 // StartMonitoring запускает периодическое обновление цен
@@ -199,10 +251,10 @@ func (pm *PriceMonitor) GetPriceChange(symbol string, interval Interval) (*Price
 	// Получаем текущую цену
 	currentPrice, currentExists := pm.currentPrices[symbol]
 	if !currentExists {
-		return nil, fmt.Errorf("current price for %s not found", symbol)
+		return nil, fmt.Errorf("текущая цена для %s не найдена", symbol)
 	}
 
-	// Получаем исторические данные из API Bybit
+	// Получаем исторические данные из API Bybit для фьючерсов
 	changePercent, err := pm.getPriceChangeFromAPI(symbol, interval)
 	if err != nil {
 		return nil, err
@@ -237,8 +289,8 @@ func (pm *PriceMonitor) getPriceChangeFromAPI(symbol string, interval Interval) 
 		return 0, fmt.Errorf("invalid interval format: %s", intervalStr)
 	}
 
-	// Получаем свечные данные из API
-	klineResp, err := pm.client.GetKlineData(symbol, "spot", "1", intervalMinutes+1)
+	// Получаем свечные данные для фьючерсов
+	klineResp, err := pm.client.GetKlineData(symbol, pm.client.Category(), "1", intervalMinutes+1)
 	if err != nil {
 		return 0, err
 	}
@@ -248,11 +300,11 @@ func (pm *PriceMonitor) getPriceChangeFromAPI(symbol string, interval Interval) 
 	}
 
 	// Берем самую старую и самую новую свечу
-	oldestCandle := klineResp.Result.List[0] // [timestamp, open, high, low, close, volume, turnover]
+	oldestCandle := klineResp.Result.List[0]
 	newestCandle := klineResp.Result.List[len(klineResp.Result.List)-1]
 
 	// Парсим цены закрытия
-	oldestPrice, err := strconv.ParseFloat(oldestCandle[4], 64) // Индекс 4 = цена закрытия
+	oldestPrice, err := strconv.ParseFloat(oldestCandle[4], 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse oldest price: %w", err)
 	}
@@ -496,4 +548,6 @@ func (pm *PriceMonitor) StopSignalMonitoring() {
 	}
 }
 
-
+func (pm *PriceMonitor) Config() *config.Config {
+	return pm.config
+}

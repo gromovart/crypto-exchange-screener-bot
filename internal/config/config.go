@@ -61,6 +61,16 @@ type Config struct {
 
 	InitialDataFetch bool `json:"initial_data_fetch"`
 	DataFetchLimit   int  `json:"data_fetch_limit"`
+
+	FuturesCategory string  `json:"futures_category"` // "linear" или "inverse"
+	FuturesLeverage float64 `json:"futures_leverage"`
+
+	// Growth Monitoring
+	GrowthPeriods   []int   `json:"growth_periods"`   // Периоды роста в минутах
+	GrowthThreshold float64 `json:"growth_threshold"` // Порог роста в процентах
+	FallThreshold   float64 `json:"fall_threshold"`   // Порог падения в процентах
+	CheckContinuity bool    `json:"check_continuity"` // Проверять непрерывность
+	MinDataPoints   int     `json:"min_data_points"`  // Минимальное количество точек дан
 }
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -142,6 +152,13 @@ func LoadConfig(envPath string) (*Config, error) {
 
 		InitialDataFetch: getEnvBool("INITIAL_DATA_FETCH", true),
 		DataFetchLimit:   getEnvInt("DATA_FETCH_LIMIT", 100),
+
+		// Growth Monitoring
+		GrowthPeriods:   parseGrowthPeriods(getEnvString("GROWTH_PERIODS", "5,15,30,60")),
+		GrowthThreshold: getEnvFloat("GROWTH_THRESHOLD", 2.0),
+		FallThreshold:   getEnvFloat("FALL_THRESHOLD", 2.0),
+		CheckContinuity: getEnvBool("CHECK_CONTINUITY", true),
+		MinDataPoints:   getEnvInt("MIN_DATA_POINTS", 3),
 	}
 
 	return config, nil
@@ -252,4 +269,31 @@ func (c *Config) GetAllIntervalDurations() []time.Duration {
 		durations[i] = c.GetIntervalDuration(interval)
 	}
 	return durations
+}
+
+// Новая функция для парсинга периодов роста
+func parseGrowthPeriods(periodsStr string) []int {
+	parts := strings.Split(periodsStr, ",")
+	periods := make([]int, 0, len(parts))
+
+	supportedPeriods := map[int]bool{
+		1: true, 5: true, 10: true, 15: true, 30: true,
+		60: true, 120: true, 240: true, 480: true,
+		720: true, 1440: true,
+	}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if period, err := strconv.Atoi(part); err == nil {
+			if supportedPeriods[period] {
+				periods = append(periods, period)
+			}
+		}
+	}
+
+	if len(periods) == 0 {
+		periods = []int{5, 15, 30, 60}
+	}
+
+	return periods
 }

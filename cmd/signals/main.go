@@ -13,7 +13,7 @@ import (
 
 func main() {
 	fmt.Println("══════════════════════════════════════════════════")
-	fmt.Println("           CRYPTO SIGNAL MONITOR - BYBIT          ")
+	fmt.Println("      CRYPTO FUTURES SIGNAL MONITOR - BYBIT       ")
 	fmt.Println("══════════════════════════════════════════════════")
 
 	// Загружаем конфигурацию
@@ -22,13 +22,15 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Настраиваем для сигналов
+	// Настраиваем для фьючерсов
+	cfg.FuturesCategory = "linear"
 	cfg.UpdateInterval = 5
 	cfg.AlertThreshold = 0.1
 	cfg.HttpEnabled = false
 
 	fmt.Printf("🔧 Конфигурация:\n")
 	fmt.Printf("   Сеть: %s\n", map[bool]string{true: "Testnet 🧪", false: "Mainnet ⚡"}[cfg.UseTestnet])
+	fmt.Printf("   Категория фьючерсов: %s\n", cfg.FuturesCategory)
 	fmt.Printf("   Порог сигнала: %.2f%%\n", cfg.AlertThreshold)
 	fmt.Printf("   Интервал проверки: %d сек\n", cfg.UpdateInterval)
 	fmt.Println()
@@ -36,28 +38,34 @@ func main() {
 	// Создаем монитор цен
 	priceMonitor := monitor.NewPriceMonitor(cfg)
 
-	// Получаем ограниченный список пар
-	fmt.Println("📈 Получение торговых пар...")
-	pairs, err := priceMonitor.FetchAllUSDTPairs()
+	// Получаем фьючерсные пары
+	fmt.Println("📈 Получение фьючерсных торговых пар...")
+	pairs, err := priceMonitor.FetchAllFuturesPairs()
 	if err != nil {
-		log.Fatalf("Failed to fetch USDT pairs: %v", err)
+		log.Fatalf("Failed to fetch futures pairs: %v", err)
 	}
 
-	// Выбираем топ-10 пар для мониторинга
+	// Выбираем топ-10 фьючерсных пар для мониторинга
 	var symbolsToMonitor []string
-	topSymbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-		"ADAUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT"}
+	topFuturesSymbols := []string{
+		"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+		"ADAUSDT", "DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT",
+		"LINKUSDT", "UNIUSDT", "LTCUSDT", "ATOMUSDT", "ETCUSDT",
+	}
 
-	for _, symbol := range topSymbols {
+	for _, symbol := range topFuturesSymbols {
 		for _, pair := range pairs {
 			if pair == symbol {
 				symbolsToMonitor = append(symbolsToMonitor, symbol)
 				break
 			}
 		}
+		if len(symbolsToMonitor) >= 10 {
+			break
+		}
 	}
 
-	fmt.Printf("✅ Отслеживается %d пар:\n", len(symbolsToMonitor))
+	fmt.Printf("✅ Отслеживается %d фьючерсных пар:\n", len(symbolsToMonitor))
 	for i, symbol := range symbolsToMonitor {
 		fmt.Printf("   %d. %s\n", i+1, symbol)
 	}

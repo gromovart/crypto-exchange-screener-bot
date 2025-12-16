@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-// RunMainBot - экспортируемая функция для запуска из launcher
 func RunMainBot() {
 	main() // Просто вызываем основную функцию
 }
@@ -32,6 +31,7 @@ func main() {
 	printHeader("Crypto Exchange Screener Bot - FULL MODE")
 	fmt.Printf("🔧 Конфигурация:\n")
 	fmt.Printf("   Сеть: %s\n", map[bool]string{true: "Testnet 🧪", false: "Mainnet ⚡"}[cfg.UseTestnet])
+	fmt.Printf("   Категория: %s фьючерсы\n", cfg.FuturesCategory)
 	fmt.Printf("   Интервал обновления: %d секунд\n", cfg.UpdateInterval)
 	fmt.Printf("   Отслеживаемые интервалы: %s\n", formatIntervals(cfg.TrackedIntervals))
 	fmt.Printf("   Порог сигнала: %.2f%%\n", cfg.AlertThreshold)
@@ -40,14 +40,32 @@ func main() {
 	// Создаем монитор цен
 	priceMonitor := monitor.NewPriceMonitor(cfg)
 
-	// Получаем все USDT пары
-	fmt.Println("📈 Получение торговых пар...")
-	pairs, err := priceMonitor.FetchAllUSDTPairs()
+	// Создаем монитор роста
+	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
+
+	// Запускаем мониторинг роста
+	growthMonitor.Start()
+	fmt.Println("📈 Growth monitoring started")
+
+	// Обработка сигналов роста в отдельной горутине
+	go func() {
+		for signal := range growthMonitor.GetSignals() {
+			// Обработка сигналов роста
+			log.Printf("🎯 Growth signal: %s %s %.2f%%",
+				signal.Symbol, signal.Direction,
+				signal.GrowthPercent+signal.FallPercent)
+		}
+	}()
+
+	// Получаем все фьючерсные USDT пары
+	fmt.Println("📈 Получение фьючерсных торговых пар...")
+	pairs, err := priceMonitor.FetchAllFuturesPairs()
 	if err != nil {
-		log.Fatalf("Failed to fetch USDT pairs: %v", err)
+		log.Fatalf("Failed to fetch futures pairs: %v", err)
 	}
 
-	fmt.Printf("✅ Найдено %d USDT-пар\n", len(pairs))
+	fmt.Printf("✅ Найдено %d фьючерсных USDT-пар\n", len(pairs))
+	fmt.Println()
 
 	// Выбираем символы для мониторинга
 	symbolsToMonitor := selectSymbolsForMonitoring(pairs, 15)
@@ -152,6 +170,19 @@ func main() {
 				counter,
 				time.Now().Format("15:04:05"))
 			counter++
+		}
+	}()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			stats := growthMonitor.GetGrowthStats()
+			fmt.Printf("📊 Growth Stats: %d signals (↑%d ↓%d)\n",
+				stats["total_signals"],
+				stats["growth_signals"],
+				stats["fall_signals"])
 		}
 	}()
 

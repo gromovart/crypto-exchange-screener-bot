@@ -3,6 +3,9 @@ package api
 
 import (
 	"bytes"
+	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/types"
+
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,13 +13,18 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"time"
+)
 
-	"crypto-exchange-screener-bot/internal/config"
+const (
+	CategorySpot    = "spot"
+	CategoryLinear  = "linear"  // USDT-M фьючерсы
+	CategoryInverse = "inverse" // COIN-M фьючерсы
 )
 
 // BybitClient - клиент для работы с API Bybit
@@ -26,6 +34,7 @@ type BybitClient struct {
 	baseURL    string
 	apiKey     string
 	apiSecret  string
+	category   string // "spot", "linear", "inverse"
 }
 
 // APIResponse - базовый ответ API Bybit
@@ -98,6 +107,35 @@ type OrderResponse struct {
 	OrderLinkID string `json:"orderLinkId"`
 }
 
+// InstrumentInfo - информация об инструменте фьючерса
+type InstrumentInfo struct {
+	Symbol          string `json:"symbol"`
+	ContractType    string `json:"contractType"`
+	Status          string `json:"status"`
+	BaseCoin        string `json:"baseCoin"`
+	QuoteCoin       string `json:"quoteCoin"`
+	LaunchTime      string `json:"launchTime"`
+	DeliveryTime    string `json:"deliveryTime"`
+	DeliveryFeeRate string `json:"deliveryFeeRate"`
+	PriceScale      string `json:"priceScale"`
+	LeverageFilter  struct {
+		MinLeverage  string `json:"minLeverage"`
+		MaxLeverage  string `json:"maxLeverage"`
+		LeverageStep string `json:"leverageStep"`
+	} `json:"leverageFilter"`
+	PriceFilter struct {
+		MinPrice string `json:"minPrice"`
+		MaxPrice string `json:"maxPrice"`
+		TickSize string `json:"tickSize"`
+	} `json:"priceFilter"`
+	LotSizeFilter struct {
+		MaxOrderQty         string `json:"maxOrderQty"`
+		MinOrderQty         string `json:"minOrderQty"`
+		QtyStep             string `json:"qtyStep"`
+		PostOnlyMaxOrderQty string `json:"postOnlyMaxOrderQty"`
+	} `json:"lotSizeFilter"`
+}
+
 // NewBybitClient создает новый клиент для работы с API Bybit
 func NewBybitClient(cfg *config.Config) *BybitClient {
 	// Определяем базовый URL
@@ -111,6 +149,12 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 		apiSecret = cfg.TestnetApiSecret
 	}
 
+	// Определяем категорию по умолчанию (фьючерсы)
+	category := CategoryLinear
+	if cfg.FuturesCategory != "" {
+		category = cfg.FuturesCategory
+	}
+
 	return &BybitClient{
 		httpClient: &http.Client{
 			Timeout: time.Duration(cfg.RequestTimeout) * time.Second,
@@ -119,6 +163,7 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 		baseURL:   baseURL,
 		apiKey:    apiKey,
 		apiSecret: apiSecret,
+		category:  category,
 	}
 }
 
@@ -263,7 +308,7 @@ func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interfa
 	return body, nil
 }
 
-// GetTickers получает все тикеры для спотового рынка
+// GetTickers получает все тикеры для указанной категории
 func (c *BybitClient) GetTickers(category string) (*TickerResponse, error) {
 	params := url.Values{}
 	params.Set("category", category)
@@ -279,6 +324,35 @@ func (c *BybitClient) GetTickers(category string) (*TickerResponse, error) {
 	}
 
 	return &tickerResp, nil
+}
+
+// GetInstrumentsInfo получает информацию об инструментах фьючерсов
+func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]InstrumentInfo, error) {
+	params := url.Values{}
+	params.Set("category", category)
+	if symbol != "" {
+		params.Set("symbol", symbol)
+	}
+	if status != "" {
+		params.Set("status", status)
+	}
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/instruments-info", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Result struct {
+			List []InstrumentInfo `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse instruments info response: %w", err)
+	}
+
+	return response.Result.List, nil
 }
 
 // GetKlineData получает свечные данные
@@ -447,4 +521,282 @@ func (c *BybitClient) GetTopMovers(symbols []string, intervalMinutes int, topN i
 	}
 
 	return results[:topN], nil
+}
+
+// Category возвращает текущую категорию клиента
+func (c *BybitClient) Category() string {
+	return c.category
+}
+
+// GetRecentKlinesForPeriod получает свечи для анализа периода роста
+func (c *BybitClient) GetRecentKlinesForPeriod(symbol string, periodMinutes int) ([][]string, error) {
+	// Определяем интервал свечей в зависимости от периода
+	var interval string
+	var limit int
+
+	switch {
+	case periodMinutes <= 5:
+		interval = "1" // 1-минутные свечи
+		limit = periodMinutes
+	case periodMinutes <= 30:
+		interval = "5" // 5-минутные свечи
+		limit = periodMinutes / 5
+	case periodMinutes <= 240:
+		interval = "15" // 15-минутные свечи
+		limit = periodMinutes / 15
+	case periodMinutes <= 1440:
+		interval = "60" // 1-часовые свечи
+		limit = periodMinutes / 60
+	default:
+		interval = "D" // Дневные свечи
+		limit = periodMinutes / 1440
+	}
+
+	// Минимальное количество свечей
+	if limit < 2 {
+		limit = 2
+	}
+
+	// Добавляем буфер на случай если некоторые данные отсутствуют
+	limit = limit + 2
+
+	resp, err := c.GetKlineDataWithInterval(symbol, "linear", interval, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp.Result.List, nil
+}
+
+// AnalyzeGrowth анализирует рост/падение за период
+func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkContinuity bool) (*types.GrowthAnalysis, error) {
+	klines, err := c.GetRecentKlinesForPeriod(symbol, periodMinutes)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(klines) < 2 {
+		return nil, fmt.Errorf("insufficient data for growth analysis")
+	}
+
+	var dataPoints []types.PriceDataPoint
+
+	// Парсим данные из свечей
+	for _, kline := range klines {
+		if len(kline) >= 5 {
+			closePrice, err := strconv.ParseFloat(kline[4], 64)
+			if err != nil {
+				continue
+			}
+
+			timestampMs, err := strconv.ParseInt(kline[0], 10, 64)
+			if err != nil {
+				continue
+			}
+
+			volume, _ := strconv.ParseFloat(kline[5], 64)
+
+			dataPoints = append(dataPoints, types.PriceDataPoint{
+				Price:     closePrice,
+				Timestamp: time.Unix(timestampMs/1000, 0),
+				Volume:    volume,
+			})
+		}
+	}
+
+	if len(dataPoints) < 2 {
+		return nil, fmt.Errorf("not enough valid data points")
+	}
+
+	// Анализируем рост/падение
+	return c.analyzeGrowthData(symbol, periodMinutes, dataPoints, checkContinuity)
+}
+
+// analyzeGrowthData анализирует данные на рост/падение
+func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPoints []types.PriceDataPoint, checkContinuity bool) (*types.GrowthAnalysis, error) {
+	analysis := &types.GrowthAnalysis{
+		Symbol:     symbol,
+		Period:     periodMinutes,
+		DataPoints: dataPoints,
+	}
+
+	// Сортируем по времени (от старых к новым)
+	sort.Slice(dataPoints, func(i, j int) bool {
+		return dataPoints[i].Timestamp.Before(dataPoints[j].Timestamp)
+	})
+
+	// Рассчитываем базовые метрики
+	startPrice := dataPoints[0].Price
+	endPrice := dataPoints[len(dataPoints)-1].Price
+
+	// Процент изменения
+	analysis.GrowthPercent = ((endPrice - startPrice) / startPrice) * 100
+	analysis.FallPercent = -analysis.GrowthPercent
+
+	// Находим min/max
+	minPrice := startPrice
+	maxPrice := startPrice
+	for _, point := range dataPoints {
+		if point.Price < minPrice {
+			minPrice = point.Price
+		}
+		if point.Price > maxPrice {
+			maxPrice = point.Price
+		}
+	}
+	analysis.MinPrice = minPrice
+	analysis.MaxPrice = maxPrice
+
+	// Волатильность
+	analysis.Volatility = ((maxPrice - minPrice) / startPrice) * 100
+
+	// Проверяем непрерывный рост
+	if checkContinuity {
+		analysis.IsGrowing = c.checkContinuousGrowth(dataPoints)
+		analysis.IsFalling = c.checkContinuousFall(dataPoints)
+	} else {
+		// Просто проверяем общее изменение
+		analysis.IsGrowing = analysis.GrowthPercent > 0
+		analysis.IsFalling = analysis.GrowthPercent < 0
+	}
+
+	return analysis, nil
+}
+
+// checkContinuousGrowth проверяет непрерывный рост
+func (c *BybitClient) checkContinuousGrowth(dataPoints []types.PriceDataPoint) bool {
+	for i := 1; i < len(dataPoints); i++ {
+		if dataPoints[i].Price <= dataPoints[i-1].Price {
+			return false
+		}
+	}
+	return true
+}
+
+// checkContinuousFall проверяет непрерывное падение
+func (c *BybitClient) checkContinuousFall(dataPoints []types.PriceDataPoint) bool {
+	for i := 1; i < len(dataPoints); i++ {
+		if dataPoints[i].Price >= dataPoints[i-1].Price {
+			return false
+		}
+	}
+	return true
+}
+
+// FindGrowthSignals ищет сигналы роста/падения
+func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int, growthThreshold, fallThreshold float64, checkContinuity bool) ([]types.GrowthSignal, error) {
+	var signals []types.GrowthSignal
+
+	for _, symbol := range symbols {
+		analysis, err := c.AnalyzeGrowth(symbol, periodMinutes, checkContinuity)
+		if err != nil {
+			continue // Пропускаем символы с недостаточными данными
+		}
+
+		var signal *types.GrowthSignal
+
+		// Проверяем рост
+		if analysis.IsGrowing && analysis.GrowthPercent >= growthThreshold {
+			signal = &types.GrowthSignal{
+				Symbol:        symbol,
+				PeriodMinutes: periodMinutes,
+				GrowthPercent: analysis.GrowthPercent,
+				FallPercent:   0,
+				IsContinuous:  true,
+				DataPoints:    len(analysis.DataPoints),
+				StartPrice:    analysis.MinPrice,
+				EndPrice:      analysis.MaxPrice,
+				Direction:     "growth",
+				Confidence:    c.calculateConfidence(analysis),
+				Timestamp:     time.Now(),
+			}
+		}
+
+		// Проверяем падение
+		if analysis.IsFalling && analysis.FallPercent >= fallThreshold {
+			signal = &types.GrowthSignal{
+				Symbol:        symbol,
+				PeriodMinutes: periodMinutes,
+				GrowthPercent: 0,
+				FallPercent:   analysis.FallPercent,
+				IsContinuous:  true,
+				DataPoints:    len(analysis.DataPoints),
+				StartPrice:    analysis.MaxPrice,
+				EndPrice:      analysis.MinPrice,
+				Direction:     "fall",
+				Confidence:    c.calculateConfidence(analysis),
+				Timestamp:     time.Now(),
+			}
+		}
+
+		if signal != nil {
+			signals = append(signals, *signal)
+		}
+	}
+
+	// Сортируем по проценту изменения
+	sort.Slice(signals, func(i, j int) bool {
+		changeI := signals[i].GrowthPercent + signals[i].FallPercent
+		changeJ := signals[j].GrowthPercent + signals[j].FallPercent
+		return math.Abs(changeI) > math.Abs(changeJ)
+	})
+
+	return signals, nil
+}
+
+// calculateConfidence рассчитывает уверенность в сигнале
+func (c *BybitClient) calculateConfidence(analysis *types.GrowthAnalysis) float64 {
+	confidence := 0.0
+
+	// Более высокий процент изменения = более высокая уверенность
+	changePercent := math.Abs(analysis.GrowthPercent)
+	confidence += math.Min(changePercent*2, 40) // Максимум 40% за изменение
+
+	// Непрерывность добавляет уверенности
+	if (analysis.IsGrowing && analysis.GrowthPercent > 0) ||
+		(analysis.IsFalling && analysis.FallPercent > 0) {
+		confidence += 30
+	}
+
+	// Объем добавляет уверенности
+	avgVolume := 0.0
+	for _, point := range analysis.DataPoints {
+		avgVolume += point.Volume
+	}
+	avgVolume /= float64(len(analysis.DataPoints))
+
+	if avgVolume > 1000000 { // > $1M объема
+		confidence += 15
+	} else if avgVolume > 100000 { // > $100K объема
+		confidence += 10
+	} else {
+		confidence += 5
+	}
+
+	// Количество точек данных
+	dataPointConfidence := float64(len(analysis.DataPoints)) * 1.5
+	confidence += math.Min(dataPointConfidence, 15)
+
+	return math.Min(confidence, 100.0)
+}
+
+// GetKlineDataWithInterval получает свечные данные с указанным интервалом
+func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string, limit int) (*KlineResponse, error) {
+	params := url.Values{}
+	params.Set("category", category)
+	params.Set("symbol", symbol)
+	params.Set("interval", interval)
+	params.Set("limit", strconv.Itoa(limit))
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/kline", params)
+	if err != nil {
+		return nil, err
+	}
+
+	var klineResp KlineResponse
+	if err := json.Unmarshal(body, &klineResp); err != nil {
+		return nil, fmt.Errorf("failed to parse kline response: %w", err)
+	}
+
+	return &klineResp, nil
 }
