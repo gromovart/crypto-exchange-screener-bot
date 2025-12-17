@@ -16,6 +16,7 @@ type EventCoordinator struct {
 	enableLogging bool
 	eventChan     chan Event
 	stopChan      chan struct{}
+	wg            sync.WaitGroup // Добавляем WaitGroup для graceful shutdown
 }
 
 // NewEventCoordinator создает нового координатора событий
@@ -25,7 +26,7 @@ func NewEventCoordinator(config CoordinatorConfig) *EventCoordinator {
 		eventBuffer:   make([]Event, 0),
 		bufferSize:    config.EventBufferSize,
 		enableLogging: config.EnableEventLogging,
-		eventChan:     make(chan Event, 100),
+		eventChan:     make(chan Event, 1000), // Увеличиваем буфер
 		stopChan:      make(chan struct{}),
 	}
 
@@ -34,6 +35,7 @@ func NewEventCoordinator(config CoordinatorConfig) *EventCoordinator {
 	}
 
 	// Запускаем обработчик событий
+	coordinator.wg.Add(1)
 	go coordinator.eventHandler()
 
 	return coordinator
@@ -93,6 +95,7 @@ func (ec *EventCoordinator) PublishEvent(event Event) {
 
 // PublishPriceUpdate публикует обновление цены
 func (ec *EventCoordinator) PublishPriceUpdate(symbol string, price, volume float64, timestamp time.Time) {
+	// Отправляем событие в канал вместо прямого уведомления
 	event := Event{
 		Type:      EventPriceUpdated,
 		Service:   "PriceMonitor",
@@ -102,10 +105,12 @@ func (ec *EventCoordinator) PublishPriceUpdate(symbol string, price, volume floa
 		Severity:  "info",
 	}
 
-	ec.PublishEvent(event)
-
-	// Уведомляем подписчиков напрямую (для производительности)
-	ec.notifyPriceUpdate(symbol, price, volume, timestamp)
+	select {
+	case ec.eventChan <- event:
+		// Событие отправлено
+	default:
+		// Буфер полон, пропускаем событие
+	}
 }
 
 // PublishSignalDetected публикует обнаружение сигнала
@@ -119,7 +124,12 @@ func (ec *EventCoordinator) PublishSignalDetected(symbol string, direction strin
 		Severity:  "info",
 	}
 
-	ec.PublishEvent(event)
+	select {
+	case ec.eventChan <- event:
+		// Событие отправлено
+	default:
+		// Буфер полон, пропускаем событие
+	}
 }
 
 // GetEvents возвращает события из буфера
@@ -154,14 +164,19 @@ func (ec *EventCoordinator) ClearBuffer() {
 // Stop останавливает координатор
 func (ec *EventCoordinator) Stop() {
 	close(ec.stopChan)
-	close(ec.eventChan)
+	ec.wg.Wait()
 }
 
 // eventHandler обрабатывает события
 func (ec *EventCoordinator) eventHandler() {
+	defer ec.wg.Done()
+
 	for {
 		select {
-		case event := <-ec.eventChan:
+		case event, ok := <-ec.eventChan:
+			if !ok {
+				return // Канал закрыт
+			}
 			ec.processEvent(event)
 		case <-ec.stopChan:
 			return
@@ -171,66 +186,44 @@ func (ec *EventCoordinator) eventHandler() {
 
 // processEvent обрабатывает событие
 func (ec *EventCoordinator) processEvent(event Event) {
+	// 1. Добавляем в буфер (под блокировкой)
 	ec.mu.Lock()
-
-	// Добавляем в буфер
 	ec.eventBuffer = append(ec.eventBuffer, event)
 
 	// Ограничиваем размер буфера
 	if len(ec.eventBuffer) > ec.bufferSize {
 		ec.eventBuffer = ec.eventBuffer[len(ec.eventBuffer)-ec.bufferSize:]
 	}
+	ec.mu.Unlock()
 
-	// Логируем если включено
+	// 2. Логируем если включено
 	if ec.enableLogging {
 		ec.logEvent(event)
 	}
 
-	ec.mu.Unlock()
-
-	// Уведомляем подписчиков
+	// 3. Уведомляем подписчиков
 	ec.notifySubscribers(event)
 }
 
 // notifySubscribers уведомляет подписчиков о событии
 func (ec *EventCoordinator) notifySubscribers(event Event) {
+	// Создаем копию подписчиков под блокировкой
 	ec.mu.RLock()
-	defer ec.mu.RUnlock()
+	subscribers := make([]DataSubscriber, len(ec.subscribers))
+	copy(subscribers, ec.subscribers)
+	ec.mu.RUnlock()
 
-	for _, subscriber := range ec.subscribers {
+	// Уведомляем каждого подписчика в отдельной горутине
+	for _, subscriber := range subscribers {
 		go func(sub DataSubscriber) {
 			defer func() {
 				if r := recover(); r != nil {
 					// Логируем ошибку но не паникуем
-					ec.logEvent(Event{
-						Type:      EventServiceError,
-						Service:   "EventCoordinator",
-						Message:   "Subscriber panic recovered",
-						Timestamp: time.Now(),
-						Severity:  "error",
-					})
+					log.Printf("[ERROR] Subscriber panic recovered: %v", r)
 				}
 			}()
 
 			sub.OnEvent(event)
-		}(subscriber)
-	}
-}
-
-// notifyPriceUpdate уведомляет о обновлении цены (оптимизированный путь)
-func (ec *EventCoordinator) notifyPriceUpdate(symbol string, price, volume float64, timestamp time.Time) {
-	ec.mu.RLock()
-	defer ec.mu.RUnlock()
-
-	for _, subscriber := range ec.subscribers {
-		go func(sub DataSubscriber) {
-			defer func() {
-				if r := recover(); r != nil {
-					// Игнорируем панику в горутине
-				}
-			}()
-
-			sub.OnPriceUpdate(symbol, price, volume, timestamp)
 		}(subscriber)
 	}
 }
@@ -244,20 +237,23 @@ func (ec *EventCoordinator) logEvent(event Event) {
 	// Структурированное логирование
 	switch event.Severity {
 	case "error":
-		log.Printf("[%s] [ERROR] %s (service: %s)",
+		log.Printf("[ERROR] [%s] %s (service: %s)",
 			event.Timestamp.Format("15:04:05"),
 			event.Message,
 			event.Service)
 	case "warning":
-		log.Printf("[%s] [WARN] %s (service: %s)",
+		log.Printf("[WARN] [%s] %s (service: %s)",
 			event.Timestamp.Format("15:04:05"),
 			event.Message,
 			event.Service)
 	default:
-		log.Printf("[%s] [INFO] %s (service: %s)",
-			event.Timestamp.Format("15:04:05"),
-			event.Message,
-			event.Service)
+		// Для событий об обновлении цены не логируем, чтобы не засорять логи
+		if event.Type != EventPriceUpdated {
+			log.Printf("[INFO] [%s] %s (service: %s)",
+				event.Timestamp.Format("15:04:05"),
+				event.Message,
+				event.Service)
+		}
 	}
 }
 
@@ -292,9 +288,8 @@ func (s *storageCoordinatorSubscriber) OnPriceUpdate(symbol string, price, volum
 }
 
 func (s *storageCoordinatorSubscriber) OnSymbolAdded(symbol string) {
-	// Можно публиковать событие о добавлении символа
 	s.sc.coordinator.PublishEvent(Event{
-		Type:      EventPriceUpdated,
+		Type:      EventSymbolAdded,
 		Service:   "StorageCoordinator",
 		Message:   "Symbol added: " + symbol,
 		Data:      map[string]interface{}{"symbol": symbol, "action": "added"},
@@ -304,9 +299,8 @@ func (s *storageCoordinatorSubscriber) OnSymbolAdded(symbol string) {
 }
 
 func (s *storageCoordinatorSubscriber) OnSymbolRemoved(symbol string) {
-	// Можно публиковать событие об удалении символа
 	s.sc.coordinator.PublishEvent(Event{
-		Type:      EventPriceUpdated,
+		Type:      EventSymbolRemoved,
 		Service:   "StorageCoordinator",
 		Message:   "Symbol removed: " + symbol,
 		Data:      map[string]interface{}{"symbol": symbol, "action": "removed"},

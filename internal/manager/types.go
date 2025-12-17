@@ -16,7 +16,7 @@ const (
 	StateError    ServiceState = "error"
 )
 
-// ServiceInfo информация о сервисе
+// ServiceInfo информация о сервиса
 type ServiceInfo struct {
 	Name      string       `json:"name"`
 	State     ServiceState `json:"state"`
@@ -44,14 +44,21 @@ type SystemStats struct {
 type EventType string
 
 const (
+	// События сервисов
 	EventServiceStarted EventType = "service_started"
 	EventServiceStopped EventType = "service_stopped"
 	EventServiceError   EventType = "service_error"
+	EventHealthCheck    EventType = "health_check"
+
+	// События данных
 	EventPriceUpdated   EventType = "price_updated"
 	EventSignalDetected EventType = "signal_detected"
-	EventTelegramSent   EventType = "telegram_sent"
-	EventConfigChanged  EventType = "config_changed"
-	EventHealthCheck    EventType = "health_check"
+	EventSymbolAdded    EventType = "symbol_added"
+	EventSymbolRemoved  EventType = "symbol_removed"
+
+	// События интеграций
+	EventTelegramSent  EventType = "telegram_sent"
+	EventConfigChanged EventType = "config_changed"
 )
 
 // Event событие системы

@@ -1,3 +1,4 @@
+// internal/telegram/bot.go
 package telegram
 
 import (
