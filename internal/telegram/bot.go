@@ -97,8 +97,8 @@ func NewTelegramBot(cfg *config.Config) *TelegramBot {
 		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramAPIKey),
 		chatID:        cfg.TelegramChatID,
 		notifyEnabled: cfg.TelegramEnabled,
-		rateLimiter:   NewRateLimiter(2 * time.Second),
-		minInterval:   2 * time.Second,
+		rateLimiter:   NewRateLimiter(10 * time.Second), // УВЕЛИЧЕН ДО 10 СЕКУНД
+		minInterval:   10 * time.Second,                 // УВЕЛИЧЕН ДО 10 СЕКУНД
 	}
 }
 

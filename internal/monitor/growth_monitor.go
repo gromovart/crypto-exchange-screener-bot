@@ -37,8 +37,11 @@ type GrowthMonitor struct {
 
 // NewGrowthMonitor создает новый монитор роста
 func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMonitor {
-	// Настройки отображения
-	minChange := 0.5
+	// ИСПРАВЛЕНО: Используем пороги из конфигурации
+	minChange := cfg.GrowthThreshold
+	if cfg.FallThreshold < minChange {
+		minChange = cfg.FallThreshold
+	}
 	maxSignals := 15
 
 	// Создаем Telegram бота если включен
@@ -54,7 +57,7 @@ func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMon
 		priceMonitor:     priceMonitor,
 		signals:          make(chan types.GrowthSignal, 100),
 		filter:           NewSignalFilter(cfg),
-		display:          NewDisplayManager(true, minChange, 50.0, maxSignals),
+		display:          NewDisplayManager(true, minChange, cfg.SignalFilters.MinConfidence, maxSignals),
 		telegramBot:      telegramBot,
 		stopChan:         make(chan bool),
 		active:           false,
@@ -483,20 +486,28 @@ func (gm *GrowthMonitor) FlushDisplay() {
 	gm.bufferMutex.Lock()
 	defer gm.bufferMutex.Unlock()
 
-	now := time.Now()
-
-	// Выводим сигналы в консоль если есть что показывать
-	if len(gm.signalBuffer) > 0 && now.Sub(gm.lastFlushTime) >= 2*time.Second {
-		// Используем DisplayManager для форматирования
-		for _, signal := range gm.signalBuffer {
-			gm.display.AddSignal(signal)
-		}
-		gm.display.Flush()
-
-		// Очищаем буфер консоли
-		gm.signalBuffer = []types.GrowthSignal{}
-		gm.lastFlushTime = now
+	if len(gm.signalBuffer) == 0 {
+		return
 	}
+
+	// Сохраняем количество до очистки
+	signalCount := len(gm.signalBuffer)
+
+	log.Printf("🔄 FlushDisplay: обработка %d сигналов", signalCount)
+
+	// Добавляем все сигналы в DisplayManager
+	for _, signal := range gm.signalBuffer {
+		gm.display.AddSignal(signal)
+	}
+
+	// Выводим сигналы
+	gm.display.Flush()
+
+	// Очищаем буфер
+	gm.signalBuffer = []types.GrowthSignal{}
+	gm.lastFlushTime = time.Now()
+
+	log.Printf("✅ FlushDisplay: выведено %d сигналов", signalCount)
 }
 
 // SendTelegramTest отправляет тестовое сообщение в Telegram

@@ -3,6 +3,7 @@ package monitor
 import (
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -33,15 +34,21 @@ func (dm *DisplayManager) AddSignal(signal types.GrowthSignal) {
 	// Фильтруем по минимальному изменению
 	changePercent := signal.GrowthPercent + signal.FallPercent
 	if abs(changePercent) < dm.minChange {
+		log.Printf("DisplayManager: Сигнал %s %.2f%% отфильтрован (minChange: %.2f%%)",
+			signal.Symbol, changePercent, dm.minChange)
 		return
 	}
 
 	// Фильтруем по минимальной уверенности
 	if signal.Confidence < dm.minConfidence {
+		log.Printf("DisplayManager: Сигнал %s отфильтрован (уверенность: %.1f%%, min: %.1f%%)",
+			signal.Symbol, signal.Confidence, dm.minConfidence)
 		return
 	}
 
 	dm.signalBuffer = append(dm.signalBuffer, signal)
+	log.Printf("DisplayManager: Сигнал %s добавлен (изменение: %.2f%%, уверенность: %.1f%%)",
+		signal.Symbol, changePercent, signal.Confidence)
 }
 
 // Flush выводит все сигналы из буфера
