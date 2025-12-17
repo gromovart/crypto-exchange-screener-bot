@@ -3,6 +3,7 @@ package monitor
 import (
 	"crypto-exchange-screener-bot/internal/api"
 	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/storage"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
@@ -14,10 +15,11 @@ import (
 )
 
 // GrowthMonitor - монитор непрерывного роста/падения
+// GrowthMonitor - монитор непрерывного роста/падения
 type GrowthMonitor struct {
 	client           *api.BybitClient
 	config           *config.Config
-	priceMonitor     *PriceMonitor
+	storage          storage.PriceStorage // Используем хранилище вместо priceMonitor
 	signals          chan types.GrowthSignal
 	filter           *SignalFilter
 	display          *DisplayManager
@@ -32,12 +34,12 @@ type GrowthMonitor struct {
 	bufferMutex      sync.Mutex
 	telegramBuffer   []types.GrowthSignal
 	lastFlushTime    time.Time
-	lastTelegramSend map[string]time.Time // Для отслеживания времени последней отправки по символу
+	lastTelegramSend map[string]time.Time
 }
 
 // NewGrowthMonitor создает новый монитор роста
-func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMonitor {
-	// ИСПРАВЛЕНО: Используем пороги из конфигурации
+func NewGrowthMonitor(cfg *config.Config, storage storage.PriceStorage) *GrowthMonitor {
+	// Используем пороги из конфигурации
 	minChange := cfg.GrowthThreshold
 	if cfg.FallThreshold < minChange {
 		minChange = cfg.FallThreshold
@@ -54,7 +56,7 @@ func NewGrowthMonitor(cfg *config.Config, priceMonitor *PriceMonitor) *GrowthMon
 	return &GrowthMonitor{
 		client:           api.NewBybitClient(cfg),
 		config:           cfg,
-		priceMonitor:     priceMonitor,
+		storage:          storage, // Используем хранилище
 		signals:          make(chan types.GrowthSignal, 100),
 		filter:           NewSignalFilter(cfg),
 		display:          NewDisplayManager(true, minChange, cfg.SignalFilters.MinConfidence, maxSignals),
@@ -341,8 +343,8 @@ func (gm *GrowthMonitor) AnalyzeSymbol(symbol string) ([]types.GrowthSignal, err
 
 // GetSymbolsToMonitor возвращает список символов для мониторинга с учетом конфигурации
 func (gm *GrowthMonitor) GetSymbolsToMonitor() ([]string, error) {
-	// Получаем все символы из priceMonitor
-	allSymbols := gm.priceMonitor.GetSymbols()
+	// Получаем все символы из хранилища
+	allSymbols := gm.storage.GetSymbols()
 
 	// Если в конфигурации указаны конкретные символы для мониторинга
 	if gm.config.SymbolFilter != "" {
@@ -398,6 +400,30 @@ func (gm *GrowthMonitor) GetSymbolsToMonitor() ([]string, error) {
 	}
 
 	return symbols, nil
+}
+
+// GetPriceHistoryRange получает историю цен за период
+func (gm *GrowthMonitor) GetPriceHistoryRange(symbol string, periodMinutes int) ([]types.PriceDataPoint, error) {
+	endTime := time.Now()
+	startTime := endTime.Add(-time.Duration(periodMinutes) * time.Minute)
+
+	// Используем хранилище для получения истории
+	priceData, err := gm.storage.GetPriceHistoryRange(symbol, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+
+	// Конвертируем в формат PriceDataPoint
+	var dataPoints []types.PriceDataPoint
+	for _, data := range priceData {
+		dataPoints = append(dataPoints, types.PriceDataPoint{
+			Price:     data.Price,
+			Timestamp: data.Timestamp,
+			Volume:    data.Volume24h,
+		})
+	}
+
+	return dataPoints, nil
 }
 
 // parseSymbolFilter парсит фильтр символов

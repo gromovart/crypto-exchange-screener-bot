@@ -1,3 +1,4 @@
+// in_memory_storage.go
 package storage
 
 import (
@@ -102,10 +103,8 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 	// Обновляем сортировку по объему
 	s.updateSymbolVolume(symbol, volume24h)
 
-	s.mu.Unlock() // Разблокируем для уведомлений
-
-	// Уведомляем подписчиков
-	s.subscriptions.NotifyAll(symbol, price, volume24h, timestamp)
+	// Уведомляем подписчиков (без блокировки, чтобы избежать deadlock)
+	go s.subscriptions.NotifyAll(symbol, price, volume24h, timestamp)
 
 	return nil
 }
@@ -461,10 +460,10 @@ func (s *InMemoryPriceStorage) RemoveSymbol(symbol string) error {
 
 	s.updateStats()
 
-	s.mu.Unlock()
-
-	// Уведомляем подписчиков
-	s.subscriptions.NotifySymbolRemoved(symbol)
+	// Уведомляем подписчиков (асинхронно)
+	go func() {
+		s.subscriptions.NotifySymbolRemoved(symbol)
+	}()
 
 	return nil
 }

@@ -2,8 +2,7 @@ package main
 
 import (
 	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/monitor"
-	"crypto-exchange-screener-bot/internal/telegram"
+	"crypto-exchange-screener-bot/internal/manager"
 	"fmt"
 	"log"
 	"os"
@@ -44,13 +43,26 @@ func main() {
 	fmt.Printf("   Мин. объем: $%.0f\n", cfg.MinVolumeFilter)
 	fmt.Println()
 
+	// Создаем DataManager
+	fmt.Println("🚀 Инициализация DataManager...")
+	dm, err := manager.NewDataManager(cfg)
+	if err != nil {
+		log.Fatalf("Не удалось создать DataManager: %v", err)
+	}
+
 	// Переменные для статистики
 	startTime := time.Now()
 	var updateCount int32 = 0
 	var signalCount int32 = 0
 
-	// Создаем монитор цен
-	priceMonitor := monitor.NewPriceMonitor(cfg)
+	// Получаем компоненты из DataManager
+	priceMonitor := dm.GetPriceMonitor()
+	growthMonitor := dm.GetGrowthMonitor()
+
+	// Запускаем DataManager
+	if err := dm.Start(); err != nil {
+		log.Fatalf("Не удалось запустить DataManager: %v", err)
+	}
 
 	// Получаем все фьючерсные USDT пары с фильтрацией
 	fmt.Println("📈 Получение фьючерсных торговых пар...")
@@ -149,31 +161,9 @@ func main() {
 	}
 	fmt.Println()
 
-	// Создаем монитор роста
-	fmt.Println("📈 Инициализация монитора роста...")
-	growthMonitor := monitor.NewGrowthMonitor(cfg, priceMonitor)
-
 	// Инициализируем Telegram бота если включен
 	if cfg.TelegramEnabled && cfg.TelegramAPIKey != "" {
 		fmt.Println("🤖 Telegram бот инициализирован")
-
-		// Запускаем webhook сервер если указан порт
-		if cfg.TelegramWebhookPort != "" && cfg.TelegramWebhookURL != "" {
-			telegramBot := telegram.NewTelegramBot(cfg)
-			webhookServer := telegram.NewWebhookServer(
-				telegramBot,
-				cfg.TelegramWebhookPort,
-				cfg.TelegramWebhookURL,
-			)
-
-			go func() {
-				if err := webhookServer.Start(); err != nil {
-					log.Printf("❌ Ошибка запуска Telegram webhook: %v", err)
-				}
-			}()
-
-			fmt.Printf("🌐 Telegram webhook сервер запущен на порту %s\n", cfg.TelegramWebhookPort)
-		}
 
 		// Отправляем тестовое сообщение
 		if cfg.TelegramChatID != 0 {
@@ -206,18 +196,11 @@ func main() {
 	fmt.Println("   Каждые 2 секунды будет групповой вывод сигналов")
 	fmt.Println()
 
-	// Запускаем мониторинг цен
-	priceMonitor.StartMonitoring(time.Duration(cfg.UpdateInterval) * time.Second)
-	fmt.Printf("🔄 Мониторинг цен запущен (обновление каждые %d сек)\n", cfg.UpdateInterval)
-
 	// Даем время на первоначальную загрузку данных
 	fmt.Println("📥 Загрузка первоначальных данных...")
 	time.Sleep(5 * time.Second)
 	fmt.Println("✅ Данные загружены")
 	fmt.Println()
-
-	// Запускаем мониторинг роста
-	growthMonitor.Start()
 
 	fmt.Println("🚀 Мониторинг роста запущен")
 
@@ -234,22 +217,12 @@ func main() {
 			growthMonitor.FlushBuffers()
 		}
 	}()
+
 	// Обработка сигналов роста в отдельной горутине
 	go func() {
 		for range growthMonitor.GetSignals() {
 			// Увеличиваем счетчик сигналов
 			atomic.AddInt32(&signalCount, 1)
-
-			// Выводим информацию о сигнале в новом формате
-			// ВЫВОД ТЕПЕРЬ ДЕЛАЕТ DisplayManager - УДАЛИТЬ ЭТОТ ВЫВОД
-			// timestamp := time.Now().Format("2006/01/02 15:04:05")
-			// changePercent := signal.GrowthPercent + signal.FallPercent
-			// fmt.Printf("📈 [%s] Получен сигнал: %s %s %.2f%% (период: %d мин)\n",
-			//     timestamp,
-			//     signal.Symbol,
-			//     signal.Direction,
-			//     changePercent,
-			//     signal.PeriodMinutes)
 		}
 	}()
 
@@ -307,7 +280,7 @@ func main() {
 		}
 	}()
 
-	// Горутина для периодического вывода статистики
+	// Горутина для периодического вывода статистики системы
 	go func() {
 		ticker := time.NewTicker(15 * time.Second)
 		defer ticker.Stop()
@@ -318,8 +291,11 @@ func main() {
 			currentSignals := atomic.LoadInt32(&signalCount)
 			growthStats := growthMonitor.GetGrowthStats()
 
+			// Получаем статистику системы
+			systemStats := dm.GetSystemStats()
+
 			printStats(startTime, int(currentUpdates), int(currentSignals),
-				cfg, len(pairs), iteration, growthStats)
+				cfg, len(pairs), iteration, growthStats, systemStats)
 			iteration++
 		}
 	}()
@@ -351,16 +327,17 @@ func main() {
 		growthStats["growth_signals"],
 		growthStats["fall_signals"])
 
-	// Остановка мониторинга
-	priceMonitor.StopMonitoring()
-	growthMonitor.Stop()
+	// Остановка DataManager
+	if err := dm.Stop(); err != nil {
+		log.Printf("⚠️ Ошибка остановки DataManager: %v", err)
+	}
 
 	fmt.Println("✅ Бот остановлен корректно")
 }
 
 func printStats(startTime time.Time, updates int, signals int,
 	cfg *config.Config, totalSymbols int, iteration int,
-	growthStats map[string]interface{}) {
+	growthStats map[string]interface{}, systemStats manager.SystemStats) {
 
 	fmt.Println(strings.Repeat("─", 80))
 	fmt.Printf("📊 СТАТУС СИСТЕМЫ (итерация #%d)\n", iteration)
@@ -376,11 +353,14 @@ func printStats(startTime time.Time, updates int, signals int,
 			growthStats["fall_signals"])
 	}
 
-	fmt.Printf("   📈 Всего пар: %d\n", totalSymbols)
+	// Добавляем статистику системы
+	fmt.Printf("   💾 Память: %.2f MB\n", systemStats.MemoryUsageMB)
+	fmt.Printf("   💾 Символов в хранилище: %d\n", systemStats.ActiveSymbols)
 
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	fmt.Printf("   💾 Память: %.2f MB\n", float64(m.Alloc)/1024/1024)
+	if systemStats.StorageStats.TotalDataPoints > 0 {
+		fmt.Printf("   📊 Точек данных: %d\n", systemStats.StorageStats.TotalDataPoints)
+	}
+
 	fmt.Printf("   🧵 Горутин: %d\n", runtime.NumGoroutine())
 	fmt.Printf("   🕐 Текущее время: %s\n", time.Now().Format("15:04:05"))
 	fmt.Println(strings.Repeat("─", 80))

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"crypto-exchange-screener-bot/internal/storage"
+	"log"
 	"sync"
 	"time"
 )
@@ -240,23 +241,23 @@ func (ec *EventCoordinator) logEvent(event Event) {
 		return
 	}
 
-	// Здесь можно добавить запись в лог файл или систему мониторинга
-	// Для простоты выводим в консоль
-	logMessage := event.Timestamp.Format("2006/01/02 15:04:05") +
-		" [" + string(event.Type) + "] " +
-		event.Message
-
-	// В зависимости от severity можно использовать разные цвета/форматы
+	// Структурированное логирование
 	switch event.Severity {
 	case "error":
-		// Красный цвет для ошибок
-		// log.Printf("\033[31m%s\033[0m", logMessage)
+		log.Printf("[%s] [ERROR] %s (service: %s)",
+			event.Timestamp.Format("15:04:05"),
+			event.Message,
+			event.Service)
 	case "warning":
-		// Желтый цвет для предупреждений
-		// log.Printf("\033[33m%s\033[0m", logMessage)
+		log.Printf("[%s] [WARN] %s (service: %s)",
+			event.Timestamp.Format("15:04:05"),
+			event.Message,
+			event.Service)
 	default:
-		// Обычный цвет для информации
-		// log.Printf("%s", logMessage)
+		log.Printf("[%s] [INFO] %s (service: %s)",
+			event.Timestamp.Format("15:04:05"),
+			event.Message,
+			event.Service)
 	}
 }
 

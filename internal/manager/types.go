@@ -18,13 +18,12 @@ const (
 
 // ServiceInfo информация о сервисе
 type ServiceInfo struct {
-	Name        string       `json:"name"`
-	State       ServiceState `json:"state"`
-	StartedAt   time.Time    `json:"started_at,omitempty"`
-	StoppedAt   time.Time    `json:"stopped_at,omitempty"`
-	Error       string       `json:"error,omitempty"`
-	Restarts    int          `json:"restarts"`
-	HealthCheck func() bool  `json:"-"`
+	Name      string       `json:"name"`
+	State     ServiceState `json:"state"`
+	StartedAt time.Time    `json:"started_at,omitempty"`
+	StoppedAt time.Time    `json:"stopped_at,omitempty"`
+	Error     string       `json:"error,omitempty"`
+	Restarts  int          `json:"restarts"`
 }
 
 // SystemStats статистика системы
@@ -36,6 +35,7 @@ type SystemStats struct {
 	MemoryUsageMB float64                `json:"memory_usage_mb"`
 	CPUUsage      float64                `json:"cpu_usage"`
 	ActiveSymbols int                    `json:"active_symbols"`
+	GrowthStats   interface{}            `json:"growth_stats,omitempty"`
 	LastError     string                 `json:"last_error,omitempty"`
 	LastUpdated   time.Time              `json:"last_updated"`
 }

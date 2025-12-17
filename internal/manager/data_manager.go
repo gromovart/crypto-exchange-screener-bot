@@ -14,20 +14,26 @@ import (
 
 // DataManager главный менеджер данных
 type DataManager struct {
-	config        *config.Config
-	storage       storage.PriceStorage
-	coordinator   *EventCoordinator
-	storageCoord  *StorageCoordinator
-	lifecycle     *LifecycleManager
-	registry      *ServiceRegistry
+	config *config.Config
+
+	// Хранилище данных
+	storage storage.PriceStorage
+
+	// Мониторы
 	priceMonitor  *monitor.PriceMonitor
 	growthMonitor *monitor.GrowthMonitor
-	telegramBot   *telegram.TelegramBot
 
-	// Мьютекс для потокобезопасности
-	mu sync.RWMutex
+	// Координация
+	coordinator  *EventCoordinator
+	storageCoord *StorageCoordinator
+	lifecycle    *LifecycleManager
+	registry     *ServiceRegistry
 
-	// Каналы для управления
+	// Дополнительные сервисы
+	telegramBot *telegram.TelegramBot
+
+	// Управление
+	mu       sync.RWMutex
 	stopChan chan struct{}
 	wg       sync.WaitGroup
 
@@ -56,12 +62,15 @@ func NewDataManager(cfg *config.Config) (*DataManager, error) {
 	// Настраиваем зависимости
 	dm.setupDependencies()
 
+	// Запускаем фоновые задачи
+	dm.startBackgroundTasks()
+
 	return dm, nil
 }
 
 // initializeComponents инициализирует все компоненты
 func (dm *DataManager) initializeComponents() error {
-	// 1. Создаем хранилище
+	// 1. Создаем хранилище (отвечает за данные)
 	storageConfig := &storage.StorageConfig{
 		MaxHistoryPerSymbol: 10000,
 		MaxSymbols:          1000,
@@ -71,7 +80,11 @@ func (dm *DataManager) initializeComponents() error {
 
 	dm.storage = storage.NewInMemoryPriceStorage(storageConfig)
 
-	// 2. Создаем координатор событий
+	// 2. Создаем мониторы (отвечают за получение данных)
+	dm.priceMonitor = monitor.NewPriceMonitor(dm.config, dm.storage)
+	dm.growthMonitor = monitor.NewGrowthMonitor(dm.config, dm.storage)
+
+	// 3. Создаем координатор событий
 	coordinatorConfig := CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
@@ -85,32 +98,21 @@ func (dm *DataManager) initializeComponents() error {
 
 	dm.coordinator = NewEventCoordinator(coordinatorConfig)
 
-	// 3. Создаем координатор хранилища
+	// 4. Создаем координатор хранилища
 	dm.storageCoord = NewStorageCoordinator(dm.storage, dm.coordinator)
 
-	// 4. Создаем реестр сервисов
+	// 5. Создаем реестр сервисов
 	dm.registry = NewServiceRegistry()
 
-	// 5. Создаем менеджер жизненного цикла
+	// 6. Создаем менеджер жизненного цикла
 	dm.lifecycle = NewLifecycleManager(dm.registry, dm.coordinator, coordinatorConfig)
 
-	// 6. Создаем сервисы (УДАЛЕНО: var err error)
-
-	// PriceMonitor
-	dm.priceMonitor = monitor.NewPriceMonitor(dm.config)
-	// Нужно обновить PriceMonitor для работы с хранилищем
-	// Пока используем временный адаптер
-	dm.setupPriceMonitorAdapter()
-
-	// GrowthMonitor
-	dm.growthMonitor = monitor.NewGrowthMonitor(dm.config, dm.priceMonitor)
-
-	// TelegramBot
+	// 7. Telegram бот
 	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" {
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
 	}
 
-	// Регистрируем сервисы
+	// 8. Регистрируем сервисы
 	if err := dm.registerServices(); err != nil {
 		return err
 	}
@@ -118,23 +120,9 @@ func (dm *DataManager) initializeComponents() error {
 	return nil
 }
 
-// setupPriceMonitorAdapter настраивает адаптер для PriceMonitor
-func (dm *DataManager) setupPriceMonitorAdapter() {
-	// Создаем адаптер который сохраняет данные в хранилище
-	// В будущем нужно переделать PriceMonitor для прямой работы с хранилищем
-	go dm.priceMonitorAdapter()
-}
-
-// priceMonitorAdapter адаптирует PriceMonitor для работы с хранилищем
-func (dm *DataManager) priceMonitorAdapter() {
-	// Подписываемся на события PriceMonitor
-	// В текущей реализации нужно перехватывать вызовы UpdateAllPrices
-	// Для простоты создаем обертку
-}
-
 // registerServices регистрирует сервисы в реестре
 func (dm *DataManager) registerServices() error {
-	// Регистрируем базовые сервисы
+	// Регистрируем все сервисы
 	services := map[string]Service{
 		"PriceStorage":     dm.newServiceAdapter("PriceStorage", dm.storage),
 		"PriceMonitor":     dm.newServiceAdapter("PriceMonitor", dm.priceMonitor),
@@ -155,76 +143,13 @@ func (dm *DataManager) registerServices() error {
 	return nil
 }
 
-// newServiceAdapter создает адаптер сервиса
-func (dm *DataManager) newServiceAdapter(name string, service interface{}) Service {
-	return &serviceAdapter{
-		name:    name,
-		service: service,
-		state:   StateStopped,
-	}
-}
-
-// serviceAdapter адаптирует любой объект к интерфейсу Service
-type serviceAdapter struct {
-	name    string
-	service interface{}
-	state   ServiceState
-}
-
-func (sa *serviceAdapter) Name() string {
-	return sa.name
-}
-
-func (sa *serviceAdapter) Start() error {
-	sa.state = StateRunning
-
-	// В зависимости от типа сервиса вызываем соответствующий метод
-	switch s := sa.service.(type) {
-	case storage.PriceStorage:
-		// Хранилище не требует запуска
-	case *monitor.PriceMonitor:
-		// PriceMonitor уже запускается отдельно
-	case *monitor.GrowthMonitor:
-		s.Start()
-	case *EventCoordinator:
-		// Координатор запускается автоматически
-	case *telegram.TelegramBot:
-		// TelegramBot не требует запуска
-	}
-
-	return nil
-}
-
-func (sa *serviceAdapter) Stop() error {
-	sa.state = StateStopping
-
-	switch s := sa.service.(type) {
-	case *monitor.GrowthMonitor:
-		s.Stop()
-	case *EventCoordinator:
-		s.Stop()
-	}
-
-	sa.state = StateStopped
-	return nil
-}
-
-func (sa *serviceAdapter) State() ServiceState {
-	return sa.state
-}
-
-func (sa *serviceAdapter) HealthCheck() bool {
-	// Простая проверка здоровья
-	return sa.state == StateRunning
-}
-
 // setupDependencies настраивает зависимости между сервисами
 func (dm *DataManager) setupDependencies() {
-	// GrowthMonitor зависит от PriceMonitor
-	dm.lifecycle.AddDependency("GrowthMonitor", "PriceMonitor")
-
 	// PriceMonitor зависит от PriceStorage
 	dm.lifecycle.AddDependency("PriceMonitor", "PriceStorage")
+
+	// GrowthMonitor зависит от PriceStorage
+	dm.lifecycle.AddDependency("GrowthMonitor", "PriceStorage")
 
 	// TelegramBot зависит от GrowthMonitor
 	if dm.telegramBot != nil {
@@ -249,11 +174,12 @@ func (dm *DataManager) Start() error {
 		return fmt.Errorf("failed to start some services")
 	}
 
-	// Запускаем фоновые задачи
-	dm.startBackgroundTasks()
+	// Запускаем мониторы
+	updateInterval := time.Duration(dm.config.UpdateInterval) * time.Second
+	dm.priceMonitor.StartMonitoring(updateInterval)
+	dm.growthMonitor.Start()
 
 	log.Println("✅ DataManager started successfully")
-
 	return nil
 }
 
@@ -268,7 +194,11 @@ func (dm *DataManager) Stop() error {
 	close(dm.stopChan)
 	dm.wg.Wait()
 
-	// Останавливаем сервисы в правильном порядке
+	// Останавливаем мониторы
+	dm.priceMonitor.StopMonitoring()
+	dm.growthMonitor.Stop()
+
+	// Останавливаем сервисы
 	errors := dm.lifecycle.StopAll()
 
 	if len(errors) > 0 {
@@ -281,13 +211,12 @@ func (dm *DataManager) Stop() error {
 	dm.lifecycle.Stop()
 
 	log.Println("✅ DataManager stopped")
-
 	return nil
 }
 
 // startBackgroundTasks запускает фоновые задачи
 func (dm *DataManager) startBackgroundTasks() {
-	// Задача обновления статистики
+	// Задача обновления статистики системы
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
@@ -305,7 +234,7 @@ func (dm *DataManager) startBackgroundTasks() {
 		}
 	}()
 
-	// Задача очистки старых данных
+	// Задача автоматической очистки старых данных
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
@@ -316,9 +245,27 @@ func (dm *DataManager) startBackgroundTasks() {
 		for {
 			select {
 			case <-ticker.C:
-				if _, err := dm.storageCoord.Cleanup(24 * time.Hour); err != nil {
+				if _, err := dm.storage.CleanOldData(24 * time.Hour); err != nil {
 					log.Printf("⚠️ Failed to cleanup old data: %v", err)
 				}
+			case <-dm.stopChan:
+				return
+			}
+		}
+	}()
+
+	// Задача мониторинга здоровья
+	dm.wg.Add(1)
+	go func() {
+		defer dm.wg.Done()
+
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				dm.checkHealth()
 			case <-dm.stopChan:
 				return
 			}
@@ -341,15 +288,40 @@ func (dm *DataManager) updateSystemStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
+	// Получаем статистику роста
+	var growthStats map[string]interface{}
+	if dm.growthMonitor != nil {
+		growthStats = dm.growthMonitor.GetGrowthStats()
+	}
+
 	dm.systemStats = SystemStats{
 		Services:      servicesInfo,
 		StorageStats:  storageStats,
 		Uptime:        time.Since(dm.startTime),
-		TotalRequests: 0, // Можно отслеживать
+		TotalRequests: 0, // Можно отслеживать в будущем
 		MemoryUsageMB: float64(m.Alloc) / 1024 / 1024,
 		CPUUsage:      0, // Нужны дополнительные метрики
 		ActiveSymbols: storageStats.TotalSymbols,
+		GrowthStats:   growthStats,
 		LastUpdated:   time.Now(),
+	}
+}
+
+// checkHealth проверяет здоровье системы
+func (dm *DataManager) checkHealth() {
+	health := dm.GetHealthStatus()
+
+	if health.Status != "healthy" {
+		dm.coordinator.PublishEvent(Event{
+			Type:      EventHealthCheck,
+			Service:   "DataManager",
+			Message:   fmt.Sprintf("System health check failed: %s", health.Status),
+			Timestamp: time.Now(),
+			Severity:  "warning",
+		})
+
+		// Можно добавить автоматическое восстановление
+		// dm.attemptRecovery()
 	}
 }
 
@@ -357,15 +329,11 @@ func (dm *DataManager) updateSystemStats() {
 func (dm *DataManager) GetSystemStats() SystemStats {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
-
 	return dm.systemStats
 }
 
 // GetHealthStatus возвращает статус здоровья системы
 func (dm *DataManager) GetHealthStatus() HealthStatus {
-	dm.mu.RLock()
-	defer dm.mu.RUnlock()
-
 	servicesInfo := dm.registry.GetAllInfo()
 	serviceStatus := make(map[string]string)
 
@@ -479,4 +447,67 @@ func (dm *DataManager) WaitForShutdown() {
 func (dm *DataManager) Cleanup() {
 	dm.storage.Clear()
 	dm.coordinator.ClearBuffer()
+}
+
+// serviceAdapter адаптирует любой объект к интерфейсу Service
+type serviceAdapter struct {
+	name    string
+	service interface{}
+	state   ServiceState
+}
+
+func (sa *serviceAdapter) Name() string {
+	return sa.name
+}
+
+func (sa *serviceAdapter) Start() error {
+	sa.state = StateRunning
+
+	// В зависимости от типа сервиса вызываем соответствующий метод
+	switch s := sa.service.(type) {
+	case storage.PriceStorage:
+		// Хранилище не требует запуска
+	case *monitor.PriceMonitor:
+		// PriceMonitor запускается отдельно через StartMonitoring
+	case *monitor.GrowthMonitor:
+		s.Start()
+	case *EventCoordinator:
+		// Координатор запускается автоматически
+	case *telegram.TelegramBot:
+		// TelegramBot не требует запуска
+	}
+
+	return nil
+}
+
+func (sa *serviceAdapter) Stop() error {
+	sa.state = StateStopping
+
+	switch s := sa.service.(type) {
+	case *monitor.GrowthMonitor:
+		s.Stop()
+	case *EventCoordinator:
+		s.Stop()
+	}
+
+	sa.state = StateStopped
+	return nil
+}
+
+func (sa *serviceAdapter) State() ServiceState {
+	return sa.state
+}
+
+func (sa *serviceAdapter) HealthCheck() bool {
+	// Простая проверка здоровья
+	return sa.state == StateRunning
+}
+
+// newServiceAdapter создает адаптер сервиса
+func (dm *DataManager) newServiceAdapter(name string, service interface{}) Service {
+	return &serviceAdapter{
+		name:    name,
+		service: service,
+		state:   StateStopped,
+	}
 }
