@@ -4,6 +4,7 @@ import (
 	"crypto-exchange-screener-bot/internal/analysis/analyzers"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -12,11 +13,11 @@ func main() {
 	fmt.Println("🔧 ТЕСТИРОВАНИЕ АНАЛИЗАТОРОВ")
 	fmt.Println(strings.Repeat("=", 60))
 
-	// Тестируем новый FallAnalyzer
-	testNewFallAnalyzer()
-
 	// Тестовые данные для других тестов
 	testData := createTestData()
+
+	// Тестируем новый FallAnalyzer  <-- ТОЛЬКО ОДИН РАЗ!
+	testNewFallAnalyzer()
 
 	// Тестируем GrowthAnalyzer
 	fmt.Println("\n🧪 ТЕСТ GROWTH ANALYZER:")
@@ -29,6 +30,10 @@ func main() {
 	// Тестируем ContinuousAnalyzer
 	fmt.Println("\n🧪 ТЕСТ CONTINUOUS ANALYZER:")
 	testContinuousAnalyzer(testData)
+
+	// Тестируем VolumeAnalyzer (если готов)
+	fmt.Println("\n🧪 ТЕСТ VOLUME ANALYZER:")
+	testVolumeAnalyzer(testData)
 
 	fmt.Println("\n✅ Тестирование завершено")
 }
@@ -359,5 +364,86 @@ func testContinuousAnalyzer(data []types.PriceData) {
 		fmt.Println("   🔍 В данных есть последовательные изменения:")
 		fmt.Println("      - Рост: точки 0→1→2 (+1% → +1%)")
 		fmt.Println("      - Падение: точки 2→3→4 (-0.5% → -1%)")
+	}
+}
+func testVolumeAnalyzer(data []types.PriceData) {
+	config := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.5,
+		MinConfidence: 30.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"min_volume":              100000.0, // Минимальный объем
+			"volume_change_threshold": 50.0,     // Порог изменения объема
+		},
+	}
+
+	analyzer := analyzers.NewVolumeAnalyzer(config)
+
+	fmt.Println("   Конфигурация:")
+	fmt.Printf("      • MinVolume: %.0f\n", config.CustomSettings["min_volume"])
+	fmt.Printf("      • VolumeChangeThreshold: %.0f%%\n", config.CustomSettings["volume_change_threshold"])
+	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
+
+	// Покажем объемы
+	fmt.Println("   📊 Объемы данных:")
+	for i, point := range data {
+		fmt.Printf("      %d. Цена: %.2f, Объем: %.0f\n",
+			i+1, point.Price, point.Volume24h)
+	}
+
+	signals, err := analyzer.Analyze(data, config)
+	if err != nil {
+		fmt.Printf("   ❌ Ошибка: %v\n", err)
+		return
+	}
+
+	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
+
+	for i, signal := range signals {
+		fmt.Printf("      Сигнал %d:\n", i+1)
+		fmt.Printf("      • Символ: %s\n", signal.Symbol)
+		fmt.Printf("      • Тип: %s\n", signal.Type)
+		fmt.Printf("      • Направление: %s\n", signal.Direction)
+		fmt.Printf("      • Уверенность: %.1f%%\n", signal.Confidence)
+
+		if avgVolume, ok := signal.Metadata.Indicators["avg_volume"]; ok {
+			fmt.Printf("      • Средний объем: %.0f\n", avgVolume)
+		}
+
+		if volumeChange, ok := signal.Metadata.Indicators["volume_change"]; ok {
+			fmt.Printf("      • Изменение объема: %.1f%%\n", volumeChange)
+
+			// Проверяем значительное изменение объема
+			threshold := config.CustomSettings["volume_change_threshold"].(float64)
+			if math.Abs(volumeChange) > threshold {
+				fmt.Printf("      ⚡ ЗНАЧИТЕЛЬНОЕ ИЗМЕНЕНИЕ ОБЪЕМА!\n")
+			}
+		}
+	}
+
+	if len(signals) == 0 {
+		fmt.Println("   ⚠️  Нет сигналов объема!")
+		// Рассчитаем средний объем вручную
+		var totalVolume float64
+		hasVolume := false
+		for _, point := range data {
+			if point.Volume24h > 0 {
+				totalVolume += point.Volume24h
+				hasVolume = true
+			}
+		}
+
+		if hasVolume {
+			avgVolume := totalVolume / float64(len(data))
+			fmt.Printf("   📈 Средний объем: %.0f\n", avgVolume)
+			fmt.Printf("   🔍 Минимальный порог: %.0f\n", config.CustomSettings["min_volume"])
+
+			if avgVolume < config.CustomSettings["min_volume"].(float64) {
+				fmt.Println("   💡 Объем ниже минимального порога!")
+			}
+		} else {
+			fmt.Println("   💡 В данных нет информации об объеме!")
+		}
 	}
 }

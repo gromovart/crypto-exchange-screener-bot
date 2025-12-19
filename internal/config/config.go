@@ -199,6 +199,10 @@ func LoadConfig(envPath string) (*Config, error) {
 		LogFile:       getEnvString("LOG_FILE", "logs/bot.log"),
 		LogMaxSize:    getEnvInt("LOG_MAX_SIZE", 10),
 		LogMaxBackups: getEnvInt("LOG_MAX_BACKUPS", 5),
+		LogToConsole:  true,
+		LogToFile:     true,
+		LogFilePath:   "logs/app.log",
+		DebugMode:     false, // Отключаем debug mode по умолчанию
 
 		// HTTP Server
 		HttpPort:    getEnvString("HTTP_PORT", "8080"),

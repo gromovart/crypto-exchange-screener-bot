@@ -230,7 +230,7 @@ func manualAnalyzerCheck(dataManager *manager.DataManager) {
 		fmt.Printf("         📈 Изменение: %.6f%% (%.6f → %.6f)\n", change, first, last)
 
 		// Проверяем против порогов
-		cfg := dataManager.(interface{ GetConfig() *config.Config }).GetConfig()
+		cfg := createDebugConfig()
 		if cfg == nil {
 			continue
 		}

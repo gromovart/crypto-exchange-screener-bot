@@ -2,6 +2,7 @@
 package events
 
 import (
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -187,8 +188,8 @@ func (b *EventBus) Publish(event Event) error {
 		return fmt.Errorf("event bus is not running")
 	}
 
-	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
-	fmt.Printf("🔍 [EventBus.Publish] Публикую %s от %s\n", event.Type, event.Source)
+	logger.Debug("[EventBus.Publish] Публикую %s от %s", event.Type, event.Source)
+	logger.Info("📤 Опубликовано событие: %s от %s", event.Type, event.Source)
 
 	// Устанавливаем ID и временную метку если они не установлены
 	if event.ID == "" {
@@ -206,7 +207,7 @@ func (b *EventBus) Publish(event Event) error {
 		b.metrics.mu.Unlock()
 
 		if b.config.EnableLogging && event.Type != EventPriceUpdated {
-			log.Printf("📤 Опубликовано событие: %s от %s",
+			logger.Info("📤 Опубликовано событие: %s от %s",
 				event.Type, event.Source)
 		}
 		fmt.Printf("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
@@ -214,7 +215,7 @@ func (b *EventBus) Publish(event Event) error {
 	default:
 		// Буфер полон
 		if b.config.EnableLogging {
-			log.Printf("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
+			logger.Warn("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
 		}
 		return fmt.Errorf("event buffer is full")
 	}
