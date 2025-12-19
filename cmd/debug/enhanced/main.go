@@ -3,6 +3,7 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/manager"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"os"
@@ -14,8 +15,8 @@ import (
 )
 
 func main() {
-	fmt.Println("🚀 ЗАПУСК РАСШИРЕННОЙ ОТЛАДКИ")
-	fmt.Println(strings.Repeat("=", 70))
+	logger.Debug("🚀 ЗАПУСК РАСШИРЕННОЙ ОТЛАДКИ")
+	logger.Debug(strings.Repeat("=", 70))
 
 	// Загружаем конфигурацию
 	cfg, err := config.LoadConfig(".env")
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	// НАСТРАИВАЕМ ДЛЯ МАКСИМАЛЬНОЙ ЧУВСТВИТЕЛЬНОСТИ
-	fmt.Println("\n⚙️  НАСТРОЙКА ДЛЯ ОТЛАДКИ:")
+	logger.Debug("\n⚙️  НАСТРОЙКА ДЛЯ ОТЛАДКИ:")
 
 	// Основные настройки
 	cfg.DebugMode = true
@@ -75,41 +76,41 @@ func main() {
 	fmt.Printf("      • Фильтр объема: %v\n", cfg.MinVolumeFilter > 0)
 
 	// Создаем менеджер
-	fmt.Println("\n🛠️  Создание менеджера данных...")
+	logger.Debug("\n🛠️  Создание менеджера данных...")
 	dataManager, err := manager.NewDataManager(cfg)
 	if err != nil {
 		log.Fatalf("❌ Ошибка создания менеджера: %v", err)
 	}
-	fmt.Println("✅ Менеджер создан")
+	logger.Debug("✅ Менеджер создан")
 
 	// Запускаем сервисы
-	fmt.Println("\n🚀 Запуск сервисов...")
+	logger.Debug("\n🚀 Запуск сервисов...")
 	errors := dataManager.StartAllServices()
 
 	if len(errors) > 0 {
-		fmt.Println("⚠️  Ошибки запуска:")
+		logger.Debug("⚠️  Ошибки запуска:")
 		for service, err := range errors {
 			fmt.Printf("   ❌ %s: %v\n", service, err)
 		}
 	} else {
-		fmt.Println("✅ Все сервисы запущены")
+		logger.Debug("✅ Все сервисы запущены")
 	}
 
 	// Обработка сигналов
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Println("📈 РАСШИРЕННАЯ ОТЛАДКА")
-	fmt.Println(strings.Repeat("=", 70))
-	fmt.Println("⚡ Супер-низкие пороги для тестирования (0.1%)")
-	fmt.Println("🔧 Отключены все фильтры")
-	fmt.Println("📊 План работы:")
-	fmt.Println("   1. Проверка хранилища через 5 секунд")
-	fmt.Println("   2. Анализ через 10 секунд")
-	fmt.Println("   3. Детальная проверка через 15 секунд")
-	fmt.Println("\n🛑 Для остановки нажмите Ctrl+C")
-	fmt.Println(strings.Repeat("=", 70))
+	logger.Debug("\n" + strings.Repeat("=", 70))
+	logger.Debug("📈 РАСШИРЕННАЯ ОТЛАДКА")
+	logger.Debug(strings.Repeat("=", 70))
+	logger.Debug("⚡ Супер-низкие пороги для тестирования (0.1%)")
+	logger.Debug("🔧 Отключены все фильтры")
+	logger.Debug("📊 План работы:")
+	logger.Debug("   1. Проверка хранилища через 5 секунд")
+	logger.Debug("   2. Анализ через 10 секунд")
+	logger.Debug("   3. Детальная проверка через 15 секунд")
+	logger.Debug("\n🛑 Для остановки нажмите Ctrl+C")
+	logger.Debug(strings.Repeat("=", 70))
 
 	// Запускаем тесты
 	testChan := make(chan bool, 1)
@@ -117,23 +118,23 @@ func main() {
 	go func() {
 		// Тест 1: Проверка хранилища
 		time.Sleep(5 * time.Second)
-		fmt.Println("\n" + strings.Repeat("📊", 25))
-		fmt.Println("ТЕСТ 1: ПРОВЕРКА ХРАНИЛИЩА")
-		fmt.Println(strings.Repeat("📊", 25))
+		logger.Debug("\n" + strings.Repeat("📊", 25))
+		logger.Debug("ТЕСТ 1: ПРОВЕРКА ХРАНИЛИЩА")
+		logger.Debug(strings.Repeat("📊", 25))
 		runStorageTest(dataManager)
 
 		// Тест 2: Первый анализ
 		time.Sleep(5 * time.Second)
-		fmt.Println("\n" + strings.Repeat("🧪", 25))
-		fmt.Println("ТЕСТ 2: ПЕРВЫЙ АНАЛИЗ")
-		fmt.Println(strings.Repeat("🧪", 25))
+		logger.Debug("\n" + strings.Repeat("🧪", 25))
+		logger.Debug("ТЕСТ 2: ПЕРВЫЙ АНАЛИЗ")
+		logger.Debug(strings.Repeat("🧪", 25))
 		runAnalysisTest(dataManager)
 
 		// Тест 3: Детальный анализ
 		time.Sleep(5 * time.Second)
-		fmt.Println("\n" + strings.Repeat("🔍", 25))
-		fmt.Println("ТЕСТ 3: ДЕТАЛЬНЫЙ АНАЛИЗ")
-		fmt.Println(strings.Repeat("🔍", 25))
+		logger.Debug("\n" + strings.Repeat("🔍", 25))
+		logger.Debug("ТЕСТ 3: ДЕТАЛЬНЫЙ АНАЛИЗ")
+		logger.Debug(strings.Repeat("🔍", 25))
 		runDetailedAnalysis(dataManager)
 
 		testChan <- true
@@ -142,24 +143,24 @@ func main() {
 	// Ждем либо завершения тестов, либо сигнала
 	select {
 	case <-testChan:
-		fmt.Println("\n✅ Все тесты завершены")
-		fmt.Println("Система продолжает работать в фоновом режиме")
-		fmt.Println("Нажмите Ctrl+C для остановки")
+		logger.Debug("\n✅ Все тесты завершены")
+		logger.Debug("Система продолжает работать в фоновом режиме")
+		logger.Debug("Нажмите Ctrl+C для остановки")
 
 		// Ждем сигнал завершения
 		<-sigChan
 
 	case <-sigChan:
-		fmt.Println("\n🛑 Получен сигнал завершения...")
+		logger.Debug("\n🛑 Получен сигнал завершения...")
 	}
 
 	// Останавливаем
-	fmt.Println("\n⏳ Остановка сервисов...")
+	logger.Debug("\n⏳ Остановка сервисов...")
 	if err := dataManager.Stop(); err != nil {
 		fmt.Printf("⚠️ Ошибка остановки: %v\n", err)
 	}
 
-	fmt.Println("✅ Программа завершена")
+	logger.Debug("✅ Программа завершена")
 }
 
 // runStorageTest проверяет хранилище
@@ -170,7 +171,7 @@ func runStorageTest(dataManager *manager.DataManager) {
 
 	storage := dataManager.GetStorage()
 	if storage == nil {
-		fmt.Println("❌ Хранилище не инициализировано")
+		logger.Debug("❌ Хранилище не инициализировано")
 		return
 	}
 
@@ -180,8 +181,8 @@ func runStorageTest(dataManager *manager.DataManager) {
 	fmt.Printf("   • Всего символов: %d\n", len(symbols))
 
 	if len(symbols) == 0 {
-		fmt.Println("   ⚠️  Нет символов в хранилище!")
-		fmt.Println("   💡 Проверьте API ключи и подключение к Bybit")
+		logger.Debug("   ⚠️  Нет символов в хранилище!")
+		logger.Debug("   💡 Проверьте API ключи и подключение к Bybit")
 		return
 	}
 
@@ -215,7 +216,7 @@ func runAnalysisTest(dataManager *manager.DataManager) {
 		return
 	}
 
-	fmt.Println("🧪 Запуск анализа...")
+	logger.Debug("🧪 Запуск анализа...")
 	startTime := time.Now()
 
 	results, err := dataManager.RunAnalysis()
@@ -257,7 +258,7 @@ func runAnalysisTest(dataManager *manager.DataManager) {
 	fmt.Printf("   • Обнаружено сигналов: %d\n", totalSignals)
 
 	if totalSignals > 0 {
-		fmt.Println("   🎯 Обнаруженные сигналы:")
+		logger.Debug("   🎯 Обнаруженные сигналы:")
 
 		// Сортируем по изменению (по убыванию)
 		sort.Slice(allSignals, func(i, j int) bool {
@@ -288,8 +289,8 @@ func runAnalysisTest(dataManager *manager.DataManager) {
 				sig["period"].(int))
 		}
 	} else {
-		fmt.Println("   ⚠️  Сигналы не обнаружены")
-		fmt.Println("   🔍 Проверяем возможные проблемы...")
+		logger.Debug("   ⚠️  Сигналы не обнаружены")
+		logger.Debug("   🔍 Проверяем возможные проблемы...")
 		checkPotentialIssues(dataManager)
 	}
 }
@@ -300,7 +301,7 @@ func runDetailedAnalysis(dataManager *manager.DataManager) {
 		return
 	}
 
-	fmt.Println("🔍 Детальный анализ системы...")
+	logger.Debug("🔍 Детальный анализ системы...")
 
 	// 1. Проверяем анализаторы
 	if engine := dataManager.GetAnalysisEngine(); engine != nil {
@@ -351,7 +352,7 @@ func runDetailedAnalysis(dataManager *manager.DataManager) {
 	}
 
 	// 3. Еще один анализ с выводом всех символов
-	fmt.Println("\n🧪 Финальный анализ всех символов:")
+	logger.Debug("\n🧪 Финальный анализ всех символов:")
 	results, err := dataManager.RunAnalysis()
 	if err != nil {
 		fmt.Printf("❌ Ошибка: %v\n", err)
@@ -386,28 +387,28 @@ func runDetailedAnalysis(dataManager *manager.DataManager) {
 	}
 
 	if growthCount == 0 && fallCount == 0 {
-		fmt.Println("   ⚠️  АБСОЛЮТНО НИКАКИХ СИГНАЛОВ!")
-		fmt.Println("   🚨 Возможные серьезные проблемы:")
-		fmt.Println("      1. Анализаторы не работают")
-		fmt.Println("      2. Данные не поступают")
-		fmt.Println("      3. Очень стабильный рынок (маловероятно)")
-		fmt.Println("      4. Ошибки в логике анализа")
+		logger.Debug("   ⚠️  АБСОЛЮТНО НИКАКИХ СИГНАЛОВ!")
+		logger.Debug("   🚨 Возможные серьезные проблемы:")
+		logger.Debug("      1. Анализаторы не работают")
+		logger.Debug("      2. Данные не поступают")
+		logger.Debug("      3. Очень стабильный рынок (маловероятно)")
+		logger.Debug("      4. Ошибки в логике анализа")
 	}
 }
 
 // checkPotentialIssues проверяет возможные проблемы
 func checkPotentialIssues(dataManager *manager.DataManager) {
-	fmt.Println("   🔧 Проверка проблем:")
+	logger.Debug("   🔧 Проверка проблем:")
 
 	// 1. Проверяем данные в хранилище
 	storage := dataManager.GetStorage()
 	if storage != nil {
 		symbols := storage.GetSymbols()
 		if len(symbols) == 0 {
-			fmt.Println("      ❌ Нет символов в хранилище")
-			fmt.Println("         • Проверьте API ключи")
-			fmt.Println("         • Проверьте подключение к интернету")
-			fmt.Println("         • Проверьте статус API Bybit")
+			logger.Debug("      ❌ Нет символов в хранилище")
+			logger.Debug("         • Проверьте API ключи")
+			logger.Debug("         • Проверьте подключение к интернету")
+			logger.Debug("         • Проверьте статус API Bybit")
 			return
 		}
 
@@ -417,8 +418,8 @@ func checkPotentialIssues(dataManager *manager.DataManager) {
 			history, err := storage.GetPriceHistory(symbol, 3)
 			if err != nil || len(history) < 2 {
 				fmt.Printf("      ❌ Недостаточно данных для %s\n", symbol)
-				fmt.Println("         • Ожидайте больше данных")
-				fmt.Println("         • Проверьте обновление цен")
+				logger.Debug("         • Ожидайте больше данных")
+				logger.Debug("         • Проверьте обновление цен")
 				return
 			}
 
@@ -430,9 +431,9 @@ func checkPotentialIssues(dataManager *manager.DataManager) {
 			fmt.Printf("      • Тестовый символ %s: изменение %.4f%%\n", symbol, change)
 
 			if change == 0 {
-				fmt.Println("         ⚠️  Цена не меняется")
-				fmt.Println("         • Может быть стабильный рынок")
-				fmt.Println("         • Или проблемы с данными")
+				logger.Debug("         ⚠️  Цена не меняется")
+				logger.Debug("         • Может быть стабильный рынок")
+				logger.Debug("         • Или проблемы с данными")
 			}
 		}
 	}
@@ -441,16 +442,16 @@ func checkPotentialIssues(dataManager *manager.DataManager) {
 	if engine := dataManager.GetAnalysisEngine(); engine != nil {
 		analyzers := engine.GetAnalyzers()
 		if len(analyzers) == 0 {
-			fmt.Println("      ❌ Нет зарегистрированных анализаторов")
+			logger.Debug("      ❌ Нет зарегистрированных анализаторов")
 		} else {
 			fmt.Printf("      • Анализаторы: %v\n", analyzers)
 		}
 	}
 
 	// 3. Советы по настройке
-	fmt.Println("   💡 Советы по настройке:")
-	fmt.Println("      • Уменьшите пороги до 0.01%")
-	fmt.Println("      • Уменьшите уверенность до 1%")
-	fmt.Println("      • Проверьте данные вручную через API")
-	fmt.Println("      • Добавьте больше символов для мониторинга")
+	logger.Debug("   💡 Советы по настройке:")
+	logger.Debug("      • Уменьшите пороги до 0.01%")
+	logger.Debug("      • Уменьшите уверенность до 1%")
+	logger.Debug("      • Проверьте данные вручную через API")
+	logger.Debug("      • Добавьте больше символов для мониторинга")
 }

@@ -4,6 +4,7 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/manager"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"os"
@@ -14,8 +15,8 @@ import (
 )
 
 func main() {
-	fmt.Println("🚀 Запуск в режиме отладки...")
-	fmt.Println("📁 Загрузка конфигурации из .env файла...")
+	logger.Debug("🚀 Запуск в режиме отладки...")
+	logger.Debug("📁 Загрузка конфигурации из .env файла...")
 
 	// Загружаем конфигурацию
 	cfg, err := config.LoadConfig(".env")
@@ -24,7 +25,7 @@ func main() {
 	}
 
 	// ПРЕВРАЩАЕМ КОНФИГ В РЕЖИМ ОТЛАДКИ
-	fmt.Println("\n⚙️  НАСТРОЙКА РЕЖИМА ОТЛАДКИ:")
+	logger.Debug("\n⚙️  НАСТРОЙКА РЕЖИМА ОТЛАДКИ:")
 
 	// Общие настройки отладки
 	cfg.DebugMode = true
@@ -73,7 +74,7 @@ func main() {
 	fmt.Printf("   Порог падения: %.1f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
 	fmt.Printf("   Telegram: %v\n", cfg.TelegramEnabled)
 
-	fmt.Println("\n🛠️  Создание менеджера данных...")
+	logger.Debug("\n🛠️  Создание менеджера данных...")
 
 	// Создаем менеджер данных
 	dataManager, err := manager.NewDataManager(cfg)
@@ -81,15 +82,15 @@ func main() {
 		log.Fatalf("❌ Ошибка создания менеджера данных: %v", err)
 	}
 
-	fmt.Println("✅ Менеджер данных создан")
+	logger.Debug("✅ Менеджер данных создан")
 
 	// Запускаем сервисы
-	fmt.Println("\n🚀 Запуск сервисов...")
+	logger.Debug("\n🚀 Запуск сервисов...")
 	startTime := time.Now()
 	errors := dataManager.StartAllServices()
 
 	if len(errors) > 0 {
-		fmt.Println("⚠️  Ошибки при запуске сервисов:")
+		logger.Debug("⚠️  Ошибки при запуске сервисов:")
 		for service, err := range errors {
 			fmt.Printf("   ❌ %s: %v\n", service, err)
 		}
@@ -106,10 +107,10 @@ func main() {
 
 	// Запускаем тестовый анализ через 10 секунд
 	go func() {
-		fmt.Println("\n⏳ Ожидание 10 секунд для сбора данных...")
+		logger.Debug("\n⏳ Ожидание 10 секунд для сбора данных...")
 		time.Sleep(10 * time.Second)
 
-		fmt.Println("\n🧪 ТЕСТОВЫЙ АНАЛИЗ:")
+		logger.Debug("\n🧪 ТЕСТОВЫЙ АНАЛИЗ:")
 		debugger.TestAnalysis()
 
 		// Показываем статистику каждые 30 секунд
@@ -126,13 +127,13 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Println("📊 СИСТЕМА ОТЛАДКИ ЗАПУЩЕНА")
-	fmt.Println(strings.Repeat("=", 70))
-	fmt.Println("📈 Мониторинг роста/падения криптовалют")
-	fmt.Println("⚡ Режим: ОТЛАДКА (упрощенная конфигурация)")
-	fmt.Println("📁 Логи: debug.log")
-	fmt.Println("\n📋 КОНФИГУРАЦИЯ ОТЛАДКИ:")
+	logger.Debug("\n" + strings.Repeat("=", 70))
+	logger.Debug("📊 СИСТЕМА ОТЛАДКИ ЗАПУЩЕНА")
+	logger.Debug(strings.Repeat("=", 70))
+	logger.Debug("📈 Мониторинг роста/падения криптовалют")
+	logger.Debug("⚡ Режим: ОТЛАДКА (упрощенная конфигурация)")
+	logger.Debug("📁 Логи: debug.log")
+	logger.Debug("\n📋 КОНФИГУРАЦИЯ ОТЛАДКИ:")
 	fmt.Printf("   • Символов: %d (из вашего списка)\n", cfg.MaxSymbolsToMonitor)
 	fmt.Printf("   • Интервал обновления: %d сек\n", cfg.UpdateInterval)
 	fmt.Printf("   • Анализ каждые: %d сек\n", cfg.AnalysisEngine.UpdateInterval)
@@ -140,27 +141,27 @@ func main() {
 		cfg.Analyzers.GrowthAnalyzer.MinGrowth,
 		cfg.Analyzers.FallAnalyzer.MinFall)
 	fmt.Printf("   • Фильтры: %v\n", cfg.SignalFilters.Enabled)
-	fmt.Println("\n⏰ Первый анализ через 10 секунд...")
-	fmt.Println("📊 Статистика каждые 30 секунд")
-	fmt.Println("\n🛑 Для остановки нажмите Ctrl+C")
-	fmt.Println(strings.Repeat("=", 70))
+	logger.Debug("\n⏰ Первый анализ через 10 секунд...")
+	logger.Debug("📊 Статистика каждые 30 секунд")
+	logger.Debug("\n🛑 Для остановки нажмите Ctrl+C")
+	logger.Debug(strings.Repeat("=", 70))
 
 	// Ждем сигнал завершения
 	<-sigChan
-	fmt.Println("\n🛑 Получен сигнал завершения...")
+	logger.Debug("\n🛑 Получен сигнал завершения...")
 
 	// Останавливаем отладчик
 	debugger.Stop()
 
 	// Останавливаем менеджер
-	fmt.Println("⏳ Остановка сервисов...")
+	logger.Debug("⏳ Остановка сервисов...")
 	stopTime := time.Now()
 	if err := dataManager.Stop(); err != nil {
 		log.Printf("⚠️ Ошибка при остановке: %v", err)
 	}
 
 	fmt.Printf("✅ Все сервисы остановлены за %v\n", time.Since(stopTime))
-	fmt.Println("🎯 Программа завершена")
+	logger.Debug("🎯 Программа завершена")
 }
 
 // Debugger - отладчик системы
@@ -190,7 +191,7 @@ func (d *Debugger) Start() {
 	}
 
 	d.running = true
-	fmt.Println("🔧 Отладчик активирован")
+	logger.Debug("🔧 Отладчик активирован")
 }
 
 // Stop останавливает отладчик
@@ -201,7 +202,7 @@ func (d *Debugger) Stop() {
 
 	d.running = false
 	close(d.stopChan)
-	fmt.Println("🔧 Отладчик деактивирован")
+	logger.Debug("🔧 Отладчик деактивирован")
 }
 
 // PrintStats выводит статистику
@@ -268,11 +269,11 @@ func (d *Debugger) PrintStats() {
 // TestAnalysis запускает тестовый анализ
 func (d *Debugger) TestAnalysis() {
 	if d.dataManager == nil {
-		fmt.Println("❌ Менеджер данных не инициализирован")
+		logger.Debug("❌ Менеджер данных не инициализирован")
 		return
 	}
 
-	fmt.Println("🧪 Запуск ручного анализа...")
+	logger.Debug("🧪 Запуск ручного анализа...")
 	startTime := time.Now()
 
 	results, err := d.dataManager.RunAnalysis()
@@ -312,7 +313,7 @@ func (d *Debugger) TestAnalysis() {
 	fmt.Printf("   • Рост: %d | Падение: %d\n", growthSignals, fallSignals)
 
 	if totalSignals > 0 {
-		fmt.Println("\n🎯 ТОП СИГНАЛЫ:")
+		logger.Debug("\n🎯 ТОП СИГНАЛЫ:")
 		// Собираем все сигналы
 		var allSignals []interface{}
 		for _, result := range results {

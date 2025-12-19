@@ -3,7 +3,7 @@ package manager
 
 import (
 	"crypto-exchange-screener-bot/internal/events"
-	"log"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"sync"
 	"time"
 )
@@ -516,7 +516,7 @@ func (lm *LifecycleManager) publishEvent(event events.Event) {
 	if lm.eventBus != nil {
 		lm.eventBus.Publish(event)
 	} else {
-		log.Printf("[EVENT] %s: %s - %v", event.Type, event.Source, event.Data)
+		logger.Info("[EVENT] %s: %s - %v", event.Type, event.Source, event.Data)
 	}
 }
 

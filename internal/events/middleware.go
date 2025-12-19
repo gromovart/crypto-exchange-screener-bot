@@ -2,6 +2,7 @@
 package events
 
 import (
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"sync"
@@ -12,7 +13,7 @@ import (
 type LoggingMiddleware struct{}
 
 func (m *LoggingMiddleware) Process(event Event, next HandlerFunc) error {
-	fmt.Printf("🔍 [LoggingMiddleware] Начало обработки %s\n", event.Type)
+	logger.Info("🔍 [LoggingMiddleware] Начало обработки %s\n", event.Type)
 	start := time.Now()
 
 	err := next(event)
@@ -20,10 +21,10 @@ func (m *LoggingMiddleware) Process(event Event, next HandlerFunc) error {
 	duration := time.Since(start)
 
 	if err != nil {
-		fmt.Printf("❌ [LoggingMiddleware] Ошибка обработки %s за %v: %v\n",
+		logger.Info("❌ [LoggingMiddleware] Ошибка обработки %s за %v: %v\n",
 			event.Type, duration, err)
 	} else {
-		fmt.Printf("✅ [LoggingMiddleware] %s обработан за %v\n",
+		logger.Info("✅ [LoggingMiddleware] %s обработан за %v\n",
 			event.Type, duration)
 	}
 
@@ -36,7 +37,7 @@ type MetricsMiddleware struct {
 }
 
 func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
-	fmt.Printf("🔍 [MetricsMiddleware] Обработка %s\n", event.Type)
+	logger.Info("🔍 [MetricsMiddleware] Обработка %s\n", event.Type)
 	start := time.Now()
 
 	err := next(event)
@@ -47,7 +48,7 @@ func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
 	m.metrics.ProcessingTime += duration
 	m.metrics.mu.Unlock()
 
-	fmt.Printf("✅ [MetricsMiddleware] %s обработан за %v\n", event.Type, duration)
+	logger.Info("✅ [MetricsMiddleware] %s обработан за %v\n", event.Type, duration)
 	return err
 }
 
@@ -91,7 +92,7 @@ func (m *RateLimitingMiddleware) Process(event Event, next HandlerFunc) error {
 type ValidationMiddleware struct{}
 
 func (m *ValidationMiddleware) Process(event Event, next HandlerFunc) error {
-	fmt.Printf("🔍 [ValidationMiddleware] Проверка %s от %s\n",
+	logger.Info("🔍 [ValidationMiddleware] Проверка %s от %s\n",
 		event.Type, event.Source)
 
 	// Проверяем обязательные поля
@@ -107,7 +108,7 @@ func (m *ValidationMiddleware) Process(event Event, next HandlerFunc) error {
 		return fmt.Errorf("event timestamp is required")
 	}
 
-	fmt.Printf("✅ [ValidationMiddleware] Все проверки пройдены, вызываю next\n")
+	logger.Info("✅ [ValidationMiddleware] Все проверки пройдены, вызываю next\n")
 
 	// 🔴 ВЫЗЫВАЕМ next В ЛЮБОМ СЛУЧАЕ!
 	return next(event)

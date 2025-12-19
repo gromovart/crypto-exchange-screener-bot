@@ -3,6 +3,7 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/manager"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"os"
@@ -14,58 +15,58 @@ import (
 )
 
 func main() {
-	fmt.Println("🔬 ГЛУБОКАЯ ДИАГНОСТИКА СИСТЕМЫ")
-	fmt.Println(strings.Repeat("=", 70))
+	logger.Debug("🔬 ГЛУБОКАЯ ДИАГНОСТИКА СИСТЕМЫ")
+	logger.Debug(strings.Repeat("=", 70))
 
 	// 1. Проверяем конфигурацию
-	fmt.Println("\n1️⃣  ПРОВЕРКА КОНФИГУРАЦИИ")
+	logger.Debug("\n1️⃣  ПРОВЕРКА КОНФИГУРАЦИИ")
 	cfg := createDebugConfig()
 	printConfig(cfg)
 
 	// 2. Создаем менеджер
-	fmt.Println("\n2️⃣  СОЗДАНИЕ МЕНЕДЖЕРА")
+	logger.Debug("\n2️⃣  СОЗДАНИЕ МЕНЕДЖЕРА")
 	dataManager, err := manager.NewDataManager(cfg)
 	if err != nil {
 		log.Fatalf("❌ Ошибка создания менеджера: %v", err)
 	}
-	fmt.Println("✅ Менеджер создан")
+	logger.Debug("✅ Менеджер создан")
 
 	// 3. Запускаем только хранилище и фетчер
-	fmt.Println("\n3️⃣  ЗАПУСК БАЗОВЫХ СЕРВИСОВ")
+	logger.Debug("\n3️⃣  ЗАПУСК БАЗОВЫХ СЕРВИСОВ")
 	startBasicServices(dataManager)
 
 	// 4. Ждем данные
-	fmt.Println("\n4️⃣  ОЖИДАНИЕ ДАННЫХ")
+	logger.Debug("\n4️⃣  ОЖИДАНИЕ ДАННЫХ")
 	time.Sleep(10 * time.Second)
 
 	// 5. Проверяем данные
-	fmt.Println("\n5️⃣  ПРОВЕРКА ДАННЫХ")
+	logger.Debug("\n5️⃣  ПРОВЕРКА ДАННЫХ")
 	checkData(dataManager)
 
 	// 6. Проверяем анализаторы вручную
-	fmt.Println("\n6️⃣  РУЧНАЯ ПРОВЕРКА АНАЛИЗАТОРОВ")
+	logger.Debug("\n6️⃣  РУЧНАЯ ПРОВЕРКА АНАЛИЗАТОРОВ")
 	manualAnalyzerCheck(dataManager)
 
 	// 7. Запускаем полную систему
-	fmt.Println("\n7️⃣  ЗАПУСК ПОЛНОЙ СИСТЕМЫ")
+	logger.Debug("\n7️⃣  ЗАПУСК ПОЛНОЙ СИСТЕМЫ")
 	startAllServices(dataManager)
 
 	// 8. Запускаем тестовый анализ
-	fmt.Println("\n8️⃣  ТЕСТОВЫЙ АНАЛИЗ")
+	logger.Debug("\n8️⃣  ТЕСТОВЫЙ АНАЛИЗ")
 	runTestAnalysis(dataManager)
 
 	// Ожидание завершения
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Println("🏁 СИСТЕМА ЗАПУЩЕНА. Нажмите Ctrl+C для остановки")
-	fmt.Println(strings.Repeat("=", 70))
+	logger.Debug("\n" + strings.Repeat("=", 70))
+	logger.Debug("🏁 СИСТЕМА ЗАПУЩЕНА. Нажмите Ctrl+C для остановки")
+	logger.Debug(strings.Repeat("=", 70))
 
 	<-sigChan
-	fmt.Println("\n🛑 Остановка...")
+	logger.Debug("\n🛑 Остановка...")
 	dataManager.Stop()
-	fmt.Println("✅ Готово")
+	logger.Debug("✅ Готово")
 }
 
 func createDebugConfig() *config.Config {
@@ -93,7 +94,7 @@ func createDebugConfig() *config.Config {
 }
 
 func printConfig(cfg *config.Config) {
-	fmt.Println("   ⚙️  Настройки анализа:")
+	logger.Debug("   ⚙️  Настройки анализа:")
 	fmt.Printf("      • Рост: порог=%.3f%%, уверенность=%.1f%%\n",
 		cfg.Analyzers.GrowthAnalyzer.MinGrowth,
 		cfg.Analyzers.GrowthAnalyzer.MinConfidence)
@@ -120,19 +121,19 @@ func startBasicServices(dataManager *manager.DataManager) {
 	}
 
 	if len(errors) > 0 {
-		fmt.Println("   ⚠️  Ошибки запуска:")
+		logger.Debug("   ⚠️  Ошибки запуска:")
 		for service, err := range errors {
 			fmt.Printf("      • %s: %v\n", service, err)
 		}
 	} else {
-		fmt.Println("   ✅ Базовые сервисы запущены")
+		logger.Debug("   ✅ Базовые сервисы запущены")
 	}
 }
 
 func checkData(dataManager *manager.DataManager) {
 	storage := dataManager.GetStorage()
 	if storage == nil {
-		fmt.Println("   ❌ Хранилище не инициализировано")
+		logger.Debug("   ❌ Хранилище не инициализировано")
 		return
 	}
 
@@ -141,7 +142,7 @@ func checkData(dataManager *manager.DataManager) {
 	fmt.Printf("      • Символов: %d\n", len(symbols))
 
 	if len(symbols) == 0 {
-		fmt.Println("      ⚠️  Нет данных! Проверьте API ключи")
+		logger.Debug("      ⚠️  Нет данных! Проверьте API ключи")
 		return
 	}
 
@@ -189,13 +190,13 @@ func checkData(dataManager *manager.DataManager) {
 func manualAnalyzerCheck(dataManager *manager.DataManager) {
 	storage := dataManager.GetStorage()
 	if storage == nil {
-		fmt.Println("   ❌ Нет доступа к хранилищу")
+		logger.Debug("   ❌ Нет доступа к хранилищу")
 		return
 	}
 
 	symbols := storage.GetSymbols()
 	if len(symbols) == 0 {
-		fmt.Println("   ⚠️  Нет символов для проверки")
+		logger.Debug("   ⚠️  Нет символов для проверки")
 		return
 	}
 
@@ -259,7 +260,7 @@ func manualAnalyzerCheck(dataManager *manager.DataManager) {
 }
 
 func startAllServices(dataManager *manager.DataManager) {
-	fmt.Println("   🚀 Запуск всех сервисов...")
+	logger.Debug("   🚀 Запуск всех сервисов...")
 
 	services := []string{
 		"EventBus",
@@ -278,7 +279,7 @@ func startAllServices(dataManager *manager.DataManager) {
 }
 
 func runTestAnalysis(dataManager *manager.DataManager) {
-	fmt.Println("   🧪 Запуск тестового анализа...")
+	logger.Debug("   🧪 Запуск тестового анализа...")
 
 	startTime := time.Now()
 	results, err := dataManager.RunAnalysis()
@@ -319,7 +320,7 @@ func runTestAnalysis(dataManager *manager.DataManager) {
 	fmt.Printf("         • Сигналов обнаружено: %d\n", totalSignals)
 
 	if totalSignals > 0 {
-		fmt.Println("         🎯 Детали сигналов:")
+		logger.Debug("         🎯 Детали сигналов:")
 		// Сортируем по изменению
 		sort.Slice(signalDetails, func(i, j int) bool {
 			// Извлекаем процент изменения из строки
@@ -330,11 +331,11 @@ func runTestAnalysis(dataManager *manager.DataManager) {
 			fmt.Printf("            %s\n", detail)
 		}
 	} else {
-		fmt.Println("         ⚠️  НЕТ СИГНАЛОВ!")
-		fmt.Println("         🚨 ВОЗМОЖНЫЕ ПРИЧИНЫ:")
-		fmt.Println("            1. Анализаторы не работают")
-		fmt.Println("            2. Данные не обновляются")
-		fmt.Println("            3. Ошибки в конфигурации")
-		fmt.Println("            4. Все цены действительно стабильны")
+		logger.Debug("         ⚠️  НЕТ СИГНАЛОВ!")
+		logger.Debug("         🚨 ВОЗМОЖНЫЕ ПРИЧИНЫ:")
+		logger.Debug("            1. Анализаторы не работают")
+		logger.Debug("            2. Данные не обновляются")
+		logger.Debug("            3. Ошибки в конфигурации")
+		logger.Debug("            4. Все цены действительно стабильны")
 	}
 }

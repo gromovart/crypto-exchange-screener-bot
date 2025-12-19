@@ -82,7 +82,7 @@ func NewEventBus(config ...EventBusConfig) *EventBus {
 	}
 
 	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
-	fmt.Printf("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v\n",
+	logger.Info("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v\n",
 		cfg.MaxRetries, cfg.RetryDelay)
 
 	return bus
@@ -210,7 +210,7 @@ func (b *EventBus) Publish(event Event) error {
 			logger.Info("📤 Опубликовано событие: %s от %s",
 				event.Type, event.Source)
 		}
-		fmt.Printf("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
+		logger.Info("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
 		return nil
 	default:
 		// Буфер полон
@@ -242,15 +242,15 @@ func (b *EventBus) AddMiddleware(middleware Middleware) {
 func (b *EventBus) eventWorker(id int) {
 	defer b.wg.Done()
 
-	fmt.Printf("🔍 [EventWorker %d] Запущен\n", id)
+	logger.Info("🔍 [EventWorker %d] Запущен\n", id)
 
 	for {
 		select {
 		case event := <-b.eventBuffer:
-			fmt.Printf("🔍 [EventWorker %d] Получил событие %s из буфера\n", id, event.Type)
+			logger.Info("🔍 [EventWorker %d] Получил событие %s из буфера\n", id, event.Type)
 			b.processEvent(event)
 		case <-b.stopChan:
-			fmt.Printf("🔍 [EventWorker %d] Остановлен\n", id)
+			logger.Info("🔍 [EventWorker %d] Остановлен\n", id)
 			return
 		}
 	}
@@ -261,7 +261,7 @@ func (b *EventBus) processEvent(event Event) error {
 	startTime := time.Now()
 
 	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
-	fmt.Printf("🔍 EventBus.processEvent: обработка %s от %s\n", event.Type, event.Source)
+	logger.Info("🔍 EventBus.processEvent: обработка %s от %s\n", event.Type, event.Source)
 
 	defer func() {
 		// Обновляем метрики времени обработки
@@ -271,7 +271,7 @@ func (b *EventBus) processEvent(event Event) error {
 		b.metrics.mu.Unlock()
 
 		// 🔴 ДОБАВЬТЕ:
-		fmt.Printf("✅ EventBus.processEvent: %s обработано за %v\n",
+		logger.Info("✅ EventBus.processEvent: %s обработано за %v\n",
 			event.Type, time.Since(startTime))
 	}()
 
@@ -280,12 +280,12 @@ func (b *EventBus) processEvent(event Event) error {
 	subscribers, exists := b.subscribers[event.Type]
 	b.mu.RUnlock()
 
-	fmt.Printf("🔍 EventBus.processEvent: найдено %d подписчиков для %s\n",
+	logger.Info("🔍 EventBus.processEvent: найдено %d подписчиков для %s\n",
 		len(subscribers), event.Type) // 🔴 ДОБАВЬТЕ
 
 	if !exists || len(subscribers) == 0 {
 		if b.config.EnableLogging {
-			log.Printf("⚠️ Нет подписчиков для события: %s", event.Type)
+			logger.Warn("⚠️ Нет подписчиков для события: %s", event.Type)
 		}
 		return nil
 	}
@@ -299,28 +299,28 @@ func (b *EventBus) processEvent(event Event) error {
 // createHandlerChain создает цепочку обработчиков
 func (b *EventBus) createHandlerChain(subscribers []Subscriber) HandlerFunc {
 	return func(event Event) error {
-		fmt.Printf("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков\n",
+		logger.Info("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков\n",
 			event.Type, len(subscribers))
 
 		var lastError error
 
 		for i, subscriber := range subscribers {
-			fmt.Printf("🔍 [createHandlerChain] Обработка подписчика [%d] %s\n",
+			logger.Info("🔍 [createHandlerChain] Обработка подписчика [%d] %s\n",
 				i, subscriber.GetName())
 
 			if err := b.handleEventWithRetry(event, subscriber); err != nil {
-				fmt.Printf("❌ [createHandlerChain] Ошибка от %s: %v\n",
+				logger.Info("❌ [createHandlerChain] Ошибка от %s: %v\n",
 					subscriber.GetName(), err)
 				lastError = err
 				log.Printf("❌ Ошибка обработки события %s подписчиком %s: %v",
 					event.Type, subscriber.GetName(), err)
 			} else {
-				fmt.Printf("✅ [createHandlerChain] %s успешно обработал %s\n",
+				logger.Info("✅ [createHandlerChain] %s успешно обработал %s\n",
 					subscriber.GetName(), event.Type)
 			}
 		}
 
-		fmt.Printf("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v\n",
+		logger.Info("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v\n",
 			event.Type, lastError)
 		return lastError
 	}
@@ -328,14 +328,14 @@ func (b *EventBus) createHandlerChain(subscribers []Subscriber) HandlerFunc {
 
 // handleEventWithRetry обрабатывает событие с повторными попытками
 func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) error {
-	fmt.Printf("🔍 [handleEventWithRetry] Вызов %s для события %s\n",
+	logger.Info("🔍 [handleEventWithRetry] Вызов %s для события %s\n",
 		subscriber.GetName(), event.Type)
 
 	// Просто вызываем обработчик
 	err := subscriber.HandleEvent(event)
 
 	if err != nil {
-		fmt.Printf("❌ [handleEventWithRetry] Ошибка от %s: %v\n",
+		logger.Info("❌ [handleEventWithRetry] Ошибка от %s: %v\n",
 			subscriber.GetName(), err)
 		b.metrics.mu.Lock()
 		b.metrics.EventsFailed++
@@ -343,7 +343,7 @@ func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) erro
 		return err
 	}
 
-	fmt.Printf("✅ [handleEventWithRetry] %s успешно обработал %s\n",
+	logger.Info("✅ [handleEventWithRetry] %s успешно обработал %s\n",
 		subscriber.GetName(), event.Type)
 	return nil
 }
@@ -356,12 +356,12 @@ func (b *EventBus) executeWithMiddleware(event Event, handler HandlerFunc) error
 		mw := b.middlewares[i]
 		next := chain
 		chain = func(event Event) error {
-			fmt.Printf("🔍 [executeWithMiddleware] Вызов middleware %T\n", mw)
+			logger.Info("🔍 [executeWithMiddleware] Вызов middleware %T\n", mw)
 			return mw.Process(event, next)
 		}
 	}
 
-	fmt.Printf("🔍 [executeWithMiddleware] Запуск цепочки для %s\n", event.Type)
+	logger.Info("🔍 [executeWithMiddleware] Запуск цепочки для %s\n", event.Type)
 
 	// Запускаем цепочку
 	return chain(event)

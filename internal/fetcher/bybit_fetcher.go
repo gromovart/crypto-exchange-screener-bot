@@ -6,6 +6,7 @@ import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/events"
 	"crypto-exchange-screener-bot/internal/storage"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"sync"
@@ -54,14 +55,14 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 
 		// Первоначальный запрос
 		if err := f.fetchPrices(); err != nil {
-			log.Printf("Ошибка первоначального получения цен: %v", err)
+			logger.Info("Ошибка первоначального получения цен: %v", err)
 		}
 
 		for {
 			select {
 			case <-ticker.C:
 				if err := f.fetchPrices(); err != nil {
-					log.Printf("Ошибка получения цен: %v", err)
+					logger.Info("Ошибка получения цен: %v", err)
 				}
 			case <-f.stopChan:
 				return
@@ -114,7 +115,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		// Сохраняем в хранилище
 		if err := f.storage.StorePrice(ticker.Symbol, price, volume, now); err != nil {
-			log.Printf("Ошибка сохранения цены для %s: %v", ticker.Symbol, err)
+			logger.Info("Ошибка сохранения цены для %s: %v", ticker.Symbol, err)
 			continue
 		}
 
@@ -140,14 +141,14 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		err := f.eventBus.Publish(event)
 		if err != nil {
-			log.Printf("Ошибка публикации события: %v", err)
+			logger.Info("Ошибка публикации события: %v", err)
 		} else {
-			log.Printf("✅ Опубликовано событие с %d ценами", updatedCount)
+			logger.Info("✅ Опубликовано событие с %d ценами", updatedCount)
 		}
 	}
 
 	if updatedCount > 0 {
-		log.Printf("💰 Обновлено %d цен", updatedCount)
+		logger.Info("💰 Обновлено %d цен", updatedCount)
 	}
 
 	return nil

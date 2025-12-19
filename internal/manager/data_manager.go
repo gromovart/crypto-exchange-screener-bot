@@ -13,6 +13,7 @@ import (
 	"crypto-exchange-screener-bot/internal/pipeline"
 	"crypto-exchange-screener-bot/internal/storage"
 	"crypto-exchange-screener-bot/internal/telegram"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"runtime"
@@ -127,7 +128,7 @@ func (dm *DataManager) initializeComponents() error {
 		var err error
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
 		if err != nil {
-			log.Printf("⚠️ Не удалось создать Telegram бота: %v", err)
+			logger.Info("⚠️ Не удалось создать Telegram бота: %v", err)
 		}
 	}
 
@@ -197,7 +198,7 @@ func (dm *DataManager) setupNotifiers() {
 
 	dm.eventBus.Subscribe(events.EventSignalDetected, notificationSubscriber)
 
-	log.Printf("✅ Нотификаторы настроены")
+	logger.Info("✅ Нотификаторы настроены")
 }
 
 // setupPipeline настраивает этапы обработки сигналов
@@ -282,7 +283,7 @@ func (dm *DataManager) startBackgroundTasks() {
 			select {
 			case <-ticker.C:
 				if _, err := dm.storage.CleanOldData(24 * time.Hour); err != nil {
-					log.Printf("⚠️ Failed to cleanup old data: %v", err)
+					logger.Info("⚠️ Failed to cleanup old data: %v", err)
 				}
 			case <-dm.stopChan:
 				return
@@ -365,7 +366,7 @@ func (dm *DataManager) checkHealth() {
 			},
 		})
 
-		log.Printf("⚠️ System health check failed: %s", health.Status)
+		logger.Info("⚠️ System health check failed: %s", health.Status)
 	}
 }
 
@@ -503,7 +504,7 @@ func (dm *DataManager) Stop() error {
 
 	if len(errors) > 0 {
 		for service, err := range errors {
-			log.Printf("⚠️ Failed to stop %s: %v", service, err)
+			logger.Info("⚠️ Failed to stop %s: %v", service, err)
 		}
 	}
 
@@ -708,9 +709,9 @@ func (dm *DataManager) TriggerAnalysis() {
 		go func() {
 			results, err := dm.analysisEngine.AnalyzeAll()
 			if err != nil {
-				log.Printf("Ошибка при ручном анализе: %v", err)
+				logger.Info("Ошибка при ручном анализе: %v", err)
 			} else {
-				log.Printf("Ручной анализ завершен: %d символов обработано", len(results))
+				logger.Info("Ручной анализ завершен: %d символов обработано", len(results))
 			}
 		}()
 	}

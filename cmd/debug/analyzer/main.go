@@ -3,6 +3,7 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/analysis/analyzers"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"math"
 	"strings"
@@ -10,8 +11,8 @@ import (
 )
 
 func main() {
-	fmt.Println("🔧 ТЕСТИРОВАНИЕ АНАЛИЗАТОРОВ")
-	fmt.Println(strings.Repeat("=", 60))
+	logger.Debug("🔧 ТЕСТИРОВАНИЕ АНАЛИЗАТОРОВ")
+	logger.Debug(strings.Repeat("=", 60))
 
 	// Тестовые данные для других тестов
 	testData := createTestData()
@@ -20,22 +21,22 @@ func main() {
 	testNewFallAnalyzer()
 
 	// Тестируем GrowthAnalyzer
-	fmt.Println("\n🧪 ТЕСТ GROWTH ANALYZER:")
+	logger.Debug("\n🧪 ТЕСТ GROWTH ANALYZER:")
 	testGrowthAnalyzer(testData)
 
 	// Тестируем старый FallAnalyzer (для сравнения)
-	fmt.Println("\n🧪 ТЕСТ СТАРОГО FALL ANALYZER:")
+	logger.Debug("\n🧪 ТЕСТ СТАРОГО FALL ANALYZER:")
 	testFallAnalyzer(testData)
 
 	// Тестируем ContinuousAnalyzer
-	fmt.Println("\n🧪 ТЕСТ CONTINUOUS ANALYZER:")
+	logger.Debug("\n🧪 ТЕСТ CONTINUOUS ANALYZER:")
 	testContinuousAnalyzer(testData)
 
 	// Тестируем VolumeAnalyzer (если готов)
-	fmt.Println("\n🧪 ТЕСТ VOLUME ANALYZER:")
+	logger.Debug("\n🧪 ТЕСТ VOLUME ANALYZER:")
 	testVolumeAnalyzer(testData)
 
-	fmt.Println("\n✅ Тестирование завершено")
+	logger.Debug("\n✅ Тестирование завершено")
 }
 
 func createTestData() []types.PriceData {
@@ -123,7 +124,7 @@ func createTestDataForFall() []types.PriceData {
 }
 
 func testNewFallAnalyzer() {
-	fmt.Println("\n🧪 ТЕСТ НОВОГО FALL ANALYZER (версия 2.0):")
+	logger.Debug("\n🧪 ТЕСТ НОВОГО FALL ANALYZER (версия 2.0):")
 
 	data := createTestDataForFall()
 
@@ -141,7 +142,7 @@ func testNewFallAnalyzer() {
 
 	analyzer := analyzers.NewFallAnalyzer(config)
 
-	fmt.Println("   📊 Тестовые данные:")
+	logger.Debug("   📊 Тестовые данные:")
 	for i, point := range data {
 		fmt.Printf("      %d. %.2f (объем: %.0f) время: %v\n",
 			i+1, point.Price, point.Volume24h,
@@ -157,9 +158,9 @@ func testNewFallAnalyzer() {
 	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
 
 	if len(signals) == 0 {
-		fmt.Println("   ⚠️  НЕТ СИГНАЛОВ!")
+		logger.Debug("   ⚠️  НЕТ СИГНАЛОВ!")
 
-		fmt.Println("   📈 Все изменения:")
+		logger.Debug("   📈 Все изменения:")
 		for i := 1; i < len(data); i++ {
 			change := ((data[i].Price - data[i-1].Price) / data[i-1].Price) * 100
 			trend := "↑"
@@ -183,7 +184,7 @@ func testNewFallAnalyzer() {
 			signal.StartPrice, signal.EndPrice)
 
 		if signal.ChangePercent > 0 && signal.Direction == "down" {
-			fmt.Println("      ⚠️  ВНИМАНИЕ: ChangePercent положительный при падении!")
+			logger.Debug("      ⚠️  ВНИМАНИЕ: ChangePercent положительный при падении!")
 		}
 	}
 }
@@ -203,7 +204,7 @@ func testGrowthAnalyzer(data []types.PriceData) {
 
 	analyzer := analyzers.NewGrowthAnalyzer(config)
 
-	fmt.Println("   Конфигурация:")
+	logger.Debug("   Конфигурация:")
 	fmt.Printf("      • MinGrowth: %.2f%%\n", config.CustomSettings["min_growth"])
 	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
 	fmt.Printf("      • MinDataPoints: %d\n", config.MinDataPoints)
@@ -234,8 +235,8 @@ func testGrowthAnalyzer(data []types.PriceData) {
 	}
 
 	if len(signals) == 0 {
-		fmt.Println("   ⚠️  Нет сигналов, даже с порогом 0.01%!")
-		fmt.Println("   🔍 Проблемы с анализатором роста!")
+		logger.Debug("   ⚠️  Нет сигналов, даже с порогом 0.01%!")
+		logger.Debug("   🔍 Проблемы с анализатором роста!")
 	}
 }
 
@@ -254,7 +255,7 @@ func testFallAnalyzer(data []types.PriceData) {
 
 	analyzer := analyzers.NewFallAnalyzer(config)
 
-	fmt.Println("   Конфигурация:")
+	logger.Debug("   Конфигурация:")
 	fmt.Printf("      • MinFall: %.3f%%\n", config.CustomSettings["min_fall"])
 	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
 	fmt.Printf("      • Вес: %.1f\n", config.Weight)
@@ -267,7 +268,7 @@ func testFallAnalyzer(data []types.PriceData) {
 
 	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
 
-	fmt.Println("   📈 Анализ данных:")
+	logger.Debug("   📈 Анализ данных:")
 	for i, point := range data {
 		if i > 0 {
 			change := ((point.Price - data[i-1].Price) / data[i-1].Price) * 100
@@ -297,12 +298,12 @@ func testFallAnalyzer(data []types.PriceData) {
 	}
 
 	if len(signals) == 0 {
-		fmt.Println("   ⚠️  Нет сигналов падения!")
-		fmt.Println("   🔍 Возможные причины:")
-		fmt.Println("      • ChangePercent должен быть отрицательным для падения")
-		fmt.Println("      • Порог min_fall слишком высокий")
-		fmt.Println("      • Анализатор неправильно рассчитывает изменения")
-		fmt.Println("      • Не учитываются промежуточные падения")
+		logger.Debug("   ⚠️  Нет сигналов падения!")
+		logger.Debug("   🔍 Возможные причины:")
+		logger.Debug("      • ChangePercent должен быть отрицательным для падения")
+		logger.Debug("      • Порог min_fall слишком высокий")
+		logger.Debug("      • Анализатор неправильно рассчитывает изменения")
+		logger.Debug("      • Не учитываются промежуточные падения")
 	}
 }
 
@@ -320,7 +321,7 @@ func testContinuousAnalyzer(data []types.PriceData) {
 
 	analyzer := analyzers.NewContinuousAnalyzer(config)
 
-	fmt.Println("   Конфигурация:")
+	logger.Debug("   Конфигурация:")
 	fmt.Printf("      • MinContinuousPoints: %d\n", config.CustomSettings["min_continuous_points"])
 	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
 
@@ -332,7 +333,7 @@ func testContinuousAnalyzer(data []types.PriceData) {
 
 	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
 
-	fmt.Println("   📈 Анализ непрерывности:")
+	logger.Debug("   📈 Анализ непрерывности:")
 	for i := 1; i < len(data); i++ {
 		change1 := ((data[i].Price - data[i-1].Price) / data[i-1].Price) * 100
 
@@ -360,10 +361,10 @@ func testContinuousAnalyzer(data []types.PriceData) {
 	}
 
 	if len(signals) == 0 {
-		fmt.Println("   ⚠️  Нет сигналов непрерывности!")
-		fmt.Println("   🔍 В данных есть последовательные изменения:")
-		fmt.Println("      - Рост: точки 0→1→2 (+1% → +1%)")
-		fmt.Println("      - Падение: точки 2→3→4 (-0.5% → -1%)")
+		logger.Debug("   ⚠️  Нет сигналов непрерывности!")
+		logger.Debug("   🔍 В данных есть последовательные изменения:")
+		logger.Debug("      - Рост: точки 0→1→2 (+1% → +1%)")
+		logger.Debug("      - Падение: точки 2→3→4 (-0.5% → -1%)")
 	}
 }
 func testVolumeAnalyzer(data []types.PriceData) {
@@ -380,13 +381,13 @@ func testVolumeAnalyzer(data []types.PriceData) {
 
 	analyzer := analyzers.NewVolumeAnalyzer(config)
 
-	fmt.Println("   Конфигурация:")
+	logger.Debug("   Конфигурация:")
 	fmt.Printf("      • MinVolume: %.0f\n", config.CustomSettings["min_volume"])
 	fmt.Printf("      • VolumeChangeThreshold: %.0f%%\n", config.CustomSettings["volume_change_threshold"])
 	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
 
 	// Покажем объемы
-	fmt.Println("   📊 Объемы данных:")
+	logger.Debug("   📊 Объемы данных:")
 	for i, point := range data {
 		fmt.Printf("      %d. Цена: %.2f, Объем: %.0f\n",
 			i+1, point.Price, point.Volume24h)
@@ -423,7 +424,7 @@ func testVolumeAnalyzer(data []types.PriceData) {
 	}
 
 	if len(signals) == 0 {
-		fmt.Println("   ⚠️  Нет сигналов объема!")
+		logger.Debug("   ⚠️  Нет сигналов объема!")
 		// Рассчитаем средний объем вручную
 		var totalVolume float64
 		hasVolume := false
@@ -440,10 +441,10 @@ func testVolumeAnalyzer(data []types.PriceData) {
 			fmt.Printf("   🔍 Минимальный порог: %.0f\n", config.CustomSettings["min_volume"])
 
 			if avgVolume < config.CustomSettings["min_volume"].(float64) {
-				fmt.Println("   💡 Объем ниже минимального порога!")
+				logger.Debug("   💡 Объем ниже минимального порога!")
 			}
 		} else {
-			fmt.Println("   💡 В данных нет информации об объеме!")
+			logger.Debug("   💡 В данных нет информации об объеме!")
 		}
 	}
 }
