@@ -26,27 +26,48 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 		periods = append(periods, time.Duration(period)*time.Minute)
 	}
 
-	// Создаем конфигурацию движка
+	// Создаем конфигурацию движка с новыми полями
 	engineConfig := EngineConfig{
 		UpdateInterval:   time.Duration(cfg.UpdateInterval) * time.Second,
 		AnalysisPeriods:  periods,
 		MinVolumeFilter:  cfg.AnalysisEngine.MinVolumeFilter,
 		MaxSymbolsPerRun: cfg.AnalysisEngine.MaxSymbolsPerRun,
-		EnableParallel:   true,
-		MaxWorkers:       cfg.MaxConcurrentRequests,
+		EnableParallel:   cfg.AnalysisEngine.EnableParallel,
+		MaxWorkers:       cfg.AnalysisEngine.MaxWorkers,
 		SignalThreshold:  cfg.AnalysisEngine.SignalThreshold,
 		RetentionPeriod:  cfg.AnalysisEngine.RetentionPeriod,
 		EnableCache:      cfg.AnalysisEngine.EnableCache,
+		MinDataPoints:    cfg.AnalysisEngine.MinDataPoints,
+
+		// Конфигурация анализаторов
+		AnalyzerConfigs: AnalyzerConfigs{
+			GrowthAnalyzer: AnalyzerConfig{
+				Enabled:       cfg.Analyzers.GrowthAnalyzer.Enabled,
+				MinConfidence: cfg.Analyzers.GrowthAnalyzer.MinConfidence,
+				MinGrowth:     cfg.Analyzers.GrowthAnalyzer.MinGrowth,
+			},
+			FallAnalyzer: AnalyzerConfig{
+				Enabled:       cfg.Analyzers.FallAnalyzer.Enabled,
+				MinConfidence: cfg.Analyzers.FallAnalyzer.MinConfidence,
+				MinFall:       cfg.Analyzers.FallAnalyzer.MinFall,
+			},
+			ContinuousAnalyzer: AnalyzerConfig{
+				Enabled: cfg.Analyzers.ContinuousAnalyzer.Enabled,
+			},
+		},
+
+		// Конфигурация фильтров
+		FilterConfigs: FilterConfigs{
+			SignalFilters: SignalFilterConfig{
+				Enabled:          cfg.SignalFilters.Enabled,
+				MinConfidence:    cfg.SignalFilters.MinConfidence,
+				MaxSignalsPerMin: cfg.SignalFilters.MaxSignalsPerMin,
+			},
+		},
 	}
 
 	// Создаем движок
 	engine := NewAnalysisEngine(storage, eventBus, engineConfig)
-
-	// Настраиваем анализаторы на основе конфигурации
-	f.configureAnalyzers(engine, cfg)
-
-	// Настраиваем фильтры на основе конфигурации
-	f.configureFilters(engine, cfg)
 
 	return engine
 }

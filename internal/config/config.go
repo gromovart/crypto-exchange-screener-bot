@@ -14,16 +14,18 @@ import (
 
 // Config - структура конфигурации приложения
 type Config struct {
+	// Debug и логирование
+	DebugMode    bool   `json:"debug_mode"`
+	LogToConsole bool   `json:"log_to_console"`
+	LogToFile    bool   `json:"log_to_file"`
+	LogFilePath  string `json:"log_file_path"`
+
 	// API Keys
-	ApiKey           string
-	ApiSecret        string
-	TestnetApiKey    string
-	TestnetApiSecret string
-	BaseURL          string
-	TestnetBaseURL   string
+	ApiKey    string
+	ApiSecret string
+	BaseURL   string
 
 	// Trading Settings
-	UseTestnet     bool
 	TradingEnabled bool
 	TradingSymbol  string
 
@@ -151,20 +153,11 @@ func LoadConfig(envPath string) (*Config, error) {
 		log.Printf("Warning: Could not load %s file: %v", envPath, err)
 	}
 
-	// Определяем, какую сеть использовать
-	useTestnet := getEnvBool("USE_TESTNET", true)
-
 	// Выбираем соответствующие API ключи
 	var apiKey, apiSecret, baseURL string
-	if useTestnet {
-		apiKey = getEnvString("BYBIT_TESTNET_API_KEY", "")
-		apiSecret = getEnvString("BYBIT_TESTNET_SECRET_KEY", "")
-		baseURL = getEnvString("BYBIT_API_TEST_URL", "https://api-testnet.bybit.com")
-	} else {
-		apiKey = getEnvString("BYBIT_API_KEY", "")
-		apiSecret = getEnvString("BYBIT_SECRET_KEY", "")
-		baseURL = getEnvString("BYBIT_API_URL", "https://api.bybit.com")
-	}
+	apiKey = getEnvString("BYBIT_API_KEY", "")
+	apiSecret = getEnvString("BYBIT_SECRET_KEY", "")
+	baseURL = getEnvString("BYBIT_API_URL", "https://api.bybit.com")
 
 	// Проверяем обязательные поля
 	if apiKey == "" || apiSecret == "" {
@@ -177,15 +170,11 @@ func LoadConfig(envPath string) (*Config, error) {
 
 	config := &Config{
 		// API
-		ApiKey:           apiKey,
-		ApiSecret:        apiSecret,
-		TestnetApiKey:    getEnvString("BYBIT_TESTNET_API_KEY", ""),
-		TestnetApiSecret: getEnvString("BYBIT_TESTNET_SECRET_KEY", ""),
-		BaseURL:          baseURL,
-		TestnetBaseURL:   getEnvString("BYBIT_API_TEST_URL", "https://api-testnet.bybit.com"),
+		ApiKey:    apiKey,
+		ApiSecret: apiSecret,
+		BaseURL:   baseURL,
 
 		// Trading
-		UseTestnet:     useTestnet,
 		TradingEnabled: getEnvBool("TRADING_ENABLED", false),
 		TradingSymbol:  getEnvString("TRADING_SYMBOL", "BTCUSDT"),
 
@@ -422,11 +411,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("API secret is required")
 	}
 
-	// Проверяем длину ключей (Bybit ключи обычно имеют длину 36 символов)
-	if len(c.ApiKey) != 36 && len(c.ApiKey) != 32 {
-		log.Printf("Warning: API key length (%d) is unusual", len(c.ApiKey))
-	}
-
 	// Проверяем допустимость значений
 	if c.RiskPercent <= 0 || c.RiskPercent > 100 {
 		return fmt.Errorf("risk percent must be between 0 and 100")
@@ -445,9 +429,6 @@ func (c *Config) Validate() error {
 
 // GetCurrentAPI возвращает текущие API ключи в зависимости от сети
 func (c *Config) GetCurrentAPI() (string, string, string) {
-	if c.UseTestnet {
-		return c.TestnetApiKey, c.TestnetApiSecret, c.TestnetBaseURL
-	}
 	return c.ApiKey, c.ApiSecret, c.BaseURL
 }
 

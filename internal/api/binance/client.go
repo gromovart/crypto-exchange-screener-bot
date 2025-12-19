@@ -84,12 +84,6 @@ func NewBinanceClient(cfg *config.Config) *BinanceClient {
 	baseURL := "https://api.binance.com"
 	futuresURL := "https://fapi.binance.com"
 
-	// Если тестнет, используем testnet URLs
-	if cfg.UseTestnet {
-		baseURL = "https://testnet.binance.vision"
-		futuresURL = "https://testnet.binancefuture.com"
-	}
-
 	return &BinanceClient{
 		config:     cfg,
 		httpClient: &http.Client{Timeout: 30 * time.Second},

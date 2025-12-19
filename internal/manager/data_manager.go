@@ -1,4 +1,4 @@
-// internal/manager/data_manager.go
+// internal/manager/data_manager.go (исправленная версия)
 package manager
 
 import (
@@ -77,6 +77,13 @@ func NewDataManager(cfg *config.Config) (*DataManager, error) {
 
 // initializeComponents инициализирует все компоненты
 func (dm *DataManager) initializeComponents() error {
+	fmt.Printf("🔍 DataManager: RateLimitDelay = %v\n", dm.config.RateLimitDelay)
+
+	// Если RateLimitDelay > 0, то RateLimitingMiddleware добавляется
+	if dm.config.RateLimitDelay > 0 {
+		fmt.Println("⚠️  RateLimitingMiddleware активен для EventPriceUpdated")
+		fmt.Printf("   Лимит: %v между событиями\n", dm.config.RateLimitDelay)
+	}
 	// 1. Создаем EventBus
 	eventBusConfig := events.EventBusConfig{
 		BufferSize:    dm.config.EventBus.BufferSize,
@@ -117,7 +124,11 @@ func (dm *DataManager) initializeComponents() error {
 
 	// 8. Создаем Telegram бота если включен
 	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" {
+		var err error
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
+		if err != nil {
+			log.Printf("⚠️ Не удалось создать Telegram бота: %v", err)
+		}
 	}
 
 	// 9. Создаем реестр сервисов
@@ -413,6 +424,11 @@ func (dm *DataManager) GetTelegramBot() *telegram.TelegramBot {
 	return dm.telegramBot
 }
 
+// GetPriceFetcher возвращает PriceFetcher
+func (dm *DataManager) GetPriceFetcher() fetcher.PriceFetcher {
+	return dm.priceFetcher
+}
+
 // GetService возвращает сервис по имени
 func (dm *DataManager) GetService(name string) (interface{}, bool) {
 	switch name {
@@ -482,11 +498,6 @@ func (dm *DataManager) Stop() error {
 	close(dm.stopChan)
 	dm.wg.Wait()
 
-	// Останавливаем PriceFetcher
-	if dm.priceFetcher != nil {
-		dm.priceFetcher.Stop()
-	}
-
 	// Останавливаем сервисы через LifecycleManager
 	errors := dm.lifecycle.StopAll()
 
@@ -505,22 +516,71 @@ func (dm *DataManager) Stop() error {
 	return nil
 }
 
-func (sa *serviceAdapter) State() ServiceState {
-	return sa.state
+// ==================== НОВЫЕ МЕТОДЫ ====================
+
+// StartAllServices запускает все сервисы
+func (dm *DataManager) StartAllServices() map[string]error {
+	return dm.lifecycle.StartAll()
 }
 
-func (sa *serviceAdapter) HealthCheck() bool {
-	// Простая проверка здоровья
-	return sa.state == StateRunning
+// StartService запускает конкретный сервис
+func (dm *DataManager) StartService(name string) error {
+	return dm.lifecycle.StartService(name)
 }
 
-// newServiceAdapter создает адаптер сервиса
-func (dm *DataManager) newServiceAdapter(name string, service interface{}) Service {
-	return &serviceAdapter{
-		name:    name,
-		service: service,
-		state:   StateStopped,
+// StopService останавливает конкретный сервис
+func (dm *DataManager) StopService(name string) error {
+	return dm.lifecycle.StopService(name)
+}
+
+// GetServicesInfo возвращает информацию о всех сервисах
+func (dm *DataManager) GetServicesInfo() map[string]ServiceInfo {
+	return dm.registry.GetAllInfo()
+}
+
+// GetStorageStats возвращает статистику хранилища
+func (dm *DataManager) GetStorageStats() storage.StorageStats {
+	return dm.storage.GetStats()
+}
+
+// GetAnalysisEngineStats возвращает статистику анализатора
+func (dm *DataManager) GetAnalysisEngineStats() engine.EngineStats {
+	if dm.analysisEngine != nil {
+		return dm.analysisEngine.GetStats()
 	}
+	return engine.EngineStats{}
+}
+
+// RunAnalysis выполняет анализ всех символов
+func (dm *DataManager) RunAnalysis() (map[string]*analysis.AnalysisResult, error) {
+	if dm.analysisEngine == nil {
+		return nil, fmt.Errorf("analysis engine not initialized")
+	}
+	return dm.analysisEngine.AnalyzeAll()
+}
+
+// GetAnalysisResults возвращает результаты анализа для символа
+func (dm *DataManager) GetAnalysisResults(symbol string, periods []time.Duration) (*analysis.AnalysisResult, error) {
+	if dm.analysisEngine == nil {
+		return nil, fmt.Errorf("analysis engine not initialized")
+	}
+	return dm.analysisEngine.AnalyzeSymbol(symbol, periods)
+}
+
+// GetActiveAnalyzers возвращает список активных анализаторов
+func (dm *DataManager) GetActiveAnalyzers() []string {
+	if dm.analysisEngine == nil {
+		return []string{}
+	}
+	return dm.analysisEngine.GetAnalyzers()
+}
+
+// AddConsoleSubscriber добавляет подписчика для вывода в консоль
+func (dm *DataManager) AddConsoleSubscriber() {
+	consoleSubscriber := events.NewConsoleLoggerSubscriber()
+	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
 }
 
 // AddTelegramSubscriber добавляет подписчика Telegram
@@ -536,47 +596,13 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 	return nil
 }
 
-// AddConsoleSubscriber добавляет подписчика для вывода в консоль
-func (dm *DataManager) AddConsoleSubscriber() {
-	consoleSubscriber := events.NewConsoleLoggerSubscriber()
-	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
-}
-
-// GetAnalysisResults возвращает результаты анализа для символа
-func (dm *DataManager) GetAnalysisResults(symbol string, periods []time.Duration) (*analysis.AnalysisResult, error) {
-	if dm.analysisEngine == nil {
-		return nil, fmt.Errorf("analysis engine not initialized")
-	}
-
-	return dm.analysisEngine.AnalyzeSymbol(symbol, periods)
-}
-
-// RunAnalysis выполняет анализ всех символов
-func (dm *DataManager) RunAnalysis() (map[string]*analysis.AnalysisResult, error) {
-	if dm.analysisEngine == nil {
-		return nil, fmt.Errorf("analysis engine not initialized")
-	}
-
-	return dm.analysisEngine.AnalyzeAll()
-}
-
-// GetActiveAnalyzers возвращает список активных анализаторов
-func (dm *DataManager) GetActiveAnalyzers() []string {
-	if dm.analysisEngine == nil {
-		return []string{}
-	}
-
-	return dm.analysisEngine.GetAnalyzers()
-}
+// ==================== Service Adapter ====================
 
 // serviceAdapter адаптирует любой объект к интерфейсу Service
 type serviceAdapter struct {
 	name    string
 	service interface{}
 	state   ServiceState
-	config  *config.Config // Добавляем конфиг для PriceFetcher
 }
 
 func (sa *serviceAdapter) Name() string {
@@ -620,6 +646,7 @@ func (sa *serviceAdapter) Start() error {
 		sa.state = StateRunning
 
 	case *telegram.TelegramBot:
+		// Telegram бот запускается при создании
 		sa.state = StateRunning
 	}
 
@@ -636,8 +663,55 @@ func (sa *serviceAdapter) Stop() error {
 		s.Stop()
 	case *events.EventBus:
 		s.Stop()
+	case *telegram.TelegramBot:
+		// Telegram бот не требует явной остановки
 	}
 
 	sa.state = StateStopped
 	return nil
+}
+
+func (sa *serviceAdapter) State() ServiceState {
+	return sa.state
+}
+
+func (sa *serviceAdapter) HealthCheck() bool {
+	// Простая проверка здоровья
+	return sa.state == StateRunning
+}
+
+// newServiceAdapter создает адаптер сервиса
+func (dm *DataManager) newServiceAdapter(name string, service interface{}) Service {
+	return &serviceAdapter{
+		name:    name,
+		service: service,
+		state:   StateStopped,
+	}
+}
+
+// Добавим метод для проверки инициализации
+func (dm *DataManager) IsInitialized() bool {
+	return dm.storage != nil && dm.eventBus != nil && dm.analysisEngine != nil
+}
+
+// Добавим метод для получения анализаторов
+func (dm *DataManager) GetAnalyzers() []string {
+	if dm.analysisEngine != nil {
+		return dm.analysisEngine.GetAnalyzers()
+	}
+	return []string{}
+}
+
+// Добавим метод для ручного запуска анализа
+func (dm *DataManager) TriggerAnalysis() {
+	if dm.analysisEngine != nil {
+		go func() {
+			results, err := dm.analysisEngine.AnalyzeAll()
+			if err != nil {
+				log.Printf("Ошибка при ручном анализе: %v", err)
+			} else {
+				log.Printf("Ручной анализ завершен: %d символов обработано", len(results))
+			}
+		}()
+	}
 }

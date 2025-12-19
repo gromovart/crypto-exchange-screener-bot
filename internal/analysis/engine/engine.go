@@ -43,6 +43,38 @@ type EngineConfig struct {
 	SignalThreshold  float64         `json:"signal_threshold"`
 	RetentionPeriod  time.Duration   `json:"retention_period"`
 	EnableCache      bool            `json:"enable_cache"`
+	MinDataPoints    int             `json:"min_data_points"`
+
+	// Добавляем поля для анализаторов и фильтров
+	AnalyzerConfigs AnalyzerConfigs `json:"analyzer_configs"`
+	FilterConfigs   FilterConfigs   `json:"filter_configs"`
+}
+
+// AnalyzerConfigs - конфигурация анализаторов
+type AnalyzerConfigs struct {
+	GrowthAnalyzer     AnalyzerConfig `json:"growth_analyzer"`
+	FallAnalyzer       AnalyzerConfig `json:"fall_analyzer"`
+	ContinuousAnalyzer AnalyzerConfig `json:"continuous_analyzer"`
+}
+
+// FilterConfigs - конфигурация фильтров
+type FilterConfigs struct {
+	SignalFilters SignalFilterConfig `json:"signal_filters"`
+}
+
+// SignalFilterConfig - конфигурация фильтров сигналов
+type SignalFilterConfig struct {
+	Enabled          bool    `json:"enabled"`
+	MinConfidence    float64 `json:"min_confidence"`
+	MaxSignalsPerMin int     `json:"max_signals_per_min"`
+}
+
+// AnalyzerConfig - конфигурация анализатора
+type AnalyzerConfig struct {
+	Enabled       bool    `json:"enabled"`
+	MinConfidence float64 `json:"min_confidence"`
+	MinGrowth     float64 `json:"min_growth"`
+	MinFall       float64 `json:"min_fall"`
 }
 
 // EngineStats - статистика движка
@@ -545,36 +577,84 @@ func (e *AnalysisEngine) saveStats() {
 
 // registerDefaultAnalyzers регистрирует стандартные анализаторы
 func (e *AnalysisEngine) registerDefaultAnalyzers() {
+	e.mu.Lock()
+	e.analyzers = make(map[string]analyzers.Analyzer)
+	e.stats.AnalyzerStats = make(map[string]analyzers.AnalyzerStats)
+	e.stats.ActiveAnalyzers = 0
+	e.mu.Unlock()
+
 	// GrowthAnalyzer - анализатор роста
-	growthAnalyzer := analyzers.NewGrowthAnalyzer(analyzers.DefaultGrowthConfig)
-	e.RegisterAnalyzer(growthAnalyzer)
+	if e.config.AnalyzerConfigs.GrowthAnalyzer.Enabled {
+		growthConfig := analyzers.AnalyzerConfig{
+			Enabled:       true,
+			Weight:        1.0,
+			MinConfidence: e.config.AnalyzerConfigs.GrowthAnalyzer.MinConfidence,
+			MinDataPoints: e.config.MinDataPoints,
+			CustomSettings: map[string]interface{}{
+				"min_growth":           e.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth,
+				"continuity_threshold": 0.7,
+				"volume_weight":        0.2,
+			},
+		}
+		growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
+		e.RegisterAnalyzer(growthAnalyzer)
+	}
 
 	// FallAnalyzer - анализатор падения
-	fallAnalyzer := analyzers.NewFallAnalyzer(analyzers.DefaultFallConfig)
-	e.RegisterAnalyzer(fallAnalyzer)
+	if e.config.AnalyzerConfigs.FallAnalyzer.Enabled {
+		fallConfig := analyzers.AnalyzerConfig{
+			Enabled:       true,
+			Weight:        1.0,
+			MinConfidence: e.config.AnalyzerConfigs.FallAnalyzer.MinConfidence,
+			MinDataPoints: e.config.MinDataPoints,
+			CustomSettings: map[string]interface{}{
+				"min_fall":             e.config.AnalyzerConfigs.FallAnalyzer.MinFall,
+				"continuity_threshold": 0.7,
+				"volume_weight":        0.2,
+			},
+		}
+		fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
+		e.RegisterAnalyzer(fallAnalyzer)
+	}
 
 	// VolumeAnalyzer - анализатор объема
-	volumeAnalyzer := analyzers.NewVolumeAnalyzer(analyzers.DefaultVolumeConfig)
+	volumeConfig := analyzers.DefaultVolumeConfig
+	volumeConfig.MinDataPoints = e.config.MinDataPoints
+	volumeAnalyzer := analyzers.NewVolumeAnalyzer(volumeConfig)
 	e.RegisterAnalyzer(volumeAnalyzer)
 
 	// ContinuousAnalyzer - анализатор непрерывности
-	continuousAnalyzer := analyzers.NewContinuousAnalyzer(analyzers.DefaultContinuousConfig)
-	e.RegisterAnalyzer(continuousAnalyzer)
+	if e.config.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
+		continuousConfig := analyzers.DefaultContinuousConfig
+		continuousConfig.MinDataPoints = e.config.MinDataPoints
+		continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
+		e.RegisterAnalyzer(continuousAnalyzer)
+	}
 }
 
 // setupDefaultFilters настраивает стандартные фильтры
 func (e *AnalysisEngine) setupDefaultFilters() {
+	// Очищаем цепочку фильтров
+	e.filters = NewFilterChain()
+
 	// ConfidenceFilter - фильтр по уверенности
-	confidenceFilter := filters.NewConfidenceFilter(50.0)
-	e.AddFilter(confidenceFilter)
+	if e.config.FilterConfigs.SignalFilters.Enabled && e.config.FilterConfigs.SignalFilters.MinConfidence > 0 {
+		confidenceFilter := filters.NewConfidenceFilter(e.config.FilterConfigs.SignalFilters.MinConfidence)
+		e.AddFilter(confidenceFilter)
+	}
 
 	// VolumeFilter - фильтр по объему
-	volumeFilter := filters.NewVolumeFilter(100000)
-	e.AddFilter(volumeFilter)
+	if e.config.MinVolumeFilter > 0 {
+		volumeFilter := filters.NewVolumeFilter(e.config.MinVolumeFilter)
+		e.AddFilter(volumeFilter)
+	}
 
 	// RateLimitFilter - фильтр частоты
-	rateLimitFilter := filters.NewRateLimitFilter(30 * time.Second)
-	e.AddFilter(rateLimitFilter)
+	if e.config.FilterConfigs.SignalFilters.Enabled && e.config.FilterConfigs.SignalFilters.MaxSignalsPerMin > 0 {
+		minDelay := time.Minute / time.Duration(e.config.FilterConfigs.SignalFilters.MaxSignalsPerMin)
+		rateLimitFilter := filters.NewRateLimitFilter(minDelay)
+		e.AddFilter(rateLimitFilter)
+	}
 }
 
 // convertToPriceData конвертирует данные хранилища в формат анализа

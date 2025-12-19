@@ -39,12 +39,6 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 	apiKey := cfg.ApiKey
 	apiSecret := cfg.ApiSecret
 
-	if cfg.UseTestnet {
-		baseURL = cfg.TestnetBaseURL
-		apiKey = cfg.TestnetApiKey
-		apiSecret = cfg.TestnetApiSecret
-	}
-
 	// Определяем категорию по умолчанию (фьючерсы)
 	category := CategoryLinear
 	if cfg.FuturesCategory != "" {
@@ -814,4 +808,16 @@ func (c *BybitClient) GetSymbolVolume(symbols []string) (map[string]float64, err
 	}
 
 	return volumes, nil
+}
+
+func NewBybitClientSimple(apiKey, apiSecret, baseURL, category string, timeout time.Duration) *BybitClient {
+	return &BybitClient{
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
+		apiKey:    apiKey,
+		apiSecret: apiSecret,
+		baseURL:   baseURL,
+		category:  category,
+	}
 }

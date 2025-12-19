@@ -80,6 +80,10 @@ func NewEventBus(config ...EventBusConfig) *EventBus {
 		bus.startMetricsCollection()
 	}
 
+	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
+	fmt.Printf("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v\n",
+		cfg.MaxRetries, cfg.RetryDelay)
+
 	return bus
 }
 
@@ -183,6 +187,9 @@ func (b *EventBus) Publish(event Event) error {
 		return fmt.Errorf("event bus is not running")
 	}
 
+	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
+	fmt.Printf("🔍 [EventBus.Publish] Публикую %s от %s\n", event.Type, event.Source)
+
 	// Устанавливаем ID и временную метку если они не установлены
 	if event.ID == "" {
 		event.ID = uuid.New().String()
@@ -202,11 +209,12 @@ func (b *EventBus) Publish(event Event) error {
 			log.Printf("📤 Опубликовано событие: %s от %s",
 				event.Type, event.Source)
 		}
+		fmt.Printf("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
 		return nil
 	default:
 		// Буфер полон
 		if b.config.EnableLogging {
-			log.Printf("⚠️ Буфер событий полон, событие отброшено: %s", event.Type)
+			log.Printf("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
 		}
 		return fmt.Errorf("event buffer is full")
 	}
@@ -233,11 +241,15 @@ func (b *EventBus) AddMiddleware(middleware Middleware) {
 func (b *EventBus) eventWorker(id int) {
 	defer b.wg.Done()
 
+	fmt.Printf("🔍 [EventWorker %d] Запущен\n", id)
+
 	for {
 		select {
 		case event := <-b.eventBuffer:
+			fmt.Printf("🔍 [EventWorker %d] Получил событие %s из буфера\n", id, event.Type)
 			b.processEvent(event)
 		case <-b.stopChan:
+			fmt.Printf("🔍 [EventWorker %d] Остановлен\n", id)
 			return
 		}
 	}
@@ -246,12 +258,20 @@ func (b *EventBus) eventWorker(id int) {
 // processEvent обрабатывает одно событие
 func (b *EventBus) processEvent(event Event) error {
 	startTime := time.Now()
+
+	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
+	fmt.Printf("🔍 EventBus.processEvent: обработка %s от %s\n", event.Type, event.Source)
+
 	defer func() {
 		// Обновляем метрики времени обработки
 		b.metrics.mu.Lock()
 		b.metrics.ProcessingTime += time.Since(startTime)
 		b.metrics.EventsProcessed++
 		b.metrics.mu.Unlock()
+
+		// 🔴 ДОБАВЬТЕ:
+		fmt.Printf("✅ EventBus.processEvent: %s обработано за %v\n",
+			event.Type, time.Since(startTime))
 	}()
 
 	// Получаем подписчиков для этого типа события
@@ -259,13 +279,15 @@ func (b *EventBus) processEvent(event Event) error {
 	subscribers, exists := b.subscribers[event.Type]
 	b.mu.RUnlock()
 
+	fmt.Printf("🔍 EventBus.processEvent: найдено %d подписчиков для %s\n",
+		len(subscribers), event.Type) // 🔴 ДОБАВЬТЕ
+
 	if !exists || len(subscribers) == 0 {
 		if b.config.EnableLogging {
 			log.Printf("⚠️ Нет подписчиков для события: %s", event.Type)
 		}
 		return nil
 	}
-
 	// Создаем цепочку middleware
 	handler := b.createHandlerChain(subscribers)
 
@@ -276,46 +298,53 @@ func (b *EventBus) processEvent(event Event) error {
 // createHandlerChain создает цепочку обработчиков
 func (b *EventBus) createHandlerChain(subscribers []Subscriber) HandlerFunc {
 	return func(event Event) error {
+		fmt.Printf("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков\n",
+			event.Type, len(subscribers))
+
 		var lastError error
 
-		for _, subscriber := range subscribers {
-			// Обрабатываем событие в отдельной горутине для каждого подписчика
-			go func(s Subscriber) {
-				if err := b.handleEventWithRetry(event, s); err != nil {
-					lastError = err
-					log.Printf("❌ Ошибка обработки события %s подписчиком %s: %v",
-						event.Type, s.GetName(), err)
-				}
-			}(subscriber)
+		for i, subscriber := range subscribers {
+			fmt.Printf("🔍 [createHandlerChain] Обработка подписчика [%d] %s\n",
+				i, subscriber.GetName())
+
+			if err := b.handleEventWithRetry(event, subscriber); err != nil {
+				fmt.Printf("❌ [createHandlerChain] Ошибка от %s: %v\n",
+					subscriber.GetName(), err)
+				lastError = err
+				log.Printf("❌ Ошибка обработки события %s подписчиком %s: %v",
+					event.Type, subscriber.GetName(), err)
+			} else {
+				fmt.Printf("✅ [createHandlerChain] %s успешно обработал %s\n",
+					subscriber.GetName(), event.Type)
+			}
 		}
 
+		fmt.Printf("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v\n",
+			event.Type, lastError)
 		return lastError
 	}
 }
 
 // handleEventWithRetry обрабатывает событие с повторными попытками
 func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) error {
-	var lastError error
+	fmt.Printf("🔍 [handleEventWithRetry] Вызов %s для события %s\n",
+		subscriber.GetName(), event.Type)
 
-	for attempt := 1; attempt <= b.config.MaxRetries; attempt++ {
-		err := subscriber.HandleEvent(event)
-		if err == nil {
-			return nil
-		}
+	// Просто вызываем обработчик
+	err := subscriber.HandleEvent(event)
 
-		lastError = err
-
-		if attempt < b.config.MaxRetries {
-			time.Sleep(b.config.RetryDelay * time.Duration(attempt))
-		}
+	if err != nil {
+		fmt.Printf("❌ [handleEventWithRetry] Ошибка от %s: %v\n",
+			subscriber.GetName(), err)
+		b.metrics.mu.Lock()
+		b.metrics.EventsFailed++
+		b.metrics.mu.Unlock()
+		return err
 	}
 
-	// Увеличиваем счетчик ошибок
-	b.metrics.mu.Lock()
-	b.metrics.EventsFailed++
-	b.metrics.mu.Unlock()
-
-	return lastError
+	fmt.Printf("✅ [handleEventWithRetry] %s успешно обработал %s\n",
+		subscriber.GetName(), event.Type)
+	return nil
 }
 
 // executeWithMiddleware выполняет обработку через цепочку middleware
@@ -326,9 +355,12 @@ func (b *EventBus) executeWithMiddleware(event Event, handler HandlerFunc) error
 		mw := b.middlewares[i]
 		next := chain
 		chain = func(event Event) error {
+			fmt.Printf("🔍 [executeWithMiddleware] Вызов middleware %T\n", mw)
 			return mw.Process(event, next)
 		}
 	}
+
+	fmt.Printf("🔍 [executeWithMiddleware] Запуск цепочки для %s\n", event.Type)
 
 	// Запускаем цепочку
 	return chain(event)
@@ -416,4 +448,27 @@ func (b *EventBus) safeExecute(fn func()) {
 	}()
 
 	fn()
+}
+
+// GetMiddlewares возвращает список middleware (для отладки)
+func (b *EventBus) GetMiddlewares() []Middleware {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// Создаем копию
+	result := make([]Middleware, len(b.middlewares))
+	copy(result, b.middlewares)
+	return result
+}
+
+// ClearMiddlewares очищает все middleware
+func (b *EventBus) ClearMiddlewares() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.middlewares = []Middleware{}
+
+	if b.config.EnableLogging {
+		log.Println("✅ Все middleware удалены из EventBus")
+	}
 }

@@ -12,20 +12,18 @@ import (
 type LoggingMiddleware struct{}
 
 func (m *LoggingMiddleware) Process(event Event, next HandlerFunc) error {
+	fmt.Printf("🔍 [LoggingMiddleware] Начало обработки %s\n", event.Type)
 	start := time.Now()
-
-	log.Printf("➡️  Начало обработки события: %s от %s",
-		event.Type, event.Source)
 
 	err := next(event)
 
 	duration := time.Since(start)
 
 	if err != nil {
-		log.Printf("❌ Ошибка обработки события %s за %v: %v",
+		fmt.Printf("❌ [LoggingMiddleware] Ошибка обработки %s за %v: %v\n",
 			event.Type, duration, err)
 	} else {
-		log.Printf("✅ Событие %s обработано за %v",
+		fmt.Printf("✅ [LoggingMiddleware] %s обработан за %v\n",
 			event.Type, duration)
 	}
 
@@ -38,6 +36,7 @@ type MetricsMiddleware struct {
 }
 
 func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
+	fmt.Printf("🔍 [MetricsMiddleware] Обработка %s\n", event.Type)
 	start := time.Now()
 
 	err := next(event)
@@ -48,6 +47,7 @@ func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
 	m.metrics.ProcessingTime += duration
 	m.metrics.mu.Unlock()
 
+	fmt.Printf("✅ [MetricsMiddleware] %s обработан за %v\n", event.Type, duration)
 	return err
 }
 
@@ -91,6 +91,9 @@ func (m *RateLimitingMiddleware) Process(event Event, next HandlerFunc) error {
 type ValidationMiddleware struct{}
 
 func (m *ValidationMiddleware) Process(event Event, next HandlerFunc) error {
+	fmt.Printf("🔍 [ValidationMiddleware] Проверка %s от %s\n",
+		event.Type, event.Source)
+
 	// Проверяем обязательные поля
 	if event.Type == "" {
 		return fmt.Errorf("event type is required")
@@ -104,5 +107,8 @@ func (m *ValidationMiddleware) Process(event Event, next HandlerFunc) error {
 		return fmt.Errorf("event timestamp is required")
 	}
 
+	fmt.Printf("✅ [ValidationMiddleware] Все проверки пройдены, вызываю next\n")
+
+	// 🔴 ВЫЗЫВАЕМ next В ЛЮБОМ СЛУЧАЕ!
 	return next(event)
 }

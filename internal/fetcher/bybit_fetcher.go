@@ -1,4 +1,4 @@
-// internal/fetcher/price_fetcher.go - правильная реализация
+// internal/fetcher/bybit_fetcher.go
 package fetcher
 
 import (
@@ -99,6 +99,9 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	now := time.Now()
 	updatedCount := 0
 
+	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
+	var priceDataList []PriceData
+
 	for _, ticker := range tickers.Result.List {
 		// Парсим цену
 		price, err := parseFloat(ticker.LastPrice)
@@ -115,20 +118,32 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			continue
 		}
 
-		// Публикуем событие
-		f.eventBus.Publish(events.Event{
-			Type:   events.EventPriceUpdated,
-			Source: "price_fetcher",
-			Data: map[string]interface{}{
-				"symbol":    ticker.Symbol,
-				"price":     price,
-				"volume":    volume,
-				"timestamp": now,
-			},
+		// Добавляем в массив
+		priceDataList = append(priceDataList, PriceData{
+			Symbol:    ticker.Symbol,
+			Price:     price,
+			Volume24h: volume,
 			Timestamp: now,
 		})
 
 		updatedCount++
+	}
+
+	// 🔴 ПУБЛИКУЕМ ОДНО СОБЫТИЕ СО ВСЕМИ ЦЕНАМИ
+	if updatedCount > 0 && f.eventBus != nil {
+		event := events.Event{
+			Type:      events.EventPriceUpdated,
+			Source:    "price_fetcher",
+			Data:      priceDataList, // ← МАССИВ ВСЕХ ЦЕН
+			Timestamp: now,
+		}
+
+		err := f.eventBus.Publish(event)
+		if err != nil {
+			log.Printf("Ошибка публикации события: %v", err)
+		} else {
+			log.Printf("✅ Опубликовано событие с %d ценами", updatedCount)
+		}
 	}
 
 	if updatedCount > 0 {

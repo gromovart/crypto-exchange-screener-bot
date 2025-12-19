@@ -46,14 +46,22 @@ func (a *FallAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([
 	endPrice := data[len(data)-1].Price
 	change := ((endPrice - startPrice) / startPrice) * 100
 
-	// Для падения изменение отрицательное, берем модуль
-	if -change < a.config.CustomSettings["min_fall"].(float64) {
+	// ДЛЯ ПАДЕНИЯ: изменение должно быть ОТРИЦАТЕЛЬНЫМ
+	if change >= 0 {
+		// Это рост или стагнация, не падение
+		a.updateStats(time.Since(startTime), false)
+		return nil, nil
+	}
+
+	// Проверяем, достаточно ли сильное падение (берем абсолютное значение)
+	fallValue := math.Abs(change)
+	if fallValue < a.config.CustomSettings["min_fall"].(float64) {
 		a.updateStats(time.Since(startTime), false)
 		return nil, nil
 	}
 
 	isContinuous := a.checkContinuity(data)
-	confidence := a.calculateConfidence(data, -change, isContinuous)
+	confidence := a.calculateConfidence(data, fallValue, isContinuous)
 
 	if confidence < config.MinConfidence {
 		a.updateStats(time.Since(startTime), false)
@@ -64,7 +72,7 @@ func (a *FallAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([
 		Symbol:        data[0].Symbol,
 		Type:          "fall",
 		Direction:     "down",
-		ChangePercent: change,
+		ChangePercent: change, // Здесь change ОТРИЦАТЕЛЬНЫЙ
 		Confidence:    confidence,
 		DataPoints:    len(data),
 		StartPrice:    startPrice,

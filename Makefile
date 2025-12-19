@@ -1,22 +1,43 @@
-# Makefile для Crypto Exchange Screener Bot
+# Makefile
+.PHONY: debug debug-enhanced debug-diagnostic analyzer-test
 
-.PHONY: all bot signals test clean
+debug:
+	@echo "🐛 Базовая отладка..."
+	go run ./cmd/bot/debug_main.go
 
-all: bot
+debug-enhanced:
+	@echo "🔬 Расширенная отладка..."
+	go run ./cmd/bot/debug_enhanced.go
 
-bot:
-	go run cmd/bot/main.go
+debug-diagnostic:
+	@echo "🏥 Глубокая диагностика системы..."
+	@echo ""
+	@echo "Эта команда проверит:"
+	@echo "  1. Конфигурацию"
+	@echo "  2. Данные в хранилище"
+	@echo "  3. Работу анализаторов вручную"
+	@echo "  4. Полную систему"
+	@echo ""
+	@echo "Пороги: 0.001% (одна тысячная процента!)"
+	@echo ""
+	go run ./cmd/bot/debug_detailed.go
 
-build-bot:
-	go build -o bin/bot cmd/bot/main.go
+analyzer-test:
+	@echo "🧪 Тестирование анализаторов..."
+	@echo ""
+	@echo "Проверяем работу каждого анализатора отдельно"
+	@echo "С тестовыми данными (рост 1%, падение 0.5%)"
+	@echo ""
+	go run ./cmd/bot/analyzer_debug.go
 
-build: build-bot
-
-clean:
-	rm -rf bin/ logs/*.log
-
-run-debug:
-	./debug_run.sh
-
-install:
-	go mod download
+debug-all:
+	@echo "🚀 Полный набор тестов..."
+	@echo ""
+	@echo "1. Тест анализаторов..."
+	make analyzer-test
+	@echo ""
+	@echo "2. Диагностика системы..."
+	make debug-diagnostic
+	@echo ""
+	@echo "3. Расширенная отладка..."
+	make debug-enhanced
