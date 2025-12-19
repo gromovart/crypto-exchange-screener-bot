@@ -1,296 +1,326 @@
-// // cmd/bot/main.go - исправленная версия
 package main
 
-// import (
-// 	"crypto-exchange-screener-bot/internal/api/bybit"
-// 	"crypto-exchange-screener-bot/internal/config"
-// 	"crypto-exchange-screener-bot/internal/events"
-// 	"crypto-exchange-screener-bot/internal/fetcher"
-// 	"crypto-exchange-screener-bot/internal/notifier"
-// 	"crypto-exchange-screener-bot/internal/storage"
-// 	"crypto-exchange-screener-bot/internal/telegram"
-// 	"fmt"
-// 	"log"
-// 	"os"
-// 	"os/signal"
-// 	"runtime"
-// 	"strconv"
-// 	"strings"
-// 	"sync/atomic"
-// 	"syscall"
-// 	"time"
+import (
+	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/manager"
+	"crypto-exchange-screener-bot/pkg/logger"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+)
 
-// 	analysisengine "crypto-exchange-screener-bot/internal/analysis/engine"
-// )
+var (
+	version   = "1.0.0"
+	buildTime = "unknown"
+)
 
-// func main() {
-// 	// Загружаем конфигурацию
-// 	cfg, err := config.LoadConfig(".env")
-// 	if err != nil {
-// 		log.Fatalf("Не удалось загрузить конфигурацию: %v", err)
-// 	}
+func main() {
+	// Парсинг флагов командной строки
+	var (
+		configPath  = flag.String("config", ".env", "Path to configuration file")
+		logLevel    = flag.String("log-level", "", "Log level: debug, info, warn, error (overrides .env)")
+		showHelp    = flag.Bool("help", false, "Show help")
+		showVersion = flag.Bool("version", false, "Show version")
+	)
+	flag.Parse()
 
-// 	// Выводим информацию о конфигурации
-// 	printHeader("АНАЛИЗ РОСТА/ПАДЕНИЯ КРИПТОВАЛЮТНЫХ ФЬЮЧЕРСОВ")
-// 	fmt.Printf("🔧 Конфигурация:\n")
-// 	fmt.Printf("   Сеть: %s\n", map[bool]string{true: "Testnet 🧪", false: "Mainnet ⚡"}[cfg.UseTestnet])
+	if *showVersion {
+		fmt.Printf("📈 Crypto Growth Monitor v%s\n", version)
+		fmt.Printf("📅 Build: %s\n", buildTime)
+		fmt.Printf("🚀 Exchange: Bybit Futures\n")
+		return
+	}
 
-// 	// Создаем API клиент
-// 	apiClient := bybit.NewBybitClient(cfg)
+	if *showHelp {
+		printHelp()
+		return
+	}
 
-// 	fmt.Printf("   Категория: %s\n", apiClient.Category())
-// 	fmt.Printf("   Интервал анализа: %d секунд\n", cfg.UpdateInterval)
-// 	fmt.Printf("   Периоды анализа: %s\n", formatPeriods(cfg.AnalysisEngine.AnalysisPeriods))
-// 	fmt.Printf("   Порог роста: %.2f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
-// 	fmt.Printf("   Порог падения: %.2f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
+	// Загрузка конфигурации
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		fmt.Printf("❌ Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
 
-// 	// Создаем EventBus
-// 	eventBusFactory := &events.Factory{}
-// 	eventBus := eventBusFactory.NewEventBusFromConfig(cfg)
+	// Переопределение уровня логирования из флага
+	if *logLevel != "" {
+		cfg.LogLevel = *logLevel
+	}
 
-// 	// Создаем хранилище
-// 	storageConfig := &storage.StorageConfig{
-// 		MaxHistoryPerSymbol: 10000,
-// 		MaxSymbols:          1000,
-// 		CleanupInterval:     5 * time.Minute,
-// 		RetentionPeriod:     24 * time.Hour,
-// 	}
-// 	priceStorage := storage.NewInMemoryPriceStorage(storageConfig)
+	// Инициализация логгера
+	logPath := cfg.LogFile
+	if logPath == "" {
+		logPath = "logs/growth_monitor.log"
+	}
 
-// 	// Создаем PriceFetcher
-// 	fetcherFactory := &fetcher.Factory{}
-// 	priceFetcher := fetcherFactory.NewPriceFetcherFromConfig(apiClient, priceStorage, eventBus, cfg)
+	if err := logger.InitGlobal(logPath, cfg.LogLevel, true); err != nil {
+		fmt.Printf("❌ Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer logger.Close()
 
-// 	// Создаем AnalysisEngine
-// 	engineFactory := &analysisengine.Factory{}
-// 	analysisEngine := engineFactory.NewAnalysisEngineFromConfig(priceStorage, eventBus, cfg)
+	// Запуск
+	runBot(cfg)
+}
 
-// 	// Запускаем компоненты
-// 	if err := priceFetcher.Start(time.Duration(cfg.UpdateInterval) * time.Second); err != nil {
-// 		log.Fatalf("Не удалось запустить PriceFetcher: %v", err)
-// 	}
+func runBot(cfg *config.Config) {
+	logger.Info("🚀 Starting Crypto Growth Monitor v%s", version)
+	logger.Info("📅 Build time: %s", buildTime)
+	logger.Info("⚡ Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
+	logger.Info("📊 Log level: %s", cfg.LogLevel)
 
-// 	if err := analysisEngine.Start(); err != nil {
-// 		log.Fatalf("Не удалось запустить AnalysisEngine: %v", err)
-// 	}
+	// Валидация конфигурации
+	if err := validateConfig(cfg); err != nil {
+		logger.Error("❌ Configuration validation failed: %v", err)
+		os.Exit(1)
+	}
 
-// 	// Регистрируем стандартных подписчиков
-// 	eventBusFactory.RegisterDefaultSubscribers(eventBus, cfg)
+	// Логирование конфигурации
+	logConfig(cfg)
 
-// 	// Инициализируем Telegram бота если включен
-// 	var telegramNotifier *notifier.TelegramNotifier
-// 	if cfg.TelegramEnabled && cfg.TelegramAPIKey != "" && cfg.TelegramChatID != 0 {
-// 		telegramNotifier = notifier.NewTelegramNotifier(cfg)
-// 		if telegramNotifier != nil {
-// 			// Создаем подписчика для Telegram
-// 			telegramSubscriber := events.NewBaseSubscriber(
-// 				"telegram_notifier",
-// 				[]events.EventType{events.EventSignalDetected},
-// 				func(event events.Event) error {
-// 					// Логируем получение события
-// 					log.Printf("📨 Получено событие для Telegram: %v", event.Type)
-// 					return nil
-// 				},
-// 			)
-// 			eventBus.Subscribe(events.EventSignalDetected, telegramSubscriber)
+	// Создание менеджера данных
+	logger.Info("🛠️ Creating data manager...")
+	dataManager, err := manager.NewDataManager(cfg)
+	if err != nil {
+		logger.Error("❌ Failed to create data manager: %v", err)
+		os.Exit(1)
+	}
 
-// 			// Отправляем тестовое сообщение
-// 			go func() {
-// 				time.Sleep(3 * time.Second)
-// 				// Используем bot из notifier для отправки тестового сообщения
-// 				// Но у TelegramNotifier нет метода GetBot, поэтому создадим отдельно
-// 				telegramBot := telegram.NewTelegramBot(cfg)
-// 				if telegramBot != nil {
-// 					telegramBot.SendTestMessage()
-// 				}
-// 			}()
-// 		}
-// 	}
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-// 	fmt.Println("\n✅ Система инициализирована")
-// 	fmt.Println("🚀 Запуск мониторинга...")
+	errChan := make(chan error, 1)
 
-// 	// Ждем накопления данных перед анализом
-// 	fmt.Println("⏳ Накопление данных для анализа (ожидание 60 секунд)...")
-// 	time.Sleep(60 * time.Second)
-// 	fmt.Println("✅ Данные накоплены, начинаем анализ...")
+	// Запуск системы
+	go func() {
+		logger.Info("🚦 Starting system services...")
+		if err := startSystem(dataManager); err != nil {
+			errChan <- err
+		}
+	}()
 
-// 	// Статистика
-// 	startTime := time.Now()
-// 	var analysisCount int32 = 0
-// 	var signalCount int32 = 0
+	// Таймер для статуса
+	statusTicker := time.NewTicker(1 * time.Minute)
+	defer statusTicker.Stop()
 
-// 	// Подписываемся на события сигналов
-// 	signalSubscriber := events.NewBaseSubscriber(
-// 		"signal_counter",
-// 		[]events.EventType{events.EventSignalDetected},
-// 		func(event events.Event) error {
-// 			atomic.AddInt32(&signalCount, 1)
-// 			return nil
-// 		},
-// 	)
-// 	eventBus.Subscribe(events.EventSignalDetected, signalSubscriber)
+	// Главный цикл
+	logger.Info("✅ System started successfully!")
+	logger.Info("🎯 Monitoring %d+ symbols", len(cfg.GetSymbolList()))
+	logger.Info("🛑 Press Ctrl+C to stop")
 
-// 	// Подписываемся на события завершения анализа
-// 	analysisSubscriber := events.NewBaseSubscriber(
-// 		"analysis_counter",
-// 		[]events.EventType{events.EventType("analysis_complete")},
-// 		func(event events.Event) error {
-// 			atomic.AddInt32(&analysisCount, 1)
-// 			return nil
-// 		},
-// 	)
-// 	eventBus.Subscribe(events.EventType("analysis_complete"), analysisSubscriber)
+	startTime := time.Now()
 
-// 	// Горутина для вывода статистики
-// 	go func() {
-// 		ticker := time.NewTicker(15 * time.Second)
-// 		defer ticker.Stop()
+	for {
+		select {
+		case sig := <-sigChan:
+			logger.Info("📶 Received signal: %v", sig)
+			shutdown(dataManager, startTime)
+			return
 
-// 		iteration := 1
-// 		for range ticker.C {
-// 			engineStats := analysisEngine.GetStats()
-// 			storageStats := priceStorage.GetStats()
+		case err := <-errChan:
+			logger.Error("❌ System error: %v", err)
+			shutdown(dataManager, startTime)
+			os.Exit(1)
 
-// 			fmt.Println(strings.Repeat("─", 80))
-// 			fmt.Printf("📊 СТАТИСТИКА (итерация #%d)\n", iteration)
-// 			fmt.Printf("   ⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
-// 			fmt.Printf("   🔄 Завершено анализов: %d\n", atomic.LoadInt32(&analysisCount))
-// 			fmt.Printf("   📈 Обнаружено сигналов: %d\n", atomic.LoadInt32(&signalCount))
-// 			fmt.Printf("   💾 Символов в хранилище: %d\n", storageStats.TotalSymbols)
-// 			fmt.Printf("   📊 Точок данных: %d\n", storageStats.TotalDataPoints)
-// 			fmt.Printf("   🧮 Анализаторов: %d\n", engineStats.ActiveAnalyzers)
-// 			fmt.Printf("   🧵 Горутин: %d\n", runtime.NumGoroutine())
-// 			fmt.Printf("   🕐 Текущее время: %s\n", time.Now().Format("15:04:05"))
-// 			fmt.Println(strings.Repeat("─", 80))
-// 			fmt.Println()
+		case <-statusTicker.C:
+			logStatus(dataManager, startTime)
+		}
+	}
+}
 
-// 			iteration++
-// 		}
-// 	}()
+func startSystem(dataManager *manager.DataManager) error {
+	errors := dataManager.StartAllServices()
+	if len(errors) > 0 {
+		for service, err := range errors {
+			logger.Error("❌ Failed to start %s: %v", service, err)
+		}
+		return fmt.Errorf("failed to start one or more services")
+	}
 
-// 	// Обработка сигналов для graceful shutdown
-// 	stopChan := make(chan os.Signal, 1)
-// 	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
+	// Проверка работоспособности
+	time.Sleep(5 * time.Second)
+	if !checkSystemHealth(dataManager) {
+		return fmt.Errorf("system health check failed")
+	}
 
-// 	fmt.Println("\n🎮 Управление:")
-// 	fmt.Println("   Ctrl+C - Остановить систему")
-// 	fmt.Println()
+	logger.Info("🎯 System is running and monitoring for growth signals")
+	return nil
+}
 
-// 	// Ожидание сигнала остановки
-// 	<-stopChan
+func shutdown(dataManager *manager.DataManager, startTime time.Time) {
+	logger.Info("🛑 Shutting down system...")
 
-// 	fmt.Println("\n🛑 Завершение работы...")
+	shutdownStart := time.Now()
 
-// 	// Останавливаем компоненты
-// 	analysisEngine.Stop()
-// 	priceFetcher.Stop()
-// 	eventBus.Stop()
+	if err := dataManager.Stop(); err != nil {
+		logger.Error("❌ Error during shutdown: %v", err)
+	} else {
+		logger.Info("✅ System stopped cleanly")
+	}
 
-// 	// Выводим финальную статистику
-// 	fmt.Printf("\n📊 ФИНАЛЬНАЯ СТАТИСТИКА:\n")
-// 	fmt.Printf("   ⏱️  Время работы: %s\n", formatDuration(time.Since(startTime)))
-// 	fmt.Printf("   🔄 Всего анализов: %d\n", atomic.LoadInt32(&analysisCount))
-// 	fmt.Printf("   📈 Всего сигналов: %d\n", atomic.LoadInt32(&signalCount))
+	uptime := time.Since(startTime).Round(time.Second)
+	shutdownTime := time.Since(shutdownStart).Round(time.Millisecond)
 
-// 	engineStats := analysisEngine.GetStats()
-// 	fmt.Printf("   🧮 Анализаторов использовано: %d\n", engineStats.ActiveAnalyzers)
+	logger.Info("📊 Session summary:")
+	logger.Info("   • Uptime: %v", uptime)
+	logger.Info("   • Shutdown time: %v", shutdownTime)
+}
 
-// 	fmt.Println("\n✅ Система завершена корректно")
-// }
+func validateConfig(cfg *config.Config) error {
+	var errors []string
 
-// // Вспомогательные функции
-// func printHeader(text string) {
-// 	width := 80
+	// Проверка API ключей
+	if cfg.Exchange == "bybit" {
+		if cfg.ApiKey == "" || cfg.ApiSecret == "" {
+			errors = append(errors, "BYBIT_API_KEY and BYBIT_SECRET_KEY are required for Bybit")
+		}
+	} else if cfg.Exchange == "binance" {
+		if cfg.ApiKey == "" || cfg.ApiSecret == "" {
+			errors = append(errors, "BINANCE_API_KEY and BINANCE_API_SECRET are required for Binance")
+		}
+	}
 
-// 	// Создаем красивый заголовок с рамкой
-// 	fmt.Println(strings.Repeat("=", width))
+	// Проверка Telegram
+	if cfg.TelegramEnabled {
+		if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
+			errors = append(errors, "TG_API_KEY and TG_CHAT_ID are required when Telegram is enabled")
+		}
+	}
 
-// 	// Если текст короткий, центрируем его
-// 	if len(text) <= width {
-// 		padding := (width - len(text)) / 2
-// 		leftPadding := padding
-// 		rightPadding := width - len(text) - leftPadding
+	// Проверка анализаторов
+	if cfg.Analyzers.GrowthAnalyzer.MinGrowth < 0.1 {
+		logger.Warn("⚠️  MinGrowth (%.2f%%) is very low, may generate many signals",
+			cfg.Analyzers.GrowthAnalyzer.MinGrowth)
+	}
 
-// 		fmt.Printf("%s%s%s\n",
-// 			strings.Repeat(" ", leftPadding),
-// 			text,
-// 			strings.Repeat(" ", rightPadding))
-// 	} else {
-// 		// Если текст длинный, просто выводим его с переносом
-// 		fmt.Println(text[:width])
-// 	}
+	if cfg.Analyzers.FallAnalyzer.MinFall < 0.1 {
+		logger.Warn("⚠️  MinFall (%.2f%%) is very low, may generate many signals",
+			cfg.Analyzers.FallAnalyzer.MinFall)
+	}
 
-// 	fmt.Println(strings.Repeat("=", width))
-// }
+	if len(errors) > 0 {
+		return fmt.Errorf(strings.Join(errors, "; "))
+	}
 
-// func formatPeriods(periods []int) string {
-// 	var result []string
-// 	for _, period := range periods {
-// 		if period < 60 {
-// 			result = append(result, fmt.Sprintf("%dм", period))
-// 		} else if period == 60 {
-// 			result = append(result, "1ч")
-// 		} else if period < 1440 {
-// 			result = append(result, fmt.Sprintf("%dч", period/60))
-// 		} else {
-// 			result = append(result, fmt.Sprintf("%dд", period/1440))
-// 		}
-// 	}
-// 	return strings.Join(result, ", ")
-// }
+	return nil
+}
 
-// func formatDuration(d time.Duration) string {
-// 	hours := int(d.Hours())
-// 	minutes := int(d.Minutes()) % 60
-// 	seconds := int(d.Seconds()) % 60
+func logConfig(cfg *config.Config) {
+	logger.Info("📝 Configuration loaded:")
+	logger.Info("   • Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
 
-// 	if hours > 0 {
-// 		return fmt.Sprintf("%dч %dм %dс", hours, minutes, seconds)
-// 	} else if minutes > 0 {
-// 		return fmt.Sprintf("%dм %dс", minutes, seconds)
-// 	}
-// 	return fmt.Sprintf("%dс", seconds)
-// }
+	// Символы
+	symbols := cfg.GetSymbolList()
+	if len(symbols) > 0 {
+		logger.Info("   • Monitoring %d symbols", len(symbols))
+		if len(symbols) <= 10 {
+			logger.Info("   • Symbols: %v", symbols)
+		} else {
+			logger.Info("   • First 10 symbols: %v", symbols[:10])
+		}
+	} else {
+		logger.Info("   • Monitoring: ALL symbols (filtered by volume)")
+	}
 
-// // parseFloat - вспомогательная функция для парсинга строк в числа
-// func parseFloat(s string) (float64, error) {
-// 	if s == "" {
-// 		return 0, fmt.Errorf("empty string")
-// 	}
-// 	return strconv.ParseFloat(s, 64)
-// }
+	// Анализ
+	logger.Info("   • Analysis: every %d seconds", cfg.AnalysisEngine.UpdateInterval)
+	logger.Info("   • Periods: %v minutes", cfg.AnalysisEngine.AnalysisPeriods)
 
-// // package main
+	// Пороги
+	logger.Info("   ⚡ Growth detection: >%.2f%% (confidence: >%.0f%%)",
+		cfg.Analyzers.GrowthAnalyzer.MinGrowth,
+		cfg.Analyzers.GrowthAnalyzer.MinConfidence)
 
-// // import "honnef.co/go/tools/config"
+	logger.Info("   📉 Fall detection: >%.2f%% (confidence: >%.0f%%)",
+		cfg.Analyzers.FallAnalyzer.MinFall,
+		cfg.Analyzers.FallAnalyzer.MinConfidence)
 
-// // func main() {
-// // 	// Инициализация
-// // 	cfg := config.Load()
-// // 	eventBus := events.NewEventBus()
+	// Фильтры
+	logger.Info("   🛡️  Volume filter: >%.0f USDT", cfg.MinVolumeFilter)
+	logger.Info("   🚦 Signal filters: %v", cfg.SignalFilters.Enabled)
 
-// // 	// Создание компонентов
-// // 	storage := storage.NewTimeSeriesStorage(cfg)
-// // 	analyzer := analysis.NewAnalysisEngine(cfg, storage, eventBus)
-// // 	notifier := notification.NewCoordinator(cfg, eventBus)
+	// Уведомления
+	logger.Info("   📱 Telegram: %v", cfg.TelegramEnabled)
+	if cfg.TelegramEnabled {
+		logger.Info("   📨 Notify: growth=%v, fall=%v",
+			cfg.TelegramNotifyGrowth, cfg.TelegramNotifyFall)
+	}
+}
 
-// // 	// Настройка пайплайна
-// // 	pipeline := pipeline.NewSignalPipeline()
-// // 	pipeline.AddStage(analysis.NewValidationStage())
-// // 	pipeline.AddStage(analysis.NewEnrichmentStage(storage))
-// // 	pipeline.AddStage(filter.NewConfidenceFilter(cfg))
-// // 	pipeline.AddStage(notification.NewFormattingStage(cfg))
+func checkSystemHealth(dataManager *manager.DataManager) bool {
+	storage := dataManager.GetStorage()
+	if storage == nil {
+		logger.Error("❌ Storage not initialized")
+		return false
+	}
 
-// // 	// Подписки
-// // 	eventBus.Subscribe(events.EventPriceUpdate, analyzer)
-// // 	eventBus.Subscribe(events.EventSignalDetected, pipeline)
-// // 	eventBus.Subscribe(events.EventSignalProcessed, notifier)
+	symbols := storage.GetSymbols()
+	logger.Info("✅ System health check passed")
+	logger.Info("📦 Storage initialized with %d symbols", len(symbols))
 
-// // 	// Запуск
-// // 	scheduler := orchestration.NewScheduler(cfg)
-// // 	scheduler.AddTask(fetcher.UpdatePrices, cfg.UpdateInterval)
-// // 	scheduler.AddTask(analyzer.RunAnalysis, cfg.AnalysisInterval)
+	if len(symbols) > 0 {
+		// Показываем несколько символов с ценами
+		sampleCount := min(5, len(symbols))
+		for i := 0; i < sampleCount; i++ {
+			if price, ok := storage.GetCurrentPrice(symbols[i]); ok {
+				logger.Debug("   • %s: %.4f", symbols[i], price)
+			}
+		}
+	}
 
-// // 	scheduler.Start()
-// // }
+	return true
+}
+
+func logStatus(dataManager *manager.DataManager, startTime time.Time) {
+	storage := dataManager.GetStorage()
+	symbolCount := 0
+	if storage != nil {
+		symbolCount = len(storage.GetSymbols())
+	}
+
+	stats := map[string]string{
+		"Uptime":         time.Since(startTime).Round(time.Second).String(),
+		"Symbols Loaded": fmt.Sprintf("%d", symbolCount),
+	}
+
+	if engine := dataManager.GetAnalysisEngine(); engine != nil {
+		engineStats := engine.GetStats()
+		stats["Total Analyses"] = fmt.Sprintf("%d", engineStats.TotalAnalyses)
+		stats["Signals Found"] = fmt.Sprintf("%d", engineStats.TotalSignals)
+		stats["Last Analysis"] = time.Since(engineStats.LastAnalysisTime).Round(time.Second).String() + " ago"
+	}
+
+	logger.Status(stats)
+}
+
+func printHelp() {
+	fmt.Println("📈 Crypto Growth Monitor")
+	fmt.Println("Usage: growth-monitor [options]")
+	fmt.Println()
+	fmt.Println("Options:")
+	fmt.Println("  --config string    Path to configuration file (default: .env)")
+	fmt.Println("  --log-level string Log level: debug, info, warn, error")
+	fmt.Println("  --version          Show version information")
+	fmt.Println("  --help             Show this help message")
+	fmt.Println()
+	fmt.Println("Configuration (.env file):")
+	fmt.Println("  Required: BYBIT_API_KEY, BYBIT_SECRET_KEY")
+	fmt.Println("  Optional: SYMBOL_FILTER, MIN_VOLUME_FILTER, etc.")
+	fmt.Println()
+	fmt.Println("Example:")
+	fmt.Println("  growth-monitor --config=.env --log-level=info")
+	fmt.Println("  growth-monitor --help")
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

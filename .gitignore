@@ -30,3 +30,32 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+# Бинарники
+bin/
+releases/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Логи
+logs/*.log
+*.log
+
+# Конфигурация
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Тестовые данные
+test_data/
+debug.log

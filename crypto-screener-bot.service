@@ -1,0 +1,20 @@
+# /etc/systemd/system/crypto-screener-bot.service
+[Unit]
+Description=Crypto Exchange Screener Bot
+After=network.target
+
+[Service]
+Type=simple
+User=crypto
+WorkingDirectory=/opt/crypto-screener-bot
+Environment="BYBIT_API_KEY=your_key"
+Environment="BYBIT_SECRET_KEY=your_secret"
+Environment="LOG_LEVEL=info"
+ExecStart=/opt/crypto-screener-bot/bot --log-level=info
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

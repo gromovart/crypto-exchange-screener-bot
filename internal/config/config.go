@@ -1,124 +1,66 @@
-// internal/config/config.go
 package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/joho/godotenv"
 )
 
-// Config - структура конфигурации приложения
 type Config struct {
-	// Debug и логирование
-	DebugMode    bool   `json:"debug_mode"`
-	LogToConsole bool   `json:"log_to_console"`
-	LogToFile    bool   `json:"log_to_file"`
-	LogFilePath  string `json:"log_file_path"`
+	// Выбор биржи
+	Exchange     string `json:"exchange"`
+	ExchangeType string `json:"exchange_type"`
 
-	// API Keys
-	ApiKey    string
-	ApiSecret string
-	BaseURL   string
+	// API ключи
+	ApiKey    string `json:"api_key"`
+	ApiSecret string `json:"api_secret"`
+	BaseURL   string `json:"base_url"`
 
-	// Trading Settings
-	TradingEnabled bool
-	TradingSymbol  string
+	// Bybit специфичные
+	FuturesCategory string `json:"futures_category"`
 
-	// Risk Management
-	RiskPercent     float64
-	StopLoss        float64
-	TakeProfit      float64
-	MaxPositionSize float64
+	// Символы и фильтрация
+	SymbolFilter        string  `json:"symbol_filter"`
+	ExcludeSymbols      string  `json:"exclude_symbols"`
+	MaxSymbolsToMonitor int     `json:"max_symbols_to_monitor"`
+	MinVolumeFilter     float64 `json:"min_volume_filter"`
 
-	// Monitoring
-	UpdateInterval   int
-	PriceHistorySize int
-	TrackedIntervals []int
-
-	// Alerts
-	AlertThreshold float64
-	AlertEnabled   bool
-	AlertEmail     string
-
-	// Logging
-	LogLevel      string
-	LogFile       string
-	LogMaxSize    int
-	LogMaxBackups int
-
-	// HTTP Server
-	HttpPort    string
-	HttpEnabled bool
-	CorsOrigins []string
-
-	// Performance
-	MaxConcurrentRequests int
-	RequestTimeout        time.Duration
-	RateLimitDelay        time.Duration
-
-	InitialDataFetch bool `json:"initial_data_fetch"`
-	DataFetchLimit   int  `json:"data_fetch_limit"`
-
-	FuturesCategory string  `json:"futures_category"` // "linear" или "inverse"
-	FuturesLeverage float64 `json:"futures_leverage"`
-
-	// Analysis Engine Configuration
+	// Движок анализа
 	AnalysisEngine struct {
-		UpdateInterval   int           `json:"update_interval"`     // Интервал анализа в секундах
-		AnalysisPeriods  []int         `json:"analysis_periods"`    // Периоды анализа в минутах
-		MinVolumeFilter  float64       `json:"min_volume_filter"`   // Минимальный объем
-		MaxSymbolsPerRun int           `json:"max_symbols_per_run"` // Макс. символов за анализ
-		EnableParallel   bool          `json:"enable_parallel"`     // Параллельный анализ
-		MaxWorkers       int           `json:"max_workers"`         // Макс. горутин для анализа
-		SignalThreshold  float64       `json:"signal_threshold"`    // Порог сигнала
-		RetentionPeriod  time.Duration `json:"retention_period"`    // Период хранения данных
-		EnableCache      bool          `json:"enable_cache"`        // Включить кэширование
-		MinDataPoints    int           `json:"min_data_points"`     // Минимальное количество точек данных
+		UpdateInterval   int     `json:"update_interval"`
+		AnalysisPeriods  []int   `json:"analysis_periods"`
+		MaxSymbolsPerRun int     `json:"max_symbols_per_run"`
+		SignalThreshold  float64 `json:"signal_threshold"`
+		RetentionPeriod  int     `json:"retention_period"`
+		EnableCache      bool    `json:"enable_cache"`
+		EnableParallel   bool    `json:"enable_parallel"`
+		MaxWorkers       int     `json:"max_workers"`
 	} `json:"analysis_engine"`
 
-	// Analyzers Configuration
+	// Анализаторы
 	Analyzers struct {
 		GrowthAnalyzer struct {
 			Enabled             bool    `json:"enabled"`
 			MinConfidence       float64 `json:"min_confidence"`
-			MinGrowth           float64 `json:"min_growth"`           // Минимальный рост в %
-			ContinuityThreshold float64 `json:"continuity_threshold"` // Порог непрерывности
+			MinGrowth           float64 `json:"min_growth"`
+			ContinuityThreshold float64 `json:"continuity_threshold"`
 		} `json:"growth_analyzer"`
-
 		FallAnalyzer struct {
 			Enabled             bool    `json:"enabled"`
 			MinConfidence       float64 `json:"min_confidence"`
-			MinFall             float64 `json:"min_fall"` // Минимальное падение в %
+			MinFall             float64 `json:"min_fall"`
 			ContinuityThreshold float64 `json:"continuity_threshold"`
 		} `json:"fall_analyzer"`
-
 		ContinuousAnalyzer struct {
 			Enabled             bool `json:"enabled"`
-			MinContinuousPoints int  `json:"min_continuous_points"` // Мин. точек непрерывности
+			MinContinuousPoints int  `json:"min_continuous_points"`
 		} `json:"continuous_analyzer"`
 	} `json:"analyzers"`
 
-	// Фильтры символов
-	SymbolFilter        string  `json:"symbol_filter"`          // Фильтр символов
-	ExcludeSymbols      string  `json:"exclude_symbols"`        // Символы для исключения
-	MaxSymbolsToMonitor int     `json:"max_symbols_to_monitor"` // Максимальное количество символов для мониторинга
-	MinVolumeFilter     float64 `json:"min_volume_filter"`      // Минимальный объем для фильтрации
-
-	// Фильтры сигналов
-	SignalFilters struct {
-		Enabled          bool     `json:"enabled"`             // Включить фильтрацию сигналов
-		IncludePatterns  []string `json:"include_patterns"`    // Паттерны для включения
-		ExcludePatterns  []string `json:"exclude_patterns"`    // Паттерны для исключения
-		MinConfidence    float64  `json:"min_confidence"`      // Минимальная уверенность сигнала
-		MaxSignalsPerMin int      `json:"max_signals_per_min"` // Максимум сигналов в минуту
-	} `json:"signal_filters"`
-
-	// EventBus Configuration
+	// Шина событий
 	EventBus struct {
 		BufferSize    int  `json:"buffer_size"`
 		WorkerCount   int  `json:"worker_count"`
@@ -126,241 +68,167 @@ type Config struct {
 		EnableLogging bool `json:"enable_logging"`
 	} `json:"event_bus"`
 
-	// Telegram Bot Configuration
-	TelegramAPIKey   string `json:"telegram_api_key"`
-	TelegramChatID   int64  `json:"telegram_chat_id"`
-	TelegramEnabled  bool   `json:"telegram_enabled"`
-	TelegramNotifyOn struct {
-		Growth bool `json:"notify_on_growth"`
-		Fall   bool `json:"notify_on_fall"`
-	} `json:"telegram_notify_on"`
-	TelegramWebhookPort string `json:"telegram_webhook_port"`
-	TelegramWebhookURL  string `json:"telegram_webhook_url"`
+	// Фильтры сигналов
+	SignalFilters struct {
+		Enabled          bool     `json:"enabled"`
+		MinConfidence    float64  `json:"min_confidence"`
+		MaxSignalsPerMin int      `json:"max_signals_per_min"`
+		IncludePatterns  []string `json:"include_patterns"`
+		ExcludePatterns  []string `json:"exclude_patterns"`
+	} `json:"signal_filters"`
 
-	// Message Formatting
-	MessageFormat   string `json:"message_format"` // "compact" | "detailed"
-	Include24hStats bool   `json:"include_24h_stats"`
+	// Настройки отображения
+	Display struct {
+		Mode               string `json:"mode"`
+		MaxSignalsPerBatch int    `json:"max_signals_per_batch"`
+		MinConfidence      int    `json:"min_confidence"`
+		DisplayGrowth      bool   `json:"display_growth"`
+		DisplayFall        bool   `json:"display_fall"`
+		DisplayPeriods     []int  `json:"display_periods"`
+		UseColors          bool   `json:"use_colors"`
+	} `json:"display"`
 
-	// Exchange Selection
-	Exchange     string `json:"exchange"`      // bybit, binance
-	ExchangeType string `json:"exchange_type"` // spot, futures
+	// Telegram
+	TelegramEnabled         bool    `json:"telegram_enabled"`
+	TelegramBotToken        string  `json:"telegram_bot_token"`
+	TelegramChatID          string  `json:"telegram_chat_id"`
+	TelegramNotifyGrowth    bool    `json:"telegram_notify_growth"`
+	TelegramNotifyFall      bool    `json:"telegram_notify_fall"`
+	TelegramGrowthThreshold float64 `json:"telegram_growth_threshold"`
+	TelegramFallThreshold   float64 `json:"telegram_fall_threshold"`
+	MessageFormat           string  `json:"message_format"`
+	Include24hStats         bool    `json:"include_24h_stats"`
+
+	// Производительность и логирование
+	LogLevel    string `json:"log_level"`
+	LogFile     string `json:"log_file"`
+	HTTPPort    int    `json:"http_port"`
+	HTTPEnabled bool   `json:"http_enabled"`
+
+	// Устаревшие настройки (для обратной совместимости)
+	UpdateInterval  int     `json:"update_interval"`
+	CheckContinuity bool    `json:"check_continuity"`
+	MinDataPoints   int     `json:"min_data_points"`
+	GrowthThreshold float64 `json:"growth_threshold"`
+	FallThreshold   float64 `json:"fall_threshold"`
+	GrowthPeriods   []int   `json:"growth_periods"`
 }
 
 // LoadConfig загружает конфигурацию из .env файла
-func LoadConfig(envPath string) (*Config, error) {
-	// Загружаем .env файл
-	if err := godotenv.Load(envPath); err != nil {
-		log.Printf("Warning: Could not load %s file: %v", envPath, err)
+func LoadConfig(path string) (*Config, error) {
+	if err := godotenv.Load(path); err != nil {
+		// Пробуем загрузить из переменных окружения, если файла нет
+		fmt.Printf("⚠️  Config file not found, using environment variables\n")
 	}
 
-	// Выбираем соответствующие API ключи
-	var apiKey, apiSecret, baseURL string
-	apiKey = getEnvString("BYBIT_API_KEY", "")
-	apiSecret = getEnvString("BYBIT_SECRET_KEY", "")
-	baseURL = getEnvString("BYBIT_API_URL", "https://api.bybit.com")
+	cfg := &Config{}
 
-	// Проверяем обязательные поля
-	if apiKey == "" || apiSecret == "" {
-		return nil, fmt.Errorf("API keys are required. Please set BYBIT_API_KEY and BYBIT_SECRET_KEY in .env file")
+	// Выбор биржи
+	cfg.Exchange = getEnv("EXCHANGE", "bybit")
+	cfg.ExchangeType = getEnv("EXCHANGE_TYPE", "futures")
+
+	// API ключи
+	if cfg.Exchange == "bybit" {
+		cfg.ApiKey = getEnv("BYBIT_API_KEY", "")
+		cfg.ApiSecret = getEnv("BYBIT_SECRET_KEY", "")
+		cfg.BaseURL = getEnv("BYBIT_API_URL", "https://api.bybit.com")
+		cfg.FuturesCategory = getEnv("FUTURES_CATEGORY", "linear")
+	} else if cfg.Exchange == "binance" {
+		cfg.ApiKey = getEnv("BINANCE_API_KEY", "")
+		cfg.ApiSecret = getEnv("BINANCE_API_SECRET", "")
+		cfg.BaseURL = "https://api.binance.com"
 	}
 
-	// Парсим интервалы
-	intervalsStr := getEnvString("TRACKED_INTERVALS", "1,5,10,15,30,60,120,240,480,720,1440")
-	intervals := parseIntervals(intervalsStr)
+	// Символы и фильтрация
+	cfg.SymbolFilter = getEnv("SYMBOL_FILTER", "BTC,ETH,USDT")
+	cfg.ExcludeSymbols = getEnv("EXCLUDE_SYMBOLS", "")
+	cfg.MaxSymbolsToMonitor = getEnvInt("MAX_SYMBOLS_TO_MONITOR", 50)
+	cfg.MinVolumeFilter = getEnvFloat("MIN_VOLUME_FILTER", 100000)
 
-	config := &Config{
-		// API
-		ApiKey:    apiKey,
-		ApiSecret: apiSecret,
-		BaseURL:   baseURL,
+	// Движок анализа
+	cfg.AnalysisEngine.UpdateInterval = getEnvInt("ANALYSIS_UPDATE_INTERVAL", 10)
+	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "5,15,30,60"))
+	cfg.AnalysisEngine.MaxSymbolsPerRun = getEnvInt("ANALYSIS_MAX_SYMBOLS_PER_RUN", 50)
+	cfg.AnalysisEngine.SignalThreshold = getEnvFloat("ANALYSIS_SIGNAL_THRESHOLD", 2.0)
+	cfg.AnalysisEngine.RetentionPeriod = getEnvInt("ANALYSIS_RETENTION_PERIOD", 24)
+	cfg.AnalysisEngine.EnableCache = getEnvBool("ANALYSIS_ENABLE_CACHE", true)
+	cfg.AnalysisEngine.EnableParallel = getEnvBool("ANALYSIS_ENABLE_PARALLEL", true)
+	cfg.AnalysisEngine.MaxWorkers = getEnvInt("ANALYSIS_MAX_WORKERS", 5)
 
-		// Trading
-		TradingEnabled: getEnvBool("TRADING_ENABLED", false),
-		TradingSymbol:  getEnvString("TRADING_SYMBOL", "BTCUSDT"),
+	// Анализаторы
+	cfg.Analyzers.GrowthAnalyzer.Enabled = getEnvBool("GROWTH_ANALYZER_ENABLED", true)
+	cfg.Analyzers.GrowthAnalyzer.MinConfidence = getEnvFloat("GROWTH_ANALYZER_MIN_CONFIDENCE", 60.0)
+	cfg.Analyzers.GrowthAnalyzer.MinGrowth = getEnvFloat("GROWTH_ANALYZER_MIN_GROWTH", 2.0)
+	cfg.Analyzers.GrowthAnalyzer.ContinuityThreshold = getEnvFloat("GROWTH_ANALYZER_CONTINUITY_THRESHOLD", 0.7)
 
-		// Risk
-		RiskPercent:     getEnvFloat("RISK_PERCENT", 2.0),
-		StopLoss:        getEnvFloat("STOP_LOSS", 5.0),
-		TakeProfit:      getEnvFloat("TAKE_PROFIT", 10.0),
-		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 0.01),
+	cfg.Analyzers.FallAnalyzer.Enabled = getEnvBool("FALL_ANALYZER_ENABLED", true)
+	cfg.Analyzers.FallAnalyzer.MinConfidence = getEnvFloat("FALL_ANALYZER_MIN_CONFIDENCE", 60.0)
+	cfg.Analyzers.FallAnalyzer.MinFall = getEnvFloat("FALL_ANALYZER_MIN_FALL", 2.0)
+	cfg.Analyzers.FallAnalyzer.ContinuityThreshold = getEnvFloat("FALL_ANALYZER_CONTINUITY_THRESHOLD", 0.7)
 
-		// Monitoring
-		UpdateInterval:   getEnvInt("UPDATE_INTERVAL", 10),
-		PriceHistorySize: getEnvInt("PRICE_HISTORY_SIZE", 8640),
-		TrackedIntervals: intervals,
+	cfg.Analyzers.ContinuousAnalyzer.Enabled = getEnvBool("CONTINUOUS_ANALYZER_ENABLED", true)
+	cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints = getEnvInt("CONTINUOUS_ANALYZER_MIN_POINTS", 3)
 
-		// Alerts
-		AlertThreshold: getEnvFloat("ALERT_THRESHOLD", 5.0),
-		AlertEnabled:   getEnvBool("ALERT_ENABLED", true),
-		AlertEmail:     getEnvString("ALERT_EMAIL", ""),
+	// Шина событий
+	cfg.EventBus.BufferSize = getEnvInt("EVENT_BUS_BUFFER_SIZE", 1000)
+	cfg.EventBus.WorkerCount = getEnvInt("EVENT_BUS_WORKER_COUNT", 10)
+	cfg.EventBus.EnableMetrics = getEnvBool("EVENT_BUS_ENABLE_METRICS", true)
+	cfg.EventBus.EnableLogging = getEnvBool("EVENT_BUS_ENABLE_LOGGING", true)
 
-		// Logging
-		LogLevel:      getEnvString("LOG_LEVEL", "info"),
-		LogFile:       getEnvString("LOG_FILE", "logs/bot.log"),
-		LogMaxSize:    getEnvInt("LOG_MAX_SIZE", 10),
-		LogMaxBackups: getEnvInt("LOG_MAX_BACKUPS", 5),
-		LogToConsole:  true,
-		LogToFile:     true,
-		LogFilePath:   "logs/app.log",
-		DebugMode:     false, // Отключаем debug mode по умолчанию
+	// Фильтры сигналов
+	cfg.SignalFilters.Enabled = getEnvBool("SIGNAL_FILTERS_ENABLED", false)
+	cfg.SignalFilters.MinConfidence = getEnvFloat("MIN_CONFIDENCE", 50.0)
+	cfg.SignalFilters.MaxSignalsPerMin = getEnvInt("MAX_SIGNALS_PER_MIN", 5)
+	cfg.SignalFilters.IncludePatterns = parsePatterns(getEnv("SIGNAL_INCLUDE_PATTERNS", ""))
+	cfg.SignalFilters.ExcludePatterns = parsePatterns(getEnv("SIGNAL_EXCLUDE_PATTERNS", ""))
 
-		// HTTP Server
-		HttpPort:    getEnvString("HTTP_PORT", "8080"),
-		HttpEnabled: getEnvBool("HTTP_ENABLED", true),
-		CorsOrigins: strings.Split(getEnvString("CORS_ORIGINS", "*"), ","),
+	// Настройки отображения
+	cfg.Display.Mode = getEnv("DISPLAY_MODE", "compact")
+	cfg.Display.MaxSignalsPerBatch = getEnvInt("MAX_SIGNALS_PER_BATCH", 10)
+	cfg.Display.MinConfidence = getEnvInt("MIN_CONFIDENCE_DISPLAY", 30)
+	cfg.Display.DisplayGrowth = getEnvBool("DISPLAY_GROWTH", true)
+	cfg.Display.DisplayFall = getEnvBool("DISPLAY_FALL", true)
+	cfg.Display.DisplayPeriods = parseIntList(getEnv("DISPLAY_PERIODS", "5,15,30"))
+	cfg.Display.UseColors = getEnvBool("USE_COLORS", true)
 
-		// Performance
-		MaxConcurrentRequests: getEnvInt("MAX_CONCURRENT_REQUESTS", 10),
-		RequestTimeout:        time.Duration(getEnvInt("REQUEST_TIMEOUT", 30)) * time.Second,
-		RateLimitDelay:        time.Duration(getEnvInt("RATE_LIMIT_DELAY", 100)) * time.Millisecond,
+	// Telegram
+	cfg.TelegramEnabled = getEnvBool("TELEGRAM_ENABLED", false)
+	cfg.TelegramBotToken = getEnv("TG_API_KEY", "")
+	cfg.TelegramChatID = getEnv("TG_CHAT_ID", "")
+	cfg.TelegramNotifyGrowth = getEnvBool("TELEGRAM_NOTIFY_GROWTH", true)
+	cfg.TelegramNotifyFall = getEnvBool("TELEGRAM_NOTIFY_FALL", true)
+	cfg.TelegramGrowthThreshold = getEnvFloat("TELEGRAM_GROWTH_THRESHOLD", 0.5)
+	cfg.TelegramFallThreshold = getEnvFloat("TELEGRAM_FALL_THRESHOLD", 0.5)
+	cfg.MessageFormat = getEnv("MESSAGE_FORMAT", "compact")
+	cfg.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
 
-		InitialDataFetch: getEnvBool("INITIAL_DATA_FETCH", true),
-		DataFetchLimit:   getEnvInt("DATA_FETCH_LIMIT", 100),
+	// Производительность и логирование
+	cfg.LogLevel = getEnv("LOG_LEVEL", "info")
+	cfg.LogFile = getEnv("LOG_FILE", "logs/growth.log")
+	cfg.HTTPPort = getEnvInt("HTTP_PORT", 8080)
+	cfg.HTTPEnabled = getEnvBool("HTTP_ENABLED", false)
 
-		// Analysis Engine (обновленные поля с MinDataPoints)
-		AnalysisEngine: struct {
-			UpdateInterval   int           `json:"update_interval"`
-			AnalysisPeriods  []int         `json:"analysis_periods"`
-			MinVolumeFilter  float64       `json:"min_volume_filter"`
-			MaxSymbolsPerRun int           `json:"max_symbols_per_run"`
-			EnableParallel   bool          `json:"enable_parallel"`
-			MaxWorkers       int           `json:"max_workers"`
-			SignalThreshold  float64       `json:"signal_threshold"`
-			RetentionPeriod  time.Duration `json:"retention_period"`
-			EnableCache      bool          `json:"enable_cache"`
-			MinDataPoints    int           `json:"min_data_points"`
-		}{
-			UpdateInterval:   getEnvInt("ANALYSIS_UPDATE_INTERVAL", 10),
-			AnalysisPeriods:  parseGrowthPeriods(getEnvString("ANALYSIS_PERIODS", "5,15,30,60")),
-			MinVolumeFilter:  getEnvFloat("ANALYSIS_MIN_VOLUME_FILTER", 100000),
-			MaxSymbolsPerRun: getEnvInt("ANALYSIS_MAX_SYMBOLS_PER_RUN", 100),
-			EnableParallel:   getEnvBool("ANALYSIS_ENABLE_PARALLEL", true),
-			MaxWorkers:       getEnvInt("ANALYSIS_MAX_WORKERS", 5),
-			SignalThreshold:  getEnvFloat("ANALYSIS_SIGNAL_THRESHOLD", 2.0),
-			RetentionPeriod:  time.Duration(getEnvInt("ANALYSIS_RETENTION_PERIOD", 24)) * time.Hour,
-			EnableCache:      getEnvBool("ANALYSIS_ENABLE_CACHE", true),
-			MinDataPoints:    getEnvInt("ANALYSIS_MIN_DATA_POINTS", 3), // Добавлено поле
-		},
+	// Устаревшие настройки (для обратной совместимости)
+	cfg.UpdateInterval = getEnvInt("UPDATE_INTERVAL", 5)
+	cfg.CheckContinuity = getEnvBool("CHECK_CONTINUITY", false)
+	cfg.MinDataPoints = getEnvInt("MIN_DATA_POINTS", 2)
+	cfg.GrowthThreshold = getEnvFloat("GROWTH_THRESHOLD", 0.05)
+	cfg.FallThreshold = getEnvFloat("FALL_THRESHOLD", 0.05)
+	cfg.GrowthPeriods = parseIntList(getEnv("GROWTH_PERIODS", "5,15,30"))
 
-		// Analyzers
-		Analyzers: struct {
-			GrowthAnalyzer struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinGrowth           float64 `json:"min_growth"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			} `json:"growth_analyzer"`
-			FallAnalyzer struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinFall             float64 `json:"min_fall"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			} `json:"fall_analyzer"`
-			ContinuousAnalyzer struct {
-				Enabled             bool `json:"enabled"`
-				MinContinuousPoints int  `json:"min_continuous_points"`
-			} `json:"continuous_analyzer"`
-		}{
-			GrowthAnalyzer: struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinGrowth           float64 `json:"min_growth"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			}{
-				Enabled:             getEnvBool("GROWTH_ANALYZER_ENABLED", true),
-				MinConfidence:       getEnvFloat("GROWTH_ANALYZER_MIN_CONFIDENCE", 60.0),
-				MinGrowth:           getEnvFloat("GROWTH_ANALYZER_MIN_GROWTH", 2.0),
-				ContinuityThreshold: getEnvFloat("GROWTH_ANALYZER_CONTINUITY_THRESHOLD", 0.7),
-			},
-			FallAnalyzer: struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinFall             float64 `json:"min_fall"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			}{
-				Enabled:             getEnvBool("FALL_ANALYZER_ENABLED", true),
-				MinConfidence:       getEnvFloat("FALL_ANALYZER_MIN_CONFIDENCE", 60.0),
-				MinFall:             getEnvFloat("FALL_ANALYZER_MIN_FALL", 2.0),
-				ContinuityThreshold: getEnvFloat("FALL_ANALYZER_CONTINUITY_THRESHOLD", 0.7),
-			},
-			ContinuousAnalyzer: struct {
-				Enabled             bool `json:"enabled"`
-				MinContinuousPoints int  `json:"min_continuous_points"`
-			}{
-				Enabled:             getEnvBool("CONTINUOUS_ANALYZER_ENABLED", true),
-				MinContinuousPoints: getEnvInt("CONTINUOUS_ANALYZER_MIN_POINTS", 3),
-			},
-		},
-
-		// Фильтры символов (сохраняем старые имена для обратной совместимости)
-		SymbolFilter:        getEnvString("SYMBOL_FILTER", ""),
-		ExcludeSymbols:      getEnvString("EXCLUDE_SYMBOLS", ""),
-		MaxSymbolsToMonitor: getEnvInt("MAX_SYMBOLS_TO_MONITOR", 0),
-		MinVolumeFilter:     getEnvFloat("MIN_VOLUME_FILTER", 100000),
-
-		// Фильтры сигналов
-		SignalFilters: struct {
-			Enabled          bool     `json:"enabled"`
-			IncludePatterns  []string `json:"include_patterns"`
-			ExcludePatterns  []string `json:"exclude_patterns"`
-			MinConfidence    float64  `json:"min_confidence"`
-			MaxSignalsPerMin int      `json:"max_signals_per_min"`
-		}{
-			Enabled:          getEnvBool("SIGNAL_FILTERS_ENABLED", false),
-			IncludePatterns:  parsePatterns(getEnvString("SIGNAL_INCLUDE_PATTERNS", "")),
-			ExcludePatterns:  parsePatterns(getEnvString("SIGNAL_EXCLUDE_PATTERNS", "")),
-			MinConfidence:    getEnvFloat("MIN_CONFIDENCE", 50.0),
-			MaxSignalsPerMin: getEnvInt("MAX_SIGNALS_PER_MIN", 5),
-		},
-
-		// EventBus
-		EventBus: struct {
-			BufferSize    int  `json:"buffer_size"`
-			WorkerCount   int  `json:"worker_count"`
-			EnableMetrics bool `json:"enable_metrics"`
-			EnableLogging bool `json:"enable_logging"`
-		}{
-			BufferSize:    getEnvInt("EVENT_BUS_BUFFER_SIZE", 1000),
-			WorkerCount:   getEnvInt("EVENT_BUS_WORKER_COUNT", 10),
-			EnableMetrics: getEnvBool("EVENT_BUS_ENABLE_METRICS", true),
-			EnableLogging: getEnvBool("EVENT_BUS_ENABLE_LOGGING", true),
-		},
-
-		// Telegram Configuration
-		TelegramAPIKey:  getEnvString("TG_API_KEY", ""),
-		TelegramChatID:  getEnvInt64("TG_CHAT_ID", 0),
-		TelegramEnabled: getEnvBool("TELEGRAM_ENABLED", false),
-		TelegramNotifyOn: struct {
-			Growth bool `json:"notify_on_growth"`
-			Fall   bool `json:"notify_on_fall"`
-		}{
-			Growth: getEnvBool("TELEGRAM_NOTIFY_GROWTH", true),
-			Fall:   getEnvBool("TELEGRAM_NOTIFY_FALL", true),
-		},
-		TelegramWebhookPort: getEnvString("TELEGRAM_WEBHOOK_PORT", "8443"),
-		TelegramWebhookURL:  getEnvString("TELEGRAM_WEBHOOK_URL", ""),
-
-		// Message Formatting
-		MessageFormat:   getEnvString("MESSAGE_FORMAT", "compact"),
-		Include24hStats: getEnvBool("INCLUDE_24H_STATS", false),
-
-		Exchange:     getEnvString("EXCHANGE", "bybit"),
-		ExchangeType: getEnvString("EXCHANGE_TYPE", "futures"),
-	}
-
-	return config, nil
+	return cfg, nil
 }
 
-// Вспомогательные функции для парсинга переменных окружения
-func getEnvString(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
+// Вспомогательные функции
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return defaultValue
 }
 
 func getEnvInt(key string, defaultValue int) int {
-	if value, exists := os.LookupEnv(key); exists {
+	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
 		}
@@ -369,7 +237,7 @@ func getEnvInt(key string, defaultValue int) int {
 }
 
 func getEnvFloat(key string, defaultValue float64) float64 {
-	if value, exists := os.LookupEnv(key); exists {
+	if value := os.Getenv(key); value != "" {
 		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
 			return floatValue
 		}
@@ -378,7 +246,7 @@ func getEnvFloat(key string, defaultValue float64) float64 {
 }
 
 func getEnvBool(key string, defaultValue bool) bool {
-	if value, exists := os.LookupEnv(key); exists {
+	if value := os.Getenv(key); value != "" {
 		if boolValue, err := strconv.ParseBool(value); err == nil {
 			return boolValue
 		}
@@ -386,120 +254,73 @@ func getEnvBool(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
-func parseIntervals(intervalStr string) []int {
-	parts := strings.Split(intervalStr, ",")
-	intervals := make([]int, 0, len(parts))
+func parseIntList(value string) []int {
+	var result []int
+	if value == "" {
+		return result
+	}
 
+	parts := strings.Split(value, ",")
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if interval, err := strconv.Atoi(part); err == nil && interval > 0 {
-			intervals = append(intervals, interval)
+		if part == "" {
+			continue
+		}
+		if intValue, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+			result = append(result, intValue)
 		}
 	}
-
-	// Если не удалось распарсить, возвращаем стандартные интервалы
-	if len(intervals) == 0 {
-		return []int{1, 5, 10, 15, 30, 60, 120, 240, 480, 720, 1440}
-	}
-
-	return intervals
-}
-
-// Validate проверяет корректность конфигурации
-func (c *Config) Validate() error {
-	// Проверяем API ключи
-	if c.ApiKey == "" {
-		return fmt.Errorf("API key is required")
-	}
-	if c.ApiSecret == "" {
-		return fmt.Errorf("API secret is required")
-	}
-
-	// Проверяем допустимость значений
-	if c.RiskPercent <= 0 || c.RiskPercent > 100 {
-		return fmt.Errorf("risk percent must be between 0 and 100")
-	}
-
-	if c.StopLoss <= 0 {
-		return fmt.Errorf("stop loss must be positive")
-	}
-
-	if c.UpdateInterval < 1 {
-		return fmt.Errorf("update interval must be at least 1 second")
-	}
-
-	return nil
-}
-
-// GetCurrentAPI возвращает текущие API ключи в зависимости от сети
-func (c *Config) GetCurrentAPI() (string, string, string) {
-	return c.ApiKey, c.ApiSecret, c.BaseURL
-}
-
-// GetIntervalDuration возвращает time.Duration для интервала в минутах
-func (c *Config) GetIntervalDuration(minutes int) time.Duration {
-	return time.Duration(minutes) * time.Minute
-}
-
-// GetAllIntervalDurations возвращает все интервалы в виде time.Duration
-func (c *Config) GetAllIntervalDurations() []time.Duration {
-	durations := make([]time.Duration, len(c.TrackedIntervals))
-	for i, interval := range c.TrackedIntervals {
-		durations[i] = c.GetIntervalDuration(interval)
-	}
-	return durations
-}
-
-// parseGrowthPeriods парсит периоды роста
-func parseGrowthPeriods(periodsStr string) []int {
-	parts := strings.Split(periodsStr, ",")
-	periods := make([]int, 0, len(parts))
-
-	supportedPeriods := map[int]bool{
-		1: true, 5: true, 10: true, 15: true, 30: true,
-		60: true, 120: true, 240: true, 480: true,
-		720: true, 1440: true,
-	}
-
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if period, err := strconv.Atoi(part); err == nil {
-			if supportedPeriods[period] {
-				periods = append(periods, period)
-			}
-		}
-	}
-
-	if len(periods) == 0 {
-		periods = []int{5, 15, 30, 60}
-	}
-
-	return periods
-}
-
-func parsePatterns(patternsStr string) []string {
-	if patternsStr == "" {
-		return []string{}
-	}
-
-	patterns := strings.Split(patternsStr, ",")
-	result := make([]string, 0, len(patterns))
-
-	for _, pattern := range patterns {
-		trimmed := strings.TrimSpace(pattern)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-
 	return result
 }
 
-func getEnvInt64(key string, defaultValue int64) int64 {
-	if value, exists := os.LookupEnv(key); exists {
-		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
-			return intValue
+func parsePatterns(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+
+	patterns := strings.Split(value, ",")
+	var result []string
+	for _, pattern := range patterns {
+		if trimmed := strings.TrimSpace(pattern); trimmed != "" {
+			result = append(result, trimmed)
 		}
 	}
-	return defaultValue
+	return result
+}
+
+// GetSymbolList возвращает список символов для мониторинга
+func (c *Config) GetSymbolList() []string {
+	if c.SymbolFilter == "" || c.SymbolFilter == "all" {
+		return []string{} // Пустой список означает "все символы"
+	}
+
+	var symbols []string
+	parts := strings.Split(c.SymbolFilter, ",")
+
+	for _, part := range parts {
+		symbol := strings.TrimSpace(part)
+		if symbol != "" {
+			// Если символ не содержит USDT, добавляем его
+			if !strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+				symbol = strings.ToUpper(symbol) + "USDT"
+			}
+			symbols = append(symbols, symbol)
+		}
+	}
+
+	return symbols
+}
+
+// ShouldExcludeSymbol проверяет, нужно ли исключить символ
+func (c *Config) ShouldExcludeSymbol(symbol string) bool {
+	if c.ExcludeSymbols == "" {
+		return false
+	}
+
+	excludeList := strings.Split(c.ExcludeSymbols, ",")
+	for _, exclude := range excludeList {
+		if strings.TrimSpace(strings.ToUpper(exclude)) == strings.ToUpper(symbol) {
+			return true
+		}
+	}
+	return false
 }
