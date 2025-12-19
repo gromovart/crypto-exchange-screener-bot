@@ -12,15 +12,18 @@ func main() {
 	fmt.Println("🔧 ТЕСТИРОВАНИЕ АНАЛИЗАТОРОВ")
 	fmt.Println(strings.Repeat("=", 60))
 
-	// Тестовые данные
+	// Тестируем новый FallAnalyzer
+	testNewFallAnalyzer()
+
+	// Тестовые данные для других тестов
 	testData := createTestData()
 
 	// Тестируем GrowthAnalyzer
 	fmt.Println("\n🧪 ТЕСТ GROWTH ANALYZER:")
 	testGrowthAnalyzer(testData)
 
-	// Тестируем FallAnalyzer
-	fmt.Println("\n🧪 ТЕСТ FALL ANALYZER:")
+	// Тестируем старый FallAnalyzer (для сравнения)
+	fmt.Println("\n🧪 ТЕСТ СТАРОГО FALL ANALYZER:")
 	testFallAnalyzer(testData)
 
 	// Тестируем ContinuousAnalyzer
@@ -72,14 +75,122 @@ func createTestData() []types.PriceData {
 	}
 }
 
+func createTestDataForFall() []types.PriceData {
+	now := time.Now()
+	return []types.PriceData{
+		{
+			Symbol:    "BTCUSDT",
+			Price:     100.0,
+			Volume24h: 1000000,
+			Timestamp: now.Add(-5 * time.Minute),
+		},
+		{
+			Symbol:    "BTCUSDT",
+			Price:     101.0, // +1%
+			Volume24h: 1100000,
+			Timestamp: now.Add(-4 * time.Minute),
+		},
+		{
+			Symbol:    "BTCUSDT",
+			Price:     100.0, // -1% - ЯВНОЕ ПАДЕНИЕ
+			Volume24h: 900000,
+			Timestamp: now.Add(-3 * time.Minute),
+		},
+		{
+			Symbol:    "BTCUSDT",
+			Price:     99.0, // -1% - ЕЩЕ ПАДЕНИЕ
+			Volume24h: 800000,
+			Timestamp: now.Add(-2 * time.Minute),
+		},
+		{
+			Symbol:    "BTCUSDT",
+			Price:     99.5, // +0.5%
+			Volume24h: 850000,
+			Timestamp: now.Add(-1 * time.Minute),
+		},
+		{
+			Symbol:    "BTCUSDT",
+			Price:     99.0, // -0.5%
+			Volume24h: 800000,
+			Timestamp: now,
+		},
+	}
+}
+
+func testNewFallAnalyzer() {
+	fmt.Println("\n🧪 ТЕСТ НОВОГО FALL ANALYZER (версия 2.0):")
+
+	data := createTestDataForFall()
+
+	config := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        1.0,
+		MinConfidence: 1.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"min_fall":             0.01,
+			"continuity_threshold": 0.5,
+			"volume_weight":        0.2,
+		},
+	}
+
+	analyzer := analyzers.NewFallAnalyzer(config)
+
+	fmt.Println("   📊 Тестовые данные:")
+	for i, point := range data {
+		fmt.Printf("      %d. %.2f (объем: %.0f) время: %v\n",
+			i+1, point.Price, point.Volume24h,
+			point.Timestamp.Format("15:04:05"))
+	}
+
+	signals, err := analyzer.Analyze(data, config)
+	if err != nil {
+		fmt.Printf("   ❌ Ошибка: %v\n", err)
+		return
+	}
+
+	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
+
+	if len(signals) == 0 {
+		fmt.Println("   ⚠️  НЕТ СИГНАЛОВ!")
+
+		fmt.Println("   📈 Все изменения:")
+		for i := 1; i < len(data); i++ {
+			change := ((data[i].Price - data[i-1].Price) / data[i-1].Price) * 100
+			trend := "↑"
+			if change < 0 {
+				trend = "↓"
+			}
+			fmt.Printf("      %d→%d: %.2f → %.2f (%s%.4f%%)\n",
+				i-1, i, data[i-1].Price, data[i].Price, trend, change)
+		}
+	}
+
+	for i, signal := range signals {
+		fmt.Printf("      Сигнал %d:\n", i+1)
+		fmt.Printf("      • Символ: %s\n", signal.Symbol)
+		fmt.Printf("      • Тип: %s\n", signal.Type)
+		fmt.Printf("      • Направление: %s\n", signal.Direction)
+		fmt.Printf("      • Изменение: %.4f%%\n", signal.ChangePercent)
+		fmt.Printf("      • Уверенность: %.1f%%\n", signal.Confidence)
+		fmt.Printf("      • Период: %d мин\n", signal.Period)
+		fmt.Printf("      • Начало: %.2f → Конец: %.2f\n",
+			signal.StartPrice, signal.EndPrice)
+
+		if signal.ChangePercent > 0 && signal.Direction == "down" {
+			fmt.Println("      ⚠️  ВНИМАНИЕ: ChangePercent положительный при падении!")
+		}
+	}
+}
+
 func testGrowthAnalyzer(data []types.PriceData) {
 	config := analyzers.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        1.0,
-		MinConfidence: 10.0, // Очень низкая уверенность
+		MinConfidence: 10.0,
 		MinDataPoints: 2,
 		CustomSettings: map[string]interface{}{
-			"min_growth":           0.01, // Всего 0.01%!
+			"min_growth":           0.01,
 			"continuity_threshold": 0.5,
 			"volume_weight":        0.2,
 		},
@@ -109,7 +220,6 @@ func testGrowthAnalyzer(data []types.PriceData) {
 		fmt.Printf("      • Уверенность: %.1f%%\n", signal.Confidence)
 		fmt.Printf("      • Точки данных: %d\n", signal.DataPoints)
 
-		// Проверяем данные
 		if len(data) > 0 {
 			startPrice := data[0].Price
 			endPrice := data[len(data)-1].Price
@@ -128,10 +238,10 @@ func testFallAnalyzer(data []types.PriceData) {
 	config := analyzers.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        1.0,
-		MinConfidence: 1.0, // СНИЖАЕМ до 1%!
+		MinConfidence: 1.0,
 		MinDataPoints: 2,
 		CustomSettings: map[string]interface{}{
-			"min_fall":             0.001, // ЕЩЕ НИЖЕ - 0.001%!
+			"min_fall":             0.001,
 			"continuity_threshold": 0.5,
 			"volume_weight":        0.2,
 		},
@@ -152,7 +262,6 @@ func testFallAnalyzer(data []types.PriceData) {
 
 	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
 
-	// Детальная информация о данных
 	fmt.Println("   📈 Анализ данных:")
 	for i, point := range data {
 		if i > 0 {
@@ -166,7 +275,6 @@ func testFallAnalyzer(data []types.PriceData) {
 		}
 	}
 
-	// Общее изменение
 	totalChange := ((data[len(data)-1].Price - data[0].Price) / data[0].Price) * 100
 	fmt.Printf("   📊 Общее изменение: %.4f%%\n", totalChange)
 
@@ -178,7 +286,6 @@ func testFallAnalyzer(data []types.PriceData) {
 		fmt.Printf("      • Изменение: %.4f%%\n", signal.ChangePercent)
 		fmt.Printf("      • Уверенность: %.1f%%\n", signal.Confidence)
 
-		// Обратите внимание: для падения ChangePercent должен быть отрицательным
 		if signal.ChangePercent > 0 && signal.Direction == "down" {
 			fmt.Printf("      ⚠️  Внимание: ChangePercent положительный для падения!\n")
 		}
@@ -198,7 +305,7 @@ func testContinuousAnalyzer(data []types.PriceData) {
 	config := analyzers.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
-		MinConfidence: 10.0,
+		MinConfidence: 1.0,
 		MinDataPoints: 2,
 		CustomSettings: map[string]interface{}{
 			"min_continuous_points": 2,
@@ -210,6 +317,7 @@ func testContinuousAnalyzer(data []types.PriceData) {
 
 	fmt.Println("   Конфигурация:")
 	fmt.Printf("      • MinContinuousPoints: %d\n", config.CustomSettings["min_continuous_points"])
+	fmt.Printf("      • MinConfidence: %.1f%%\n", config.MinConfidence)
 
 	signals, err := analyzer.Analyze(data, config)
 	if err != nil {
@@ -219,6 +327,23 @@ func testContinuousAnalyzer(data []types.PriceData) {
 
 	fmt.Printf("   📊 Результаты: %d сигналов\n", len(signals))
 
+	fmt.Println("   📈 Анализ непрерывности:")
+	for i := 1; i < len(data); i++ {
+		change1 := ((data[i].Price - data[i-1].Price) / data[i-1].Price) * 100
+
+		if i+1 < len(data) {
+			change2 := ((data[i+1].Price - data[i].Price) / data[i].Price) * 100
+
+			if change1 > 0 && change2 > 0 {
+				fmt.Printf("      %d-%d-%d: РОСТ %.4f%% → %.4f%%\n",
+					i-1, i, i+1, change1, change2)
+			} else if change1 < 0 && change2 < 0 {
+				fmt.Printf("      %d-%d-%d: ПАДЕНИЕ %.4f%% → %.4f%%\n",
+					i-1, i, i+1, change1, change2)
+			}
+		}
+	}
+
 	for i, signal := range signals {
 		fmt.Printf("      Сигнал %d:\n", i+1)
 		fmt.Printf("      • Символ: %s\n", signal.Symbol)
@@ -226,5 +351,13 @@ func testContinuousAnalyzer(data []types.PriceData) {
 		fmt.Printf("      • Направление: %s\n", signal.Direction)
 		fmt.Printf("      • Непрерывный: %v\n", signal.Metadata.IsContinuous)
 		fmt.Printf("      • Изменение: %.4f%%\n", signal.ChangePercent)
+		fmt.Printf("      • Уверенность: %.1f%%\n", signal.Confidence)
+	}
+
+	if len(signals) == 0 {
+		fmt.Println("   ⚠️  Нет сигналов непрерывности!")
+		fmt.Println("   🔍 В данных есть последовательные изменения:")
+		fmt.Println("      - Рост: точки 0→1→2 (+1% → +1%)")
+		fmt.Println("      - Падение: точки 2→3→4 (-0.5% → -1%)")
 	}
 }

@@ -17,6 +17,14 @@ type ContinuousAnalyzer struct {
 	mu     sync.RWMutex
 }
 
+type SequenceInfo struct {
+	StartIdx  int
+	Length    int
+	Direction string
+	AvgGap    float64
+	AvgChange float64
+}
+
 func (a *ContinuousAnalyzer) Name() string {
 	return "continuous_analyzer"
 }
@@ -78,38 +86,19 @@ func (a *ContinuousAnalyzer) checkContinuity(data []types.PriceData) (bool, floa
 		return false, 0
 	}
 
-	continuousPoints := 0
-	totalGap := 0.0
-	totalChange := 0.0
+	// Ищем последовательные движения в одном направлении
+	bestSequence := a.findBestSequence(data)
 
-	for i := 1; i < len(data); i++ {
-		prevPrice := data[i-1].Price
-		currPrice := data[i].Price
-
-		// Проверяем направление (рост или падение)
-		if currPrice >= prevPrice {
-			continuousPoints++
-		}
-
-		// Рассчитываем разрыв
-		gap := a.calculateGap(prevPrice, currPrice)
-		totalGap += gap
-
-		// Рассчитываем изменение
-		change := ((currPrice - prevPrice) / prevPrice) * 100
-		totalChange += change
+	if bestSequence.Length < minPoints {
+		return false, 0
 	}
 
-	continuousRatio := float64(continuousPoints) / float64(len(data)-1)
-	avgGap := totalGap / float64(len(data)-1)
-	avgChange := totalChange / float64(len(data)-1)
+	// Рассчитываем оценку
+	score := float64(bestSequence.Length) / float64(len(data)) * 50
+	score += (1.0 - bestSequence.AvgGap/maxGapRatio) * 30
+	score += math.Min(math.Abs(bestSequence.AvgChange), 20)
 
-	// Рассчитываем оценку непрерывности
-	score := continuousRatio * 50
-	score += (1.0 - avgGap/maxGapRatio) * 30
-	score += math.Min(math.Abs(avgChange), 20)
-
-	return continuousRatio > 0.7 && avgGap < maxGapRatio, math.Min(score, 100)
+	return true, math.Min(score, 100)
 }
 
 func (a *ContinuousAnalyzer) calculateGap(prev, curr float64) float64 {
@@ -192,4 +181,55 @@ var DefaultContinuousConfig = AnalyzerConfig{
 		"min_continuous_points": 3,
 		"max_gap_ratio":         0.3,
 	},
+}
+
+func (a *ContinuousAnalyzer) findBestSequence(data []types.PriceData) SequenceInfo {
+	best := SequenceInfo{}
+	current := SequenceInfo{StartIdx: 0, Length: 1}
+
+	for i := 1; i < len(data); i++ {
+		prevPrice := data[i-1].Price
+		currPrice := data[i].Price
+
+		// Определяем направление этого изменения
+		var direction string
+		if currPrice > prevPrice {
+			direction = "up"
+		} else if currPrice < prevPrice {
+			direction = "down"
+		} else {
+			direction = "neutral"
+		}
+
+		// Если направление совпадает с текущей последовательностью или она только началась
+		if current.Length == 1 || current.Direction == direction {
+			current.Direction = direction
+			current.Length++
+
+			// Обновляем средние значения
+			gap := a.calculateGap(prevPrice, currPrice)
+			change := ((currPrice - prevPrice) / prevPrice) * 100
+
+			current.AvgGap = (current.AvgGap*float64(current.Length-2) + gap) / float64(current.Length-1)
+			current.AvgChange = (current.AvgChange*float64(current.Length-2) + change) / float64(current.Length-1)
+		} else {
+			// Завершаем текущую последовательность
+			if current.Length > best.Length {
+				best = current
+			}
+			// Начинаем новую
+			current = SequenceInfo{
+				StartIdx:  i - 1,
+				Length:    2,
+				Direction: direction,
+			}
+		}
+	}
+
+	// Проверяем последнюю последовательность
+	if current.Length > best.Length {
+		best = current
+	}
+
+	return best
 }
