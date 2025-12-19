@@ -1,6 +1,9 @@
+// lifecycle.go
 package manager
 
 import (
+	"crypto-exchange-screener-bot/internal/events"
+	"log"
 	"sync"
 	"time"
 )
@@ -9,7 +12,7 @@ import (
 type LifecycleManager struct {
 	mu              sync.RWMutex
 	registry        *ServiceRegistry
-	coordinator     *EventCoordinator
+	eventBus        *events.EventBus
 	dependencyGraph *DependencyGraph
 	restartAttempts map[string]int
 	config          CoordinatorConfig
@@ -19,10 +22,10 @@ type LifecycleManager struct {
 }
 
 // NewLifecycleManager создает менеджер жизненного цикла
-func NewLifecycleManager(registry *ServiceRegistry, coordinator *EventCoordinator, config CoordinatorConfig) *LifecycleManager {
+func NewLifecycleManager(registry *ServiceRegistry, eventBus *events.EventBus, config CoordinatorConfig) *LifecycleManager {
 	lm := &LifecycleManager{
 		registry:        registry,
-		coordinator:     coordinator,
+		eventBus:        eventBus,
 		dependencyGraph: &DependencyGraph{Services: make(map[string][]string)},
 		restartAttempts: make(map[string]int),
 		config:          config,
@@ -66,13 +69,15 @@ func (lm *LifecycleManager) StartService(name string) error {
 		StartedAt: time.Now(),
 	})
 
-	// Публикуем событие
-	lm.coordinator.PublishEvent(Event{
-		Type:      EventServiceStarted,
-		Service:   name,
-		Message:   "Starting service",
+	// Публикуем событие через eventBus если он есть
+	lm.publishEvent(events.Event{
+		Type:   events.EventServiceStarted,
+		Source: name,
+		Data: map[string]interface{}{
+			"service": name,
+			"action":  "starting",
+		},
 		Timestamp: time.Now(),
-		Severity:  "info",
 	})
 
 	// Запускаем сервис
@@ -83,12 +88,15 @@ func (lm *LifecycleManager) StartService(name string) error {
 			Error: err.Error(),
 		})
 
-		lm.coordinator.PublishEvent(Event{
-			Type:      EventServiceError,
-			Service:   name,
-			Message:   "Failed to start: " + err.Error(),
+		lm.publishEvent(events.Event{
+			Type:   events.EventError,
+			Source: name,
+			Data: map[string]interface{}{
+				"service": name,
+				"error":   err.Error(),
+				"action":  "start_failed",
+			},
 			Timestamp: time.Now(),
-			Severity:  "error",
 		})
 
 		// Пытаемся перезапустить если включено
@@ -108,12 +116,15 @@ func (lm *LifecycleManager) StartService(name string) error {
 	// Сбрасываем счетчик перезапусков
 	delete(lm.restartAttempts, name)
 
-	lm.coordinator.PublishEvent(Event{
-		Type:      EventServiceStarted,
-		Service:   name,
-		Message:   "Service started successfully",
+	lm.publishEvent(events.Event{
+		Type:   events.EventServiceStarted,
+		Source: name,
+		Data: map[string]interface{}{
+			"service": name,
+			"action":  "started",
+			"status":  "running",
+		},
 		Timestamp: time.Now(),
-		Severity:  "info",
 	})
 
 	return nil
@@ -135,12 +146,14 @@ func (lm *LifecycleManager) StopService(name string) error {
 		StoppedAt: time.Now(),
 	})
 
-	lm.coordinator.PublishEvent(Event{
-		Type:      EventServiceStopped,
-		Service:   name,
-		Message:   "Stopping service",
+	lm.publishEvent(events.Event{
+		Type:   events.EventServiceStopped,
+		Source: name,
+		Data: map[string]interface{}{
+			"service": name,
+			"action":  "stopping",
+		},
 		Timestamp: time.Now(),
-		Severity:  "info",
 	})
 
 	// Останавливаем сервис
@@ -151,12 +164,15 @@ func (lm *LifecycleManager) StopService(name string) error {
 			Error: err.Error(),
 		})
 
-		lm.coordinator.PublishEvent(Event{
-			Type:      EventServiceError,
-			Service:   name,
-			Message:   "Failed to stop: " + err.Error(),
+		lm.publishEvent(events.Event{
+			Type:   events.EventServiceError,
+			Source: name,
+			Data: map[string]interface{}{
+				"service": name,
+				"action":  "stop_failed",
+				"error":   err.Error(),
+			},
 			Timestamp: time.Now(),
-			Severity:  "error",
 		})
 
 		return err
@@ -168,12 +184,16 @@ func (lm *LifecycleManager) StopService(name string) error {
 		StoppedAt: time.Now(),
 	})
 
-	lm.coordinator.PublishEvent(Event{
-		Type:      EventServiceStopped,
-		Service:   name,
-		Message:   "Service stopped successfully",
+	lm.publishEvent(events.Event{
+		Type:   events.EventServiceStopped,
+		Source: name,
+		Data: map[string]interface{}{
+			"service":   name,
+			"action":    "stopped",
+			"status":    "stopped",
+			"timestamp": time.Now(),
+		},
 		Timestamp: time.Now(),
-		Severity:  "info",
 	})
 
 	return nil
@@ -247,6 +267,17 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 				Error: err.Error(),
 			})
 
+			lm.publishEvent(events.Event{
+				Type:   events.EventServiceError,
+				Source: serviceName,
+				Data: map[string]interface{}{
+					"service": serviceName,
+					"error":   err.Error(),
+					"action":  "start_failed",
+				},
+				Timestamp: time.Now(),
+			})
+
 			// Пытаемся перезапустить если включено
 			if lm.config.RestartOnFailure {
 				lm.scheduleRestart(serviceName)
@@ -255,6 +286,17 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 			lm.registry.UpdateInfo(serviceName, ServiceInfo{
 				State:     StateRunning,
 				StartedAt: time.Now(),
+			})
+
+			lm.publishEvent(events.Event{
+				Type:   events.EventServiceStarted,
+				Source: serviceName,
+				Data: map[string]interface{}{
+					"service": serviceName,
+					"action":  "started",
+					"status":  "running",
+				},
+				Timestamp: time.Now(),
 			})
 		}
 	}
@@ -284,10 +326,32 @@ func (lm *LifecycleManager) StopAll() map[string]error {
 				State: StateError,
 				Error: err.Error(),
 			})
+
+			lm.publishEvent(events.Event{
+				Type:   events.EventServiceError,
+				Source: serviceName,
+				Data: map[string]interface{}{
+					"service": serviceName,
+					"error":   err.Error(),
+					"action":  "stop_failed",
+				},
+				Timestamp: time.Now(),
+			})
 		} else {
 			lm.registry.UpdateInfo(serviceName, ServiceInfo{
 				State:     StateStopped,
 				StoppedAt: time.Now(),
+			})
+
+			lm.publishEvent(events.Event{
+				Type:   events.EventServiceStopped,
+				Source: serviceName,
+				Data: map[string]interface{}{
+					"service": serviceName,
+					"action":  "stopped",
+					"status":  "stopped",
+				},
+				Timestamp: time.Now(),
 			})
 		}
 	}
@@ -356,12 +420,16 @@ func (lm *LifecycleManager) scheduleRestart(name string) {
 
 	// Проверяем максимальное количество попыток
 	if attempts > lm.config.MaxRestartAttempts && lm.config.MaxRestartAttempts > 0 {
-		lm.coordinator.PublishEvent(Event{
-			Type:      EventServiceError,
-			Service:   name,
-			Message:   "Max restart attempts exceeded, giving up",
+		lm.publishEvent(events.Event{
+			Type:   events.EventServiceError,
+			Source: "LifecycleManager",
+			Data: map[string]interface{}{
+				"service":   name,
+				"message":   "Max restart attempts exceeded, giving up",
+				"timestamp": time.Now(),
+				"severity":  "error",
+			},
 			Timestamp: time.Now(),
-			Severity:  "error",
 		})
 		return
 	}
@@ -370,21 +438,29 @@ func (lm *LifecycleManager) scheduleRestart(name string) {
 	go func() {
 		time.Sleep(lm.config.RestartDelay)
 
-		lm.coordinator.PublishEvent(Event{
-			Type:      EventServiceStarted,
-			Service:   name,
-			Message:   "Attempting restart",
+		lm.publishEvent(events.Event{
+			Type:   events.EventServiceStarted,
+			Source: "LifecycleManager",
+			Data: map[string]interface{}{
+				"service":   name,
+				"message":   "Attempting restart",
+				"timestamp": time.Now(),
+				"severity":  "info",
+			},
 			Timestamp: time.Now(),
-			Severity:  "info",
 		})
 
 		if err := lm.StartService(name); err != nil {
-			lm.coordinator.PublishEvent(Event{
-				Type:      EventServiceError,
-				Service:   name,
-				Message:   "Restart failed: " + err.Error(),
+			lm.publishEvent(events.Event{
+				Type:   events.EventServiceError,
+				Source: "LifecycleManager",
+				Data: map[string]interface{}{
+					"service":   name,
+					"message":   "Restart failed: " + err.Error(),
+					"timestamp": time.Now(),
+					"severity":  "error",
+				},
 				Timestamp: time.Now(),
-				Severity:  "error",
 			})
 		}
 	}()
@@ -397,7 +473,9 @@ func (lm *LifecycleManager) healthCheckLoop() {
 		case <-lm.healthTicker.C:
 			lm.performHealthCheck()
 		case <-lm.stopChan:
-			lm.healthTicker.Stop()
+			if lm.healthTicker != nil {
+				lm.healthTicker.Stop()
+			}
 			return
 		}
 	}
@@ -411,13 +489,16 @@ func (lm *LifecycleManager) performHealthCheck() {
 	health := lm.registry.CheckHealth()
 
 	// Публикуем событие проверки здоровья
-	lm.coordinator.PublishEvent(Event{
-		Type:      EventHealthCheck,
-		Service:   "LifecycleManager",
-		Message:   "Health check performed",
-		Data:      health,
+	lm.publishEvent(events.Event{
+		Type:   events.EventHealthCheck,
+		Source: "LifecycleManager",
+		Data: map[string]interface{}{
+			"message":   "Health check performed",
+			"data":      health,
+			"timestamp": time.Now(),
+			"severity":  "info",
+		},
 		Timestamp: time.Now(),
-		Severity:  "info",
 	})
 
 	// Перезапускаем неудачные сервисы если включено
@@ -427,6 +508,15 @@ func (lm *LifecycleManager) performHealthCheck() {
 				lm.scheduleRestart(service)
 			}
 		}
+	}
+}
+
+// publishEvent публикует событие через eventBus или логирует
+func (lm *LifecycleManager) publishEvent(event events.Event) {
+	if lm.eventBus != nil {
+		lm.eventBus.Publish(event)
+	} else {
+		log.Printf("[EVENT] %s: %s - %v", event.Type, event.Source, event.Data)
 	}
 }
 

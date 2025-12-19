@@ -1,8 +1,16 @@
+// internal/manager/data_manager.go
 package manager
 
 import (
+	"crypto-exchange-screener-bot/internal/adapters"
+	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto-exchange-screener-bot/internal/analysis/engine"
+	"crypto-exchange-screener-bot/internal/api/bybit"
 	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/monitor"
+	"crypto-exchange-screener-bot/internal/events"
+	"crypto-exchange-screener-bot/internal/fetcher"
+	"crypto-exchange-screener-bot/internal/notifier"
+	"crypto-exchange-screener-bot/internal/pipeline"
 	"crypto-exchange-screener-bot/internal/storage"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"fmt"
@@ -16,18 +24,17 @@ import (
 type DataManager struct {
 	config *config.Config
 
-	// Хранилище данных
-	storage storage.PriceStorage
+	// Компоненты цепочки
+	priceFetcher   fetcher.PriceFetcher
+	storage        storage.PriceStorage
+	analysisEngine *engine.AnalysisEngine
+	signalPipeline *pipeline.SignalPipeline
+	notification   *notifier.CompositeNotificationService
 
-	// Мониторы
-	priceMonitor  *monitor.PriceMonitor
-	growthMonitor *monitor.GrowthMonitor
-
-	// Координация
-	coordinator  *EventCoordinator
-	storageCoord *StorageCoordinator
-	lifecycle    *LifecycleManager
-	registry     *ServiceRegistry
+	// EventBus и координация
+	eventBus  *events.EventBus
+	lifecycle *LifecycleManager
+	registry  *ServiceRegistry
 
 	// Дополнительные сервисы
 	telegramBot *telegram.TelegramBot
@@ -70,21 +77,53 @@ func NewDataManager(cfg *config.Config) (*DataManager, error) {
 
 // initializeComponents инициализирует все компоненты
 func (dm *DataManager) initializeComponents() error {
-	// 1. Создаем хранилище (отвечает за данные)
+	// 1. Создаем EventBus
+	eventBusConfig := events.EventBusConfig{
+		BufferSize:    dm.config.EventBus.BufferSize,
+		WorkerCount:   dm.config.EventBus.WorkerCount,
+		EnableMetrics: dm.config.EventBus.EnableMetrics,
+		EnableLogging: dm.config.EventBus.EnableLogging,
+	}
+	dm.eventBus = events.NewEventBus(eventBusConfig)
+
+	// 2. Создаем хранилище
 	storageConfig := &storage.StorageConfig{
 		MaxHistoryPerSymbol: 10000,
 		MaxSymbols:          1000,
 		CleanupInterval:     5 * time.Minute,
 		RetentionPeriod:     24 * time.Hour,
 	}
-
 	dm.storage = storage.NewInMemoryPriceStorage(storageConfig)
 
-	// 2. Создаем мониторы (отвечают за получение данных)
-	dm.priceMonitor = monitor.NewPriceMonitor(dm.config, dm.storage)
-	dm.growthMonitor = monitor.NewGrowthMonitor(dm.config, dm.storage)
+	// 3. Создаем API клиент
+	apiClient := bybit.NewBybitClient(dm.config)
 
-	// 3. Создаем координатор событий
+	// 4. Создаем PriceFetcher
+	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus)
+
+	// 5. Создаем AnalysisEngine через фабрику
+	analysisFactory := &engine.Factory{}
+	dm.analysisEngine = analysisFactory.NewAnalysisEngineFromConfig(
+		dm.storage,
+		dm.eventBus,
+		dm.config,
+	)
+
+	// 6. Создаем SignalPipeline
+	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
+
+	// 7. Создаем CompositeNotificationService
+	dm.notification = notifier.NewCompositeNotificationService()
+
+	// 8. Создаем Telegram бота если включен
+	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" {
+		dm.telegramBot = telegram.NewTelegramBot(dm.config)
+	}
+
+	// 9. Создаем реестр сервисов
+	dm.registry = NewServiceRegistry()
+
+	// 10. Создаем менеджер жизненного цикла
 	coordinatorConfig := CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
@@ -95,39 +134,78 @@ func (dm *DataManager) initializeComponents() error {
 		EnableMetrics:       true,
 		MetricsPort:         "9090",
 	}
+	dm.lifecycle = NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
 
-	dm.coordinator = NewEventCoordinator(coordinatorConfig)
+	// 11. Настраиваем нотификаторы
+	dm.setupNotifiers()
 
-	// 4. Создаем координатор хранилища
-	dm.storageCoord = NewStorageCoordinator(dm.storage, dm.coordinator)
-
-	// 5. Создаем реестр сервисов
-	dm.registry = NewServiceRegistry()
-
-	// 6. Создаем менеджер жизненного цикла
-	dm.lifecycle = NewLifecycleManager(dm.registry, dm.coordinator, coordinatorConfig)
-
-	// 7. Telegram бот
-	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" {
-		dm.telegramBot = telegram.NewTelegramBot(dm.config)
-	}
-
-	// 8. Регистрируем сервисы
+	// 12. Регистрируем сервисы
 	if err := dm.registerServices(); err != nil {
 		return err
 	}
 
+	// 13. Настраиваем пайплайн
+	dm.setupPipeline()
+
 	return nil
+}
+
+// setupNotifiers настраивает нотификаторы
+func (dm *DataManager) setupNotifiers() {
+	if dm.notification == nil {
+		return
+	}
+
+	// Добавляем консольный нотификатор
+	consoleNotifier := notifier.NewConsoleNotifier(dm.config.MessageFormat == "compact")
+	dm.notification.AddNotifier(consoleNotifier)
+
+	// Добавляем Telegram нотификатор если включен
+	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" && dm.telegramBot != nil {
+		telegramNotifier := notifier.NewTelegramNotifier(dm.config)
+		if telegramNotifier != nil {
+			dm.notification.AddNotifier(telegramNotifier)
+		}
+	}
+
+	// Подписываем CompositeNotificationService на события сигналов
+	notificationSubscriber := events.NewBaseSubscriber(
+		"notification_service",
+		[]events.EventType{events.EventSignalDetected},
+		func(event events.Event) error {
+			if dm.notification != nil && dm.notification.IsEnabled() {
+				// Преобразуем сигнал для нотификации
+				if signal, ok := event.Data.(analysis.Signal); ok {
+					trendSignal := adapters.AnalysisSignalToTrendSignal(signal)
+					return dm.notification.Send(trendSignal)
+				}
+			}
+			return nil
+		},
+	)
+
+	dm.eventBus.Subscribe(events.EventSignalDetected, notificationSubscriber)
+
+	log.Printf("✅ Нотификаторы настроены")
+}
+
+// setupPipeline настраивает этапы обработки сигналов
+func (dm *DataManager) setupPipeline() {
+	// Добавляем этапы валидации и обогащения
+	dm.signalPipeline.AddStage(&pipeline.ValidationStage{})
+	dm.signalPipeline.AddStage(&pipeline.EnrichmentStage{})
 }
 
 // registerServices регистрирует сервисы в реестре
 func (dm *DataManager) registerServices() error {
 	// Регистрируем все сервисы
 	services := map[string]Service{
-		"PriceStorage":     dm.newServiceAdapter("PriceStorage", dm.storage),
-		"PriceMonitor":     dm.newServiceAdapter("PriceMonitor", dm.priceMonitor),
-		"GrowthMonitor":    dm.newServiceAdapter("GrowthMonitor", dm.growthMonitor),
-		"EventCoordinator": dm.newServiceAdapter("EventCoordinator", dm.coordinator),
+		"PriceStorage":        dm.newServiceAdapter("PriceStorage", dm.storage),
+		"PriceFetcher":        dm.newServiceAdapter("PriceFetcher", dm.priceFetcher),
+		"AnalysisEngine":      dm.newServiceAdapter("AnalysisEngine", dm.analysisEngine),
+		"SignalPipeline":      dm.newServiceAdapter("SignalPipeline", dm.signalPipeline),
+		"NotificationService": dm.newServiceAdapter("NotificationService", dm.notification),
+		"EventBus":            dm.newServiceAdapter("EventBus", dm.eventBus),
 	}
 
 	if dm.telegramBot != nil {
@@ -145,73 +223,20 @@ func (dm *DataManager) registerServices() error {
 
 // setupDependencies настраивает зависимости между сервисами
 func (dm *DataManager) setupDependencies() {
-	// PriceMonitor зависит от PriceStorage
-	dm.lifecycle.AddDependency("PriceMonitor", "PriceStorage")
+	// AnalysisEngine зависит от PriceStorage и EventBus
+	dm.lifecycle.AddDependency("AnalysisEngine", "PriceStorage")
+	dm.lifecycle.AddDependency("AnalysisEngine", "EventBus")
 
-	// GrowthMonitor зависит от PriceStorage
-	dm.lifecycle.AddDependency("GrowthMonitor", "PriceStorage")
+	// SignalPipeline зависит от EventBus
+	dm.lifecycle.AddDependency("SignalPipeline", "EventBus")
 
-	// TelegramBot зависит от GrowthMonitor
+	// NotificationService зависит от EventBus
+	dm.lifecycle.AddDependency("NotificationService", "EventBus")
+
+	// TelegramBot зависит от EventBus
 	if dm.telegramBot != nil {
-		dm.lifecycle.AddDependency("TelegramBot", "GrowthMonitor")
+		dm.lifecycle.AddDependency("TelegramBot", "EventBus")
 	}
-}
-
-// Start запускает все сервисы
-func (dm *DataManager) Start() error {
-	dm.mu.Lock()
-	defer dm.mu.Unlock()
-
-	log.Println("🚀 Starting DataManager...")
-
-	// Запускаем сервисы в правильном порядке
-	errors := dm.lifecycle.StartAll()
-
-	if len(errors) > 0 {
-		for service, err := range errors {
-			log.Printf("❌ Failed to start %s: %v", service, err)
-		}
-		return fmt.Errorf("failed to start some services")
-	}
-
-	// Запускаем мониторы
-	updateInterval := time.Duration(dm.config.UpdateInterval) * time.Second
-	dm.priceMonitor.StartMonitoring(updateInterval)
-	dm.growthMonitor.Start()
-
-	log.Println("✅ DataManager started successfully")
-	return nil
-}
-
-// Stop останавливает все сервисы
-func (dm *DataManager) Stop() error {
-	dm.mu.Lock()
-	defer dm.mu.Unlock()
-
-	log.Println("🛑 Stopping DataManager...")
-
-	// Останавливаем фоновые задачи
-	close(dm.stopChan)
-	dm.wg.Wait()
-
-	// Останавливаем мониторы
-	dm.priceMonitor.StopMonitoring()
-	dm.growthMonitor.Stop()
-
-	// Останавливаем сервисы
-	errors := dm.lifecycle.StopAll()
-
-	if len(errors) > 0 {
-		for service, err := range errors {
-			log.Printf("⚠️ Failed to stop %s: %v", service, err)
-		}
-	}
-
-	// Останавливаем менеджер жизненного цикла
-	dm.lifecycle.Stop()
-
-	log.Println("✅ DataManager stopped")
-	return nil
 }
 
 // startBackgroundTasks запускает фоновые задачи
@@ -288,21 +313,28 @@ func (dm *DataManager) updateSystemStats() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	// Получаем статистику роста
-	var growthStats map[string]interface{}
-	if dm.growthMonitor != nil {
-		growthStats = dm.growthMonitor.GetGrowthStats()
+	// Получаем статистику анализа
+	var analysisStats interface{}
+	if dm.analysisEngine != nil {
+		analysisStats = dm.analysisEngine.GetStats()
+	}
+
+	// Получаем статистику EventBus
+	var eventBusStats interface{}
+	if dm.eventBus != nil {
+		eventBusStats = dm.eventBus.GetMetrics()
 	}
 
 	dm.systemStats = SystemStats{
 		Services:      servicesInfo,
 		StorageStats:  storageStats,
+		AnalysisStats: analysisStats,
+		EventBusStats: eventBusStats,
 		Uptime:        time.Since(dm.startTime),
-		TotalRequests: 0, // Можно отслеживать в будущем
+		TotalRequests: 0,
 		MemoryUsageMB: float64(m.Alloc) / 1024 / 1024,
-		CPUUsage:      0, // Нужны дополнительные метрики
+		CPUUsage:      0,
 		ActiveSymbols: storageStats.TotalSymbols,
-		GrowthStats:   growthStats,
 		LastUpdated:   time.Now(),
 	}
 }
@@ -312,16 +344,17 @@ func (dm *DataManager) checkHealth() {
 	health := dm.GetHealthStatus()
 
 	if health.Status != "healthy" {
-		dm.coordinator.PublishEvent(Event{
-			Type:      EventHealthCheck,
-			Service:   "DataManager",
-			Message:   fmt.Sprintf("System health check failed: %s", health.Status),
-			Timestamp: time.Now(),
-			Severity:  "warning",
+		// Публикуем событие в EventBus
+		dm.eventBus.Publish(events.Event{
+			Type:   events.EventError,
+			Source: "DataManager",
+			Data: map[string]interface{}{
+				"status":  health.Status,
+				"message": "System health check failed",
+			},
 		})
 
-		// Можно добавить автоматическое восстановление
-		// dm.attemptRecovery()
+		log.Printf("⚠️ System health check failed: %s", health.Status)
 	}
 }
 
@@ -365,14 +398,14 @@ func (dm *DataManager) GetStorage() storage.PriceStorage {
 	return dm.storage
 }
 
-// GetPriceMonitor возвращает монитор цен
-func (dm *DataManager) GetPriceMonitor() *monitor.PriceMonitor {
-	return dm.priceMonitor
+// GetAnalysisEngine возвращает движок анализа
+func (dm *DataManager) GetAnalysisEngine() *engine.AnalysisEngine {
+	return dm.analysisEngine
 }
 
-// GetGrowthMonitor возвращает монитор роста
-func (dm *DataManager) GetGrowthMonitor() *monitor.GrowthMonitor {
-	return dm.growthMonitor
+// GetEventBus возвращает EventBus
+func (dm *DataManager) GetEventBus() *events.EventBus {
+	return dm.eventBus
 }
 
 // GetTelegramBot возвращает Telegram бота
@@ -380,47 +413,37 @@ func (dm *DataManager) GetTelegramBot() *telegram.TelegramBot {
 	return dm.telegramBot
 }
 
-// GetEventCoordinator возвращает координатор событий
-func (dm *DataManager) GetEventCoordinator() *EventCoordinator {
-	return dm.coordinator
-}
-
 // GetService возвращает сервис по имени
 func (dm *DataManager) GetService(name string) (interface{}, bool) {
 	switch name {
 	case "PriceStorage":
 		return dm.storage, true
-	case "PriceMonitor":
-		return dm.priceMonitor, true
-	case "GrowthMonitor":
-		return dm.growthMonitor, true
+	case "PriceFetcher":
+		return dm.priceFetcher, true
+	case "AnalysisEngine":
+		return dm.analysisEngine, true
+	case "EventBus":
+		return dm.eventBus, true
 	case "TelegramBot":
 		return dm.telegramBot, dm.telegramBot != nil
-	case "EventCoordinator":
-		return dm.coordinator, true
 	default:
 		return nil, false
 	}
 }
 
 // PublishEvent публикует событие
-func (dm *DataManager) PublishEvent(event Event) {
-	dm.coordinator.PublishEvent(event)
+func (dm *DataManager) PublishEvent(event events.Event) {
+	dm.eventBus.Publish(event)
 }
 
 // Subscribe подписывает на события
-func (dm *DataManager) Subscribe(subscriber DataSubscriber) {
-	dm.coordinator.Subscribe(subscriber)
+func (dm *DataManager) Subscribe(eventType events.EventType, subscriber events.Subscriber) {
+	dm.eventBus.Subscribe(eventType, subscriber)
 }
 
 // Unsubscribe отписывает от событий
-func (dm *DataManager) Unsubscribe(subscriber DataSubscriber) {
-	dm.coordinator.Unsubscribe(subscriber)
-}
-
-// GetRecentEvents возвращает последние события
-func (dm *DataManager) GetRecentEvents(limit int) []Event {
-	return dm.coordinator.GetEvents(limit)
+func (dm *DataManager) Unsubscribe(eventType events.EventType, subscriber events.Subscriber) {
+	dm.eventBus.Unsubscribe(eventType, subscriber)
 }
 
 // RestartService перезапускает сервис
@@ -446,51 +469,39 @@ func (dm *DataManager) WaitForShutdown() {
 // Cleanup очищает ресурсы
 func (dm *DataManager) Cleanup() {
 	dm.storage.Clear()
-	dm.coordinator.ClearBuffer()
 }
 
-// serviceAdapter адаптирует любой объект к интерфейсу Service
-type serviceAdapter struct {
-	name    string
-	service interface{}
-	state   ServiceState
-}
+// Stop останавливает все сервисы
+func (dm *DataManager) Stop() error {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
 
-func (sa *serviceAdapter) Name() string {
-	return sa.name
-}
+	log.Println("🛑 Stopping DataManager...")
 
-func (sa *serviceAdapter) Start() error {
-	sa.state = StateRunning
+	// Останавливаем фоновые задачи
+	close(dm.stopChan)
+	dm.wg.Wait()
 
-	// В зависимости от типа сервиса вызываем соответствующий метод
-	switch s := sa.service.(type) {
-	case storage.PriceStorage:
-		// Хранилище не требует запуска
-	case *monitor.PriceMonitor:
-		// PriceMonitor запускается отдельно через StartMonitoring
-	case *monitor.GrowthMonitor:
-		s.Start()
-	case *EventCoordinator:
-		// Координатор запускается автоматически
-	case *telegram.TelegramBot:
-		// TelegramBot не требует запуска
+	// Останавливаем PriceFetcher
+	if dm.priceFetcher != nil {
+		dm.priceFetcher.Stop()
 	}
 
-	return nil
-}
+	// Останавливаем сервисы через LifecycleManager
+	errors := dm.lifecycle.StopAll()
 
-func (sa *serviceAdapter) Stop() error {
-	sa.state = StateStopping
-
-	switch s := sa.service.(type) {
-	case *monitor.GrowthMonitor:
-		s.Stop()
-	case *EventCoordinator:
-		s.Stop()
+	if len(errors) > 0 {
+		for service, err := range errors {
+			log.Printf("⚠️ Failed to stop %s: %v", service, err)
+		}
 	}
 
-	sa.state = StateStopped
+	// Останавливаем EventBus последним
+	if dm.eventBus != nil {
+		dm.eventBus.Stop()
+	}
+
+	log.Println("✅ DataManager stopped")
 	return nil
 }
 
@@ -510,4 +521,123 @@ func (dm *DataManager) newServiceAdapter(name string, service interface{}) Servi
 		service: service,
 		state:   StateStopped,
 	}
+}
+
+// AddTelegramSubscriber добавляет подписчика Telegram
+func (dm *DataManager) AddTelegramSubscriber() error {
+	if dm.telegramBot == nil {
+		return fmt.Errorf("telegram bot not initialized")
+	}
+
+	// Создаем подписчика для Telegram
+	telegramSubscriber := events.NewTelegramNotifierSubscriber(dm.telegramBot)
+	dm.eventBus.Subscribe(events.EventSignalDetected, telegramSubscriber)
+
+	return nil
+}
+
+// AddConsoleSubscriber добавляет подписчика для вывода в консоль
+func (dm *DataManager) AddConsoleSubscriber() {
+	consoleSubscriber := events.NewConsoleLoggerSubscriber()
+	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
+}
+
+// GetAnalysisResults возвращает результаты анализа для символа
+func (dm *DataManager) GetAnalysisResults(symbol string, periods []time.Duration) (*analysis.AnalysisResult, error) {
+	if dm.analysisEngine == nil {
+		return nil, fmt.Errorf("analysis engine not initialized")
+	}
+
+	return dm.analysisEngine.AnalyzeSymbol(symbol, periods)
+}
+
+// RunAnalysis выполняет анализ всех символов
+func (dm *DataManager) RunAnalysis() (map[string]*analysis.AnalysisResult, error) {
+	if dm.analysisEngine == nil {
+		return nil, fmt.Errorf("analysis engine not initialized")
+	}
+
+	return dm.analysisEngine.AnalyzeAll()
+}
+
+// GetActiveAnalyzers возвращает список активных анализаторов
+func (dm *DataManager) GetActiveAnalyzers() []string {
+	if dm.analysisEngine == nil {
+		return []string{}
+	}
+
+	return dm.analysisEngine.GetAnalyzers()
+}
+
+// serviceAdapter адаптирует любой объект к интерфейсу Service
+type serviceAdapter struct {
+	name    string
+	service interface{}
+	state   ServiceState
+	config  *config.Config // Добавляем конфиг для PriceFetcher
+}
+
+func (sa *serviceAdapter) Name() string {
+	return sa.name
+}
+
+func (sa *serviceAdapter) Start() error {
+	sa.state = StateStarting
+
+	switch s := sa.service.(type) {
+	case storage.PriceStorage:
+		// Хранилище не требует запуска
+		sa.state = StateRunning
+
+	case fetcher.PriceFetcher:
+		// Запускаем с интервалом из конфигурации
+		updateInterval := time.Duration(10) * time.Second // дефолтное значение
+		if err := s.Start(updateInterval); err != nil {
+			sa.state = StateError
+			return err
+		}
+		sa.state = StateRunning
+
+	case *engine.AnalysisEngine:
+		if err := s.Start(); err != nil {
+			sa.state = StateError
+			return err
+		}
+		sa.state = StateRunning
+
+	case *pipeline.SignalPipeline:
+		s.Start()
+		sa.state = StateRunning
+
+	case *notifier.CompositeNotificationService:
+		// NotificationService не требует явного запуска
+		sa.state = StateRunning
+
+	case *events.EventBus:
+		s.Start()
+		sa.state = StateRunning
+
+	case *telegram.TelegramBot:
+		sa.state = StateRunning
+	}
+
+	return nil
+}
+
+func (sa *serviceAdapter) Stop() error {
+	sa.state = StateStopping
+
+	switch s := sa.service.(type) {
+	case fetcher.PriceFetcher:
+		s.Stop()
+	case *engine.AnalysisEngine:
+		s.Stop()
+	case *events.EventBus:
+		s.Stop()
+	}
+
+	sa.state = StateStopped
+	return nil
 }

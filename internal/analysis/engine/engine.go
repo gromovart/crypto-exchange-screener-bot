@@ -1,0 +1,654 @@
+// internal/analysis/engine/engine.go
+package engine
+
+import (
+	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto-exchange-screener-bot/internal/analysis/analyzers"
+	"crypto-exchange-screener-bot/internal/analysis/filters"
+	"crypto-exchange-screener-bot/internal/events"
+	"crypto-exchange-screener-bot/internal/storage"
+	"crypto-exchange-screener-bot/internal/types"
+	"fmt"
+	"log"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// AnalysisEngine - основной движок анализа
+type AnalysisEngine struct {
+	mu           sync.RWMutex
+	analyzers    map[string]analyzers.Analyzer
+	filters      *FilterChain
+	storage      storage.PriceStorage
+	eventBus     *events.EventBus
+	config       EngineConfig
+	stats        EngineStats
+	lastAnalysis map[string]time.Time
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
+	running      bool
+}
+
+// EngineConfig - конфигурация движка
+type EngineConfig struct {
+	UpdateInterval   time.Duration   `json:"update_interval"`
+	AnalysisPeriods  []time.Duration `json:"analysis_periods"`
+	MinVolumeFilter  float64         `json:"min_volume_filter"`
+	MaxSymbolsPerRun int             `json:"max_symbols_per_run"`
+	EnableParallel   bool            `json:"enable_parallel"`
+	MaxWorkers       int             `json:"max_workers"`
+	SignalThreshold  float64         `json:"signal_threshold"`
+	RetentionPeriod  time.Duration   `json:"retention_period"`
+	EnableCache      bool            `json:"enable_cache"`
+}
+
+// EngineStats - статистика движка
+type EngineStats struct {
+	TotalAnalyses   int64                              `json:"total_analyses"`
+	TotalSignals    int64                              `json:"total_signals"`
+	AnalysisTime    time.Duration                      `json:"analysis_time"`
+	ActiveAnalyzers int                                `json:"active_analyzers"`
+	LastRunTime     time.Time                          `json:"last_run_time"`
+	SymbolsAnalyzed map[string]int64                   `json:"symbols_analyzed"`
+	AnalyzerStats   map[string]analyzers.AnalyzerStats `json:"analyzer_stats"`
+}
+
+// DefaultConfig - конфигурация по умолчанию
+var DefaultConfig = EngineConfig{
+	UpdateInterval:   10 * time.Second,
+	AnalysisPeriods:  []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, 60 * time.Minute},
+	MinVolumeFilter:  100000,
+	MaxSymbolsPerRun: 100,
+	EnableParallel:   true,
+	MaxWorkers:       5,
+	SignalThreshold:  2.0,
+	RetentionPeriod:  24 * time.Hour,
+	EnableCache:      true,
+}
+
+// NewAnalysisEngine создает новый движок анализа
+func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, config ...EngineConfig) *AnalysisEngine {
+	cfg := DefaultConfig
+	if len(config) > 0 {
+		cfg = config[0]
+	}
+
+	engine := &AnalysisEngine{
+		analyzers: make(map[string]analyzers.Analyzer),
+		filters:   NewFilterChain(),
+		storage:   storage,
+		eventBus:  eventBus,
+		config:    cfg,
+		stats: EngineStats{
+			SymbolsAnalyzed: make(map[string]int64),
+			AnalyzerStats:   make(map[string]analyzers.AnalyzerStats),
+		},
+		lastAnalysis: make(map[string]time.Time),
+		stopChan:     make(chan struct{}),
+		running:      false,
+	}
+
+	// Регистрируем стандартные анализаторы
+	engine.registerDefaultAnalyzers()
+
+	// Настраиваем стандартные фильтры
+	engine.setupDefaultFilters()
+
+	return engine
+}
+
+// Start запускает движок анализа
+func (e *AnalysisEngine) Start() error {
+	if e.running {
+		return fmt.Errorf("analysis engine already running")
+	}
+
+	e.running = true
+
+	// Запускаем периодический анализ
+	e.wg.Add(1)
+	go e.analysisLoop()
+
+	// Подписываемся на события
+	e.subscribeToEvents()
+
+	log.Printf("🚀 AnalysisEngine запущен с %d анализаторами", len(e.analyzers))
+	return nil
+}
+
+// Stop останавливает движок анализа
+func (e *AnalysisEngine) Stop() error {
+	if !e.running {
+		return nil
+	}
+
+	e.running = false
+	close(e.stopChan)
+	e.wg.Wait()
+
+	// Сохраняем статистику
+	e.saveStats()
+
+	log.Println("🛑 AnalysisEngine остановлен")
+	return nil
+}
+
+// RegisterAnalyzer регистрирует анализатор
+func (e *AnalysisEngine) RegisterAnalyzer(analyzer analyzers.Analyzer) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	name := analyzer.Name()
+	if _, exists := e.analyzers[name]; exists {
+		return fmt.Errorf("analyzer %s already registered", name)
+	}
+
+	e.analyzers[name] = analyzer
+
+	// Инициализируем статистику
+	e.stats.AnalyzerStats[name] = analyzers.AnalyzerStats{}
+	e.stats.ActiveAnalyzers++
+
+	log.Printf("✅ Зарегистрирован анализатор: %s v%s", name, analyzer.Version())
+	return nil
+}
+
+// UnregisterAnalyzer удаляет анализатор
+func (e *AnalysisEngine) UnregisterAnalyzer(name string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, exists := e.analyzers[name]; !exists {
+		return fmt.Errorf("analyzer %s not found", name)
+	}
+
+	delete(e.analyzers, name)
+	delete(e.stats.AnalyzerStats, name)
+	e.stats.ActiveAnalyzers--
+
+	log.Printf("❌ Удален анализатор: %s", name)
+	return nil
+}
+
+// AddFilter добавляет фильтр в цепочку
+func (e *AnalysisEngine) AddFilter(filter filters.Filter) {
+	e.filters.Add(filter)
+	log.Printf("➕ Добавлен фильтр: %s", filter.Name())
+}
+
+// AnalyzeSymbol анализирует конкретный символ
+func (e *AnalysisEngine) AnalyzeSymbol(symbol string, periods []time.Duration) (*analysis.AnalysisResult, error) {
+	startTime := time.Now()
+
+	// Проверяем объем символа
+	if !e.passesVolumeFilter(symbol) {
+		return nil, fmt.Errorf("symbol %s doesn't pass volume filter", symbol)
+	}
+
+	var allSignals []analysis.Signal
+
+	// Анализируем для каждого периода
+	for _, period := range periods {
+		signals, err := e.analyzePeriod(symbol, period)
+		if err != nil {
+			continue
+		}
+		allSignals = append(allSignals, signals...)
+	}
+
+	// Применяем фильтры
+	filteredSignals := e.filters.Apply(allSignals)
+
+	// Обновляем статистику
+	e.updateStats(symbol, len(allSignals), len(filteredSignals), time.Since(startTime))
+
+	result := &analysis.AnalysisResult{
+		Symbol:    symbol,
+		Signals:   filteredSignals,
+		Timestamp: time.Now(),
+		Duration:  time.Since(startTime),
+	}
+
+	// Публикуем событие если есть сигналы
+	if len(filteredSignals) > 0 {
+		e.publishSignals(filteredSignals)
+	}
+
+	return result, nil
+}
+
+// AnalyzeAll анализирует все символы
+func (e *AnalysisEngine) AnalyzeAll() (map[string]*analysis.AnalysisResult, error) {
+	startTime := time.Now()
+
+	// Получаем символы для анализа
+	symbols := e.getSymbolsToAnalyze()
+
+	results := make(map[string]*analysis.AnalysisResult)
+
+	if e.config.EnableParallel {
+		results = e.analyzeParallel(symbols)
+	} else {
+		results = e.analyzeSequential(symbols)
+	}
+
+	// Публикуем общую статистику
+	e.publishAnalysisComplete(results, time.Since(startTime))
+
+	return results, nil
+}
+
+// analyzePeriod анализирует символ за конкретный период
+func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]analysis.Signal, error) {
+	// Получаем данные за период
+	endTime := time.Now()
+	startTime := endTime.Add(-period)
+
+	priceData, err := e.storage.GetPriceHistoryRange(symbol, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get price history for %s: %w", symbol, err)
+	}
+
+	if len(priceData) < 2 {
+		return nil, fmt.Errorf("insufficient data for %s", symbol)
+	}
+
+	// Конвертируем в формат анализа
+	data := convertToPriceData(priceData)
+
+	// Запускаем все анализаторы
+	var allSignals []analysis.Signal
+
+	e.mu.RLock()
+	analyzersList := make([]analyzers.Analyzer, 0, len(e.analyzers))
+	for _, analyzer := range e.analyzers {
+		if analyzer.Supports(symbol) {
+			analyzersList = append(analyzersList, analyzer)
+		}
+	}
+	e.mu.RUnlock()
+
+	for _, analyzer := range analyzersList {
+		signals, err := analyzer.Analyze(data, analyzer.GetConfig())
+		if err != nil {
+			log.Printf("⚠️ Ошибка анализа %s анализатором %s: %v", symbol, analyzer.Name(), err)
+			continue
+		}
+
+		// Добавляем метаданные
+		for i := range signals {
+			signals[i].Symbol = symbol
+			signals[i].Period = int(period.Minutes())
+			signals[i].Timestamp = time.Now()
+			signals[i].ID = uuid.New().String()
+		}
+
+		allSignals = append(allSignals, signals...)
+	}
+
+	return allSignals, nil
+}
+
+// analyzeParallel анализирует символы параллельно
+func (e *AnalysisEngine) analyzeParallel(symbols []string) map[string]*analysis.AnalysisResult {
+	results := make(map[string]*analysis.AnalysisResult)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Ограничиваем количество одновременных горутин
+	workerPool := make(chan struct{}, e.config.MaxWorkers)
+
+	for _, symbol := range symbols {
+		wg.Add(1)
+		workerPool <- struct{}{}
+
+		go func(s string) {
+			defer wg.Done()
+			defer func() { <-workerPool }()
+
+			result, err := e.AnalyzeSymbol(s, e.config.AnalysisPeriods)
+			if err != nil {
+				log.Printf("⚠️ Ошибка анализа %s: %v", s, err)
+				return
+			}
+
+			mu.Lock()
+			results[s] = result
+			mu.Unlock()
+		}(symbol)
+	}
+
+	wg.Wait()
+	return results
+}
+
+// analyzeSequential анализирует символы последовательно
+func (e *AnalysisEngine) analyzeSequential(symbols []string) map[string]*analysis.AnalysisResult {
+	results := make(map[string]*analysis.AnalysisResult)
+
+	for _, symbol := range symbols {
+		result, err := e.AnalyzeSymbol(symbol, e.config.AnalysisPeriods)
+		if err != nil {
+			log.Printf("⚠️ Ошибка анализа %s: %v", symbol, err)
+			continue
+		}
+
+		results[symbol] = result
+	}
+
+	return results
+}
+
+// getSymbolsToAnalyze возвращает символы для анализа
+func (e *AnalysisEngine) getSymbolsToAnalyze() []string {
+	allSymbols := e.storage.GetSymbols()
+
+	// Фильтруем по объему
+	var filtered []string
+	for _, symbol := range allSymbols {
+		if e.passesVolumeFilter(symbol) {
+			filtered = append(filtered, symbol)
+		}
+	}
+
+	// Ограничиваем количество
+	if len(filtered) > e.config.MaxSymbolsPerRun {
+		// Сортируем по объему (по убыванию)
+		sorted := e.sortByVolume(filtered)
+		filtered = sorted[:e.config.MaxSymbolsPerRun]
+	}
+
+	// Сортируем по алфавиту для детерминированности
+	sort.Strings(filtered)
+
+	return filtered
+}
+
+// sortByVolume сортирует символы по объему
+func (e *AnalysisEngine) sortByVolume(symbols []string) []string {
+	type symbolVolume struct {
+		symbol string
+		volume float64
+	}
+
+	var sv []symbolVolume
+	for _, symbol := range symbols {
+		if snapshot, exists := e.storage.GetCurrentSnapshot(symbol); exists {
+			sv = append(sv, symbolVolume{symbol, snapshot.Volume24h})
+		}
+	}
+
+	// Сортируем по убыванию объема
+	sort.Slice(sv, func(i, j int) bool {
+		return sv[i].volume > sv[j].volume
+	})
+
+	result := make([]string, len(sv))
+	for i, item := range sv {
+		result[i] = item.symbol
+	}
+
+	return result
+}
+
+// passesVolumeFilter проверяет фильтр объема
+func (e *AnalysisEngine) passesVolumeFilter(symbol string) bool {
+	if e.config.MinVolumeFilter <= 0 {
+		return true
+	}
+
+	if snapshot, exists := e.storage.GetCurrentSnapshot(symbol); exists {
+		return snapshot.Volume24h >= e.config.MinVolumeFilter
+	}
+
+	return false
+}
+
+// updateStats обновляет статистику
+func (e *AnalysisEngine) updateStats(symbol string, totalSignals, filteredSignals int, duration time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.stats.TotalAnalyses++
+	e.stats.TotalSignals += int64(filteredSignals)
+	e.stats.AnalysisTime += duration
+	e.stats.LastRunTime = time.Now()
+	e.stats.SymbolsAnalyzed[symbol]++
+}
+
+// publishSignals публикует сигналы в EventBus
+func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
+	for _, signal := range signals {
+		e.eventBus.Publish(events.Event{
+			Type:   events.EventSignalDetected,
+			Source: "analysis_engine",
+			Data:   signal,
+			Metadata: events.Metadata{
+				CorrelationID: signal.ID,
+				Priority:      int(signal.Confidence / 10),
+				Tags:          signal.Metadata.Tags,
+			},
+		})
+
+		// Логируем сигнал
+		log.Printf("📈 Обнаружен сигнал: %s %s %.2f%% (уверенность: %.0f%%)",
+			signal.Symbol, signal.Direction, signal.ChangePercent, signal.Confidence)
+	}
+}
+
+// publishAnalysisComplete публикует событие завершения анализа
+func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.AnalysisResult, duration time.Duration) {
+	totalSignals := 0
+	for _, result := range results {
+		totalSignals += len(result.Signals)
+	}
+
+	e.eventBus.Publish(events.Event{
+		Type:   "analysis_complete",
+		Source: "analysis_engine",
+		Data: map[string]interface{}{
+			"symbols_analyzed": len(results),
+			"total_signals":    totalSignals,
+			"duration":         duration.String(),
+			"timestamp":        time.Now(),
+		},
+	})
+}
+
+// analysisLoop цикл периодического анализа
+func (e *AnalysisEngine) analysisLoop() {
+	defer e.wg.Done()
+
+	ticker := time.NewTicker(e.config.UpdateInterval)
+	defer ticker.Stop()
+
+	// Первоначальный анализ
+	e.AnalyzeAll()
+
+	for {
+		select {
+		case <-ticker.C:
+			e.AnalyzeAll()
+		case <-e.stopChan:
+			return
+		}
+	}
+}
+
+// subscribeToEvents подписывается на события EventBus
+func (e *AnalysisEngine) subscribeToEvents() {
+	subscriber := events.NewBaseSubscriber(
+		"analysis_engine",
+		[]events.EventType{
+			events.EventPriceUpdated,
+			"analysis_request",
+		},
+		e.handleEvent,
+	)
+
+	e.eventBus.Subscribe(events.EventPriceUpdated, subscriber)
+	e.eventBus.Subscribe("analysis_request", subscriber)
+}
+
+// handleEvent обрабатывает события EventBus
+func (e *AnalysisEngine) handleEvent(event events.Event) error {
+	switch event.Type {
+	case events.EventPriceUpdated:
+		// Можно добавить реактивный анализ при обновлении цен
+		// Например, анализировать только обновленный символ
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			if symbol, ok := data["symbol"].(string); ok {
+				e.AnalyzeSymbol(symbol, e.config.AnalysisPeriods)
+			}
+		}
+
+	case "analysis_request":
+		// Обработка запроса на анализ
+		if request, ok := event.Data.(analysis.AnalysisRequest); ok {
+			e.AnalyzeSymbol(request.Symbol, []time.Duration{request.Period})
+		}
+	}
+
+	return nil
+}
+
+// GetStats возвращает статистику движка
+func (e *AnalysisEngine) GetStats() EngineStats {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	return e.stats
+}
+
+// GetAnalyzers возвращает список зарегистрированных анализаторов
+func (e *AnalysisEngine) GetAnalyzers() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	names := make([]string, 0, len(e.analyzers))
+	for name := range e.analyzers {
+		names = append(names, name)
+	}
+
+	sort.Strings(names)
+	return names
+}
+
+// saveStats сохраняет статистику (заглушка)
+func (e *AnalysisEngine) saveStats() {
+	// В будущем можно сохранять в файл или базу данных
+	log.Printf("💾 Сохранение статистики AnalysisEngine")
+}
+
+// registerDefaultAnalyzers регистрирует стандартные анализаторы
+func (e *AnalysisEngine) registerDefaultAnalyzers() {
+	// GrowthAnalyzer - анализатор роста
+	growthAnalyzer := analyzers.NewGrowthAnalyzer(analyzers.DefaultGrowthConfig)
+	e.RegisterAnalyzer(growthAnalyzer)
+
+	// FallAnalyzer - анализатор падения
+	fallAnalyzer := analyzers.NewFallAnalyzer(analyzers.DefaultFallConfig)
+	e.RegisterAnalyzer(fallAnalyzer)
+
+	// VolumeAnalyzer - анализатор объема
+	volumeAnalyzer := analyzers.NewVolumeAnalyzer(analyzers.DefaultVolumeConfig)
+	e.RegisterAnalyzer(volumeAnalyzer)
+
+	// ContinuousAnalyzer - анализатор непрерывности
+	continuousAnalyzer := analyzers.NewContinuousAnalyzer(analyzers.DefaultContinuousConfig)
+	e.RegisterAnalyzer(continuousAnalyzer)
+}
+
+// setupDefaultFilters настраивает стандартные фильтры
+func (e *AnalysisEngine) setupDefaultFilters() {
+	// ConfidenceFilter - фильтр по уверенности
+	confidenceFilter := filters.NewConfidenceFilter(50.0)
+	e.AddFilter(confidenceFilter)
+
+	// VolumeFilter - фильтр по объему
+	volumeFilter := filters.NewVolumeFilter(100000)
+	e.AddFilter(volumeFilter)
+
+	// RateLimitFilter - фильтр частоты
+	rateLimitFilter := filters.NewRateLimitFilter(30 * time.Second)
+	e.AddFilter(rateLimitFilter)
+}
+
+// convertToPriceData конвертирует данные хранилища в формат анализа
+func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
+	result := make([]types.PriceData, len(storageData))
+
+	for i, data := range storageData {
+		result[i] = types.PriceData{
+			Symbol:    data.Symbol,
+			Price:     data.Price,
+			Volume24h: data.Volume24h,
+			Timestamp: data.Timestamp,
+		}
+	}
+
+	return result
+}
+
+// FilterChain - цепочка фильтров
+type FilterChain struct {
+	filters []filters.Filter
+	mu      sync.RWMutex
+}
+
+// NewFilterChain создает новую цепочку фильтров
+func NewFilterChain() *FilterChain {
+	return &FilterChain{
+		filters: make([]filters.Filter, 0),
+	}
+}
+
+// Add добавляет фильтр в цепочку
+func (fc *FilterChain) Add(filter filters.Filter) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	fc.filters = append(fc.filters, filter)
+}
+
+// Apply применяет все фильтры к сигналам
+func (fc *FilterChain) Apply(signals []analysis.Signal) []analysis.Signal {
+	fc.mu.RLock()
+	defer fc.mu.RUnlock()
+
+	if len(fc.filters) == 0 {
+		return signals
+	}
+
+	var filtered []analysis.Signal
+	for _, signal := range signals {
+		passed := true
+		for _, filter := range fc.filters {
+			if !filter.Apply(signal) {
+				passed = false
+				break
+			}
+		}
+		if passed {
+			filtered = append(filtered, signal)
+		}
+	}
+
+	return filtered
+}
+
+// GetFilterStats возвращает статистику по всем фильтрам
+func (e *AnalysisEngine) GetFilterStats() map[string]filters.FilterStats {
+	stats := make(map[string]filters.FilterStats)
+
+	e.filters.mu.RLock()
+	defer e.filters.mu.RUnlock()
+
+	for _, filter := range e.filters.filters {
+		stats[filter.Name()] = filter.GetStats()
+	}
+
+	return stats
+}

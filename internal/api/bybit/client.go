@@ -1,8 +1,9 @@
-// internal/api/bybit_client.go
-package api
+// internal/api/bybit/bybit_client.go
+package bybit
 
 import (
 	"bytes"
+	"crypto-exchange-screener-bot/internal/api"
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/types"
 
@@ -21,12 +22,6 @@ import (
 	"time"
 )
 
-const (
-	CategorySpot    = "spot"
-	CategoryLinear  = "linear"  // USDT-M фьючерсы
-	CategoryInverse = "inverse" // COIN-M фьючерсы
-)
-
 // BybitClient - клиент для работы с API Bybit
 type BybitClient struct {
 	httpClient *http.Client
@@ -35,105 +30,6 @@ type BybitClient struct {
 	apiKey     string
 	apiSecret  string
 	category   string // "spot", "linear", "inverse"
-}
-
-// APIResponse - базовый ответ API Bybit
-type APIResponse struct {
-	RetCode int         `json:"retCode"`
-	RetMsg  string      `json:"retMsg"`
-	Result  interface{} `json:"result"`
-	Time    int64       `json:"time"`
-}
-
-// TickerResponse - ответ для тикеров
-type TickerResponse struct {
-	RetCode int    `json:"retCode"`
-	RetMsg  string `json:"retMsg"`
-	Result  struct {
-		Category string `json:"category"`
-		List     []struct {
-			Symbol       string `json:"symbol"`
-			LastPrice    string `json:"lastPrice"`
-			Price24hPcnt string `json:"price24hPcnt"`
-			Volume24h    string `json:"volume24h"`
-			Turnover24h  string `json:"turnover24h"`
-		} `json:"list"`
-	} `json:"result"`
-	Time int64 `json:"time"`
-}
-
-// KlineResponse - ответ для свечных данных
-type KlineResponse struct {
-	RetCode int    `json:"retCode"`
-	RetMsg  string `json:"retMsg"`
-	Result  struct {
-		Category string     `json:"category"`
-		Symbol   string     `json:"symbol"`
-		List     [][]string `json:"list"`
-	} `json:"result"`
-	Time int64 `json:"time"`
-}
-
-// OrderBookResponse - ответ для стакана заявок
-type OrderBookResponse struct {
-	RetCode int    `json:"retCode"`
-	RetMsg  string `json:"retMsg"`
-	Result  struct {
-		S []struct {
-			Price string `json:"price"`
-			Size  string `json:"size"`
-		} `json:"s"`
-		B []struct {
-			Price string `json:"price"`
-			Size  string `json:"size"`
-		} `json:"b"`
-		Ts int64 `json:"ts"`
-	} `json:"result"`
-	Time int64 `json:"time"`
-}
-
-// AccountBalance - баланс аккаунта
-type AccountBalance struct {
-	Coin             string `json:"coin"`
-	Equity           string `json:"equity"`
-	WalletBalance    string `json:"walletBalance"`
-	PositionMM       string `json:"positionMM"`
-	AvailableBalance string `json:"availableBalance"`
-}
-
-// OrderResponse - ответ на создание ордера
-type OrderResponse struct {
-	OrderID     string `json:"orderId"`
-	OrderLinkID string `json:"orderLinkId"`
-}
-
-// InstrumentInfo - информация об инструменте фьючерса
-type InstrumentInfo struct {
-	Symbol          string `json:"symbol"`
-	ContractType    string `json:"contractType"`
-	Status          string `json:"status"`
-	BaseCoin        string `json:"baseCoin"`
-	QuoteCoin       string `json:"quoteCoin"`
-	LaunchTime      string `json:"launchTime"`
-	DeliveryTime    string `json:"deliveryTime"`
-	DeliveryFeeRate string `json:"deliveryFeeRate"`
-	PriceScale      string `json:"priceScale"`
-	LeverageFilter  struct {
-		MinLeverage  string `json:"minLeverage"`
-		MaxLeverage  string `json:"maxLeverage"`
-		LeverageStep string `json:"leverageStep"`
-	} `json:"leverageFilter"`
-	PriceFilter struct {
-		MinPrice string `json:"minPrice"`
-		MaxPrice string `json:"maxPrice"`
-		TickSize string `json:"tickSize"`
-	} `json:"priceFilter"`
-	LotSizeFilter struct {
-		MaxOrderQty         string `json:"maxOrderQty"`
-		MinOrderQty         string `json:"minOrderQty"`
-		QtyStep             string `json:"qtyStep"`
-		PostOnlyMaxOrderQty string `json:"postOnlyMaxOrderQty"`
-	} `json:"lotSizeFilter"`
 }
 
 // NewBybitClient создает новый клиент для работы с API Bybit
@@ -309,7 +205,7 @@ func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interfa
 }
 
 // GetTickers получает все тикеры для указанной категории
-func (c *BybitClient) GetTickers(category string) (*TickerResponse, error) {
+func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 	params := url.Values{}
 	params.Set("category", category)
 
@@ -318,12 +214,36 @@ func (c *BybitClient) GetTickers(category string) (*TickerResponse, error) {
 		return nil, err
 	}
 
-	var tickerResp TickerResponse
+	var tickerResp bybitTickerResponse
 	if err := json.Unmarshal(body, &tickerResp); err != nil {
 		return nil, fmt.Errorf("failed to parse ticker response: %w", err)
 	}
 
-	return &tickerResp, nil
+	// Преобразуем в общую структуру api.TickerResponse
+	return c.convertToApiTickerResponse(&tickerResp), nil
+}
+
+// Вспомогательный метод для преобразования
+func (c *BybitClient) convertToApiTickerResponse(bybitResp *bybitTickerResponse) *api.TickerResponse {
+	var tickers []api.Ticker
+
+	for _, t := range bybitResp.Result.List {
+		tickers = append(tickers, api.Ticker{
+			Symbol:       t.Symbol,
+			LastPrice:    t.LastPrice,
+			Volume24h:    t.Volume24h,
+			Price24hPcnt: t.Price24hPcnt,
+			Turnover24h:  t.Turnover24h,
+		})
+	}
+
+	return &api.TickerResponse{
+		RetCode: bybitResp.RetCode,
+		RetMsg:  bybitResp.RetMsg,
+		Result: api.TickerList{
+			List: tickers,
+		},
+	}
 }
 
 // GetInstrumentsInfo получает информацию об инструментах фьючерсов
@@ -525,7 +445,7 @@ func (c *BybitClient) GetTopMovers(symbols []string, intervalMinutes int, topN i
 
 // Category возвращает текущую категорию клиента
 func (c *BybitClient) Category() string {
-	return c.category
+	return c.config.FuturesCategory
 }
 
 // GetRecentKlinesForPeriod получает свечи для анализа периода роста

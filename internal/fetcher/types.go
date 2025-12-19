@@ -1,8 +1,30 @@
-package monitor
+package fetcher
 
 import (
 	"time"
 )
+
+// PriceFetcher интерфейс
+type PriceFetcher interface {
+	Start(interval time.Duration) error
+	Stop() error
+	IsRunning() bool
+	GetStats() map[string]interface{}
+}
+
+// PriceFetcherConfig - конфигурация PriceFetcher
+type PriceFetcherConfig struct {
+	UpdateInterval      time.Duration
+	MaxConcurrent       int
+	RequestTimeout      time.Duration
+	SymbolFilter        string
+	ExcludeSymbols      string
+	MaxSymbolsToMonitor int
+	MinVolumeFilter     float64
+	InitialDataFetch    bool
+	DataFetchLimit      int
+	FuturesCategory     string
+}
 
 // PriceData данные о цене
 type PriceData struct {

@@ -1,3 +1,4 @@
+// internal/types/trend.go
 package types
 
 import (

@@ -30,12 +30,13 @@ type ServiceInfo struct {
 type SystemStats struct {
 	Services      map[string]ServiceInfo `json:"services"`
 	StorageStats  storage.StorageStats   `json:"storage_stats"`
+	AnalysisStats interface{}            `json:"analysis_stats,omitempty"`
+	EventBusStats interface{}            `json:"event_bus_stats,omitempty"`
 	Uptime        time.Duration          `json:"uptime"`
 	TotalRequests int64                  `json:"total_requests"`
 	MemoryUsageMB float64                `json:"memory_usage_mb"`
 	CPUUsage      float64                `json:"cpu_usage"`
 	ActiveSymbols int                    `json:"active_symbols"`
-	GrowthStats   interface{}            `json:"growth_stats,omitempty"`
 	LastError     string                 `json:"last_error,omitempty"`
 	LastUpdated   time.Time              `json:"last_updated"`
 }

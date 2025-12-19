@@ -1,4 +1,4 @@
-// internal/telegram/bot.go
+// internal/telegram/bot.go (исправленная версия)
 package telegram
 
 import (
@@ -377,7 +377,11 @@ func (tb *TelegramBot) SendTestMessage() error {
 		"🔔 Уведомления отправляются с ограничением 1 сообщение в 2 секунды.\n" +
 		"⚡ Настройки: рост=%.2f%%, падение=%.2f%%"
 
-	message = fmt.Sprintf(message, tb.config.GrowthThreshold, tb.config.FallThreshold)
+	// Используем настройки из конфигурации анализаторов
+	growthThreshold := tb.config.Analyzers.GrowthAnalyzer.MinGrowth
+	fallThreshold := tb.config.Analyzers.FallAnalyzer.MinFall
+
+	message = fmt.Sprintf(message, growthThreshold, fallThreshold)
 
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{

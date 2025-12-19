@@ -1,4 +1,4 @@
-package monitor
+package fetcher
 
 import (
 	"crypto-exchange-screener-bot/internal/config"

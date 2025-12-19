@@ -1,3 +1,4 @@
+// internal/notifier/telegram_notifier.go
 package notifier
 
 import (
@@ -32,13 +33,18 @@ func NewTelegramNotifier(cfg *config.Config) *TelegramNotifier {
 	}
 }
 
+// GetBot возвращает Telegram бота
+func (t *TelegramNotifier) GetBot() *telegram.TelegramBot {
+	return t.bot
+}
+
 // Send отправляет сигнал в Telegram
 func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
 	if !t.enabled || t.bot == nil {
 		return nil
 	}
 
-	// Конвертируем в GrowthSignal
+	// Конвертируем TrendSignal в GrowthSignal
 	growthSignal := convertToGrowthSignal(signal)
 	if err := t.bot.SendNotification(growthSignal); err != nil {
 		return err
@@ -49,6 +55,40 @@ func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
 	t.stats["last_sent_time"] = time.Now()
 
 	return nil
+}
+
+// convertToGrowthSignal конвертирует TrendSignal в GrowthSignal
+func convertToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
+	growthPercent := 0.0
+	fallPercent := 0.0
+	direction := "growth"
+
+	if signal.Direction == "growth" {
+		growthPercent = signal.ChangePercent
+	} else if signal.Direction == "fall" {
+		fallPercent = -signal.ChangePercent // Делаем положительным для Telegram
+		direction = "fall"
+	} else {
+		// Если направление нейтральное, используем изменение цены
+		if signal.ChangePercent > 0 {
+			growthPercent = signal.ChangePercent
+			direction = "growth"
+		} else {
+			fallPercent = -signal.ChangePercent
+			direction = "fall"
+		}
+	}
+
+	return types.GrowthSignal{
+		Symbol:        signal.Symbol,
+		Direction:     direction,
+		GrowthPercent: growthPercent,
+		FallPercent:   fallPercent,
+		PeriodMinutes: signal.PeriodMinutes,
+		Confidence:    signal.Confidence,
+		Timestamp:     signal.Timestamp,
+		DataPoints:    signal.DataPoints,
+	}
 }
 
 // Name возвращает имя
@@ -69,26 +109,4 @@ func (t *TelegramNotifier) SetEnabled(enabled bool) {
 // GetStats возвращает статистику
 func (t *TelegramNotifier) GetStats() map[string]interface{} {
 	return t.stats
-}
-
-// convertToGrowthSignal конвертирует TrendSignal в GrowthSignal
-func convertToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
-	growthPercent := 0.0
-	fallPercent := 0.0
-
-	if signal.Direction == "growth" {
-		growthPercent = signal.ChangePercent
-	} else {
-		fallPercent = signal.ChangePercent
-	}
-
-	return types.GrowthSignal{
-		Symbol:        signal.Symbol,
-		Direction:     signal.Direction,
-		GrowthPercent: growthPercent,
-		FallPercent:   fallPercent,
-		PeriodMinutes: signal.PeriodMinutes,
-		Confidence:    signal.Confidence,
-		Timestamp:     signal.Timestamp,
-	}
 }

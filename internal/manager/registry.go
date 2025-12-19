@@ -1,3 +1,4 @@
+// internal/manager/registry.go
 package manager
 
 import (
