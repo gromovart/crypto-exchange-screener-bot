@@ -34,7 +34,11 @@ func main() {
 	printHeader("АНАЛИЗ РОСТА/ПАДЕНИЯ КРИПТОВАЛЮТНЫХ ФЬЮЧЕРСОВ")
 	fmt.Printf("🔧 Конфигурация:\n")
 	fmt.Printf("   Сеть: %s\n", map[bool]string{true: "Testnet 🧪", false: "Mainnet ⚡"}[cfg.UseTestnet])
-	fmt.Printf("   Категория: %s фьючерсы\n", cfg.FuturesCategory)
+
+	// Создаем API клиент
+	apiClient := bybit.NewBybitClient(cfg)
+
+	fmt.Printf("   Категория: %s\n", apiClient.Category())
 	fmt.Printf("   Интервал анализа: %d секунд\n", cfg.UpdateInterval)
 	fmt.Printf("   Периоды анализа: %s\n", formatPeriods(cfg.AnalysisEngine.AnalysisPeriods))
 	fmt.Printf("   Порог роста: %.2f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
@@ -52,9 +56,6 @@ func main() {
 		RetentionPeriod:     24 * time.Hour,
 	}
 	priceStorage := storage.NewInMemoryPriceStorage(storageConfig)
-
-	// Создаем API клиент
-	apiClient := bybit.NewBybitClient(cfg)
 
 	// Создаем PriceFetcher
 	fetcherFactory := &fetcher.Factory{}
@@ -108,6 +109,11 @@ func main() {
 
 	fmt.Println("\n✅ Система инициализирована")
 	fmt.Println("🚀 Запуск мониторинга...")
+
+	// Ждем накопления данных перед анализом
+	fmt.Println("⏳ Накопление данных для анализа (ожидание 60 секунд)...")
+	time.Sleep(60 * time.Second)
+	fmt.Println("✅ Данные накоплены, начинаем анализ...")
 
 	// Статистика
 	startTime := time.Now()
@@ -196,17 +202,26 @@ func main() {
 // Вспомогательные функции
 func printHeader(text string) {
 	width := 80
-	padding := (width - len(text)) / 2
-	if padding < 0 {
-		padding = 0
+
+	// Создаем красивый заголовок с рамкой
+	fmt.Println(strings.Repeat("=", width))
+
+	// Если текст короткий, центрируем его
+	if len(text) <= width {
+		padding := (width - len(text)) / 2
+		leftPadding := padding
+		rightPadding := width - len(text) - leftPadding
+
+		fmt.Printf("%s%s%s\n",
+			strings.Repeat(" ", leftPadding),
+			text,
+			strings.Repeat(" ", rightPadding))
+	} else {
+		// Если текст длинный, просто выводим его с переносом
+		fmt.Println(text[:width])
 	}
 
-	fmt.Println(strings.Repeat("═", width))
-	fmt.Printf("%s%s%s\n",
-		strings.Repeat(" ", padding),
-		text,
-		strings.Repeat(" ", width-len(text)-padding))
-	fmt.Println(strings.Repeat("═", width))
+	fmt.Println(strings.Repeat("=", width))
 }
 
 func formatPeriods(periods []int) string {

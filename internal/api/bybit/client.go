@@ -49,6 +49,9 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 	category := CategoryLinear
 	if cfg.FuturesCategory != "" {
 		category = cfg.FuturesCategory
+	} else {
+		// Если в конфиге не указана категория, используем linear
+		category = "linear"
 	}
 
 	return &BybitClient{
@@ -207,6 +210,12 @@ func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interfa
 // GetTickers получает все тикеры для указанной категории
 func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 	params := url.Values{}
+
+	// Если категория пустая, используем линейные фьючерсы
+	if category == "" {
+		category = "linear"
+	}
+
 	params.Set("category", category)
 
 	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/tickers", params)
@@ -445,7 +454,12 @@ func (c *BybitClient) GetTopMovers(symbols []string, intervalMinutes int, topN i
 
 // Category возвращает текущую категорию клиента
 func (c *BybitClient) Category() string {
-	return c.config.FuturesCategory
+	// Возвращаем поле category клиента, а не из конфига
+	if c.category != "" {
+		return c.category
+	}
+	// Если category пустая, возвращаем linear по умолчанию
+	return "linear"
 }
 
 // GetRecentKlinesForPeriod получает свечи для анализа периода роста
