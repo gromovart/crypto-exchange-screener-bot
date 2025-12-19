@@ -34,3 +34,5 @@ ENV LOG_TO_CONSOLE=true
 # Запуск приложения
 ENTRYPOINT ["/growth-monitor"]
 CMD ["--log-level=info"]
+
+
