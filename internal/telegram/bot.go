@@ -3,7 +3,6 @@ package telegram
 
 import (
 	"bytes"
-
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/types"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -21,11 +21,12 @@ type TelegramBot struct {
 	config        *config.Config
 	httpClient    *http.Client
 	baseURL       string
-	chatID        int64
+	chatID        string
 	notifyEnabled bool
 	rateLimiter   *RateLimiter
 	lastSendTime  time.Time
 	minInterval   time.Duration
+	mu            sync.RWMutex
 }
 
 // RateLimiter - ограничитель частоты запросов
@@ -57,7 +58,7 @@ type InlineKeyboardMarkup struct {
 
 // TelegramMessage - сообщение с клавиатурой
 type TelegramMessage struct {
-	ChatID      int64                 `json:"chat_id"`
+	ChatID      string                `json:"chat_id"`
 	Text        string                `json:"text"`
 	ParseMode   string                `json:"parse_mode,omitempty"`
 	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
@@ -86,44 +87,58 @@ func (rl *RateLimiter) CanSend(key string) bool {
 	return true
 }
 
-// CanSend проверяет, можно ли отправить сообщение
+// NewTelegramBot создает новый экземпляр Telegram бота
 func NewTelegramBot(cfg *config.Config) *TelegramBot {
-	if cfg.TelegramAPIKey == "" || cfg.TelegramChatID == 0 {
-		log.Println("⚠️ Telegram API ключ или Chat ID не указаны, бот отключен")
+	if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
+		log.Println("⚠️ Telegram Bot Token или Chat ID не указаны, бот отключен")
 		return nil
 	}
 
 	return &TelegramBot{
 		config:        cfg,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramAPIKey),
+		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
 		chatID:        cfg.TelegramChatID,
 		notifyEnabled: cfg.TelegramEnabled,
-		rateLimiter:   NewRateLimiter(10 * time.Second), // УВЕЛИЧЕН ДО 10 СЕКУНД
-		minInterval:   10 * time.Second,                 // УВЕЛИЧЕН ДО 10 СЕКУНД
+		rateLimiter:   NewRateLimiter(10 * time.Second),
+		minInterval:   10 * time.Second,
 	}
+}
+
+// SetNotifyEnabled устанавливает статус уведомлений
+func (tb *TelegramBot) SetNotifyEnabled(enabled bool) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.notifyEnabled = enabled
+}
+
+// IsNotifyEnabled возвращает статус уведомлений
+func (tb *TelegramBot) IsNotifyEnabled() bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return tb.notifyEnabled
 }
 
 // SendNotification отправляет уведомление о сигнале с проверкой частоты
 func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
-	if !tb.notifyEnabled {
+	if !tb.IsNotifyEnabled() {
 		return nil
 	}
 
 	// Проверяем настройки уведомлений
-	if (signal.Direction == "growth" && !tb.config.TelegramNotifyOn.Growth) ||
-		(signal.Direction == "fall" && !tb.config.TelegramNotifyOn.Fall) {
+	if (signal.Direction == "growth" && !tb.config.TelegramNotifyGrowth) ||
+		(signal.Direction == "fall" && !tb.config.TelegramNotifyFall) {
 		return nil
 	}
 
 	// Проверяем лимит частоты для данного типа сигнала
-	key := fmt.Sprintf("signal_%s", signal.Direction)
+	key := fmt.Sprintf("signal_%s_%s", signal.Direction, signal.Symbol)
 	if !tb.rateLimiter.CanSend(key) {
 		log.Printf("⚠️ Пропуск Telegram уведомления для %s (лимит частоты)", signal.Symbol)
 		return nil
 	}
 
-	// Форматируем сообщение в новом формате
+	// Форматируем сообщение
 	message := tb.FormatSignalMessage(signal)
 
 	// Создаем клавиатуру
@@ -145,7 +160,7 @@ func (tb *TelegramBot) SendMessageWithKeyboard(text string, keyboard *InlineKeyb
 
 // sendMessage отправляет простое сообщение без клавиатуры
 func (tb *TelegramBot) sendMessage(text string) error {
-	if !tb.notifyEnabled {
+	if !tb.IsNotifyEnabled() {
 		return nil
 	}
 
@@ -162,7 +177,7 @@ func (tb *TelegramBot) sendMessage(text string) error {
 	}
 
 	message := struct {
-		ChatID    int64  `json:"chat_id"`
+		ChatID    string `json:"chat_id"`
 		Text      string `json:"text"`
 		ParseMode string `json:"parse_mode,omitempty"`
 	}{
@@ -171,58 +186,7 @@ func (tb *TelegramBot) sendMessage(text string) error {
 		ParseMode: "Markdown",
 	}
 
-	jsonData, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
-	}
-
-	resp, err := tb.httpClient.Post(
-		tb.baseURL+"sendMessage",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var telegramResp struct {
-		OK          bool   `json:"ok"`
-		ErrorCode   int    `json:"error_code,omitempty"`
-		Description string `json:"description,omitempty"`
-	}
-
-	if err := json.Unmarshal(body, &telegramResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	if !telegramResp.OK {
-		// Если ошибка 429, ждем указанное время
-		if telegramResp.ErrorCode == 429 {
-			retryAfter := 5 // по умолчанию 5 секунд
-			var retryResp struct {
-				Parameters struct {
-					RetryAfter int `json:"retry_after"`
-				} `json:"parameters"`
-			}
-			if json.Unmarshal(body, &retryResp) == nil && retryResp.Parameters.RetryAfter > 0 {
-				retryAfter = retryResp.Parameters.RetryAfter
-			}
-			log.Printf("⚠️ Telegram API лимит, ждем %d секунд", retryAfter)
-			time.Sleep(time.Duration(retryAfter) * time.Second)
-			// Пробуем снова один раз
-			return tb.sendMessage(text)
-		}
-		return fmt.Errorf("telegram API error %d: %s", telegramResp.ErrorCode, telegramResp.Description)
-	}
-
-	tb.lastSendTime = time.Now()
-	return nil
+	return tb.sendTelegramRequest("sendMessage", message)
 }
 
 // FormatSignalMessage форматирует сообщение о сигнале
@@ -243,18 +207,50 @@ func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
 	intervalStr := strconv.Itoa(signal.PeriodMinutes) + "мин"
 	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
 
-	// НОВЫЙ ФОРМАТ СООБЩЕНИЯ
-	return fmt.Sprintf(
-		"⚫ Bybit - %s - %s\n"+
-			"🕐 %s\n"+
-			"%s %s: %s\n"+
-			"📡 Уверенность: %.0f%%\n"+
-			"📈 Сигнал: 1",
-		intervalStr, signal.Symbol,
-		timeStr,
-		icon, directionStr, changeStr,
-		signal.Confidence,
-	)
+	// Форматируем сообщение в зависимости от формата из конфига
+	switch tb.config.MessageFormat {
+	case "detailed":
+		return fmt.Sprintf(
+			"⚫ Bybit Futures - %s\n"+
+				"📊 Символ: %s\n"+
+				"🕐 Время: %s\n"+
+				"⏱️  Период: %s\n"+
+				"%s Направление: %s\n"+
+				"📈 Изменение: %s\n"+
+				"📡 Уверенность: %.0f%%\n"+
+				"📊 Объем: $%.0f",
+			intervalStr, signal.Symbol,
+			timeStr,
+			intervalStr,
+			icon, directionStr,
+			changeStr,
+			signal.Confidence,
+			signal.Volume24h,
+		)
+	case "compact":
+		return fmt.Sprintf(
+			"⚫ Bybit - %s - %s\n"+
+				"🕐 %s\n"+
+				"%s %s: %s\n"+
+				"📡 Уверенность: %.0f%%",
+			intervalStr, signal.Symbol,
+			timeStr,
+			icon, directionStr, changeStr,
+			signal.Confidence,
+		)
+	default:
+		return fmt.Sprintf(
+			"⚫ Bybit - %s - %s\n"+
+				"🕐 %s\n"+
+				"%s %s: %s\n"+
+				"📡 Уверенность: %.0f%%\n"+
+				"📈 Сигнал: 1",
+			intervalStr, signal.Symbol,
+			timeStr,
+			icon, directionStr, changeStr,
+			signal.Confidence,
+		)
+	}
 }
 
 // createNotificationKeyboard создает клавиатуру с кнопками для уведомления
@@ -290,7 +286,7 @@ func (tb *TelegramBot) createNotificationKeyboard(signal types.GrowthSignal) *In
 
 // sendMessageWithKeyboard отправляет сообщение с клавиатурой
 func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
-	if !tb.notifyEnabled {
+	if !tb.IsNotifyEnabled() {
 		return nil
 	}
 
@@ -317,20 +313,29 @@ func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyb
 		message.ReplyMarkup = keyboard
 	}
 
-	jsonData, err := json.Marshal(message)
+	return tb.sendTelegramRequest("sendMessage", message)
+}
+
+// sendTelegramRequest - общая функция для отправки запросов к Telegram API
+func (tb *TelegramBot) sendTelegramRequest(method string, payload interface{}) error {
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	resp, err := tb.httpClient.Post(
-		tb.baseURL+"sendMessage",
+		tb.baseURL+method,
 		"application/json",
 		bytes.NewBuffer(jsonData),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -362,7 +367,7 @@ func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyb
 			log.Printf("⚠️ Telegram API лимит, ждем %d секунд", retryAfter)
 			time.Sleep(time.Duration(retryAfter) * time.Second)
 			// Пробуем снова один раз
-			return tb.sendMessageWithKeyboard(text, keyboard)
+			return tb.sendTelegramRequest(method, payload)
 		}
 		return fmt.Errorf("telegram API error %d: %s", telegramResp.ErrorCode, telegramResp.Description)
 	}
@@ -375,7 +380,7 @@ func (tb *TelegramBot) sendMessageWithKeyboard(text string, keyboard *InlineKeyb
 func (tb *TelegramBot) SendTestMessage() error {
 	message := "🤖 *Бот активирован!*\n\n" +
 		"✅ Система мониторинга роста/падения запущена.\n" +
-		"🔔 Уведомления отправляются с ограничением 1 сообщение в 2 секунды.\n" +
+		"🔔 Уведомления отправляются с ограничением 1 сообщение в 10 секунд.\n" +
 		"⚡ Настройки: рост=%.2f%%, падение=%.2f%%"
 
 	// Используем настройки из конфигурации анализаторов
@@ -397,7 +402,7 @@ func (tb *TelegramBot) SendTestMessage() error {
 }
 
 // StartCommandHandler обрабатывает команду /start
-func (tb *TelegramBot) StartCommandHandler(chatID int64) error {
+func (tb *TelegramBot) StartCommandHandler(chatID string) error {
 	message := "🚀 *Crypto Exchange Screener Bot*\n\n" +
 		"*Доступные команды:*\n" +
 		"/start - Начало работы\n" +
@@ -424,7 +429,7 @@ func (tb *TelegramBot) StartCommandHandler(chatID int64) error {
 }
 
 // sendMessageWithKeyboardToChat отправляет сообщение в указанный чат
-func (tb *TelegramBot) sendMessageWithKeyboardToChat(chatID int64, text string, keyboard *InlineKeyboardMarkup) error {
+func (tb *TelegramBot) sendMessageWithKeyboardToChat(chatID string, text string, keyboard *InlineKeyboardMarkup) error {
 	message := TelegramMessage{
 		ChatID:    chatID,
 		Text:      text,
@@ -435,32 +440,17 @@ func (tb *TelegramBot) sendMessageWithKeyboardToChat(chatID int64, text string, 
 		message.ReplyMarkup = keyboard
 	}
 
-	jsonData, err := json.Marshal(message)
-	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
-	}
-
-	resp, err := tb.httpClient.Post(
-		tb.baseURL+"sendMessage",
-		"application/json",
-		bytes.NewBuffer(jsonData),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to send message: %w", err)
-	}
-	defer resp.Body.Close()
-
-	return nil
+	return tb.sendTelegramRequest("sendMessage", message)
 }
 
 // HandleCallback обрабатывает callback от кнопок
-func (tb *TelegramBot) HandleCallback(callbackData string, chatID int64) error {
+func (tb *TelegramBot) HandleCallback(callbackData string, chatID string) error {
 	switch callbackData {
 	case "notify_on":
-		tb.notifyEnabled = true
+		tb.SetNotifyEnabled(true)
 		return tb.sendMessageWithKeyboardToChat(chatID, "✅ Уведомления включены", nil)
 	case "notify_off":
-		tb.notifyEnabled = false
+		tb.SetNotifyEnabled(false)
 		return tb.sendMessageWithKeyboardToChat(chatID, "❌ Уведомления выключены", nil)
 	case "status":
 		return tb.sendStatus(chatID)
@@ -471,25 +461,39 @@ func (tb *TelegramBot) HandleCallback(callbackData string, chatID int64) error {
 	default:
 		// Обработка notify_SYMBOL_on/off
 		if len(callbackData) > 7 && callbackData[:7] == "notify_" {
-			symbol := callbackData[7 : len(callbackData)-3]
-			action := callbackData[len(callbackData)-2:]
-
-			var response string
-			if action == "on" {
-				response = fmt.Sprintf("✅ Уведомления для %s включены", symbol)
-			} else {
-				response = fmt.Sprintf("❌ Уведомления для %s выключены", symbol)
+			parts := callbackData[7:] // Убираем "notify_"
+			// Находим последний "_"
+			lastUnderscore := -1
+			for i := len(parts) - 1; i >= 0; i-- {
+				if parts[i] == '_' {
+					lastUnderscore = i
+					break
+				}
 			}
 
-			return tb.sendMessageWithKeyboardToChat(chatID, response, nil)
+			if lastUnderscore != -1 {
+				symbol := parts[:lastUnderscore]
+				action := parts[lastUnderscore+1:]
+
+				var response string
+				if action == "on" {
+					response = fmt.Sprintf("✅ Уведомления для %s включены", symbol)
+				} else if action == "off" {
+					response = fmt.Sprintf("❌ Уведомления для %s выключены", symbol)
+				} else {
+					response = fmt.Sprintf("❓ Неизвестное действие для %s: %s", symbol, action)
+				}
+
+				return tb.sendMessageWithKeyboardToChat(chatID, response, nil)
+			}
 		}
 	}
 
-	return nil
+	return fmt.Errorf("unknown callback data: %s", callbackData)
 }
 
 // sendStatus отправляет статус системы
-func (tb *TelegramBot) sendStatus(chatID int64) error {
+func (tb *TelegramBot) sendStatus(chatID string) error {
 	message := "📊 *Статус системы*\n\n" +
 		"✅ Бот работает\n" +
 		"🔔 Уведомления: " + tb.getNotifyStatus() + "\n" +
@@ -500,7 +504,7 @@ func (tb *TelegramBot) sendStatus(chatID int64) error {
 }
 
 // sendStats отправляет статистику
-func (tb *TelegramBot) sendStats(chatID int64) error {
+func (tb *TelegramBot) sendStats(chatID string) error {
 	// Здесь можно добавить реальную статистику
 	message := "📈 *Статистика*\n\n" +
 		"Сигналов сегодня: 0\n" +
@@ -512,18 +516,19 @@ func (tb *TelegramBot) sendStats(chatID int64) error {
 }
 
 // sendConfig отправляет текущую конфигурацию
-func (tb *TelegramBot) sendConfig(chatID int64) error {
+func (tb *TelegramBot) sendConfig(chatID string) error {
 	message := fmt.Sprintf(
 		"⚙️ *Конфигурация*\n\n"+
-			"Бот: %s\n"+
+			"Биржа: %s %s\n"+
 			"Уведомления: %s\n"+
 			"Рост: %v\n"+
 			"Падение: %v\n"+
 			"Формат: %s",
-		tb.config.FuturesCategory,
+		strings.ToUpper(tb.config.Exchange),
+		tb.config.ExchangeType,
 		tb.getNotifyStatus(),
-		tb.config.TelegramNotifyOn.Growth,
-		tb.config.TelegramNotifyOn.Fall,
+		tb.config.TelegramNotifyGrowth,
+		tb.config.TelegramNotifyFall,
 		tb.config.MessageFormat,
 	)
 
@@ -532,7 +537,7 @@ func (tb *TelegramBot) sendConfig(chatID int64) error {
 
 // getNotifyStatus возвращает статус уведомлений
 func (tb *TelegramBot) getNotifyStatus() string {
-	if tb.notifyEnabled {
+	if tb.IsNotifyEnabled() {
 		return "✅ Включены"
 	}
 	return "❌ Выключены"

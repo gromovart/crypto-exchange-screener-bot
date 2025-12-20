@@ -18,6 +18,7 @@ type GrowthSignal struct {
 	Direction     string    `json:"direction"`
 	Confidence    float64   `json:"confidence"`
 	Timestamp     time.Time `json:"timestamp"`
+	Volume24h     float64   `json:"volume_24h,omitempty"` // Добавьте это поле
 }
 
 type PriceDataPoint struct {

@@ -124,7 +124,7 @@ func (dm *DataManager) initializeComponents() error {
 	dm.notification = notifier.NewCompositeNotificationService()
 
 	// 8. Создаем Telegram бота если включен
-	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" {
+	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
 		var err error
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
 		if err != nil {
@@ -173,7 +173,7 @@ func (dm *DataManager) setupNotifiers() {
 	dm.notification.AddNotifier(consoleNotifier)
 
 	// Добавляем Telegram нотификатор если включен
-	if dm.config.TelegramEnabled && dm.config.TelegramAPIKey != "" && dm.telegramBot != nil {
+	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" && dm.telegramBot != nil {
 		telegramNotifier := notifier.NewTelegramNotifier(dm.config)
 		if telegramNotifier != nil {
 			dm.notification.AddNotifier(telegramNotifier)

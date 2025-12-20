@@ -80,6 +80,7 @@ func (a *GrowthAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) 
 		DataPoints:    len(data),
 		StartPrice:    startPrice,
 		EndPrice:      endPrice,
+		Timestamp:     time.Now(),
 		Metadata: analysis.Metadata{
 			Strategy:     "growth_detection",
 			Tags:         []string{"growth", "bullish"},

@@ -1,4 +1,4 @@
-// cmd/bot/debug_super_sensitive.go
+// cmd/bot/debug_super_sensitive.go (исправленная версия)
 package main
 
 import (
@@ -11,98 +11,75 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 func main() {
+	// Инициализируем логгер
+	if err := logger.InitGlobal("logs/debug_super_sensitive.log", "debug", true); err != nil {
+		log.Fatalf("❌ Failed to initialize logger: %v", err)
+	}
+	defer logger.Close()
+
 	logger.Debug("🚀 ЗАПУСК СУПЕР-ЧУВСТВИТЕЛЬНОЙ ОТЛАДКИ")
 	logger.Debug(strings.Repeat("=", 70))
 	logger.Debug("⚡ ЭКСТРЕМАЛЬНЫЕ НАСТРОЙКИ: пороги 0.01%, уверенность 1%")
 	logger.Debug(strings.Repeat("=", 70))
 
-	// Создаем минимальную конфигурацию
-	cfg := &config.Config{
-		// API (можно тестовые)
-		ApiKey:    os.Getenv("BYBIT_API_KEY"),
-		ApiSecret: os.Getenv("BYBIT_SECRET_KEY"),
-		BaseURL:   "https://api.bybit.com",
-
-		// Отладка
-		DebugMode:      true,
-		LogLevel:       "error", // Только ошибки
-		LogToConsole:   true,
-		LogToFile:      false,
-
-		// Основные
-		UpdateInterval:        10,
-		MaxSymbolsToMonitor:   50,
-		MaxConcurrentRequests: 5,
-		MinVolumeFilter:       0,
-
-		// Анализ - ЭКСТРЕМАЛЬНО НИЗКИЕ ПОРОГИ
-		AnalysisEngine: struct {
-			UpdateInterval   int           `json:"update_interval"`
-			AnalysisPeriods  []int         `json:"analysis_periods"`
-			MinVolumeFilter  float64       `json:"min_volume_filter"`
-			MaxSymbolsPerRun int           `json:"max_symbols_per_run"`
-			EnableParallel   bool          `json:"enable_parallel"`
-			MaxWorkers       int           `json:"max_workers"`
-			SignalThreshold  float64       `json:"signal_threshold"`
-			RetentionPeriod  time.Duration `json:"retention_period"`
-			EnableCache      bool          `json:"enable_cache"`
-			MinDataPoints    int           `json:"min_data_points"`
-		}{
-			UpdateInterval:   10,
-			AnalysisPeriods:  []int{1, 2, 5}, // Очень короткие периоды
-			MaxSymbolsPerRun: 50,
-			EnableParallel:   true,
-			MaxWorkers:       5,
-			MinDataPoints:    2,
-		},
-
-		// Анализаторы - СУПЕР ЧУВСТВИТЕЛЬНЫЕ
-		Analyzers: struct {
-			GrowthAnalyzer struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinGrowth           float64 `json:"min_growth"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			}{
-				Enabled:             true,
-				MinConfidence:       1.0, // Всего 1%!
-				MinGrowth:           0.01, // Всего 0.01%!
-			},
-			FallAnalyzer struct {
-				Enabled             bool    `json:"enabled"`
-				MinConfidence       float64 `json:"min_confidence"`
-				MinFall             float64 `json:"min_fall"`
-				ContinuityThreshold float64 `json:"continuity_threshold"`
-			}{
-				Enabled:       true,
-				MinConfidence: 1.0,
-				MinFall:       0.01,
-			},
-			ContinuousAnalyzer struct {
-				Enabled             bool `json:"enabled"`
-				MinContinuousPoints int  `json:"min_continuous_points"`
-			}{
-				Enabled: true,
-			},
-		},
-
-		// Фильтры - ВЫКЛЮЧЕНЫ
-		SignalFilters: struct {
-			Enabled          bool     `json:"enabled"`
-			IncludePatterns  []string `json:"include_patterns"`
-			ExcludePatterns  []string `json:"exclude_patterns"`
-			MinConfidence    float64  `json:"min_confidence"`
-			MaxSignalsPerMin int      `json:"max_signals_per_min"`
-		}{
-			Enabled:       false,
-			MinConfidence: 0.5,
-		},
-
-		TelegramEnabled: false,
+	// Используем загрузку из .env файла вместо ручного создания
+	cfg, err := config.LoadConfig(".env")
+	if err != nil {
+		log.Printf("⚠️  Config file not found, using default values: %v", err)
 	}
+
+	// Переопределяем настройки для супер-чувствительного режима
+	cfg.DebugMode = true
+	cfg.LogLevel = "debug"
+	cfg.UpdateInterval = 10
+	cfg.MaxSymbolsToMonitor = 50
+	cfg.MinVolumeFilter = 0
+
+	// Анализ - ЭКСТРЕМАЛЬНО НИЗКИЕ ПОРОГИ
+	cfg.AnalysisEngine.UpdateInterval = 10
+	cfg.AnalysisEngine.AnalysisPeriods = []int{1, 2, 5} // Очень короткие периоды
+	cfg.AnalysisEngine.MaxSymbolsPerRun = 50
+	cfg.AnalysisEngine.EnableParallel = true
+	cfg.AnalysisEngine.MaxWorkers = 5
+	cfg.AnalysisEngine.MinDataPoints = 2
+	cfg.AnalysisEngine.SignalThreshold = 0.01
+	cfg.AnalysisEngine.EnableCache = false
+	cfg.AnalysisEngine.RetentionPeriod = 1
+
+	// Анализаторы - СУПЕР ЧУВСТВИТЕЛЬНЫЕ
+	cfg.Analyzers.GrowthAnalyzer.Enabled = true
+	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 1.0 // Всего 1%!
+	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.01    // Всего 0.01%!
+	cfg.Analyzers.GrowthAnalyzer.ContinuityThreshold = 0.5
+
+	cfg.Analyzers.FallAnalyzer.Enabled = true
+	cfg.Analyzers.FallAnalyzer.MinConfidence = 1.0
+	cfg.Analyzers.FallAnalyzer.MinFall = 0.01
+	cfg.Analyzers.FallAnalyzer.ContinuityThreshold = 0.5
+
+	cfg.Analyzers.ContinuousAnalyzer.Enabled = true
+	cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints = 2
+
+	// Фильтры - ВЫКЛЮЧЕНЫ
+	cfg.SignalFilters.Enabled = false
+	cfg.SignalFilters.MinConfidence = 0.5
+	cfg.SignalFilters.MaxSignalsPerMin = 1000
+	cfg.SignalFilters.IncludePatterns = []string{}
+	cfg.SignalFilters.ExcludePatterns = []string{}
+
+	// Уведомления - ВЫКЛЮЧЕНЫ
+	cfg.TelegramEnabled = false
+	cfg.TelegramNotifyGrowth = false
+	cfg.TelegramNotifyFall = false
+
+	// Логирование
+	cfg.LogToConsole = true
+	cfg.LogToFile = true
 
 	// Выводим сумасшедшие настройки
 	logger.Debug("\n⚡ НАСТРОЙКИ (СУПЕР ЧУВСТВИТЕЛЬНЫЕ):")

@@ -62,6 +62,7 @@ func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config AnalyzerConf
 		DataPoints:    len(data),
 		StartPrice:    data[0].Price,
 		EndPrice:      data[len(data)-1].Price,
+		Timestamp:     time.Now(),
 		Metadata: analysis.Metadata{
 			Strategy:     "continuity_analysis",
 			Tags:         []string{"continuous", "trend"},

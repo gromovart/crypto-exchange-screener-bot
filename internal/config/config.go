@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -38,6 +39,7 @@ type Config struct {
 		EnableCache      bool    `json:"enable_cache"`
 		EnableParallel   bool    `json:"enable_parallel"`
 		MaxWorkers       int     `json:"max_workers"`
+		MinDataPoints    int     `json:"min_data_points"`
 	} `json:"analysis_engine"`
 
 	// Анализаторы
@@ -100,10 +102,13 @@ type Config struct {
 	Include24hStats         bool    `json:"include_24h_stats"`
 
 	// Производительность и логирование
-	LogLevel    string `json:"log_level"`
-	LogFile     string `json:"log_file"`
-	HTTPPort    int    `json:"http_port"`
-	HTTPEnabled bool   `json:"http_enabled"`
+	LogLevel     string `json:"log_level"`
+	LogFile      string `json:"log_file"`
+	HTTPPort     int    `json:"http_port"`
+	HTTPEnabled  bool   `json:"http_enabled"`
+	DebugMode    bool   `json:"debug_mode,omitempty"`
+	LogToConsole bool   `json:"log_to_console,omitempty"`
+	LogToFile    bool   `json:"log_to_file,omitempty"`
 
 	// Устаревшие настройки (для обратной совместимости)
 	UpdateInterval  int     `json:"update_interval"`
@@ -112,6 +117,10 @@ type Config struct {
 	GrowthThreshold float64 `json:"growth_threshold"`
 	FallThreshold   float64 `json:"fall_threshold"`
 	GrowthPeriods   []int   `json:"growth_periods"`
+
+	// Конфигурация Rate Limiting
+	RateLimitDelay        time.Duration `json:"rate_limit_delay,omitempty"`
+	MaxConcurrentRequests int           `json:"max_concurrent_requests,omitempty"`
 }
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -154,6 +163,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.AnalysisEngine.EnableCache = getEnvBool("ANALYSIS_ENABLE_CACHE", true)
 	cfg.AnalysisEngine.EnableParallel = getEnvBool("ANALYSIS_ENABLE_PARALLEL", true)
 	cfg.AnalysisEngine.MaxWorkers = getEnvInt("ANALYSIS_MAX_WORKERS", 5)
+	cfg.AnalysisEngine.MinDataPoints = getEnvInt("ANALYSIS_MIN_DATA_POINTS", 3)
 
 	// Анализаторы
 	cfg.Analyzers.GrowthAnalyzer.Enabled = getEnvBool("GROWTH_ANALYZER_ENABLED", true)
@@ -207,6 +217,9 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.LogFile = getEnv("LOG_FILE", "logs/growth.log")
 	cfg.HTTPPort = getEnvInt("HTTP_PORT", 8080)
 	cfg.HTTPEnabled = getEnvBool("HTTP_ENABLED", false)
+	cfg.DebugMode = getEnvBool("DEBUG_MODE", false)
+	cfg.LogToConsole = getEnvBool("LOG_TO_CONSOLE", true)
+	cfg.LogToFile = getEnvBool("LOG_TO_FILE", true)
 
 	// Устаревшие настройки (для обратной совместимости)
 	cfg.UpdateInterval = getEnvInt("UPDATE_INTERVAL", 5)
@@ -215,6 +228,10 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.GrowthThreshold = getEnvFloat("GROWTH_THRESHOLD", 0.05)
 	cfg.FallThreshold = getEnvFloat("FALL_THRESHOLD", 0.05)
 	cfg.GrowthPeriods = parseIntList(getEnv("GROWTH_PERIODS", "5,15,30"))
+
+	// Rate limiting настройки
+	cfg.RateLimitDelay = getEnvDuration("RATE_LIMIT_DELAY", 100*time.Millisecond)
+	cfg.MaxConcurrentRequests = getEnvInt("MAX_CONCURRENT_REQUESTS", 10)
 
 	return cfg, nil
 }
@@ -323,4 +340,14 @@ func (c *Config) ShouldExcludeSymbol(symbol string) bool {
 		}
 	}
 	return false
+}
+
+// getEnvDuration получает значение duration из переменных окружения
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil {
+			return duration
+		}
+	}
+	return defaultValue
 }

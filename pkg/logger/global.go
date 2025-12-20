@@ -52,3 +52,15 @@ func Signal(symbol, direction string, change, confidence float64, period int) {
 		globalLogger.Signal(symbol, direction, change, confidence, period)
 	}
 }
+
+func Close() {
+	if globalLogger != nil {
+		globalLogger.Close()
+	}
+}
+
+func Status(stats map[string]string) {
+	if globalLogger != nil {
+		globalLogger.Status(stats)
+	}
+}

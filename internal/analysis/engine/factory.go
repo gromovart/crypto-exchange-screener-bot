@@ -1,4 +1,4 @@
-// internal/analysis/engine/factory.go
+// internal/analysis/engine/factory.go (исправленная версия)
 package engine
 
 import (
@@ -28,16 +28,16 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 
 	// Создаем конфигурацию движка с новыми полями
 	engineConfig := EngineConfig{
-		UpdateInterval:   time.Duration(cfg.UpdateInterval) * time.Second,
+		UpdateInterval:   time.Duration(cfg.AnalysisEngine.UpdateInterval) * time.Second,
 		AnalysisPeriods:  periods,
-		MinVolumeFilter:  cfg.AnalysisEngine.MinVolumeFilter,
+		MinVolumeFilter:  cfg.MinVolumeFilter, // Из основной конфигурации
 		MaxSymbolsPerRun: cfg.AnalysisEngine.MaxSymbolsPerRun,
 		EnableParallel:   cfg.AnalysisEngine.EnableParallel,
 		MaxWorkers:       cfg.AnalysisEngine.MaxWorkers,
 		SignalThreshold:  cfg.AnalysisEngine.SignalThreshold,
-		RetentionPeriod:  cfg.AnalysisEngine.RetentionPeriod,
+		RetentionPeriod:  time.Duration(cfg.AnalysisEngine.RetentionPeriod) * time.Hour, // Конвертируем часы в duration
 		EnableCache:      cfg.AnalysisEngine.EnableCache,
-		MinDataPoints:    cfg.AnalysisEngine.MinDataPoints,
+		MinDataPoints:    3, // Значение по умолчанию
 
 		// Конфигурация анализаторов
 		AnalyzerConfigs: AnalyzerConfigs{
@@ -69,17 +69,24 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 	// Создаем движок
 	engine := NewAnalysisEngine(storage, eventBus, engineConfig)
 
+	// Настраиваем анализаторы и фильтры
+	f.configureAnalyzers(engine, cfg)
+	f.configureFilters(engine, cfg)
+
 	return engine
 }
 
 // configureAnalyzers настраивает анализаторы
 func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config) {
+	// Значение по умолчанию для MinDataPoints
+	minDataPoints := 3
+
 	// Настраиваем GrowthAnalyzer
 	growthConfig := analyzers.AnalyzerConfig{
 		Enabled:       cfg.Analyzers.GrowthAnalyzer.Enabled,
 		Weight:        1.0,
 		MinConfidence: cfg.Analyzers.GrowthAnalyzer.MinConfidence,
-		MinDataPoints: cfg.AnalysisEngine.MinDataPoints,
+		MinDataPoints: minDataPoints, // Используем значение по умолчанию
 		CustomSettings: map[string]interface{}{
 			"min_growth":           cfg.Analyzers.GrowthAnalyzer.MinGrowth,
 			"continuity_threshold": cfg.Analyzers.GrowthAnalyzer.ContinuityThreshold,
@@ -95,7 +102,7 @@ func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config)
 		Enabled:       cfg.Analyzers.FallAnalyzer.Enabled,
 		Weight:        1.0,
 		MinConfidence: cfg.Analyzers.FallAnalyzer.MinConfidence,
-		MinDataPoints: cfg.AnalysisEngine.MinDataPoints,
+		MinDataPoints: minDataPoints, // Используем значение по умолчанию
 		CustomSettings: map[string]interface{}{
 			"min_fall":             cfg.Analyzers.FallAnalyzer.MinFall,
 			"continuity_threshold": cfg.Analyzers.FallAnalyzer.ContinuityThreshold,
@@ -111,8 +118,8 @@ func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config)
 		continuousConfig := analyzers.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        0.8,
-			MinConfidence: cfg.Analyzers.GrowthAnalyzer.MinConfidence, // Используем тот же MinConfidence
-			MinDataPoints: cfg.AnalysisEngine.MinDataPoints,
+			MinConfidence: cfg.Analyzers.GrowthAnalyzer.MinConfidence,
+			MinDataPoints: minDataPoints,
 			CustomSettings: map[string]interface{}{
 				"min_continuous_points": cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints,
 				"max_gap_ratio":         0.3,

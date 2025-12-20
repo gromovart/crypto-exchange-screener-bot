@@ -50,7 +50,7 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 
 	return &BybitClient{
 		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.RequestTimeout) * time.Second,
+			Timeout: time.Duration(30) * time.Second,
 		},
 		config:    cfg,
 		baseURL:   baseURL,

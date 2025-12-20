@@ -142,5 +142,7 @@ func (l *Logger) Signal(symbol, direction string, change, confidence float64, pe
 }
 
 func (l *Logger) Close() {
-	l.logFile.Close()
+	if l.logFile != nil {
+		l.logFile.Close()
+	}
 }

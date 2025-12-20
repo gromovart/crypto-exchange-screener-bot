@@ -1,15 +1,31 @@
-// webhook.go
+// internal/telegram/webhook.go (исправленная версия)
 package telegram
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"sync"
+	"time"
 )
 
-// Update представляет обновление от Telegram
-type Update struct {
+// WebhookServer - сервер для обработки webhook от Telegram
+type WebhookServer struct {
+	bot        *TelegramBot
+	httpServer *http.Server
+	mu         sync.RWMutex
+	config     struct {
+		Port       int
+		WebhookURL string
+		Secret     string
+	}
+}
+
+// TelegramUpdate - структура обновления от Telegram
+type TelegramUpdate struct {
 	UpdateID int `json:"update_id"`
 	Message  struct {
 		MessageID int `json:"message_id"`
@@ -26,14 +42,10 @@ type Update struct {
 			Username  string `json:"username,omitempty"`
 			Type      string `json:"type"`
 		} `json:"chat"`
-		Date     int    `json:"date"`
-		Text     string `json:"text"`
-		Entities []struct {
-			Type   string `json:"type"`
-			Offset int    `json:"offset"`
-			Length int    `json:"length"`
-		} `json:"entities,omitempty"`
-	} `json:"message,omitempty"`
+		Date    int    `json:"date"`
+		Text    string `json:"text"`
+		Caption string `json:"caption,omitempty"`
+	} `json:"message"`
 	CallbackQuery struct {
 		ID   string `json:"id"`
 		From struct {
@@ -51,126 +63,239 @@ type Update struct {
 				Username  string `json:"username,omitempty"`
 				Type      string `json:"type"`
 			} `json:"chat"`
-			Date int    `json:"date"`
-			Text string `json:"text"`
-		} `json:"message,omitempty"`
+		} `json:"message"`
 		ChatInstance string `json:"chat_instance"`
 		Data         string `json:"data"`
-	} `json:"callback_query,omitempty"`
+	} `json:"callback_query"`
 }
 
-// WebhookServer - сервер для обработки webhook от Telegram
-type WebhookServer struct {
-	bot        *TelegramBot
-	port       string
-	webhookURL string
-}
-
-// NewWebhookServer создает новый webhook сервер
-func NewWebhookServer(bot *TelegramBot, port, webhookURL string) *WebhookServer {
+// NewWebhookServer создает новый сервер webhook
+func NewWebhookServer(bot *TelegramBot, port int, webhookURL, secret string) *WebhookServer {
 	return &WebhookServer{
-		bot:        bot,
-		port:       port,
-		webhookURL: webhookURL,
+		bot: bot,
+		config: struct {
+			Port       int
+			WebhookURL string
+			Secret     string
+		}{
+			Port:       port,
+			WebhookURL: webhookURL,
+			Secret:     secret,
+		},
 	}
 }
 
-// Start запускает webhook сервер
+// Start запускает сервер webhook
 func (ws *WebhookServer) Start() error {
-	// Устанавливаем webhook
-	if err := ws.setWebhook(); err != nil {
-		return fmt.Errorf("failed to set webhook: %w", err)
+	if ws.bot == nil {
+		return fmt.Errorf("telegram bot is not initialized")
 	}
 
-	// Запускаем HTTP сервер
-	http.HandleFunc("/webhook", ws.handleWebhook)
-	http.HandleFunc("/health", ws.handleHealth)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhook/"+ws.config.Secret, ws.handleWebhook)
+	mux.HandleFunc("/health", ws.handleHealthCheck)
+	mux.HandleFunc("/", ws.handleDefault)
 
-	log.Printf("🌐 Telegram webhook сервер запущен на порту %s", ws.port)
-	return http.ListenAndServe(":"+ws.port, nil)
+	ws.httpServer = &http.Server{
+		Addr:         fmt.Sprintf(":%d", ws.config.Port),
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Printf("🌐 Webhook server starting on port %d", ws.config.Port)
+	return ws.httpServer.ListenAndServe()
 }
 
-// setWebhook устанавливает webhook URL
-func (ws *WebhookServer) setWebhook() error {
-	if ws.webhookURL == "" {
-		return nil // Пропускаем если URL не указан
+// Stop останавливает сервер webhook
+func (ws *WebhookServer) Stop() error {
+	if ws.httpServer != nil {
+		return ws.httpServer.Close()
 	}
-
-	url := fmt.Sprintf("%ssetWebhook?url=%s/webhook", ws.bot.baseURL, ws.webhookURL)
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	log.Printf("✅ Webhook установлен: %s", ws.webhookURL)
 	return nil
 }
 
-// handleWebhook обрабатывает webhook запросы
+// handleWebhook обрабатывает входящие webhook запросы от Telegram
 func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	var update Update
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		log.Printf("❌ Ошибка декодирования webhook: %v", err)
-		w.WriteHeader(http.StatusBadRequest)
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Обрабатываем обновление
-	go ws.processUpdate(update)
+	var update TelegramUpdate
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		log.Printf("❌ Failed to decode webhook update: %v", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("📨 Received Telegram update: %+v", update)
+
+	// Обрабатываем сообщения
+	if update.Message.Text != "" {
+		// Конвертируем int64 chatID в string
+		chatID := strconv.FormatInt(update.Message.Chat.ID, 10)
+		ws.handleMessage(update.Message.Text, chatID)
+	}
+
+	// Обрабатываем callback query
+	if update.CallbackQuery.Data != "" {
+		// Конвертируем int64 chatID в string
+		chatID := strconv.FormatInt(update.CallbackQuery.Message.Chat.ID, 10)
+		ws.handleCallbackQuery(update.CallbackQuery.Data, chatID, update.CallbackQuery.ID)
+	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
 }
 
-// handleHealth проверка здоровья сервера
-func (ws *WebhookServer) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("✅ Telegram bot is healthy"))
+// handleMessage обрабатывает входящие сообщения
+func (ws *WebhookServer) handleMessage(text, chatID string) {
+	log.Printf("📝 Handling message from chat %s: %s", chatID, text)
+
+	switch text {
+	case "/start":
+		if err := ws.bot.StartCommandHandler(chatID); err != nil {
+			log.Printf("❌ Failed to handle /start command: %v", err)
+		}
+	case "/status":
+		if err := ws.bot.sendStatus(chatID); err != nil {
+			log.Printf("❌ Failed to handle /status command: %v", err)
+		}
+	case "/notify_on":
+		ws.bot.SetNotifyEnabled(true)
+		ws.bot.sendMessageWithKeyboardToChat(chatID, "✅ Уведомления включены", nil)
+	case "/notify_off":
+		ws.bot.SetNotifyEnabled(false)
+		ws.bot.sendMessageWithKeyboardToChat(chatID, "❌ Уведомления выключены", nil)
+	case "/test":
+		message := "📊 *Тестовое сообщение*\n\n" +
+			"Это тестовое сообщение для проверки работы бота.\n" +
+			"✅ Бот работает корректно!\n" +
+			"🕐 Время: " + time.Now().Format("2006-01-02 15:04:05")
+
+		keyboard := &InlineKeyboardMarkup{
+			InlineKeyboard: [][]InlineKeyboardButton{
+				{
+					{Text: "📊 Статус", CallbackData: "status"},
+					{Text: "⚙️ Настройки", CallbackData: "config"},
+				},
+			},
+		}
+
+		if err := ws.bot.sendMessageWithKeyboardToChat(chatID, message, keyboard); err != nil {
+			log.Printf("❌ Failed to send test message: %v", err)
+		}
+	case "/help":
+		message := "🆘 *Помощь*\n\n" +
+			"*Доступные команды:*\n" +
+			"/start - Начало работы\n" +
+			"/status - Статус системы\n" +
+			"/notify_on - Включить уведомления\n" +
+			"/notify_off - Выключить уведомления\n" +
+			"/test - Тестовое уведомление\n" +
+			"/help - Эта справка"
+
+		if err := ws.bot.sendMessageWithKeyboardToChat(chatID, message, nil); err != nil {
+			log.Printf("❌ Failed to send help message: %v", err)
+		}
+	default:
+		if err := ws.bot.sendMessageWithKeyboardToChat(chatID, "❓ Неизвестная команда. Используйте /help для списка команд", nil); err != nil {
+			log.Printf("❌ Failed to send unknown command message: %v", err)
+		}
+	}
 }
 
-// processUpdate обрабатывает обновление
-func (ws *WebhookServer) processUpdate(update Update) {
-	// Обработка callback query (нажатие на кнопку)
-	if update.CallbackQuery.Data != "" {
-		chatID := update.CallbackQuery.From.ID
-		if err := ws.bot.HandleCallback(update.CallbackQuery.Data, chatID); err != nil {
-			log.Printf("❌ Ошибка обработки callback: %v", err)
-		}
+// handleCallbackQuery обрабатывает callback query от inline кнопок
+func (ws *WebhookServer) handleCallbackQuery(data, chatID, callbackID string) {
+	log.Printf("🔄 Handling callback query from chat %s: %s", chatID, data)
+
+	// Отправляем ответ на callback (чтобы убрать "часики" на кнопке)
+	ws.answerCallbackQuery(callbackID)
+
+	// Обрабатываем данные
+	if err := ws.bot.HandleCallback(data, chatID); err != nil {
+		log.Printf("❌ Failed to handle callback: %v", err)
+		ws.bot.sendMessageWithKeyboardToChat(chatID, fmt.Sprintf("❌ Ошибка обработки запроса: %v", err), nil)
+	}
+}
+
+// answerCallbackQuery отправляет ответ на callback query
+func (ws *WebhookServer) answerCallbackQuery(callbackID string) {
+	if ws.bot == nil {
 		return
 	}
 
-	// Обработка текстовых команд
-	if update.Message.Text != "" {
-		chatID := update.Message.Chat.ID
-		text := update.Message.Text
-
-		switch text {
-		case "/start":
-			if err := ws.bot.StartCommandHandler(chatID); err != nil {
-				log.Printf("❌ Ошибка обработки /start: %v", err)
-			}
-		case "/status":
-			if err := ws.bot.sendStatus(chatID); err != nil {
-				log.Printf("❌ Ошибка отправки статуса: %v", err)
-			}
-		case "/notify_on":
-			ws.bot.notifyEnabled = true
-			ws.bot.sendMessageWithKeyboardToChat(chatID, "✅ Уведомления включены", nil)
-		case "/notify_off":
-			ws.bot.notifyEnabled = false
-			ws.bot.sendMessageWithKeyboardToChat(chatID, "❌ Уведомления выключены", nil)
-		case "/test":
-			ws.bot.sendMessageWithKeyboardToChat(chatID, "✅ Тестовое сообщение", nil)
-		case "/help":
-			helpText := "📋 *Доступные команды:*\n" +
-				"/start - Начало работы\n" +
-				"/status - Статус системы\n" +
-				"/notify_on - Включить уведомления\n" +
-				"/notify_off - Выключить уведомления\n" +
-				"/test - Тестовое уведомление\n" +
-				"/help - Эта справка"
-			ws.bot.sendMessageWithKeyboardToChat(chatID, helpText, nil)
-		}
+	response := struct {
+		CallbackQueryID string `json:"callback_query_id"`
+		Text            string `json:"text,omitempty"`
+		ShowAlert       bool   `json:"show_alert"`
+	}{
+		CallbackQueryID: callbackID,
+		Text:            "✅ Обработано",
+		ShowAlert:       false,
 	}
+
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		log.Printf("❌ Failed to marshal callback response: %v", err)
+		return
+	}
+
+	resp, err := ws.bot.httpClient.Post(
+		ws.bot.baseURL+"answerCallbackQuery",
+		"application/json",
+		bytes.NewBuffer(jsonData),
+	)
+	if err != nil {
+		log.Printf("❌ Failed to answer callback query: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+}
+
+// handleHealthCheck обрабатывает запросы проверки здоровья
+func (ws *WebhookServer) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	status := map[string]string{
+		"status": "healthy",
+		"time":   time.Now().Format(time.RFC3339),
+	}
+	json.NewEncoder(w).Encode(status)
+}
+
+// handleDefault обрабатывает запросы по умолчанию
+func (ws *WebhookServer) handleDefault(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(`
+		<!DOCTYPE html>
+		<html>
+		<head>
+			<title>Telegram Webhook Server</title>
+			<style>
+				body { font-family: Arial, sans-serif; margin: 40px; }
+				.container { max-width: 800px; margin: 0 auto; }
+				h1 { color: #0088cc; }
+				.status { background: #f0f9ff; padding: 20px; border-radius: 5px; }
+			</style>
+		</head>
+		<body>
+			<div class="container">
+				<h1>🤖 Telegram Webhook Server</h1>
+				<div class="status">
+					<p><strong>Status:</strong> ✅ Running</p>
+					<p><strong>Time:</strong> ` + time.Now().Format("2006-01-02 15:04:05") + `</p>
+					<p><strong>Endpoint:</strong> /webhook/{secret}</p>
+					<p><strong>Health Check:</strong> <a href="/health">/health</a></p>
+				</div>
+			</div>
+		</body>
+		</html>
+	`))
 }

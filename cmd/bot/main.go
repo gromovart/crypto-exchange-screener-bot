@@ -276,7 +276,6 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 
 	return true
 }
-
 func logStatus(dataManager *manager.DataManager, startTime time.Time) {
 	storage := dataManager.GetStorage()
 	symbolCount := 0
@@ -293,9 +292,14 @@ func logStatus(dataManager *manager.DataManager, startTime time.Time) {
 		engineStats := engine.GetStats()
 		stats["Total Analyses"] = fmt.Sprintf("%d", engineStats.TotalAnalyses)
 		stats["Signals Found"] = fmt.Sprintf("%d", engineStats.TotalSignals)
-		stats["Last Analysis"] = time.Since(engineStats.LastAnalysisTime).Round(time.Second).String() + " ago"
+
+		// Используем поле LastRunTime из EngineStats
+		if !engineStats.LastRunTime.IsZero() {
+			stats["Last Analysis"] = time.Since(engineStats.LastRunTime).Round(time.Second).String() + " ago"
+		}
 	}
 
+	// Используем обновленный метод Status
 	logger.Status(stats)
 }
 

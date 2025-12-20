@@ -1,4 +1,4 @@
-// internal/events/factory.go
+// internal/events/factory.go (исправленная версия)
 package events
 
 import (
@@ -7,6 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/notifier"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
+	"fmt"
 	"time"
 )
 
@@ -17,12 +18,12 @@ type Factory struct{}
 func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 	// Настраиваем конфигурацию EventBus на основе конфигурации приложения
 	eventBusConfig := EventBusConfig{
-		BufferSize:      cfg.MaxConcurrentRequests * 10,
-		WorkerCount:     cfg.MaxConcurrentRequests,
+		BufferSize:      cfg.EventBus.BufferSize,
+		WorkerCount:     cfg.EventBus.WorkerCount,
 		MaxRetries:      3,
 		RetryDelay:      100 * time.Millisecond,
-		EnableMetrics:   true,
-		EnableLogging:   cfg.LogLevel == "debug",
+		EnableMetrics:   cfg.EventBus.EnableMetrics,
+		EnableLogging:   cfg.EventBus.EnableLogging,
 		DeadLetterQueue: true,
 	}
 
@@ -36,36 +37,19 @@ func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 	bus.AddMiddleware(&ValidationMiddleware{})
 	bus.AddMiddleware(&MetricsMiddleware{metrics: bus.metrics})
 
-	// Добавляем rate limiting если нужно
-	if cfg.RateLimitDelay > 0 {
-		rateLimits := map[EventType]time.Duration{
-			EventPriceUpdated:   cfg.RateLimitDelay,
-			EventSignalDetected: 2 * time.Second,
-		}
-		bus.AddMiddleware(NewRateLimitingMiddleware(rateLimits))
-	}
-
 	return bus
 }
 
 // RegisterDefaultSubscribers регистрирует стандартных подписчиков
 func (f *Factory) RegisterDefaultSubscribers(bus *EventBus, cfg *config.Config) {
 	// Консольный логгер (всегда включен)
-	consoleLogger := NewConsoleLoggerSubscriber()
+	consoleLogger := f.createConsoleLoggerSubscriber()
 	bus.Subscribe(EventPriceUpdated, consoleLogger)
 	bus.Subscribe(EventSignalDetected, consoleLogger)
 	bus.Subscribe(EventError, consoleLogger)
 
-	// Логгер в файл если включено
-	if cfg.LogFile != "" {
-		fileLogger := NewFileLoggerSubscriber(cfg.LogFile)
-		bus.Subscribe(EventPriceUpdated, fileLogger)
-		bus.Subscribe(EventSignalDetected, fileLogger)
-		bus.Subscribe(EventError, fileLogger)
-	}
-
 	// Telegram нотификатор если включен
-	if cfg.TelegramEnabled && cfg.TelegramAPIKey != "" {
+	if cfg.TelegramEnabled && cfg.TelegramBotToken != "" {
 		// Создаем телеграм бота
 		telegramBot := telegram.NewTelegramBot(cfg)
 		if telegramBot != nil {
@@ -96,8 +80,21 @@ func (f *Factory) RegisterDefaultSubscribers(bus *EventBus, cfg *config.Config) 
 	}
 }
 
-// NewFileLoggerSubscriber создает подписчика для логирования в файл
-func NewFileLoggerSubscriber(logFile string) *BaseSubscriber {
+// createConsoleLoggerSubscriber создает подписчика для консольного логирования
+func (f *Factory) createConsoleLoggerSubscriber() *BaseSubscriber {
+	return NewBaseSubscriber(
+		"console_logger",
+		[]EventType{EventPriceUpdated, EventSignalDetected, EventError},
+		func(event Event) error {
+			// Реализация консольного логирования
+			fmt.Printf("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
+			return nil
+		},
+	)
+}
+
+// createFileLoggerSubscriber создает подписчика для логирования в файл
+func (f *Factory) createFileLoggerSubscriber(logFile string) *BaseSubscriber {
 	return NewBaseSubscriber(
 		"file_logger",
 		[]EventType{EventPriceUpdated, EventSignalDetected, EventError},
