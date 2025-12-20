@@ -1,0 +1,79 @@
+package types
+
+import (
+	"sync"
+	"time"
+)
+
+// CounterSignalType - тип сигнала для счетчика
+type CounterSignalType string
+
+const (
+	CounterTypeGrowth CounterSignalType = "growth"
+	CounterTypeFall   CounterSignalType = "fall"
+)
+
+// CounterPeriod - период для подсчета сигналов
+type CounterPeriod string
+
+const (
+	Period5Min   CounterPeriod = "5m"
+	Period15Min  CounterPeriod = "15m"
+	Period30Min  CounterPeriod = "30m"
+	Period1Hour  CounterPeriod = "1h"
+	Period4Hours CounterPeriod = "4h"
+	Period1Day   CounterPeriod = "1d"
+)
+
+// CounterConfig - конфигурация счетчика
+type CounterConfig struct {
+	Enabled               bool                  `json:"enabled"`
+	BasePeriodMinutes     int                   `json:"base_period_minutes"` // Базовый период (1 минута)
+	AnalysisPeriod        CounterPeriod         `json:"analysis_period"`
+	MaxSignalsPerPeriod   map[CounterPeriod]int `json:"max_signals_per_period"`
+	TrackGrowth           bool                  `json:"track_growth"`
+	TrackFall             bool                  `json:"track_fall"`
+	NotificationThreshold int                   `json:"notification_threshold"` // Порог для уведомлений
+	ChartProvider         string                `json:"chart_provider"`
+}
+
+// SignalCounter - счетчик сигналов для символа
+type SignalCounter struct {
+	Symbol          string        `json:"symbol"`
+	GrowthCount     int           `json:"growth_count"`
+	FallCount       int           `json:"fall_count"`
+	LastGrowthTime  time.Time     `json:"last_growth_time"`
+	LastFallTime    time.Time     `json:"last_fall_time"`
+	Period          CounterPeriod `json:"period"`
+	PeriodStartTime time.Time     `json:"period_start_time"`
+	Mu              sync.RWMutex  `json:"-"` // Изменили на экспортируемое Mu
+}
+
+// CounterNotification - уведомление счетчика
+type CounterNotification struct {
+	Symbol          string            `json:"symbol"`
+	SignalType      CounterSignalType `json:"signal_type"`
+	CurrentCount    int               `json:"current_count"`
+	Period          CounterPeriod     `json:"period"`
+	PeriodStartTime time.Time         `json:"period_start_time"`
+	Timestamp       time.Time         `json:"timestamp"`
+	MaxSignals      int               `json:"max_signals"`
+	Percentage      float64           `json:"percentage"` // Процент заполнения
+}
+
+// Методы для безопасного доступа
+func (c *SignalCounter) Lock() {
+	c.Mu.Lock()
+}
+
+func (c *SignalCounter) Unlock() {
+	c.Mu.Unlock()
+}
+
+func (c *SignalCounter) RLock() {
+	c.Mu.RLock()
+}
+
+func (c *SignalCounter) RUnlock() {
+	c.Mu.RUnlock()
+}

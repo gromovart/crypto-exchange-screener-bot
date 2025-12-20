@@ -17,8 +17,12 @@ func main() {
 	// Тестовые данные для других тестов
 	testData := createTestData()
 
-	// Тестируем новый FallAnalyzer  <-- ТОЛЬКО ОДИН РАЗ!
+	// Тестируем новый FallAnalyzer
 	testNewFallAnalyzer()
+
+	// Тестируем CounterAnalyzer
+	logger.Debug("\n🧪 ТЕСТ COUNTER ANALYZER:")
+	testCounterAnalyzer(testData)
 
 	// Тестируем GrowthAnalyzer
 	logger.Debug("\n🧪 ТЕСТ GROWTH ANALYZER:")
@@ -32,11 +36,170 @@ func main() {
 	logger.Debug("\n🧪 ТЕСТ CONTINUOUS ANALYZER:")
 	testContinuousAnalyzer(testData)
 
-	// Тестируем VolumeAnalyzer (если готов)
+	// Тестируем VolumeAnalyzer
 	logger.Debug("\n🧪 ТЕСТ VOLUME ANALYZER:")
 	testVolumeAnalyzer(testData)
 
 	logger.Debug("\n✅ Тестирование завершено")
+}
+
+func testCounterAnalyzer(testData []types.PriceData) {
+	// Создаем тестовые данные для счетчика
+	counterTestData := createCounterTestData()
+
+	config := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.7,
+		MinConfidence: 10.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"base_period_minutes":    1,
+			"analysis_period":        "15m",
+			"growth_threshold":       0.1,
+			"fall_threshold":         0.1,
+			"track_growth":           true,
+			"track_fall":             true,
+			"notification_threshold": 1,
+			"max_signals_5m":         5,
+			"max_signals_15m":        8,
+			"max_signals_30m":        10,
+			"max_signals_1h":         12,
+			"max_signals_4h":         15,
+			"max_signals_1d":         20,
+			"chart_provider":         "coinglass",
+		},
+	}
+
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+
+	logger.Debug("   Конфигурация CounterAnalyzer:")
+	fmt.Printf("      • Базовый период: %d мин\n", config.CustomSettings["base_period_minutes"])
+	fmt.Printf("      • Период анализа: %s\n", config.CustomSettings["analysis_period"])
+	fmt.Printf("      • Порог роста: %.2f%%\n", config.CustomSettings["growth_threshold"])
+	fmt.Printf("      • Порог падения: %.2f%%\n", config.CustomSettings["fall_threshold"])
+	fmt.Printf("      • Макс сигналов (15м): %d\n", config.CustomSettings["max_signals_15m"])
+
+	// Тест 1: Рост
+	logger.Debug("\n   📈 Тест 1: Сигналы роста")
+	for i, data := range counterTestData.growthTest {
+		signals, err := analyzer.Analyze(data, config)
+		if err != nil {
+			fmt.Printf("      ❌ Ошибка анализа роста %d: %v\n", i+1, err)
+			continue
+		}
+
+		if len(signals) > 0 {
+			fmt.Printf("      ✅ Тест роста %d: %d сигналов\n", i+1, len(signals))
+			for _, signal := range signals {
+				fmt.Printf("         • %s: %.4f%% (уверенность: %.1f%%)\n",
+					signal.Direction, signal.ChangePercent, signal.Confidence)
+			}
+		} else {
+			fmt.Printf("      ⚠️  Тест роста %d: нет сигналов\n", i+1)
+		}
+	}
+
+	// Тест 2: Падение
+	logger.Debug("\n   📉 Тест 2: Сигналы падения")
+	for i, data := range counterTestData.fallTest {
+		signals, err := analyzer.Analyze(data, config)
+		if err != nil {
+			fmt.Printf("      ❌ Ошибка анализа падения %d: %v\n", i+1, err)
+			continue
+		}
+
+		if len(signals) > 0 {
+			fmt.Printf("      ✅ Тест падения %d: %d сигналов\n", i+1, len(signals))
+			for _, signal := range signals {
+				fmt.Printf("         • %s: %.4f%% (уверенность: %.1f%%)\n",
+					signal.Direction, signal.ChangePercent, signal.Confidence)
+			}
+		} else {
+			fmt.Printf("      ⚠️  Тест падения %d: нет сигналов\n", i+1)
+		}
+	}
+
+	// Тест 3: Смешанные данные
+	logger.Debug("\n   🔄 Тест 3: Смешанные сигналы")
+	signals, err := analyzer.Analyze(counterTestData.mixedTest, config)
+	if err != nil {
+		fmt.Printf("      ❌ Ошибка анализа смешанных данных: %v\n", err)
+	} else {
+		fmt.Printf("      📊 Смешанный тест: %d сигналов\n", len(signals))
+		for _, signal := range signals {
+			fmt.Printf("         • %s: %.4f%%\n", signal.Direction, signal.ChangePercent)
+		}
+	}
+
+	// Тест 4: Получение статистики
+	logger.Debug("\n   📊 Тест 4: Статистика счетчика")
+
+	// Анализируем несколько раз для накопления счетчика
+	for i := 0; i < 3; i++ {
+		analyzer.Analyze(counterTestData.growthTest[0], config)
+	}
+
+	// Получаем статистику
+	counters := analyzer.GetAllCounters()
+	fmt.Printf("      • Всего счетчиков: %d\n", len(counters))
+
+	for _, counter := range counters {
+		fmt.Printf("      • %s: рост=%d, падение=%d\n",
+			counter.Symbol, counter.GrowthCount, counter.FallCount)
+	}
+
+	// Тест 5: Сброс периода
+	logger.Debug("\n   🔄 Тест 5: Сброс периода")
+	analyzer.SetAnalysisPeriod(types.Period5Min)
+	fmt.Printf("      ✅ Период изменен на 5 минут\n")
+
+	// Проверяем сброс счетчиков
+	countersAfterReset := analyzer.GetAllCounters()
+	fmt.Printf("      • Счетчиков после сброса: %d\n", len(countersAfterReset))
+}
+
+// Структура для тестовых данных счетчика
+type counterTestDataStruct struct {
+	growthTest [][]types.PriceData
+	fallTest   [][]types.PriceData
+	mixedTest  []types.PriceData
+}
+
+func createCounterTestData() counterTestDataStruct {
+	now := time.Now()
+
+	return counterTestDataStruct{
+		// Тест роста (0.5% рост за 1 минуту)
+		growthTest: [][]types.PriceData{
+			{
+				{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
+				{Symbol: "BTCUSDT", Price: 100.5, Timestamp: now.Add(-1 * time.Minute)},
+			},
+			{
+				{Symbol: "ETHUSDT", Price: 200.0, Timestamp: now.Add(-2 * time.Minute)},
+				{Symbol: "ETHUSDT", Price: 201.0, Timestamp: now.Add(-1 * time.Minute)},
+			},
+		},
+
+		// Тест падения (0.5% падение за 1 минуту)
+		fallTest: [][]types.PriceData{
+			{
+				{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
+				{Symbol: "BTCUSDT", Price: 99.5, Timestamp: now.Add(-1 * time.Minute)},
+			},
+			{
+				{Symbol: "ETHUSDT", Price: 200.0, Timestamp: now.Add(-2 * time.Minute)},
+				{Symbol: "ETHUSDT", Price: 199.0, Timestamp: now.Add(-1 * time.Minute)},
+			},
+		},
+
+		// Смешанный тест
+		mixedTest: []types.PriceData{
+			{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-3 * time.Minute)},
+			{Symbol: "BTCUSDT", Price: 100.3, Timestamp: now.Add(-2 * time.Minute)},
+			{Symbol: "BTCUSDT", Price: 99.8, Timestamp: now.Add(-1 * time.Minute)},
+		},
+	}
 }
 
 func createTestData() []types.PriceData {

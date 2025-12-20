@@ -28,12 +28,12 @@ type AnalyzerConfig struct {
 
 // AnalyzerStats - статистика анализатора
 type AnalyzerStats struct {
-	TotalCalls   int64         `json:"total_calls"`
+	TotalCalls   int           `json:"total_calls"`
+	SuccessCount int           `json:"success_count"`
+	ErrorCount   int           `json:"error_count"`
 	TotalTime    time.Duration `json:"total_time"`
-	SuccessCount int64         `json:"success_count"`
-	ErrorCount   int64         `json:"error_count"`
-	LastCallTime time.Time     `json:"last_call_time"`
 	AverageTime  time.Duration `json:"average_time"`
+	LastCallTime time.Time     `json:"last_call_time"`
 }
 
 // Signal - структура сигнала анализа

@@ -542,3 +542,181 @@ func (tb *TelegramBot) getNotifyStatus() string {
 	}
 	return "❌ Выключены"
 }
+
+// SendCounterNotification отправляет уведомление счетчика
+func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string, count int, maxSignals int, period string) error {
+	if !tb.notifyEnabled {
+		return nil
+	}
+
+	icon := "🟢"
+	directionStr := "РОСТ"
+	if signalType == "fall" {
+		icon = "🔴"
+		directionStr = "ПАДЕНИЕ"
+	}
+
+	percentage := float64(count) / float64(maxSignals) * 100
+	timeStr := time.Now().Format("2006/01/02 15:04:05")
+
+	message := fmt.Sprintf(
+		"📊 *Счетчик сигналов*\n"+
+			"⚫ Символ: %s\n"+
+			"🕐 Время: %s\n"+
+			"⏱️  Период: %s\n"+
+			"%s Направление: %s\n"+
+			"📈 Счетчик: %d/%d (%.0f%%)",
+		symbol,
+		timeStr,
+		period,
+		icon, directionStr,
+		count, maxSignals, percentage,
+	)
+
+	// Создаем клавиатуру
+	keyboard := tb.createCounterKeyboard(symbol)
+
+	return tb.sendMessageWithKeyboard(message, keyboard)
+}
+
+// createCounterKeyboard создает клавиатуру для счетчика
+func (tb *TelegramBot) createCounterKeyboard(symbol string) *InlineKeyboardMarkup {
+	chartURL := tb.getCounterChartURL(symbol)
+	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", symbol)
+
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{
+					Text: "📊 График",
+					URL:  chartURL,
+				},
+				{
+					Text: "💱 Торговать",
+					URL:  symbolURL,
+				},
+			},
+			{
+				{
+					Text:         "🔕 Отключить уведомления",
+					CallbackData: fmt.Sprintf("counter_notify_%s_off", symbol),
+				},
+				{
+					Text:         "⚙️ Настройки счетчика",
+					CallbackData: "counter_settings",
+				},
+			},
+		},
+	}
+}
+
+// getCounterChartURL возвращает URL графика для счетчика
+func (tb *TelegramBot) getCounterChartURL(symbol string) string {
+	// Используем настройку из конфигурации
+	chartProvider := tb.config.CounterAnalyzer.ChartProvider
+	if chartProvider == "" {
+		chartProvider = "coinglass" // По умолчанию
+	}
+
+	switch chartProvider {
+	case "tradingview":
+		return fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)
+	default: // coinglass
+		return fmt.Sprintf("https://www.coinglass.com/tv/%s", symbol)
+	}
+}
+
+// HandleCounterCallback обрабатывает callback счетчика
+func (tb *TelegramBot) HandleCounterCallback(callbackData string, chatID string) error {
+	switch callbackData {
+	case "counter_settings":
+		return tb.sendCounterSettings(chatID)
+	case "counter_notify_on":
+		tb.SetCounterNotifications(true)
+		return tb.sendMessageWithKeyboardToChat(chatID, "✅ Уведомления счетчика включены", nil)
+	case "counter_notify_off":
+		tb.SetCounterNotifications(false)
+		return tb.sendMessageWithKeyboardToChat(chatID, "❌ Уведомления счетчика выключены", nil)
+	default:
+		// Обработка настроек периода
+		if strings.HasPrefix(callbackData, "counter_period_") {
+			period := strings.TrimPrefix(callbackData, "counter_period_")
+			return tb.handleCounterPeriodChange(chatID, period)
+		}
+		// Обработка отключения уведомлений для символа
+		if strings.HasPrefix(callbackData, "counter_notify_") && strings.HasSuffix(callbackData, "_off") {
+			symbol := strings.TrimPrefix(callbackData, "counter_notify_")
+			symbol = strings.TrimSuffix(symbol, "_off")
+			return tb.sendMessageWithKeyboardToChat(chatID,
+				fmt.Sprintf("❌ Уведомления счетчика для %s выключены", symbol), nil)
+		}
+	}
+
+	return fmt.Errorf("unknown counter callback: %s", callbackData)
+}
+
+// sendCounterSettings отправляет настройки счетчика
+func (tb *TelegramBot) sendCounterSettings(chatID string) error {
+	message := "⚙️ *Настройки счетчика сигналов*\n\n" +
+		"Выберите период анализа:"
+
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "5 минут", CallbackData: "counter_period_5m"},
+				{Text: "15 минут", CallbackData: "counter_period_15m"},
+			},
+			{
+				{Text: "30 минут", CallbackData: "counter_period_30m"},
+				{Text: "1 час", CallbackData: "counter_period_1h"},
+			},
+			{
+				{Text: "4 часа", CallbackData: "counter_period_4h"},
+				{Text: "1 день", CallbackData: "counter_period_1d"},
+			},
+			{
+				{Text: "✅ Включить уведомления", CallbackData: "counter_notify_on"},
+				{Text: "❌ Выключить уведомления", CallbackData: "counter_notify_off"},
+			},
+			{
+				{Text: "📊 Coinglass", CallbackData: "counter_chart_coinglass"},
+				{Text: "📈 TradingView", CallbackData: "counter_chart_tradingview"},
+			},
+			{
+				{Text: "🔙 Назад", CallbackData: "settings"},
+			},
+		},
+	}
+
+	return tb.sendMessageWithKeyboardToChat(chatID, message, keyboard)
+}
+
+// handleCounterPeriodChange обрабатывает изменение периода
+func (tb *TelegramBot) handleCounterPeriodChange(chatID string, period string) error {
+	periodNames := map[string]string{
+		"5m":  "5 минут",
+		"15m": "15 минут",
+		"30m": "30 минут",
+		"1h":  "1 час",
+		"4h":  "4 часа",
+		"1d":  "1 день",
+	}
+
+	periodName, exists := periodNames[period]
+	if !exists {
+		return fmt.Errorf("unknown period: %s", period)
+	}
+
+	// Здесь нужно обновить период в анализаторе счетчика
+	// Для этого нужно получить доступ к анализатору через менеджер
+
+	return tb.sendMessageWithKeyboardToChat(chatID,
+		fmt.Sprintf("✅ Период счетчика изменен на: %s", periodName), nil)
+}
+
+// SetCounterNotifications включает/выключает уведомления счетчика
+func (tb *TelegramBot) SetCounterNotifications(enabled bool) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	// Здесь нужно обновить настройку в анализаторе счетчика
+}

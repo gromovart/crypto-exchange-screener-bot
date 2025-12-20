@@ -121,6 +121,24 @@ type Config struct {
 	// Конфигурация Rate Limiting
 	RateLimitDelay        time.Duration `json:"rate_limit_delay,omitempty"`
 	MaxConcurrentRequests int           `json:"max_concurrent_requests,omitempty"`
+
+	// CounterAnalyzer - анализатор счетчика
+	CounterAnalyzer struct {
+		Enabled               bool   `json:"enabled"`
+		BasePeriodMinutes     int    `json:"base_period_minutes"`
+		AnalysisPeriod        string `json:"analysis_period"`
+		MaxSignals5Min        int    `json:"max_signals_5min"`
+		MaxSignals15Min       int    `json:"max_signals_15min"`
+		MaxSignals30Min       int    `json:"max_signals_30min"`
+		MaxSignals1Hour       int    `json:"max_signals_1hour"`
+		MaxSignals4Hours      int    `json:"max_signals_4hours"`
+		MaxSignals1Day        int    `json:"max_signals_1day"`
+		TrackGrowth           bool   `json:"track_growth"`
+		TrackFall             bool   `json:"track_fall"`
+		NotificationThreshold int    `json:"notification_threshold"`
+		ChartProvider         string `json:"chart_provider"`
+		NotificationEnabled   bool   `json:"notification_enabled"`
+	} `json:"counter_analyzer"`
 }
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -232,6 +250,24 @@ func LoadConfig(path string) (*Config, error) {
 	// Rate limiting настройки
 	cfg.RateLimitDelay = getEnvDuration("RATE_LIMIT_DELAY", 100*time.Millisecond)
 	cfg.MaxConcurrentRequests = getEnvInt("MAX_CONCURRENT_REQUESTS", 10)
+
+	// В функции LoadConfig добавить:
+
+	// Counter Analyzer
+	cfg.CounterAnalyzer.Enabled = getEnvBool("COUNTER_ANALYZER_ENABLED", false)
+	cfg.CounterAnalyzer.BasePeriodMinutes = getEnvInt("COUNTER_BASE_PERIOD_MINUTES", 1)
+	cfg.CounterAnalyzer.AnalysisPeriod = getEnv("COUNTER_ANALYSIS_PERIOD", "15m")
+	cfg.CounterAnalyzer.MaxSignals5Min = getEnvInt("COUNTER_MAX_SIGNALS_5MIN", 5)
+	cfg.CounterAnalyzer.MaxSignals15Min = getEnvInt("COUNTER_MAX_SIGNALS_15MIN", 8)
+	cfg.CounterAnalyzer.MaxSignals30Min = getEnvInt("COUNTER_MAX_SIGNALS_30MIN", 10)
+	cfg.CounterAnalyzer.MaxSignals1Hour = getEnvInt("COUNTER_MAX_SIGNALS_1HOUR", 12)
+	cfg.CounterAnalyzer.MaxSignals4Hours = getEnvInt("COUNTER_MAX_SIGNALS_4HOURS", 15)
+	cfg.CounterAnalyzer.MaxSignals1Day = getEnvInt("COUNTER_MAX_SIGNALS_1DAY", 20)
+	cfg.CounterAnalyzer.TrackGrowth = getEnvBool("COUNTER_TRACK_GROWTH", true)
+	cfg.CounterAnalyzer.TrackFall = getEnvBool("COUNTER_TRACK_FALL", true)
+	cfg.CounterAnalyzer.NotificationThreshold = getEnvInt("COUNTER_NOTIFICATION_THRESHOLD", 1)
+	cfg.CounterAnalyzer.ChartProvider = getEnv("COUNTER_CHART_PROVIDER", "coinglass")
+	cfg.CounterAnalyzer.NotificationEnabled = getEnvBool("COUNTER_NOTIFICATION_ENABLED", true)
 
 	return cfg, nil
 }

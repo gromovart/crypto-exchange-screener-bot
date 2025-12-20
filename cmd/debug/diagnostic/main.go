@@ -3,9 +3,11 @@ package main
 import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/manager"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"sort"
@@ -31,27 +33,31 @@ func main() {
 	}
 	logger.Debug("✅ Менеджер создан")
 
-	// 3. Запускаем только хранилище и фетчер
+	// 3. Тестируем CounterAnalyzer отдельно
+	logger.Debug("\n🔧 ТЕСТ COUNTER ANALYZER")
+	testCounterAnalyzerSeparately()
+
+	// 4. Запускаем только хранилище и фетчер
 	logger.Debug("\n3️⃣  ЗАПУСК БАЗОВЫХ СЕРВИСОВ")
 	startBasicServices(dataManager)
 
-	// 4. Ждем данные
+	// 5. Ждем данные
 	logger.Debug("\n4️⃣  ОЖИДАНИЕ ДАННЫХ")
 	time.Sleep(10 * time.Second)
 
-	// 5. Проверяем данные
+	// 6. Проверяем данные
 	logger.Debug("\n5️⃣  ПРОВЕРКА ДАННЫХ")
 	checkData(dataManager)
 
-	// 6. Проверяем анализаторы вручную
+	// 7. Проверяем анализаторы вручную
 	logger.Debug("\n6️⃣  РУЧНАЯ ПРОВЕРКА АНАЛИЗАТОРОВ")
 	manualAnalyzerCheck(dataManager)
 
-	// 7. Запускаем полную систему
+	// 8. Запускаем полную систему
 	logger.Debug("\n7️⃣  ЗАПУСК ПОЛНОЙ СИСТЕМЫ")
 	startAllServices(dataManager)
 
-	// 8. Запускаем тестовый анализ
+	// 9. Запускаем тестовый анализ
 	logger.Debug("\n8️⃣  ТЕСТОВЫЙ АНАЛИЗ")
 	runTestAnalysis(dataManager)
 
@@ -67,6 +73,87 @@ func main() {
 	logger.Debug("\n🛑 Остановка...")
 	dataManager.Stop()
 	logger.Debug("✅ Готово")
+}
+
+func testCounterAnalyzerSeparately() {
+	logger.Debug("   🧪 Тестируем CounterAnalyzer отдельно...")
+
+	// Создаем тестовые данные
+	now := time.Now()
+	testData := []types.PriceData{
+		{Symbol: "TESTUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
+		{Symbol: "TESTUSDT", Price: 100.2, Timestamp: now.Add(-1 * time.Minute)}, // +0.2% рост
+	}
+
+	fmt.Printf("      📊 Тестовые данные:\n")
+	fmt.Printf("         • Начальная цена: %.2f\n", testData[0].Price)
+	fmt.Printf("         • Конечная цена: %.2f\n", testData[len(testData)-1].Price)
+	fmt.Printf("         • Изменение: +%.4f%%\n",
+		((testData[len(testData)-1].Price-testData[0].Price)/testData[0].Price)*100)
+
+	logger.Debug("      ✅ Тест CounterAnalyzer завершен")
+}
+
+// Добавляем проверку CounterAnalyzer в manualAnalyzerCheck
+func manualAnalyzerCheck(dataManager *manager.DataManager) {
+	storage := dataManager.GetStorage()
+	if storage == nil {
+		logger.Debug("   ❌ Нет доступа к хранилищу")
+		return
+	}
+
+	symbols := storage.GetSymbols()
+	if len(symbols) == 0 {
+		logger.Debug("   ⚠️  Нет символов для проверки")
+		return
+	}
+
+	// Выбираем случайные символы
+	testSymbols := []string{}
+	for i := 0; i < 3 && i < len(symbols); i++ {
+		testSymbols = append(testSymbols, symbols[i])
+	}
+
+	fmt.Printf("   🔍 Ручная проверка %d символов:\n", len(testSymbols))
+
+	for _, symbol := range testSymbols {
+		fmt.Printf("      • %s:\n", symbol)
+
+		// Получаем историю
+		history, err := storage.GetPriceHistory(symbol, 5)
+		if err != nil {
+			fmt.Printf("         ❌ Ошибка получения истории: %v\n", err)
+			continue
+		}
+
+		if len(history) < 2 {
+			fmt.Printf("         ⚠️  Недостаточно данных: %d точек\n", len(history))
+			continue
+		}
+
+		// Рассчитываем вручную
+		first := history[0].Price
+		last := history[len(history)-1].Price
+		change := ((last - first) / first) * 100
+
+		fmt.Printf("         📈 Изменение: %.6f%% (%.6f → %.6f)\n", change, first, last)
+
+		// Проверяем против порогов CounterAnalyzer
+		if change > 0.1 { // Порог роста CounterAnalyzer
+			fmt.Printf("         ✅ ДОЛЖЕН БЫТЬ ЗАСЧИТАН В COUNTER! (рост > 0.1%%)\n")
+		} else if -change > 0.1 { // Порог падения CounterAnalyzer
+			fmt.Printf("         ✅ ДОЛЖЕН БЫТЬ ЗАСЧИТАН В COUNTER! (падение > 0.1%%)\n")
+		}
+
+		// Проверяем быстрые изменения для CounterAnalyzer
+		for i := 1; i < len(history); i++ {
+			pointChange := ((history[i].Price - history[i-1].Price) / history[i-1].Price) * 100
+			if math.Abs(pointChange) > 0.1 {
+				fmt.Printf("         ⚡ Быстрое изменение %d→%d: %.4f%%\n",
+					i-1, i, pointChange)
+			}
+		}
+	}
 }
 
 func createDebugConfig() *config.Config {
@@ -183,78 +270,6 @@ func checkData(dataManager *manager.DataManager) {
 		// Если изменение очень маленькое
 		if change == 0 {
 			fmt.Printf("           ⚠️  Цена не меняется!\n")
-		}
-	}
-}
-
-func manualAnalyzerCheck(dataManager *manager.DataManager) {
-	storage := dataManager.GetStorage()
-	if storage == nil {
-		logger.Debug("   ❌ Нет доступа к хранилищу")
-		return
-	}
-
-	symbols := storage.GetSymbols()
-	if len(symbols) == 0 {
-		logger.Debug("   ⚠️  Нет символов для проверки")
-		return
-	}
-
-	// Выбираем случайные символы
-	testSymbols := []string{}
-	for i := 0; i < 3 && i < len(symbols); i++ {
-		testSymbols = append(testSymbols, symbols[i])
-	}
-
-	fmt.Printf("   🔍 Ручная проверка %d символов:\n", len(testSymbols))
-
-	for _, symbol := range testSymbols {
-		fmt.Printf("      • %s:\n", symbol)
-
-		// Получаем историю
-		history, err := storage.GetPriceHistory(symbol, 5)
-		if err != nil {
-			fmt.Printf("         ❌ Ошибка получения истории: %v\n", err)
-			continue
-		}
-
-		if len(history) < 2 {
-			fmt.Printf("         ⚠️  Недостаточно данных: %d точек\n", len(history))
-			continue
-		}
-
-		// Рассчитываем вручную
-		first := history[0].Price
-		last := history[len(history)-1].Price
-		change := ((last - first) / first) * 100
-
-		fmt.Printf("         📈 Изменение: %.6f%% (%.6f → %.6f)\n", change, first, last)
-
-		// Проверяем против порогов
-		cfg := createDebugConfig()
-		if cfg == nil {
-			continue
-		}
-
-		growthThreshold := cfg.Analyzers.GrowthAnalyzer.MinGrowth
-		fallThreshold := cfg.Analyzers.FallAnalyzer.MinFall
-
-		if change > growthThreshold {
-			fmt.Printf("         ✅ ДОЛЖЕН БЫТЬ СИГНАЛ РОСТА! (%.6f%% > %.6f%%)\n",
-				change, growthThreshold)
-		} else if -change > fallThreshold {
-			fmt.Printf("         ✅ ДОЛЖЕН БЫТЬ СИГНАЛ ПАДЕНИЯ! (%.6f%% > %.6f%%)\n",
-				-change, fallThreshold)
-		} else {
-			fmt.Printf("         ⚠️  Изменение ниже порогов (рост: %.6f%%, падение: %.6f%%)\n",
-				growthThreshold, fallThreshold)
-		}
-
-		// Показываем все точки
-		fmt.Printf("         📊 Все точки данных:\n")
-		for j, point := range history {
-			fmt.Printf("           %d. %.6f (%v)\n", j+1, point.Price,
-				point.Timestamp.Format("15:04:05"))
 		}
 	}
 }

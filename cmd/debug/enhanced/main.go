@@ -37,23 +37,31 @@ func main() {
 	cfg.UpdateInterval = 20
 	cfg.MaxSymbolsToMonitor = 20
 	cfg.MaxConcurrentRequests = 3
-	cfg.MinVolumeFilter = 0 // Отключаем фильтр объема
+	cfg.MinVolumeFilter = 0
+
+	// Настройки CounterAnalyzer
+	cfg.CounterAnalyzer.Enabled = true
+	cfg.CounterAnalyzer.BasePeriodMinutes = 1
+	cfg.CounterAnalyzer.AnalysisPeriod = "5m"
+	cfg.CounterAnalyzer.TrackGrowth = true
+	cfg.CounterAnalyzer.TrackFall = true
+	cfg.CounterAnalyzer.NotificationThreshold = 1
 
 	// Анализ - СУПЕР НИЗКИЕ ПОРОГИ
 	cfg.AnalysisEngine.UpdateInterval = 20
 	cfg.AnalysisEngine.MaxSymbolsPerRun = 20
 	cfg.AnalysisEngine.MaxWorkers = 3
-	cfg.AnalysisEngine.AnalysisPeriods = []int{1, 5, 15} // Добавляем 1 минуту
+	cfg.AnalysisEngine.AnalysisPeriods = []int{1, 5, 15}
 	cfg.AnalysisEngine.MinDataPoints = 2
 
 	// Анализаторы - ОЧЕНЬ НИЗКИЕ ПОРОГИ
 	cfg.Analyzers.GrowthAnalyzer.Enabled = true
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 10.0 // Всего 10%!
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.1      // Всего 0.1% роста!
+	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 10.0
+	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.1
 
 	cfg.Analyzers.FallAnalyzer.Enabled = true
 	cfg.Analyzers.FallAnalyzer.MinConfidence = 10.0
-	cfg.Analyzers.FallAnalyzer.MinFall = 0.1 // Всего 0.1% падения!
+	cfg.Analyzers.FallAnalyzer.MinFall = 0.1
 
 	cfg.Analyzers.ContinuousAnalyzer.Enabled = true
 
@@ -69,9 +77,14 @@ func main() {
 	fmt.Printf("   📊 Конфигурация анализа:\n")
 	fmt.Printf("      • Символов: %d\n", cfg.MaxSymbolsToMonitor)
 	fmt.Printf("      • Периоды: %v мин\n", cfg.AnalysisEngine.AnalysisPeriods)
+	fmt.Printf("      • COUNTER ANALYZER: %v\n", cfg.CounterAnalyzer.Enabled)
+	if cfg.CounterAnalyzer.Enabled {
+		fmt.Printf("        - Период: %s\n", cfg.CounterAnalyzer.AnalysisPeriod)
+		fmt.Printf("        - Базовый период: %d мин\n", cfg.CounterAnalyzer.BasePeriodMinutes)
+	}
 	fmt.Printf("      • ПОРОГИ СИГНАЛОВ:\n")
-	fmt.Printf("        - Рост: %.2f%% (очень низкий!)\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
-	fmt.Printf("        - Падение: %.2f%% (очень низкий!)\n", cfg.Analyzers.FallAnalyzer.MinFall)
+	fmt.Printf("        - Рост: %.2f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
+	fmt.Printf("        - Падение: %.2f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
 	fmt.Printf("        - Уверенность: %.0f%%\n", cfg.Analyzers.GrowthAnalyzer.MinConfidence)
 	fmt.Printf("      • Фильтр объема: %v\n", cfg.MinVolumeFilter > 0)
 
@@ -103,12 +116,12 @@ func main() {
 	logger.Debug("\n" + strings.Repeat("=", 70))
 	logger.Debug("📈 РАСШИРЕННАЯ ОТЛАДКА")
 	logger.Debug(strings.Repeat("=", 70))
-	logger.Debug("⚡ Супер-низкие пороги для тестирования (0.1%)")
+	logger.Debug("⚡ CounterAnalyzer: ВКЛЮЧЕН")
 	logger.Debug("🔧 Отключены все фильтры")
 	logger.Debug("📊 План работы:")
 	logger.Debug("   1. Проверка хранилища через 5 секунд")
 	logger.Debug("   2. Анализ через 10 секунд")
-	logger.Debug("   3. Детальная проверка через 15 секунд")
+	logger.Debug("   3. Проверка CounterAnalyzer через 15 секунд")
 	logger.Debug("\n🛑 Для остановки нажмите Ctrl+C")
 	logger.Debug(strings.Repeat("=", 70))
 
@@ -130,12 +143,12 @@ func main() {
 		logger.Debug(strings.Repeat("🧪", 25))
 		runAnalysisTest(dataManager)
 
-		// Тест 3: Детальный анализ
+		// Тест 3: Проверка CounterAnalyzer
 		time.Sleep(5 * time.Second)
-		logger.Debug("\n" + strings.Repeat("🔍", 25))
-		logger.Debug("ТЕСТ 3: ДЕТАЛЬНЫЙ АНАЛИЗ")
-		logger.Debug(strings.Repeat("🔍", 25))
-		runDetailedAnalysis(dataManager)
+		logger.Debug("\n" + strings.Repeat("🔢", 25))
+		logger.Debug("ТЕСТ 3: COUNTER ANALYZER")
+		logger.Debug(strings.Repeat("🔢", 25))
+		runCounterAnalyzerTest(dataManager)
 
 		testChan <- true
 	}()
@@ -161,6 +174,71 @@ func main() {
 	}
 
 	logger.Debug("✅ Программа завершена")
+}
+
+// Новая функция для тестирования CounterAnalyzer
+func runCounterAnalyzerTest(dataManager *manager.DataManager) {
+	if dataManager == nil {
+		return
+	}
+
+	logger.Debug("   🔢 Тестирование CounterAnalyzer...")
+
+	// Получаем анализаторы
+	engine := dataManager.GetAnalysisEngine()
+	if engine == nil {
+		fmt.Printf("      ❌ Движок анализа не инициализирован\n")
+		return
+	}
+
+	analyzers := engine.GetAnalyzers()
+	fmt.Printf("      📊 Доступные анализаторы: %v\n", analyzers)
+
+	// Проверяем, есть ли CounterAnalyzer
+	hasCounterAnalyzer := false
+	for _, analyzer := range analyzers {
+		if analyzer == "counter_analyzer" {
+			hasCounterAnalyzer = true
+			break
+		}
+	}
+
+	if hasCounterAnalyzer {
+		fmt.Printf("      ✅ CounterAnalyzer активен\n")
+
+		// Выполняем анализ несколько раз для накопления счетчиков
+		for i := 1; i <= 5; i++ {
+			logger.Debug(fmt.Sprintf("      🔄 Итерация анализа %d", i))
+			results, err := dataManager.RunAnalysis()
+			if err != nil {
+				fmt.Printf("         ❌ Ошибка анализа: %v\n", err)
+				continue
+			}
+
+			// Считаем сигналы для CounterAnalyzer
+			counterSignals := 0
+			for _, result := range results {
+				for _, signal := range result.Signals {
+					if strings.Contains(signal.Type, "counter") {
+						counterSignals++
+						fmt.Printf("         • %s: %s %.4f%%\n",
+							signal.Symbol, signal.Direction, signal.ChangePercent)
+					}
+				}
+			}
+
+			if counterSignals > 0 {
+				fmt.Printf("         📈 Counter сигналов: %d\n", counterSignals)
+			}
+
+			time.Sleep(2 * time.Second)
+		}
+	} else {
+		fmt.Printf("      ⚠️  CounterAnalyzer не найден\n")
+		fmt.Printf("      🔧 Проверьте конфигурацию:\n")
+		fmt.Printf("         • COUNTER_ANALYZER_ENABLED=true\n")
+		fmt.Printf("         • Зарегистрирован ли анализатор\n")
+	}
 }
 
 // runStorageTest проверяет хранилище

@@ -1,7 +1,6 @@
-# Makefile
-
 .PHONY: help debug debug-enhanced debug-diagnostic analyzer-test debug-super-sensitive debug-all \
-        build release run run-prod setup install test clean lint
+        build release run run-prod setup install test clean lint \
+        debug-counter test-counter test-counter-quick counter-test-all
 
 # ============================================
 # ОТЛАДКА И ТЕСТИРОВАНИЕ
@@ -40,19 +39,87 @@ debug-super-sensitive:
 	@echo "🚀 Супер-чувствительная отладка..."
 	go run ./cmd/debug/supersensitive/main.go
 
+# ============================================
+# COUNTER ANALYZER ТЕСТЫ
+# ============================================
+
+## debug-counter: Тестирование CounterAnalyzer (базовый тест)
+debug-counter:
+	@echo "🔢 Тестирование CounterAnalyzer..."
+	@echo ""
+	@echo "📊 Проверяем:"
+	@echo "  • Базовый подсчет сигналов"
+	@echo "  • Уведомления"
+	@echo "  • Периоды анализа"
+	@echo "  • Статистику"
+	@echo ""
+	go run ./cmd/debug/counter_test/main.go
+
+## test-counter: Полный тест CounterAnalyzer
+test-counter:
+	@echo "🧪 ПОЛНЫЙ ТЕСТ COUNTER ANALYZER"
+	@echo "================================"
+	@echo ""
+	@echo "1. Базовый функционал..."
+	go run ./cmd/debug/analyzer/main.go 2>&1 | grep -A 30 "ТЕСТ COUNTER ANALYZER"
+	@echo ""
+	@echo "2. Детальный тест..."
+	go run ./cmd/debug/counter_test/main.go
+	@echo ""
+	@echo "3. Интеграция с системой..."
+	go run ./cmd/debug/enhanced/main.go 2>&1 | grep -A 40 "ТЕСТ 3: COUNTER ANALYZER"
+
+## test-counter-quick: Быстрый тест CounterAnalyzer
+test-counter-quick:
+	@echo "⚡ Быстрый тест CounterAnalyzer..."
+	go run ./cmd/debug/counter_test/main.go 2>&1 | grep -B5 -A20 "БАЗОВЫЙ ТЕСТ" || true
+
+## counter-test-all: Все тесты CounterAnalyzer
+counter-test-all:
+	@echo "🚀 ЗАПУСК ВСЕХ ТЕСТОВ COUNTER ANALYZER"
+	@echo "======================================"
+	@echo ""
+	@echo "Этап 1/4: Базовый тест"
+	@echo "----------------------"
+	go run ./cmd/debug/analyzer/main.go 2>&1 | grep -A 35 "ТЕСТ COUNTER ANALYZER" || true
+	@echo ""
+
+	@echo "Этап 2/4: Полный тест"
+	@echo "---------------------"
+	go run ./cmd/debug/counter_test/main.go 2>&1 | tail -50 || true
+	@echo ""
+
+	@echo "Этап 3/4: Интеграционный тест"
+	@echo "------------------------------"
+	go run ./cmd/debug/enhanced/main.go 2>&1 | grep -B5 -A40 "COUNTER ANALYZER" || true
+	@echo ""
+
+	@echo "Этап 4/4: Диагностический тест"
+	@echo "-------------------------------"
+	go run ./cmd/debug/diagnostic/main.go 2>&1 | grep -B5 -A20 "ТЕСТ COUNTER ANALYZER" || true
+	@echo ""
+	@echo "✅ Все тесты CounterAnalyzer завершены"
+
+# ============================================
+# ВСЕ ТЕСТЫ
+# ============================================
+
 debug-all:
 	@echo "🚀 Полный набор тестов..."
 	@echo ""
 	@echo "1. Тест анализаторов..."
 	@$(MAKE) analyzer-test
 	@echo ""
-	@echo "2. Диагностика системы..."
+	@echo "2. Тест CounterAnalyzer..."
+	@$(MAKE) test-counter-quick
+	@echo ""
+	@echo "3. Диагностика системы..."
 	@$(MAKE) debug-diagnostic
 	@echo ""
-	@echo "3. Расширенная отладка..."
+	@echo "4. Расширенная отладка..."
 	@$(MAKE) debug-enhanced
 	@echo ""
-	@echo "4. Супер-чувствительный тест..."
+	@echo "5. Супер-чувствительный тест..."
 	@$(MAKE) debug-super-sensitive
 
 # ============================================
@@ -205,14 +272,24 @@ debug-super:
 	@echo "🚀 Супер-чувствительный тест..."
 	go run ./cmd/debug/supersensitive/main.go
 
+debug-counter-quick:
+	@echo "🔢 Быстрый тест CounterAnalyzer..."
+	go run ./cmd/debug/counter_test/main.go 2>&1 | grep -B2 -A15 "БАЗОВЫЙ ТЕСТ\|ПОЛНЫЙ ТЕСТ\|СТАТИСТИКИ" || true
+
 list-debug:
 	@echo "📁 Доступные отладочные программы:"
-	@echo "  make analyzer-test     - Тест анализаторов"
-	@echo "  make debug             - Базовая отладка"
-	@echo "  make debug-diagnostic  - Глубокая диагностика"
-	@echo "  make debug-enhanced    - Расширенная отладка"
+	@echo "  make analyzer-test       - Тест анализаторов"
+	@echo "  make debug               - Базовая отладка"
+	@echo "  make debug-diagnostic    - Глубокая диагностика"
+	@echo "  make debug-enhanced      - Расширенная отладка"
 	@echo "  make debug-super-sensitive - Супер-чувствительный"
-	@echo "  make debug-all         - Все тесты сразу"
+	@echo "  make debug-all           - Все тесты сразу"
+	@echo ""
+	@echo "🧮 COUNTER ANALYZER ТЕСТЫ:"
+	@echo "  make debug-counter       - Базовый тест CounterAnalyzer"
+	@echo "  make test-counter        - Полный тест CounterAnalyzer"
+	@echo "  make test-counter-quick  - Быстрый тест CounterAnalyzer"
+	@echo "  make counter-test-all    - Все тесты CounterAnalyzer"
 
 ## help: Показать помощь
 help:
@@ -231,6 +308,11 @@ help:
 	@echo "  make analyzer-test - Тест анализаторов"
 	@echo "  make test        - Запуск unit тестов"
 	@echo ""
+	@echo "🧮 COUNTER ANALYZER:"
+	@echo "  make debug-counter      - Тест CounterAnalyzer"
+	@echo "  make test-counter       - Полный тест CounterAnalyzer"
+	@echo "  make counter-test-all   - Все тесты CounterAnalyzer"
+	@echo ""
 	@echo "🔧 Утилиты:"
 	@echo "  make clean       - Очистка проекта"
 	@echo "  make lint        - Проверка кода"
@@ -240,3 +322,20 @@ help:
 	@echo "📖 Подробнее:"
 	@echo "  make help        - Показать это сообщение"
 	@echo "  make list-debug  - Список отладочных программ"
+
+# ============================================
+# СКРИПТЫ ДЛЯ ТЕСТИРОВАНИЯ
+# ============================================
+
+## run-counter-tests: Запуск всех тестов CounterAnalyzer через скрипт
+run-counter-tests:
+	@echo "🧪 Запуск тестов CounterAnalyzer..."
+	@chmod +x ./scripts/test_counter.sh
+	@./scripts/test_counter.sh
+
+## create-counter-test-dir: Создание структуры для тестов CounterAnalyzer
+create-counter-test-dir:
+	@echo "📁 Создание структуры директорий для тестов..."
+	@mkdir -p ./cmd/debug/counter_test
+	@echo "✅ Создана директория: ./cmd/debug/counter_test"
+	@echo "👉 Добавьте файл main.go для тестов CounterAnalyzer"
