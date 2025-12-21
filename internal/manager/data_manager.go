@@ -118,24 +118,25 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	// 5. Создаем CompositeNotificationService (сначала, чтобы передать в события)
 	dm.notification = notifier.NewCompositeNotificationService()
 
-	// 6. СОЗДАЕМ TELEGRAM БОТА ОДИН РАЗ
+	// 6. СОЗДАЕМ/ПОЛУЧАЕМ TELEGRAM БОТА (Singleton)
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		log.Println("🤖 Создание Telegram бота (единственный экземпляр)...")
-		dm.telegramBot = telegram.NewTelegramBot(dm.config)
+		log.Println("🤖 Получение Telegram бота (Singleton)...")
+		dm.telegramBot = telegram.GetOrCreateBot(dm.config)
+
 		if dm.telegramBot != nil {
-			logger.Info("✅ Telegram бот создан")
-			dm.telegramBot.SetTestMode(testMode) // Устанавливаем тестовый режим
-			time.Sleep(1 * time.Second)
+			logger.Info("✅ Telegram бот получен (Singleton)")
+			dm.telegramBot.SetTestMode(testMode)
 
-			// Создаем обработчик обновлений (поддержка и webhook, и polling)
-			updatesHandler := telegram.NewUpdatesHandler(dm.config, dm.telegramBot)
-
-			// Запускаем обработчик в отдельной горутине
-			go func() {
-				if err := updatesHandler.Start(); err != nil {
-					logger.Error("❌ Ошибка запуска обработчика обновлений: %v", err)
-				}
-			}()
+			// Отправляем приветственное сообщение только если не в тестовом режиме
+			if !testMode {
+				time.AfterFunc(2*time.Second, func() {
+					if err := dm.telegramBot.SendWelcomeMessage(); err != nil {
+						logger.Info("⚠️ Не удалось отправить приветственное сообщение: %v", err)
+					}
+				})
+			} else {
+				log.Println("🧪 Тестовый режим - приветственное сообщение отключено")
+			}
 		}
 	}
 
@@ -205,7 +206,7 @@ func (dm *DataManager) setupNotifiers(telegramBot *telegram.TelegramBot) {
 	// Добавляем Telegram нотификатор если бот передан
 	if dm.config.TelegramEnabled && telegramBot != nil {
 		log.Println("📱 Создание TelegramNotifier с переданным ботом...")
-		telegramNotifier := notifier.NewTelegramNotifier(dm.config, telegramBot)
+		telegramNotifier := notifier.NewEnhancedTelegramNotifier(dm.config)
 		if telegramNotifier != nil {
 			dm.notification.AddNotifier(telegramNotifier)
 			log.Println("✅ TelegramNotifier добавлен в CompositeNotificationService")

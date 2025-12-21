@@ -31,43 +31,39 @@ type TelegramBot struct {
 
 // NewTelegramBot создает новый экземпляр Telegram бота
 func NewTelegramBot(cfg *config.Config) *TelegramBot {
-	if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
-		log.Println("⚠️ Telegram Bot Token или Chat ID не указаны, бот отключен")
+	return GetOrCreateBot(cfg)
+}
+
+// NewTelegramBotWithChatID создает бота для конкретного чата (для мониторинга)
+func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
+	if cfg == nil || cfg.TelegramBotToken == "" || chatID == "" {
+		log.Println("⚠️ Telegram Bot Token или Chat ID не указаны")
 		return nil
 	}
 
-	// Создаем компоненты
-	messageSender := NewMessageSender(cfg)
-	notifier := NewNotifier(cfg)
+	// Создаем копию конфигурации с новым chat_id
+	chatConfig := *cfg
+	chatConfig.TelegramChatID = chatID
+
+	// Создаем новый бот для мониторинга (не Singleton!)
+	messageSender := NewMessageSender(&chatConfig)
+	notifier := NewNotifier(&chatConfig)
 	notifier.SetMessageSender(messageSender)
 
 	bot := &TelegramBot{
-		config:        cfg,
+		config:        &chatConfig,
 		httpClient:    &http.Client{Timeout: 30 * time.Second},
 		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
-		chatID:        cfg.TelegramChatID,
+		chatID:        chatID,
 		notifier:      notifier,
-		menuManager:   NewMenuManager(cfg, messageSender),
+		menuManager:   NewMenuManager(&chatConfig, messageSender),
 		messageSender: messageSender,
 		startupTime:   time.Now(),
-		welcomeSent:   false,
-		testMode:      false, // По умолчанию не в тестовом режиме
+		welcomeSent:   true, // НЕ отправляем приветствие для мониторинг-бота!
+		testMode:      cfg.MonitoringTestMode || false,
 	}
 
-	// Устанавливаем главное меню (2 ряда)
-	if err := bot.menuManager.SetupMenu(); err != nil {
-		log.Printf("⚠️ Failed to setup menu: %v", err)
-	}
-
-	// ОТПРАВЛЯЕМ ПРИВЕТСТВЕННОЕ СООБЩЕНИЕ ТОЛЬКО ЕСЛИ НЕ В ТЕСТОВОМ РЕЖИМЕ
-	if !bot.testMode {
-		time.AfterFunc(2*time.Second, func() {
-			bot.SendWelcomeMessage()
-		})
-	} else {
-		log.Println("📱 Telegram бот в тестовом режиме - приветственное сообщение отключено")
-	}
-
+	log.Printf("🤖 Создан Telegram бот для мониторинга (chat_id: %s)", chatID)
 	return bot
 }
 
@@ -91,6 +87,12 @@ func (tb *TelegramBot) IsTestMode() bool {
 
 // SendWelcomeMessage отправляет приветственное сообщение один раз
 func (tb *TelegramBot) SendWelcomeMessage() error {
+	// Проверяем, что это основной Singleton бот
+	if tb != GetBot() {
+		log.Println("📱 Это не основной бот - пропуск приветственного сообщения")
+		return nil
+	}
+
 	// ПРОВЕРЯЕМ ТЕСТОВЫЙ РЕЖИМ
 	if tb.IsTestMode() {
 		log.Println("📱 Тестовый режим - пропуск приветственного сообщения")
@@ -120,7 +122,7 @@ func (tb *TelegramBot) SendWelcomeMessage() error {
 	err := tb.messageSender.SendTextMessage(message, nil, false)
 	if err == nil {
 		tb.welcomeSent = true
-		log.Println("✅ Приветственное сообщение отправлено")
+		log.Println("✅ Приветственное сообщение отправлено (Singleton)")
 	} else {
 		log.Printf("❌ Ошибка отправки приветственного сообщения: %v", err)
 	}

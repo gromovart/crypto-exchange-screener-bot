@@ -6,81 +6,86 @@ import (
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
 	"log"
-	"time"
 )
 
-// TelegramNotifier нотификатор для Telegram
-type TelegramNotifier struct {
-	bot     *telegram.TelegramBot
-	enabled bool
-	stats   map[string]interface{}
+// EnhancedTelegramNotifier - улучшенный нотификатор для работы с несколькими чатами
+type EnhancedTelegramNotifier struct {
+	multiChatBot *telegram.MultiChatBot
+	enabled      bool
+	stats        map[string]interface{}
 }
 
-// NewTelegramNotifier создает Telegram нотификатор с переданным ботом
-func NewTelegramNotifier(cfg *config.Config, bot *telegram.TelegramBot) *TelegramNotifier {
-	if bot == nil {
+// NewEnhancedTelegramNotifier создает улучшенный нотификатор
+func NewEnhancedTelegramNotifier(cfg *config.Config) *EnhancedTelegramNotifier {
+	multiChatBot := telegram.NewMultiChatBot(cfg)
+	if multiChatBot == nil {
 		return nil
 	}
 
-	return &TelegramNotifier{
-		bot:     bot,
-		enabled: true,
+	return &EnhancedTelegramNotifier{
+		multiChatBot: multiChatBot,
+		enabled:      true,
 		stats: map[string]interface{}{
-			"sent":           0,
-			"last_sent_time": time.Time{},
-			"type":           "telegram",
+			"sent_to_control":    0,
+			"sent_to_monitoring": 0,
+			"errors":             0,
+			"type":               "enhanced_telegram",
 		},
 	}
 }
 
-// GetBot возвращает Telegram бота
-func (t *TelegramNotifier) GetBot() *telegram.TelegramBot {
-	return t.bot
-}
-
-// Send отправляет сигнал в Telegram
-func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
-	if !t.enabled || t.bot == nil {
+// Send отправляет сигнал в соответствующие чаты
+func (etn *EnhancedTelegramNotifier) Send(signal types.TrendSignal) error {
+	if !etn.enabled || etn.multiChatBot == nil {
 		return nil
 	}
 
-	// ПРОВЕРЯЕМ ТЕСТОВЫЙ РЕЖИМ ПЕРЕД ОТПРАВКОЙ
-	if t.bot.IsTestMode() {
-		// В тестовом режиме логируем, но не отправляем
-		log.Printf("🧪 Test mode - Skip Telegram notification for %s: %.2f%%",
-			signal.Symbol, signal.ChangePercent)
-		return nil
-	}
-
-	// Конвертируем TrendSignal в GrowthSignal
+	// Конвертируем в GrowthSignal
 	growthSignal := adapters.TrendSignalToGrowthSignal(signal)
-	if err := t.bot.SendNotification(growthSignal); err != nil {
+
+	// Отправляем только в чаты мониторинга
+	err := etn.multiChatBot.SendMonitoringNotification(growthSignal)
+	if err != nil {
+		etn.stats["errors"] = etn.stats["errors"].(int) + 1
 		return err
 	}
 
-	// Обновляем статистику
-	t.stats["sent"] = t.stats["sent"].(int) + 1
-	t.stats["last_sent_time"] = time.Now()
+	// Увеличиваем счетчик
+	if signal.Direction == "growth" {
+		etn.stats["sent_to_monitoring"] = etn.stats["sent_to_monitoring"].(int) + 1
+	} else {
+		etn.stats["sent_to_monitoring"] = etn.stats["sent_to_monitoring"].(int) + 1
+	}
+
+	log.Printf("📊 Отправлено уведомление: %s %.2f%% в %d чатов",
+		signal.Symbol, signal.ChangePercent,
+		len(etn.multiChatBot.GetMonitoringStats()["monitoring_chats"].([]map[string]interface{})))
 
 	return nil
 }
 
-// Name возвращает имя
-func (t *TelegramNotifier) Name() string {
-	return "telegram"
-}
-
-// IsEnabled возвращает статус
-func (t *TelegramNotifier) IsEnabled() bool {
-	return t.enabled
-}
-
-// SetEnabled включает/выключает
-func (t *TelegramNotifier) SetEnabled(enabled bool) {
-	t.enabled = enabled
+// SendControlMessage отправляет сообщение только в контрольные чаты
+func (etn *EnhancedTelegramNotifier) SendControlMessage(message string) error {
+	return etn.multiChatBot.SendControlNotification(message)
 }
 
 // GetStats возвращает статистику
-func (t *TelegramNotifier) GetStats() map[string]interface{} {
-	return t.stats
+func (etn *EnhancedTelegramNotifier) GetStats() map[string]interface{} {
+	stats := make(map[string]interface{})
+	for k, v := range etn.stats {
+		stats[k] = v
+	}
+
+	// Добавляем статистику чатов
+	chatStats := etn.multiChatBot.GetMonitoringStats()
+	for k, v := range chatStats {
+		stats[k] = v
+	}
+
+	return stats
 }
+
+// Name, IsEnabled, SetEnabled - как в обычном нотификаторе
+func (etn *EnhancedTelegramNotifier) Name() string            { return "enhanced_telegram" }
+func (etn *EnhancedTelegramNotifier) IsEnabled() bool         { return etn.enabled }
+func (etn *EnhancedTelegramNotifier) SetEnabled(enabled bool) { etn.enabled = enabled }

@@ -1,4 +1,3 @@
-// internal/telegram/message_sender.go
 package telegram
 
 import (
@@ -24,6 +23,8 @@ type MessageSender struct {
 	messageCache   map[string]time.Time // Кэш отправленных сообщений
 	messageCacheMu sync.RWMutex
 	cacheTTL       time.Duration
+	chatID         string              // Добавленное поле для текущего chat_id
+	replyMarkup    ReplyKeyboardMarkup // Добавленное поле для клавиатуры
 }
 
 // NewMessageSender создает новый отправитель сообщений
@@ -35,7 +36,41 @@ func NewMessageSender(cfg *config.Config) *MessageSender {
 		rateLimiter:  NewRateLimiter(2 * time.Second),
 		minInterval:  2 * time.Second,
 		messageCache: make(map[string]time.Time),
-		cacheTTL:     10 * time.Minute, // Храним 10 минут
+		cacheTTL:     10 * time.Minute,      // Храним 10 минут
+		chatID:       cfg.TelegramChatID,    // Используем chat_id из конфига
+		replyMarkup:  ReplyKeyboardMarkup{}, // Инициализируем пустую клавиатуру
+	}
+}
+
+// NewMessageSenderWithChatID создает отправитель с конкретным chat_id
+func NewMessageSenderWithChatID(cfg *config.Config, chatID string) *MessageSender {
+	return &MessageSender{
+		config:       cfg,
+		baseURL:      fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		rateLimiter:  NewRateLimiter(2 * time.Second),
+		minInterval:  2 * time.Second,
+		messageCache: make(map[string]time.Time),
+		cacheTTL:     10 * time.Minute,
+		chatID:       chatID, // Устанавливаем указанный chat_id
+		replyMarkup:  ReplyKeyboardMarkup{},
+	}
+}
+
+// WithChatID создает копию MessageSender с другим chat_id
+func (ms *MessageSender) WithChatID(chatID string) *MessageSender {
+	return &MessageSender{
+		config:         ms.config,
+		baseURL:        ms.baseURL,
+		httpClient:     ms.httpClient,
+		rateLimiter:    ms.rateLimiter,
+		lastSendTime:   ms.lastSendTime,
+		minInterval:    ms.minInterval,
+		messageCache:   ms.messageCache, // Разделяем кэш
+		messageCacheMu: ms.messageCacheMu,
+		cacheTTL:       ms.cacheTTL,
+		chatID:         chatID,         // Устанавливаем новый chat_id
+		replyMarkup:    ms.replyMarkup, // Копируем клавиатуру
 	}
 }
 
@@ -101,15 +136,15 @@ func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMa
 		time.Sleep(sleepTime)
 	}
 
-	// Проверяем дубликаты
-	messageHash := ms.getMessageHash(ms.config.TelegramChatID, text, keyboard)
+	// Проверяем дубликаты - используем ms.chatID вместо ms.config.TelegramChatID
+	messageHash := ms.getMessageHash(ms.chatID, text, keyboard)
 	if ms.isDuplicateMessage(messageHash) {
 		log.Printf("⚠️ Пропуск дублирующегося сообщения")
 		return nil
 	}
 
 	message := TelegramMessage{
-		ChatID:    ms.config.TelegramChatID,
+		ChatID:    ms.chatID, // Используем ms.chatID
 		Text:      text,
 		ParseMode: "Markdown",
 	}
@@ -165,7 +200,7 @@ func (ms *MessageSender) SetReplyKeyboard(keyboard ReplyKeyboardMarkup) error {
 		Text        string              `json:"text"`
 		ReplyMarkup ReplyKeyboardMarkup `json:"reply_markup,omitempty"`
 	}{
-		ChatID:      ms.config.TelegramChatID,
+		ChatID:      ms.chatID, // Используем ms.chatID
 		Text:        "⚙️ *Меню настроек активировано*\n\nВсе настройки доступны в меню ниже ⬇️",
 		ReplyMarkup: keyboard,
 	}
@@ -227,4 +262,14 @@ func (ms *MessageSender) SendTelegramRequest(method string, payload interface{})
 
 	ms.lastSendTime = time.Now()
 	return nil
+}
+
+// GetChatID возвращает текущий chat_id
+func (ms *MessageSender) GetChatID() string {
+	return ms.chatID
+}
+
+// SetChatID устанавливает chat_id
+func (ms *MessageSender) SetChatID(chatID string) {
+	ms.chatID = chatID
 }

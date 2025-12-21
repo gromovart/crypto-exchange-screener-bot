@@ -131,6 +131,12 @@ type Config struct {
 	TelegramFallThreshold   float64 `mapstructure:"TELEGRAM_FALL_THRESHOLD"`
 	MessageFormat           string  `mapstructure:"MESSAGE_FORMAT"`
 	Include24hStats         bool    `mapstructure:"INCLUDE_24H_STATS"`
+	// НОВЫЕ поля для мониторинга
+	MonitoringChatID       string `mapstructure:"MONITORING_CHAT_ID"`
+	MonitoringEnabled      bool   `mapstructure:"MONITORING_ENABLED"`
+	MonitoringNotifyGrowth bool   `mapstructure:"MONITORING_NOTIFY_GROWTH"`
+	MonitoringNotifyFall   bool   `mapstructure:"MONITORING_NOTIFY_FALL"`
+	MonitoringTestMode     bool   `mapstructure:"MONITORING_TEST_MODE"`
 
 	// Производительность и логирование
 	LogLevel     string `mapstructure:"LOG_LEVEL"`
@@ -262,6 +268,10 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.TelegramFallThreshold = getEnvFloat("TELEGRAM_FALL_THRESHOLD", 0.5)
 	cfg.MessageFormat = getEnv("MESSAGE_FORMAT", "compact")
 	cfg.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
+	cfg.MonitoringChatID = getEnv("MONITORING_CHAT_ID", "")
+	cfg.MonitoringEnabled = getEnvBool("MONITORING_ENABLED", false)
+	cfg.MonitoringNotifyGrowth = getEnvBool("MONITORING_NOTIFY_GROWTH", true)
+	cfg.MonitoringNotifyFall = getEnvBool("MONITORING_NOTIFY_FALL", true)
 
 	// Производительность и логирование
 	cfg.LogLevel = getEnv("LOG_LEVEL", "info")
