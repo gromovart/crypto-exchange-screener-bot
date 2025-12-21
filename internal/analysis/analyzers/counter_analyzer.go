@@ -321,6 +321,7 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotific
 	chartURL := a.getChartURL(notification.Symbol, chartProvider)
 	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", notification.Symbol)
 
+	// УПРОЩЕННАЯ КЛАВИАТУРА - только основные кнопки, без настроек
 	return &telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
@@ -336,31 +337,11 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotific
 			{
 				{
 					Text:         "🔕 Отключить уведомления",
-					CallbackData: fmt.Sprintf("counter_notify_%s_off", notification.Symbol),
+					CallbackData: fmt.Sprintf("notify_%s_off", notification.Symbol),
 				},
 				{
-					Text:         "⚙️ Настройки счетчика",
-					CallbackData: fmt.Sprintf("counter_settings_%s", notification.Symbol),
-				},
-			},
-			{
-				{
-					Text:         "📈 Только рост",
-					CallbackData: fmt.Sprintf("counter_track_%s_growth_only", notification.Symbol),
-				},
-				{
-					Text:         "📉 Только падение",
-					CallbackData: fmt.Sprintf("counter_track_%s_fall_only", notification.Symbol),
-				},
-			},
-			{
-				{
-					Text:         "🔄 Сбросить счетчик",
-					CallbackData: fmt.Sprintf("counter_reset_%s", notification.Symbol),
-				},
-				{
-					Text:         "📊 Изменить период",
-					CallbackData: fmt.Sprintf("counter_change_period_%s", notification.Symbol),
+					Text:         "⚙️ Настройки",
+					CallbackData: "settings",
 				},
 			},
 		},
