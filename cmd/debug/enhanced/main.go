@@ -17,6 +17,7 @@ import (
 func main() {
 	logger.Debug("🚀 ЗАПУСК РАСШИРЕННОЙ ОТЛАДКИ")
 	logger.Debug(strings.Repeat("=", 70))
+	var testMode bool = true
 
 	// Загружаем конфигурацию
 	cfg, err := config.LoadConfig(".env")
@@ -90,7 +91,8 @@ func main() {
 
 	// Создаем менеджер
 	logger.Debug("\n🛠️  Создание менеджера данных...")
-	dataManager, err := manager.NewDataManager(cfg)
+
+	dataManager, err := manager.NewDataManager(cfg, testMode)
 	if err != nil {
 		log.Fatalf("❌ Ошибка создания менеджера: %v", err)
 	}

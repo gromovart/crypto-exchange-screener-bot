@@ -1,3 +1,4 @@
+// cmd/bot/main.go (исправленная версия)
 package main
 
 import (
@@ -23,6 +24,7 @@ func main() {
 	var (
 		configPath  = flag.String("config", ".env", "Path to configuration file")
 		logLevel    = flag.String("log-level", "", "Log level: debug, info, warn, error (overrides .env)")
+		testMode    = flag.Bool("test", false, "Test mode (no welcome messages)")
 		showHelp    = flag.Bool("help", false, "Show help")
 		showVersion = flag.Bool("version", false, "Show version")
 	)
@@ -65,10 +67,10 @@ func main() {
 	defer logger.Close()
 
 	// Запуск
-	runBot(cfg)
+	runBot(cfg, testMode)
 }
 
-func runBot(cfg *config.Config) {
+func runBot(cfg *config.Config, testMode *bool) {
 	logger.Info("🚀 Starting Crypto Growth Monitor v%s", version)
 	logger.Info("📅 Build time: %s", buildTime)
 	logger.Info("⚡ Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
@@ -85,11 +87,12 @@ func runBot(cfg *config.Config) {
 
 	// Создание менеджера данных
 	logger.Info("🛠️ Creating data manager...")
-	dataManager, err := manager.NewDataManager(cfg)
+	dataManager, err := manager.NewDataManager(cfg, *testMode)
 	if err != nil {
 		logger.Error("❌ Failed to create data manager: %v", err)
 		os.Exit(1)
 	}
+
 	// ПРОВЕРКА: CounterAnalyzer активен ли?
 	engine := dataManager.GetAnalysisEngine()
 	if engine != nil {
@@ -112,6 +115,7 @@ func runBot(cfg *config.Config) {
 			logger.Warn("⚠️ Проверьте что COUNTER_ANALYZER_ENABLED=true в .env файле")
 		}
 	}
+
 	// Graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -121,7 +125,7 @@ func runBot(cfg *config.Config) {
 	// Запуск системы
 	go func() {
 		logger.Info("🚦 Starting system services...")
-		if err := startSystem(dataManager); err != nil {
+		if err := startSystem(dataManager, cfg); err != nil {
 			errChan <- err
 		}
 	}()
@@ -155,13 +159,24 @@ func runBot(cfg *config.Config) {
 	}
 }
 
-func startSystem(dataManager *manager.DataManager) error {
+func startSystem(dataManager *manager.DataManager, cfg *config.Config) error {
+	// Запускаем все сервисы через DataManager
 	errors := dataManager.StartAllServices()
 	if len(errors) > 0 {
 		for service, err := range errors {
 			logger.Error("❌ Failed to start %s: %v", service, err)
 		}
 		return fmt.Errorf("failed to start one or more services")
+	}
+
+	// Проверяем запущен ли WebhookServer
+	if webhookServer := dataManager.GetWebhookServer(); webhookServer != nil {
+		logger.Info("✅ Telegram webhook server ready")
+
+		// Проверяем порт
+		if cfg.HTTPPort == 0 {
+			logger.Warn("⚠️ HTTP_PORT не указан в конфигурации")
+		}
 	}
 
 	// Проверка работоспособности
@@ -207,10 +222,16 @@ func validateConfig(cfg *config.Config) error {
 		}
 	}
 
-	// Проверка Telegram
+	// Проверка Telegram если включен
 	if cfg.TelegramEnabled {
 		if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
 			errors = append(errors, "TG_API_KEY and TG_CHAT_ID are required when Telegram is enabled")
+		}
+
+		// Проверка порта для вебхука
+		if cfg.HTTPPort == 0 {
+			logger.Warn("⚠️  HTTP_PORT не указан, будет использован порт 8080")
+			cfg.HTTPPort = 8080
 		}
 	}
 
@@ -271,6 +292,7 @@ func logConfig(cfg *config.Config) {
 	if cfg.TelegramEnabled {
 		logger.Info("   📨 Notify: growth=%v, fall=%v",
 			cfg.TelegramNotifyGrowth, cfg.TelegramNotifyFall)
+		logger.Info("   🌐 Webhook порт: %d", cfg.HTTPPort)
 	}
 }
 
@@ -285,6 +307,17 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 	logger.Info("✅ System health check passed")
 	logger.Info("📦 Storage initialized with %d symbols", len(symbols))
 
+	// Получаем статус всех сервисов
+	servicesInfo := dataManager.GetServicesInfo()
+	logger.Info("🔧 Статус сервисов:")
+	for name, info := range servicesInfo {
+		status := "❌"
+		if info.State == manager.StateRunning {
+			status = "✅"
+		}
+		logger.Info("   • %s: %s %s", name, status, info.State)
+	}
+
 	if len(symbols) > 0 {
 		// Показываем несколько символов с ценами
 		sampleCount := min(5, len(symbols))
@@ -297,6 +330,7 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 
 	return true
 }
+
 func logStatus(dataManager *manager.DataManager, startTime time.Time) {
 	storage := dataManager.GetStorage()
 	symbolCount := 0
@@ -337,6 +371,7 @@ func printHelp() {
 	fmt.Println("Configuration (.env file):")
 	fmt.Println("  Required: BYBIT_API_KEY, BYBIT_SECRET_KEY")
 	fmt.Println("  Optional: SYMBOL_FILTER, MIN_VOLUME_FILTER, etc.")
+	fmt.Println("  Telegram: TG_API_KEY, TG_CHAT_ID, TELEGRAM_ENABLED=true")
 	fmt.Println()
 	fmt.Println("Example:")
 	fmt.Println("  growth-monitor --config=.env --log-level=info")

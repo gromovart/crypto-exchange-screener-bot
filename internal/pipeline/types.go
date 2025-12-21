@@ -1,3 +1,4 @@
+// шт internal/pipeline/types.go
 package pipeline
 
 import (

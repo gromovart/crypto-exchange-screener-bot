@@ -38,7 +38,8 @@ type DataManager struct {
 	registry  *ServiceRegistry
 
 	// Дополнительные сервисы
-	telegramBot *telegram.TelegramBot
+	telegramBot   *telegram.TelegramBot
+	webhookServer *telegram.WebhookServer
 
 	// Управление
 	mu       sync.RWMutex
@@ -50,8 +51,13 @@ type DataManager struct {
 	systemStats SystemStats
 }
 
+// Старая версия для обратной совместимости
+func NewDataManagerDefault(cfg *config.Config) (*DataManager, error) {
+	return NewDataManager(cfg, false)
+}
+
 // NewDataManager создает новый менеджер данных
-func NewDataManager(cfg *config.Config) (*DataManager, error) {
+func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 	dm := &DataManager{
 		config:    cfg,
 		stopChan:  make(chan struct{}),
@@ -62,8 +68,8 @@ func NewDataManager(cfg *config.Config) (*DataManager, error) {
 		},
 	}
 
-	// Инициализируем компоненты
-	if err := dm.initializeComponents(); err != nil {
+	// Инициализируем компоненты с тестовым режимом
+	if err := dm.InitializeComponents(testMode); err != nil {
 		return nil, err
 	}
 
@@ -76,8 +82,8 @@ func NewDataManager(cfg *config.Config) (*DataManager, error) {
 	return dm, nil
 }
 
-// initializeComponents инициализирует все компоненты
-func (dm *DataManager) initializeComponents() error {
+// InitializeComponents инициализирует все компоненты
+func (dm *DataManager) InitializeComponents(testMode bool) error {
 	fmt.Printf("🔍 DataManager: RateLimitDelay = %v\n", dm.config.RateLimitDelay)
 
 	// Если RateLimitDelay > 0, то RateLimitingMiddleware добавляется
@@ -85,6 +91,7 @@ func (dm *DataManager) initializeComponents() error {
 		fmt.Println("⚠️  RateLimitingMiddleware активен для EventPriceUpdated")
 		fmt.Printf("   Лимит: %v между событиями\n", dm.config.RateLimitDelay)
 	}
+
 	// 1. Создаем EventBus
 	eventBusConfig := events.EventBusConfig{
 		BufferSize:    dm.config.EventBus.BufferSize,
@@ -125,10 +132,14 @@ func (dm *DataManager) initializeComponents() error {
 
 	// 8. Создаем Telegram бота если включен
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		var err error
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
-		if err != nil {
-			logger.Info("⚠️ Не удалось создать Telegram бота: %v", err)
+		if dm.telegramBot != nil {
+			logger.Info("✅ Telegram бот создан")
+			dm.telegramBot.SetTestMode(testMode) // Устанавливаем тестовый режим
+			time.Sleep(1 * time.Second)
+
+			// 9. Создаем WebhookServer
+			dm.webhookServer = telegram.NewWebhookServer(dm.config, dm.telegramBot)
 		}
 	}
 
@@ -224,6 +235,11 @@ func (dm *DataManager) registerServices() error {
 		services["TelegramBot"] = dm.newServiceAdapter("TelegramBot", dm.telegramBot)
 	}
 
+	// ДОБАВИЛИ регистрацию WebhookServer
+	if dm.webhookServer != nil {
+		services["WebhookServer"] = dm.newServiceAdapter("WebhookServer", dm.webhookServer)
+	}
+
 	for name, service := range services {
 		if err := dm.registry.Register(name, service); err != nil {
 			return fmt.Errorf("failed to register service %s: %w", name, err)
@@ -248,6 +264,11 @@ func (dm *DataManager) setupDependencies() {
 	// TelegramBot зависит от EventBus
 	if dm.telegramBot != nil {
 		dm.lifecycle.AddDependency("TelegramBot", "EventBus")
+	}
+
+	// WebhookServer зависит от TelegramBot
+	if dm.webhookServer != nil {
+		dm.lifecycle.AddDependency("WebhookServer", "TelegramBot")
 	}
 }
 
@@ -418,6 +439,11 @@ func (dm *DataManager) GetAnalysisEngine() *engine.AnalysisEngine {
 // GetEventBus возвращает EventBus
 func (dm *DataManager) GetEventBus() *events.EventBus {
 	return dm.eventBus
+}
+
+// GetWebhookServer возвращает Webhook сервер
+func (dm *DataManager) GetWebhookServer() *telegram.WebhookServer {
+	return dm.webhookServer
 }
 
 // GetTelegramBot возвращает Telegram бота
@@ -627,6 +653,12 @@ func (sa *serviceAdapter) Start() error {
 		}
 		sa.state = StateRunning
 
+	case *telegram.WebhookServer:
+		if err := s.Start(); err != nil {
+			sa.state = StateError
+			return err
+		}
+		sa.state = StateRunning
 	case *engine.AnalysisEngine:
 		if err := s.Start(); err != nil {
 			sa.state = StateError
@@ -664,6 +696,11 @@ func (sa *serviceAdapter) Stop() error {
 		s.Stop()
 	case *events.EventBus:
 		s.Stop()
+
+	case *telegram.WebhookServer:
+		if err := s.Stop(); err != nil {
+			return err
+		}
 	case *telegram.TelegramBot:
 		// Telegram бот не требует явной остановки
 	}

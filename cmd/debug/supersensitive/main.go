@@ -22,6 +22,8 @@ func main() {
 	}
 	defer logger.Close()
 
+	var testMode bool = true
+
 	logger.Debug("🚀 ЗАПУСК СУПЕР-ЧУВСТВИТЕЛЬНОЙ ОТЛАДКИ")
 	logger.Debug(strings.Repeat("=", 70))
 	logger.Debug("⚡ ЭКСТРЕМАЛЬНЫЕ НАСТРОЙКИ: пороги 0.01%, уверенность 1%")
@@ -92,7 +94,7 @@ func main() {
 
 	// Создаем менеджер
 	logger.Debug("\n🛠️  Создание менеджера...")
-	dataManager, err := manager.NewDataManager(cfg)
+	dataManager, err := manager.NewDataManager(cfg, testMode)
 	if err != nil {
 		log.Fatalf("❌ Ошибка: %v", err)
 	}

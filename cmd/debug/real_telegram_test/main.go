@@ -15,10 +15,11 @@ import (
 func main() {
 	// Парсинг флагов
 	var (
-		configPath = flag.String("config", ".env", "Путь к файлу конфигурации")
-		testCount  = flag.Int("count", 3, "Количество тестовых уведомлений")
-		chatID     = flag.String("chat-id", "", "ID чата (переопределяет .env)")
-		debugMode  = flag.Bool("debug", false, "Режим отладки")
+		configPath  = flag.String("config", ".env", "Путь к файлу конфигурации")
+		testCount   = flag.Int("count", 1, "Количество тестовых уведомлений (ПО УМОЛЧАНИЮ 1)")
+		chatID      = flag.String("chat-id", "", "ID чата (переопределяет .env)")
+		debugMode   = flag.Bool("debug", false, "Режим отладки")
+		skipWelcome = flag.Bool("skip-welcome", false, "Пропустить приветственное сообщение")
 	)
 	flag.Parse()
 
@@ -69,6 +70,7 @@ func main() {
 	fmt.Printf("   • Chat ID: %s\n", cfg.TelegramChatID)
 	fmt.Printf("   • Уведомления роста: %v\n", cfg.TelegramNotifyGrowth)
 	fmt.Printf("   • Уведомления падения: %v\n", cfg.TelegramNotifyFall)
+	fmt.Printf("   • Тестовых сообщений: %d\n", *testCount)
 
 	// Создание Telegram бота
 	fmt.Println("\n2. 🤖 Создание Telegram бота...")
@@ -79,49 +81,70 @@ func main() {
 	}
 	fmt.Println("✅ Telegram бот создан")
 
-	// Тест 1: Отправка тестового сообщения
-	fmt.Println("\n3. 📨 Отправка тестового сообщения...")
-	err = bot.SendTestMessage()
-	if err != nil {
-		fmt.Printf("❌ Ошибка отправки тестового сообщения: %v\n", err)
-		fmt.Println("💡 Проверьте:")
-		fmt.Println("   - Правильность токена бота")
-		fmt.Println("   - Правильность Chat ID")
-		fmt.Println("   - Бот добавлен в чат")
-		os.Exit(1)
+	// ПАУЗА для того чтобы основной бот отправил свое приветственное сообщение
+	if !*skipWelcome {
+		fmt.Println("\n⏳ Ожидание 3 секунды перед отправкой тестовых сообщений...")
+		time.Sleep(3 * time.Second)
 	}
-	fmt.Println("✅ Тестовое сообщение отправлено!")
-	fmt.Println("   Проверьте Telegram чат")
 
-	// Пауза для проверки
-	time.Sleep(2 * time.Second)
+	// Тест 1: Отправка тестового сообщения (ТОЛЬКО ЕСЛИ НЕ ПРОПУСКАЕМ)
+	if !*skipWelcome && *testCount > 0 {
+		fmt.Println("\n3. 📨 Отправка тестового сообщения...")
+		err = bot.SendTestMessage()
+		if err != nil {
+			fmt.Printf("❌ Ошибка отправки тестового сообщения: %v\n", err)
+			fmt.Println("💡 Проверьте:")
+			fmt.Println("   - Правильность токена бота")
+			fmt.Println("   - Правильность Chat ID")
+			fmt.Println("   - Бот добавлен в чат")
+			os.Exit(1)
+		}
+		fmt.Println("✅ Тестовое сообщение отправлено!")
+		fmt.Println("   Проверьте Telegram чат")
+		time.Sleep(2 * time.Second)
+	} else if *skipWelcome {
+		fmt.Println("\n3. ⏭️  Пропуск тестового сообщения (--skip-welcome)")
+	}
 
-	// Тест 2: Отправка сигналов роста
-	fmt.Println("\n4. 📈 Отправка тестовых сигналов роста...")
-	testGrowthSignals(bot, cfg, *testCount, *debugMode)
+	// Тест 2: Отправка сигналов роста (ОГРАНИЧЕННОЕ КОЛИЧЕСТВО)
+	if *testCount > 0 && cfg.TelegramNotifyGrowth {
+		fmt.Println("\n4. 📈 Отправка тестовых сигналов роста...")
+		testGrowthSignals(bot, cfg, *testCount, *debugMode)
+	} else {
+		fmt.Println("\n4. ⏭️  Пропуск сигналов роста (отключено или count=0)")
+	}
 
-	// Тест 3: Отправка сигналов падения
-	fmt.Println("\n5. 📉 Отправка тестовых сигналов падения...")
-	testFallSignals(bot, cfg, *testCount, *debugMode)
+	// Тест 3: Отправка сигналов падения (ОГРАНИЧЕННОЕ КОЛИЧЕСТВО)
+	if *testCount > 0 && cfg.TelegramNotifyFall {
+		fmt.Println("\n5. 📉 Отправка тестовых сигналов падения...")
+		testFallSignals(bot, cfg, *testCount, *debugMode)
+	} else {
+		fmt.Println("\n5. ⏭️  Пропуск сигналов падения (отключено или count=0)")
+	}
 
-	// Тест 4: Отправка уведомлений счетчика
-	fmt.Println("\n6. 🔢 Отправка уведомлений счетчика...")
-	testCounterNotifications(bot, cfg, *testCount, *debugMode)
+	// Тест 4: Отправка уведомлений счетчика (ОГРАНИЧЕННОЕ КОЛИЧЕСТВО)
+	if *testCount > 0 && cfg.CounterAnalyzer.Enabled && cfg.CounterAnalyzer.NotificationEnabled {
+		fmt.Println("\n6. 🔢 Отправка уведомлений счетчика...")
+		testCounterNotifications(bot, cfg, *testCount, *debugMode)
+	} else {
+		fmt.Println("\n6. ⏭️  Пропуск уведомлений счетчика (отключено или count=0)")
+	}
 
 	fmt.Println("\n" + strings.Repeat("=", 60))
 	fmt.Println("🎉 ТЕСТИРОВАНИЕ ЗАВЕРШЕНО!")
-	fmt.Println("📱 Проверьте все уведомления в Telegram чате")
+	fmt.Println("📱 Проверьте уведомления в Telegram чате")
 	fmt.Println(strings.Repeat("=", 60))
 }
 
-// testGrowthSignals тестирует отправку сигналов роста
+// testGrowthSignals тестирует отправку сигналов роста (ОБНОВЛЕННЫЙ - ПРОСТОЕ СООБЩЕНИЕ)
 func testGrowthSignals(bot *telegram.TelegramBot, cfg *config.Config, count int, debug bool) {
-	if !cfg.TelegramNotifyGrowth {
-		fmt.Println("⚠️  Уведомления о росте отключены в конфигурации")
-		return
-	}
+	symbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
 
-	symbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT"}
+	// Ограничиваем количество сообщений
+	if count > 3 {
+		count = 3
+		fmt.Printf("   ⚠️  Ограничено %d сообщениями для теста\n", count)
+	}
 
 	for i := 0; i < count && i < len(symbols); i++ {
 		symbol := symbols[i]
@@ -130,10 +153,10 @@ func testGrowthSignals(bot *telegram.TelegramBot, cfg *config.Config, count int,
 			Symbol:        symbol,
 			Direction:     "growth",
 			GrowthPercent: 1.5 + float64(i)*0.5,
-			PeriodMinutes: 5 * (i + 1),
+			PeriodMinutes: 5,
 			Timestamp:     time.Now(),
-			Confidence:    60.0 + float64(i)*10,
-			Volume24h:     1000000 * float64(i+1),
+			Confidence:    75.0,
+			Volume24h:     1000000,
 		}
 
 		fmt.Printf("   📤 Отправка сигнала роста: %s %.2f%%\n",
@@ -144,32 +167,24 @@ func testGrowthSignals(bot *telegram.TelegramBot, cfg *config.Config, count int,
 			fmt.Printf("   ❌ Ошибка: %v\n", err)
 		} else {
 			fmt.Printf("   ✅ Отправлено\n")
-
-			if debug {
-				message := bot.FormatSignalMessage(signal)
-				fmt.Printf("   📋 Сообщение:\n")
-				lines := strings.Split(message, "\n")
-				for _, line := range lines {
-					fmt.Printf("      %s\n", line)
-				}
-			}
 		}
 
 		// Пауза между сообщениями для rate limiting
 		if i < count-1 {
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 	}
 }
 
-// testFallSignals тестирует отправку сигналов падения
+// testFallSignals тестирует отправку сигналов падения (ОБНОВЛЕННЫЙ - ПРОСТОЕ СООБЩЕНИЕ)
 func testFallSignals(bot *telegram.TelegramBot, cfg *config.Config, count int, debug bool) {
-	if !cfg.TelegramNotifyFall {
-		fmt.Println("⚠️  Уведомления о падении отключены в конфигурации")
-		return
-	}
+	symbols := []string{"DOGEUSDT", "MATICUSDT", "XRPUSDT"}
 
-	symbols := []string{"DOGEUSDT", "MATICUSDT", "DOTUSDT", "AVAXUSDT", "XRPUSDT"}
+	// Ограничиваем количество сообщений
+	if count > 3 {
+		count = 3
+		fmt.Printf("   ⚠️  Ограничено %d сообщениями для теста\n", count)
+	}
 
 	for i := 0; i < count && i < len(symbols); i++ {
 		symbol := symbols[i]
@@ -178,10 +193,10 @@ func testFallSignals(bot *telegram.TelegramBot, cfg *config.Config, count int, d
 			Symbol:        symbol,
 			Direction:     "fall",
 			FallPercent:   1.0 + float64(i)*0.5,
-			PeriodMinutes: 5 * (i + 1),
+			PeriodMinutes: 5,
 			Timestamp:     time.Now(),
-			Confidence:    65.0 + float64(i)*10,
-			Volume24h:     500000 * float64(i+1),
+			Confidence:    70.0,
+			Volume24h:     500000,
 		}
 
 		fmt.Printf("   📤 Отправка сигнала падения: %s %.2f%%\n",
@@ -192,62 +207,6 @@ func testFallSignals(bot *telegram.TelegramBot, cfg *config.Config, count int, d
 			fmt.Printf("   ❌ Ошибка: %v\n", err)
 		} else {
 			fmt.Printf("   ✅ Отправлено\n")
-
-			if debug {
-				message := bot.FormatSignalMessage(signal)
-				fmt.Printf("   📋 Сообщение:\n")
-				lines := strings.Split(message, "\n")
-				for _, line := range lines {
-					fmt.Printf("      %s\n", line)
-				}
-			}
-		}
-
-		// Пауза между сообщениями для rate limiting
-		if i < count-1 {
-			time.Sleep(2 * time.Second)
-		}
-	}
-}
-
-// testCounterNotifications тестирует отправку уведомлений счетчика
-func testCounterNotifications(bot *telegram.TelegramBot, cfg *config.Config, count int, debug bool) {
-	if !cfg.CounterAnalyzer.Enabled {
-		fmt.Println("⚠️  Counter Analyzer отключен в конфигурации")
-		return
-	}
-
-	if !cfg.CounterAnalyzer.NotificationEnabled {
-		fmt.Println("⚠️  Уведомления счетчика отключены в конфигурации")
-		return
-	}
-
-	symbols := []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"}
-	periods := []string{"15 минут", "30 минут", "1 час"}
-
-	for i := 0; i < count && i < len(symbols); i++ {
-		symbol := symbols[i]
-		period := periods[i%len(periods)]
-
-		// Используем SendCounterNotification если метод экспортирован
-		// Для теста создадим сообщение вручную
-		message := createCounterMessage(symbol, period, i+1, 8)
-
-		fmt.Printf("   📤 Отправка уведомления счетчика: %s\n", symbol)
-
-		err := bot.SendMessage(message)
-		if err != nil {
-			fmt.Printf("   ❌ Ошибка: %v\n", err)
-		} else {
-			fmt.Printf("   ✅ Отправлено (счетчик: %d/8)\n", i+1)
-
-			if debug {
-				fmt.Printf("   📋 Сообщение:\n")
-				lines := strings.Split(message, "\n")
-				for _, line := range lines {
-					fmt.Printf("      %s\n", line)
-				}
-			}
 		}
 
 		// Пауза между сообщениями для rate limiting
@@ -257,19 +216,40 @@ func testCounterNotifications(bot *telegram.TelegramBot, cfg *config.Config, cou
 	}
 }
 
-// createCounterMessage создает сообщение счетчика
+// testCounterNotifications тестирует отправку уведомлений счетчика (ОБНОВЛЕННЫЙ)
+func testCounterNotifications(bot *telegram.TelegramBot, cfg *config.Config, count int, debug bool) {
+	// Только одно сообщение счетчика для теста
+	if count > 1 {
+		count = 1
+		fmt.Println("   ⚠️  Ограничено 1 сообщением счетчика для теста")
+	}
+
+	for i := 0; i < count; i++ {
+		message := createCounterMessage("BTCUSDT", "15 минут", 3, 8)
+
+		fmt.Printf("   📤 Отправка уведомления счетчика\n")
+
+		err := bot.SendMessage(message)
+		if err != nil {
+			fmt.Printf("   ❌ Ошибка: %v\n", err)
+		} else {
+			fmt.Printf("   ✅ Отправлено\n")
+		}
+	}
+}
+
+// createCounterMessage создает сообщение счетчика (УПРОЩЕННОЕ)
 func createCounterMessage(symbol string, period string, count int, maxSignals int) string {
 	percentage := float64(count) / float64(maxSignals) * 100
 	timeStr := time.Now().Format("2006/01/02 15:04:05")
 
 	return fmt.Sprintf(
-		"📊 *Счетчик сигналов*\n"+
+		"📊 Счетчик сигналов\n"+
 			"⚫ Символ: %s\n"+
 			"🕐 Время: %s\n"+
 			"⏱️  Период: %s\n"+
 			"🟢 Направление: РОСТ\n"+
-			"📈 Счетчик: %d/%d (%.0f%%)\n"+
-			"📊 Базовый период: 1 мин",
+			"📈 Счетчик: %d/%d (%.0f%%)",
 		symbol,
 		timeStr,
 		period,

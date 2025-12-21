@@ -19,7 +19,7 @@ import (
 func main() {
 	logger.Debug("🔬 ГЛУБОКАЯ ДИАГНОСТИКА СИСТЕМЫ")
 	logger.Debug(strings.Repeat("=", 70))
-
+	var testMode bool = true
 	// 1. Проверяем конфигурацию
 	logger.Debug("\n1️⃣  ПРОВЕРКА КОНФИГУРАЦИИ")
 	cfg := createDebugConfig()
@@ -27,7 +27,7 @@ func main() {
 
 	// 2. Создаем менеджер
 	logger.Debug("\n2️⃣  СОЗДАНИЕ МЕНЕДЖЕРА")
-	dataManager, err := manager.NewDataManager(cfg)
+	dataManager, err := manager.NewDataManager(cfg, testMode)
 	if err != nil {
 		log.Fatalf("❌ Ошибка создания менеджера: %v", err)
 	}

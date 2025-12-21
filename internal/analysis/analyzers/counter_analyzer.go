@@ -319,9 +319,11 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotific
 	}
 
 	chartURL := a.getChartURL(notification.Symbol, chartProvider)
-	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", notification.Symbol)
 
-	// УПРОЩЕННАЯ КЛАВИАТУРА - только основные кнопки, без настроек
+	// ФИКС: получаем период из настроек счетчика
+	periodMinutes := a.getCurrentPeriod().GetMinutes()
+	symbolURL := a.getTradingURL(notification.Symbol, periodMinutes)
+
 	return &telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
@@ -334,17 +336,40 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotific
 					URL:  symbolURL,
 				},
 			},
-			{
-				{
-					Text:         "🔕 Отключить уведомления",
-					CallbackData: fmt.Sprintf("notify_%s_off", notification.Symbol),
-				},
-				{
-					Text:         "⚙️ Настройки",
-					CallbackData: "settings",
-				},
-			},
 		},
+	}
+}
+
+// НОВЫЙ МЕТОД: формирует URL для торговли с учетом периода
+func (a *CounterAnalyzer) getTradingURL(symbol string, periodMinutes int) string {
+	// Определяем интервал для графика на основе периода анализа
+	interval := a.getTradingInterval(periodMinutes)
+
+	// Формируем URL для Bybit с параметром интервала
+	return fmt.Sprintf(
+		"https://www.bybit.com/trade/usdt/%s?interval=%s",
+		symbol,
+		interval,
+	)
+}
+
+// Метод для преобразования минут в интервал торгового терминала
+func (a *CounterAnalyzer) getTradingInterval(periodMinutes int) string {
+	switch periodMinutes {
+	case 1, 5:
+		return "5"
+	case 15:
+		return "15"
+	case 30:
+		return "30"
+	case 60:
+		return "60"
+	case 240: // 4 часа
+		return "240"
+	case 1440: // 1 день
+		return "1D"
+	default:
+		return "15" // по умолчанию 15 минут
 	}
 }
 

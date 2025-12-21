@@ -76,8 +76,10 @@ func main() {
 
 	logger.Debug("\n🛠️  Создание менеджера данных...")
 
+	var testMode bool = true
+
 	// Создаем менеджер данных
-	dataManager, err := manager.NewDataManager(cfg)
+	dataManager, err := manager.NewDataManager(cfg, testMode)
 	if err != nil {
 		log.Fatalf("❌ Ошибка создания менеджера данных: %v", err)
 	}
