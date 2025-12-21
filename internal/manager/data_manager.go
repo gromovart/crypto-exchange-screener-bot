@@ -127,8 +127,15 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 			dm.telegramBot.SetTestMode(testMode) // Устанавливаем тестовый режим
 			time.Sleep(1 * time.Second)
 
-			// Создаем WebhookServer с тем же ботом
-			dm.webhookServer = telegram.NewWebhookServer(dm.config, dm.telegramBot)
+			// Создаем обработчик обновлений (поддержка и webhook, и polling)
+			updatesHandler := telegram.NewUpdatesHandler(dm.config, dm.telegramBot)
+
+			// Запускаем обработчик в отдельной горутине
+			go func() {
+				if err := updatesHandler.Start(); err != nil {
+					logger.Error("❌ Ошибка запуска обработчика обновлений: %v", err)
+				}
+			}()
 		}
 	}
 
