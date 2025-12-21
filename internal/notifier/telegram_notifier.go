@@ -1,4 +1,3 @@
-// internal/notifier/telegram_notifier.go
 package notifier
 
 import (
@@ -6,6 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
+	"log"
 	"time"
 )
 
@@ -16,9 +16,8 @@ type TelegramNotifier struct {
 	stats   map[string]interface{}
 }
 
-// NewTelegramNotifier создает Telegram нотификатор
-func NewTelegramNotifier(cfg *config.Config) *TelegramNotifier {
-	bot := telegram.NewTelegramBot(cfg)
+// NewTelegramNotifier создает Telegram нотификатор с переданным ботом
+func NewTelegramNotifier(cfg *config.Config, bot *telegram.TelegramBot) *TelegramNotifier {
 	if bot == nil {
 		return nil
 	}
@@ -45,6 +44,14 @@ func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
 		return nil
 	}
 
+	// ПРОВЕРЯЕМ ТЕСТОВЫЙ РЕЖИМ ПЕРЕД ОТПРАВКОЙ
+	if t.bot.IsTestMode() {
+		// В тестовом режиме логируем, но не отправляем
+		log.Printf("🧪 Test mode - Skip Telegram notification for %s: %.2f%%",
+			signal.Symbol, signal.ChangePercent)
+		return nil
+	}
+
 	// Конвертируем TrendSignal в GrowthSignal
 	growthSignal := adapters.TrendSignalToGrowthSignal(signal)
 	if err := t.bot.SendNotification(growthSignal); err != nil {
@@ -56,40 +63,6 @@ func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
 	t.stats["last_sent_time"] = time.Now()
 
 	return nil
-}
-
-// convertToGrowthSignal конвертирует TrendSignal в GrowthSignal
-func convertToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
-	growthPercent := 0.0
-	fallPercent := 0.0
-	direction := "growth"
-
-	if signal.Direction == "growth" {
-		growthPercent = signal.ChangePercent
-	} else if signal.Direction == "fall" {
-		fallPercent = -signal.ChangePercent // Делаем положительным для Telegram
-		direction = "fall"
-	} else {
-		// Если направление нейтральное, используем изменение цены
-		if signal.ChangePercent > 0 {
-			growthPercent = signal.ChangePercent
-			direction = "growth"
-		} else {
-			fallPercent = -signal.ChangePercent
-			direction = "fall"
-		}
-	}
-
-	return types.GrowthSignal{
-		Symbol:        signal.Symbol,
-		Direction:     direction,
-		GrowthPercent: growthPercent,
-		FallPercent:   fallPercent,
-		PeriodMinutes: signal.PeriodMinutes,
-		Confidence:    signal.Confidence,
-		Timestamp:     signal.Timestamp,
-		DataPoints:    signal.DataPoints,
-	}
 }
 
 // Name возвращает имя

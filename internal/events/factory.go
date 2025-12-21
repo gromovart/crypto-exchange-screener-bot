@@ -1,4 +1,4 @@
-// internal/events/factory.go (исправленная версия)
+// internal/events/factory.go
 package events
 
 import (
@@ -8,6 +8,7 @@ import (
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -16,7 +17,7 @@ type Factory struct{}
 
 // NewEventBusFromConfig создает EventBus из конфигурации
 func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
-	// Настраиваем конфигурацию EventBus на основе конфигурации приложения
+	// Настраиваем конфигурацию EventBus
 	eventBusConfig := EventBusConfig{
 		BufferSize:      cfg.EventBus.BufferSize,
 		WorkerCount:     cfg.EventBus.WorkerCount,
@@ -41,42 +42,64 @@ func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 }
 
 // RegisterDefaultSubscribers регистрирует стандартных подписчиков
-func (f *Factory) RegisterDefaultSubscribers(bus *EventBus, cfg *config.Config) {
+func (f *Factory) RegisterDefaultSubscribers(
+	bus *EventBus,
+	cfg *config.Config,
+	telegramBot *telegram.TelegramBot, // ПЕРЕДАЕМ БОТА ЧЕРЕЗ DI
+	notificationService *notifier.CompositeNotificationService, // И notification service тоже
+) {
 	// Консольный логгер (всегда включен)
 	consoleLogger := f.createConsoleLoggerSubscriber()
 	bus.Subscribe(EventPriceUpdated, consoleLogger)
 	bus.Subscribe(EventSignalDetected, consoleLogger)
 	bus.Subscribe(EventError, consoleLogger)
 
-	// Telegram нотификатор если включен
-	if cfg.TelegramEnabled && cfg.TelegramBotToken != "" {
-		// Создаем телеграм бота
-		telegramBot := telegram.NewTelegramBot(cfg)
-		if telegramBot != nil {
-			// Создаем нотификатор
-			telegramNotifier := notifier.NewTelegramNotifier(cfg)
-			if telegramNotifier != nil {
-				// Обертка в BaseSubscriber
-				telegramSubscriber := NewBaseSubscriber(
-					"telegram_notifier",
-					[]EventType{EventSignalDetected},
-					func(event Event) error {
-						// Получаем сигнал из события
-						if signal, ok := event.Data.(types.TrendSignal); ok {
-							return telegramNotifier.Send(signal)
-						}
-						// Если это другой тип сигнала (например, analysis.Signal), конвертируем
-						if analysisSignal, ok := event.Data.(analysis.Signal); ok {
-							// Конвертируем analysis.Signal в types.TrendSignal
-							trendSignal := convertAnalysisSignalToTrendSignal(analysisSignal)
-							return telegramNotifier.Send(trendSignal)
-						}
-						return nil
-					},
-				)
-				bus.Subscribe(EventSignalDetected, telegramSubscriber)
+	// Telegram нотификатор если включен И бот передан
+	if cfg.TelegramEnabled && telegramBot != nil {
+		log.Println("📱 Регистрация Telegram подписчика с переданным ботом")
+
+		// Используем уже созданный TelegramNotifier или создаем новый с переданным ботом
+		var telegramNotifier *notifier.TelegramNotifier
+
+		if notificationService != nil {
+			// Пробуем получить существующий TelegramNotifier
+			for _, n := range notificationService.GetNotifiers() {
+				if tn, ok := n.(*notifier.TelegramNotifier); ok {
+					telegramNotifier = tn
+					break
+				}
 			}
 		}
+
+		// Если не нашли существующий, создаем новый
+		if telegramNotifier == nil {
+			telegramNotifier = notifier.NewTelegramNotifier(cfg, telegramBot)
+		}
+
+		if telegramNotifier != nil {
+			// Обертка в BaseSubscriber
+			telegramSubscriber := NewBaseSubscriber(
+				"telegram_notifier",
+				[]EventType{EventSignalDetected},
+				func(event Event) error {
+					// Получаем сигнал из события
+					if signal, ok := event.Data.(types.TrendSignal); ok {
+						return telegramNotifier.Send(signal)
+					}
+					// Если это другой тип сигнала (например, analysis.Signal), конвертируем
+					if analysisSignal, ok := event.Data.(analysis.Signal); ok {
+						// Конвертируем analysis.Signal в types.TrendSignal
+						trendSignal := convertAnalysisSignalToTrendSignal(analysisSignal)
+						return telegramNotifier.Send(trendSignal)
+					}
+					return nil
+				},
+			)
+			bus.Subscribe(EventSignalDetected, telegramSubscriber)
+			log.Println("✅ Telegram подписчик успешно зарегистрирован")
+		}
+	} else if cfg.TelegramEnabled && telegramBot == nil {
+		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан в RegisterDefaultSubscribers")
 	}
 }
 
@@ -88,18 +111,6 @@ func (f *Factory) createConsoleLoggerSubscriber() *BaseSubscriber {
 		func(event Event) error {
 			// Реализация консольного логирования
 			fmt.Printf("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
-			return nil
-		},
-	)
-}
-
-// createFileLoggerSubscriber создает подписчика для логирования в файл
-func (f *Factory) createFileLoggerSubscriber(logFile string) *BaseSubscriber {
-	return NewBaseSubscriber(
-		"file_logger",
-		[]EventType{EventPriceUpdated, EventSignalDetected, EventError},
-		func(event Event) error {
-			// Реализация логирования в файл
 			return nil
 		},
 	)

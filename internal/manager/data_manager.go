@@ -86,7 +86,6 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 func (dm *DataManager) InitializeComponents(testMode bool) error {
 	fmt.Printf("🔍 DataManager: RateLimitDelay = %v\n", dm.config.RateLimitDelay)
 
-	// Если RateLimitDelay > 0, то RateLimitingMiddleware добавляется
 	if dm.config.RateLimitDelay > 0 {
 		fmt.Println("⚠️  RateLimitingMiddleware активен для EventPriceUpdated")
 		fmt.Printf("   Лимит: %v между событиями\n", dm.config.RateLimitDelay)
@@ -116,37 +115,50 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	// 4. Создаем PriceFetcher
 	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus)
 
-	// 5. Создаем AnalysisEngine через фабрику
-	analysisFactory := &engine.Factory{}
-	dm.analysisEngine = analysisFactory.NewAnalysisEngineFromConfig(
-		dm.storage,
-		dm.eventBus,
-		dm.config,
-	)
-
-	// 6. Создаем SignalPipeline
-	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
-
-	// 7. Создаем CompositeNotificationService
+	// 5. Создаем CompositeNotificationService (сначала, чтобы передать в события)
 	dm.notification = notifier.NewCompositeNotificationService()
 
-	// 8. Создаем Telegram бота если включен
+	// 6. СОЗДАЕМ TELEGRAM БОТА ОДИН РАЗ
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
+		log.Println("🤖 Создание Telegram бота (единственный экземпляр)...")
 		dm.telegramBot = telegram.NewTelegramBot(dm.config)
 		if dm.telegramBot != nil {
 			logger.Info("✅ Telegram бот создан")
 			dm.telegramBot.SetTestMode(testMode) // Устанавливаем тестовый режим
 			time.Sleep(1 * time.Second)
 
-			// 9. Создаем WebhookServer
+			// Создаем WebhookServer с тем же ботом
 			dm.webhookServer = telegram.NewWebhookServer(dm.config, dm.telegramBot)
 		}
 	}
 
-	// 9. Создаем реестр сервисов
+	// 7. Создаем AnalysisEngine через фабрику, передавая уже созданного бота
+	log.Println("🔧 Создание AnalysisEngine с переданным Telegram ботом...")
+	analysisFactory := &engine.Factory{}
+	dm.analysisEngine = analysisFactory.NewAnalysisEngineFromConfig(
+		dm.storage,
+		dm.eventBus,
+		dm.config,
+		dm.telegramBot, // ПЕРЕДАЕМ СОЗДАННОГО БОТА
+	)
+
+	// 8. Создаем SignalPipeline
+	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
+
+	// 9. Регистрируем подписчиков с передачей бота
+	log.Println("📋 Регистрация подписчиков EventBus с переданным ботом...")
+	eventFactory := &events.Factory{}
+	eventFactory.RegisterDefaultSubscribers(
+		dm.eventBus,
+		dm.config,
+		dm.telegramBot,  // ПЕРЕДАЕМ БОТА
+		dm.notification, // И notification service
+	)
+
+	// 10. Создаем реестр сервисов
 	dm.registry = NewServiceRegistry()
 
-	// 10. Создаем менеджер жизненного цикла
+	// 11. Создаем менеджер жизненного цикла
 	coordinatorConfig := CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
@@ -159,22 +171,22 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	}
 	dm.lifecycle = NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
 
-	// 11. Настраиваем нотификаторы
-	dm.setupNotifiers()
+	// 12. Настраиваем нотификаторы с передачей бота
+	dm.setupNotifiers(dm.telegramBot) // ПЕРЕДАЕМ БОТА
 
-	// 12. Регистрируем сервисы
+	// 13. Регистрируем сервисы
 	if err := dm.registerServices(); err != nil {
 		return err
 	}
 
-	// 13. Настраиваем пайплайн
+	// 14. Настраиваем пайплайн
 	dm.setupPipeline()
 
 	return nil
 }
 
 // setupNotifiers настраивает нотификаторы
-func (dm *DataManager) setupNotifiers() {
+func (dm *DataManager) setupNotifiers(telegramBot *telegram.TelegramBot) {
 	if dm.notification == nil {
 		return
 	}
@@ -183,12 +195,16 @@ func (dm *DataManager) setupNotifiers() {
 	consoleNotifier := notifier.NewConsoleNotifier(dm.config.MessageFormat == "compact")
 	dm.notification.AddNotifier(consoleNotifier)
 
-	// Добавляем Telegram нотификатор если включен
-	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" && dm.telegramBot != nil {
-		telegramNotifier := notifier.NewTelegramNotifier(dm.config)
+	// Добавляем Telegram нотификатор если бот передан
+	if dm.config.TelegramEnabled && telegramBot != nil {
+		log.Println("📱 Создание TelegramNotifier с переданным ботом...")
+		telegramNotifier := notifier.NewTelegramNotifier(dm.config, telegramBot)
 		if telegramNotifier != nil {
 			dm.notification.AddNotifier(telegramNotifier)
+			log.Println("✅ TelegramNotifier добавлен в CompositeNotificationService")
 		}
+	} else if dm.config.TelegramEnabled && telegramBot == nil {
+		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан в setupNotifiers")
 	}
 
 	// Подписываем CompositeNotificationService на события сигналов

@@ -1,4 +1,3 @@
-// internal/analysis/engine/factory.go (дополненная версия)
 package engine
 
 import (
@@ -20,6 +19,7 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 	storage storage.PriceStorage,
 	eventBus *events.EventBus,
 	cfg *config.Config,
+	telegramBot *telegram.TelegramBot, // ПЕРЕДАЕМ БОТА ЧЕРЕЗ DI
 ) *AnalysisEngine {
 
 	// Конвертируем периоды
@@ -28,18 +28,18 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 		periods = append(periods, time.Duration(period)*time.Minute)
 	}
 
-	// Создаем конфигурацию движка с новыми полями
+	// Создаем конфигурацию движка
 	engineConfig := EngineConfig{
 		UpdateInterval:   time.Duration(cfg.AnalysisEngine.UpdateInterval) * time.Second,
 		AnalysisPeriods:  periods,
-		MinVolumeFilter:  cfg.MinVolumeFilter, // Из основной конфигурации
+		MinVolumeFilter:  cfg.MinVolumeFilter,
 		MaxSymbolsPerRun: cfg.AnalysisEngine.MaxSymbolsPerRun,
 		EnableParallel:   cfg.AnalysisEngine.EnableParallel,
 		MaxWorkers:       cfg.AnalysisEngine.MaxWorkers,
 		SignalThreshold:  cfg.AnalysisEngine.SignalThreshold,
-		RetentionPeriod:  time.Duration(cfg.AnalysisEngine.RetentionPeriod) * time.Hour, // Конвертируем часы в duration
+		RetentionPeriod:  time.Duration(cfg.AnalysisEngine.RetentionPeriod) * time.Hour,
 		EnableCache:      cfg.AnalysisEngine.EnableCache,
-		MinDataPoints:    3, // Значение по умолчанию
+		MinDataPoints:    3,
 
 		// Конфигурация анализаторов
 		AnalyzerConfigs: AnalyzerConfigs{
@@ -72,15 +72,18 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 	engine := NewAnalysisEngine(storage, eventBus, engineConfig)
 
 	// Настраиваем анализаторы и фильтры
-	f.configureAnalyzers(engine, cfg)
+	f.configureAnalyzers(engine, cfg, telegramBot) // ПЕРЕДАЕМ БОТА
 	f.configureFilters(engine, cfg)
 
 	return engine
 }
 
 // configureAnalyzers настраивает анализаторы
-func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config) {
-	// Значение по умолчанию для MinDataPoints
+func (f *Factory) configureAnalyzers(
+	engine *AnalysisEngine,
+	cfg *config.Config,
+	telegramBot *telegram.TelegramBot, // ПЕРЕДАЕМ БОТА
+) {
 	minDataPoints := 3
 
 	// Настраиваем GrowthAnalyzer
@@ -119,7 +122,7 @@ func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config)
 		engine.RegisterAnalyzer(fallAnalyzer)
 	}
 
-	// Добавляем ContinuousAnalyzer если включена проверка непрерывности
+	// ContinuousAnalyzer если включена проверка непрерывности
 	if cfg.Analyzers.ContinuousAnalyzer.Enabled {
 		continuousConfig := analyzers.AnalyzerConfig{
 			Enabled:       true,
@@ -136,18 +139,26 @@ func (f *Factory) configureAnalyzers(engine *AnalysisEngine, cfg *config.Config)
 		engine.RegisterAnalyzer(continuousAnalyzer)
 	}
 
-	// 🔴 ВАЖНО: Добавляем CounterAnalyzer если включен
+	// CounterAnalyzer если включен
 	if cfg.CounterAnalyzer.Enabled {
-		f.configureCounterAnalyzer(engine, cfg)
+		f.configureCounterAnalyzer(engine, cfg, telegramBot) // ПЕРЕДАЕМ БОТА
 	}
 }
 
 // configureCounterAnalyzer настраивает CounterAnalyzer
-func (f *Factory) configureCounterAnalyzer(engine *AnalysisEngine, cfg *config.Config) {
-	// Создаем Telegram бота для CounterAnalyzer
-	var tgBot *telegram.TelegramBot
-	if cfg.TelegramEnabled {
-		tgBot = telegram.NewTelegramBot(cfg)
+func (f *Factory) configureCounterAnalyzer(
+	engine *AnalysisEngine,
+	cfg *config.Config,
+	telegramBot *telegram.TelegramBot, // ИСПОЛЬЗУЕМ ПЕРЕДАННОГО БОТА
+) {
+	log.Println("🔧 Настройка CounterAnalyzer с переданным Telegram ботом")
+
+	// НЕ СОЗДАЕМ НОВОГО БОТА, ИСПОЛЬЗУЕМ ПЕРЕДАННОГО
+	// var tgBot *telegram.TelegramBot - УДАЛЯЕМ ЭТУ СТРОКУ
+
+	// Проверяем, передан ли бот
+	if cfg.TelegramEnabled && telegramBot == nil {
+		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан в CounterAnalyzer")
 	}
 
 	// Настройки CounterAnalyzer из конфигурации
@@ -169,19 +180,20 @@ func (f *Factory) configureCounterAnalyzer(engine *AnalysisEngine, cfg *config.C
 		},
 	}
 
-	// Создаем CounterAnalyzer
+	// Создаем CounterAnalyzer с переданным ботом
 	storage := engine.GetStorage()
-	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, storage, tgBot)
+	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, storage, telegramBot) // ИСПОЛЬЗУЕМ ПЕРЕДАННОГО БОТА
 
 	// Регистрируем анализатор
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
 		log.Printf("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {
-		log.Printf("✅ CounterAnalyzer успешно добавлен в AnalysisEngine")
+		log.Printf("✅ CounterAnalyzer успешно добавлен в AnalysisEngine (Telegram бот: %v)",
+			telegramBot != nil)
 	}
 }
 
-// configureFilters настраивает фильтры
+// configureFilters настраивает фильтры (без изменений)
 func (f *Factory) configureFilters(engine *AnalysisEngine, cfg *config.Config) {
 	// ConfidenceFilter
 	if cfg.SignalFilters.Enabled && cfg.SignalFilters.MinConfidence > 0 {
@@ -203,7 +215,7 @@ func (f *Factory) configureFilters(engine *AnalysisEngine, cfg *config.Config) {
 	}
 }
 
-// GetStorage возвращает хранилище из движка (нужно для CounterAnalyzer)
+// GetStorage возвращает хранилище из движка
 func (e *AnalysisEngine) GetStorage() storage.PriceStorage {
 	return e.storage
 }

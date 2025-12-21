@@ -39,6 +39,35 @@ func NewCompositeNotificationService() *CompositeNotificationService {
 	}
 }
 
+// GetNotifiers возвращает все зарегистрированные нотификаторы
+func (c *CompositeNotificationService) GetNotifiers() []Notifier {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Возвращаем копию списка
+	notifiers := make([]Notifier, len(c.notifiers))
+	copy(notifiers, c.notifiers)
+	return notifiers
+}
+
+// GetNotifierByName возвращает нотификатор по имени
+func (c *CompositeNotificationService) GetNotifierByName(name string) Notifier {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, notifier := range c.notifiers {
+		if notifier.Name() == name {
+			return notifier
+		}
+	}
+	return nil
+}
+
+// Name возвращает имя сервиса
+func (c *CompositeNotificationService) Name() string {
+	return "composite_notification_service"
+}
+
 // Send отправляет сигнал через все нотификаторы
 func (c *CompositeNotificationService) Send(signal types.TrendSignal) error {
 	if !c.enabled {

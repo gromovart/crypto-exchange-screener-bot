@@ -1,4 +1,4 @@
-// cmd/bot/main.go (исправленная версия)
+// cmd/bot/main.go (исправленная версия с DI)
 package main
 
 import (
@@ -54,6 +54,13 @@ func main() {
 		cfg.LogLevel = *logLevel
 	}
 
+	// Определяем тестовый режим
+	testModeEnabled := *testMode
+	if !testModeEnabled {
+		// Проверяем переменную окружения как резервный вариант
+		testModeEnabled = strings.ToLower(os.Getenv("TEST_MODE")) == "true"
+	}
+
 	// Инициализация логгера
 	logPath := cfg.LogFile
 	if logPath == "" {
@@ -66,15 +73,29 @@ func main() {
 	}
 	defer logger.Close()
 
+	// Логируем режим запуска
+	if testModeEnabled {
+		logger.Info("🧪 ЗАПУСК В ТЕСТОВОМ РЕЖИМЕ")
+		logger.Info("• Приветственные сообщения Telegram отключены")
+		logger.Info("• Реальные уведомления не отправляются")
+	} else {
+		logger.Info("🚀 ЗАПУСК В РАБОЧЕМ РЕЖИМЕ")
+	}
+
 	// Запуск
-	runBot(cfg, testMode)
+	runBot(cfg, testModeEnabled)
 }
 
-func runBot(cfg *config.Config, testMode *bool) {
+func runBot(cfg *config.Config, testMode bool) {
 	logger.Info("🚀 Starting Crypto Growth Monitor v%s", version)
 	logger.Info("📅 Build time: %s", buildTime)
 	logger.Info("⚡ Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
 	logger.Info("📊 Log level: %s", cfg.LogLevel)
+
+	// Логируем режим
+	if testMode {
+		logger.Info("🧪 РЕЖИМ: Тестовый (без отправки Telegram уведомлений)")
+	}
 
 	// Валидация конфигурации
 	if err := validateConfig(cfg); err != nil {
@@ -83,13 +104,21 @@ func runBot(cfg *config.Config, testMode *bool) {
 	}
 
 	// Логирование конфигурации
-	logConfig(cfg)
+	logConfig(cfg, testMode)
 
-	// Создание менеджера данных
-	logger.Info("🛠️ Creating data manager...")
-	dataManager, err := manager.NewDataManager(cfg, *testMode)
+	// Создание менеджера данных с передачей тестового режима
+	logger.Info("🛠️ Creating data manager (test mode: %v)...", testMode)
+
+	// 🔴 ВАЖНО: Используем правильный конструктор с testMode
+	dataManager, err := manager.NewDataManager(cfg, testMode)
 	if err != nil {
 		logger.Error("❌ Failed to create data manager: %v", err)
+		os.Exit(1)
+	}
+
+	// Проверяем инициализацию
+	if !dataManager.IsInitialized() {
+		logger.Error("❌ DataManager не инициализирован корректно")
 		os.Exit(1)
 	}
 
@@ -97,12 +126,16 @@ func runBot(cfg *config.Config, testMode *bool) {
 	engine := dataManager.GetAnalysisEngine()
 	if engine != nil {
 		analyzers := engine.GetAnalyzers()
-		logger.Info("🔍 Зарегистрированные анализаторы: %v", analyzers)
+		logger.Info("🔍 Зарегистрированные анализаторы:")
+
+		for i, name := range analyzers {
+			logger.Info("   %d. %s", i+1, name)
+		}
 
 		// Проверяем наличие CounterAnalyzer
 		hasCounter := false
 		for _, name := range analyzers {
-			if name == "counter_analyzer" {
+			if strings.Contains(strings.ToLower(name), "counter") {
 				hasCounter = true
 				break
 			}
@@ -110,9 +143,9 @@ func runBot(cfg *config.Config, testMode *bool) {
 
 		if hasCounter {
 			logger.Info("✅ CounterAnalyzer активен!")
-		} else {
-			logger.Warn("⚠️ CounterAnalyzer не найден в списке анализаторов")
-			logger.Warn("⚠️ Проверьте что COUNTER_ANALYZER_ENABLED=true в .env файле")
+		} else if cfg.IsCounterAnalyzerEnabled() {
+			logger.Warn("⚠️ CounterAnalyzer включен в конфиге, но не найден в движке")
+			logger.Warn("⚠️ Проверьте настройки COUNTER_ANALYZER_ENABLED")
 		}
 	}
 
@@ -125,7 +158,7 @@ func runBot(cfg *config.Config, testMode *bool) {
 	// Запуск системы
 	go func() {
 		logger.Info("🚦 Starting system services...")
-		if err := startSystem(dataManager, cfg); err != nil {
+		if err := startSystem(dataManager, cfg, testMode); err != nil {
 			errChan <- err
 		}
 	}()
@@ -136,7 +169,19 @@ func runBot(cfg *config.Config, testMode *bool) {
 
 	// Главный цикл
 	logger.Info("✅ System started successfully!")
-	logger.Info("🎯 Monitoring %d+ symbols", len(cfg.GetSymbolList()))
+
+	// Получаем список символов
+	symbolList := cfg.GetSymbolList()
+	symbolCount := len(symbolList)
+	if symbolCount == 0 {
+		logger.Info("🎯 Monitoring ALL symbols with volume > %.0f USDT", cfg.MinVolumeFilter)
+	} else {
+		logger.Info("🎯 Monitoring %d symbols", symbolCount)
+		if symbolCount <= 15 {
+			logger.Info("📋 Symbols: %v", symbolList)
+		}
+	}
+
 	logger.Info("🛑 Press Ctrl+C to stop")
 
 	startTime := time.Now()
@@ -159,8 +204,21 @@ func runBot(cfg *config.Config, testMode *bool) {
 	}
 }
 
-func startSystem(dataManager *manager.DataManager, cfg *config.Config) error {
+func startSystem(dataManager *manager.DataManager, cfg *config.Config, testMode bool) error {
+	// Проверяем Telegram бота перед запуском
+	if bot := dataManager.GetTelegramBot(); bot != nil {
+		botTestMode := bot.IsTestMode()
+		logger.Info("🤖 Telegram bot initialized (test mode: %v)", botTestMode)
+
+		if testMode && !botTestMode {
+			logger.Warn("⚠️ Запущен в тестовом режиме, но Telegram bot не в тестовом режиме")
+		}
+	} else if cfg.TelegramEnabled {
+		logger.Warn("⚠️ Telegram включен в конфигурации, но бот не создан")
+	}
+
 	// Запускаем все сервисы через DataManager
+	logger.Info("🚀 Starting all services...")
 	errors := dataManager.StartAllServices()
 	if len(errors) > 0 {
 		for service, err := range errors {
@@ -175,12 +233,14 @@ func startSystem(dataManager *manager.DataManager, cfg *config.Config) error {
 
 		// Проверяем порт
 		if cfg.HTTPPort == 0 {
-			logger.Warn("⚠️ HTTP_PORT не указан в конфигурации")
+			logger.Warn("⚠️ HTTP_PORT не указан в конфигурации, будет использован порт 8080")
+		} else {
+			logger.Info("🌐 Webhook порт: %d", cfg.HTTPPort)
 		}
 	}
 
 	// Проверка работоспособности
-	time.Sleep(5 * time.Second)
+	time.Sleep(3 * time.Second)
 	if !checkSystemHealth(dataManager) {
 		return fmt.Errorf("system health check failed")
 	}
@@ -230,7 +290,6 @@ func validateConfig(cfg *config.Config) error {
 
 		// Проверка порта для вебхука
 		if cfg.HTTPPort == 0 {
-			logger.Warn("⚠️  HTTP_PORT не указан, будет использован порт 8080")
 			cfg.HTTPPort = 8080
 		}
 	}
@@ -246,6 +305,18 @@ func validateConfig(cfg *config.Config) error {
 			cfg.Analyzers.FallAnalyzer.MinFall)
 	}
 
+	// Проверка CounterAnalyzer если включен
+	if cfg.IsCounterAnalyzerEnabled() {
+		if cfg.CounterAnalyzer.BasePeriodMinutes <= 0 {
+			errors = append(errors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
+		}
+
+		validPeriods := map[string]bool{"5m": true, "15m": true, "30m": true, "1h": true, "4h": true, "1d": true}
+		if !validPeriods[cfg.CounterAnalyzer.DefaultPeriod] {
+			errors = append(errors, "COUNTER_DEFAULT_PERIOD must be one of: 5m, 15m, 30m, 1h, 4h, 1d")
+		}
+	}
+
 	if len(errors) > 0 {
 		return fmt.Errorf(strings.Join(errors, "; "))
 	}
@@ -253,9 +324,10 @@ func validateConfig(cfg *config.Config) error {
 	return nil
 }
 
-func logConfig(cfg *config.Config) {
+func logConfig(cfg *config.Config, testMode bool) {
 	logger.Info("📝 Configuration loaded:")
 	logger.Info("   • Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
+	logger.Info("   • Test Mode: %v", testMode)
 
 	// Символы
 	symbols := cfg.GetSymbolList()
@@ -287,12 +359,26 @@ func logConfig(cfg *config.Config) {
 	logger.Info("   🛡️  Volume filter: >%.0f USDT", cfg.MinVolumeFilter)
 	logger.Info("   🚦 Signal filters: %v", cfg.SignalFilters.Enabled)
 
+	// Counter Analyzer
+	if cfg.IsCounterAnalyzerEnabled() {
+		logger.Info("   📊 Counter Analyzer: ENABLED")
+		logger.Info("      • Period: %s", cfg.CounterAnalyzer.DefaultPeriod)
+		logger.Info("      • Base period: %d minutes", cfg.CounterAnalyzer.BasePeriodMinutes)
+		logger.Info("      • Growth threshold: %.2f%%", cfg.CounterAnalyzer.GrowthThreshold)
+		logger.Info("      • Fall threshold: %.2f%%", cfg.CounterAnalyzer.FallThreshold)
+		logger.Info("      • Notify: %v", cfg.CounterAnalyzer.NotifyOnSignal)
+	} else {
+		logger.Info("   📊 Counter Analyzer: DISABLED")
+	}
+
 	// Уведомления
 	logger.Info("   📱 Telegram: %v", cfg.TelegramEnabled)
 	if cfg.TelegramEnabled {
 		logger.Info("   📨 Notify: growth=%v, fall=%v",
 			cfg.TelegramNotifyGrowth, cfg.TelegramNotifyFall)
-		logger.Info("   🌐 Webhook порт: %d", cfg.HTTPPort)
+		if !testMode {
+			logger.Info("   🌐 Webhook порт: %d", cfg.HTTPPort)
+		}
 	}
 }
 
@@ -310,10 +396,14 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 	// Получаем статус всех сервисов
 	servicesInfo := dataManager.GetServicesInfo()
 	logger.Info("🔧 Статус сервисов:")
+
+	allRunning := true
 	for name, info := range servicesInfo {
 		status := "❌"
 		if info.State == manager.StateRunning {
 			status = "✅"
+		} else {
+			allRunning = false
 		}
 		logger.Info("   • %s: %s %s", name, status, info.State)
 	}
@@ -321,14 +411,15 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 	if len(symbols) > 0 {
 		// Показываем несколько символов с ценами
 		sampleCount := min(5, len(symbols))
+		logger.Info("   📊 Sample prices:")
 		for i := 0; i < sampleCount; i++ {
 			if price, ok := storage.GetCurrentPrice(symbols[i]); ok {
-				logger.Debug("   • %s: %.4f", symbols[i], price)
+				logger.Info("      • %s: %.4f", symbols[i], price)
 			}
 		}
 	}
 
-	return true
+	return allRunning
 }
 
 func logStatus(dataManager *manager.DataManager, startTime time.Time) {
@@ -365,16 +456,23 @@ func printHelp() {
 	fmt.Println("Options:")
 	fmt.Println("  --config string    Path to configuration file (default: .env)")
 	fmt.Println("  --log-level string Log level: debug, info, warn, error")
+	fmt.Println("  --test             Test mode (no welcome messages)")
 	fmt.Println("  --version          Show version information")
 	fmt.Println("  --help             Show this help message")
+	fmt.Println()
+	fmt.Println("Environment variables:")
+	fmt.Println("  TEST_MODE=true     Enable test mode (same as --test)")
 	fmt.Println()
 	fmt.Println("Configuration (.env file):")
 	fmt.Println("  Required: BYBIT_API_KEY, BYBIT_SECRET_KEY")
 	fmt.Println("  Optional: SYMBOL_FILTER, MIN_VOLUME_FILTER, etc.")
 	fmt.Println("  Telegram: TG_API_KEY, TG_CHAT_ID, TELEGRAM_ENABLED=true")
+	fmt.Println("  Counter: COUNTER_ANALYZER_ENABLED=true, COUNTER_DEFAULT_PERIOD=15m")
 	fmt.Println()
-	fmt.Println("Example:")
+	fmt.Println("Examples:")
 	fmt.Println("  growth-monitor --config=.env --log-level=info")
+	fmt.Println("  growth-monitor --test (test mode, no Telegram messages)")
+	fmt.Println("  TEST_MODE=true growth-monitor (test mode via env)")
 	fmt.Println("  growth-monitor --help")
 }
 
