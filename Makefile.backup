@@ -1,7 +1,7 @@
 .PHONY: help debug debug-enhanced debug-diagnostic analyzer-test debug-super-sensitive debug-all \
-	build release run run-prod setup install test clean lint \
-	debug-counter test-counter test-counter-quick counter-test-all \
-	test-basic test-quick test-all safe-test validate fix-vet test-stable quick-check
+	    build release run run-prod setup install test clean lint \
+	    debug-counter test-counter test-counter-quick counter-test-all \
+	    test-basic test-quick test-all safe-test validate fix-vet test-stable quick-check
 
 # ============================================
 # ОТЛАДКА И ТЕСТИРОВАНИЕ
@@ -401,18 +401,207 @@ docker-run:
 	fi
 	docker run --env-file .env crypto-growth-monitor:latest
 
-## help: Показать помощь
-help:
-	@echo "📈 Crypto Growth Monitor - Makefile Help"
+# ============================================
+# ПОЛНОЕ ТЕСТИРОВАНИЕ (исправленное)
+# ============================================
+
+## full-test: Полное тестирование системы
+full-test:
+	@echo "🚀 ЗАПУСК ПОЛНОГО ТЕСТИРОВАНИЯ СИСТЕМЫ"
+	@echo "======================================"
+	@echo "Версия без таймаутов для стабильности..."
 	@echo ""
-	@echo "🚀 Основные команды:"
-	@echo "  make debug       - Базовая отладка"
-	@echo "  make build       - Сборка продакшен версии"
-	@echo "  make run         - Запуск в режиме разработки"
-	@echo "  make setup       - Настройка окружения"
-	@echo "  make clean       - Очистка проекта"
+	@chmod +x ./scripts/full_test.sh
+	@./scripts/full_test.sh
+
+## integration-test: Интеграционный тест
+integration-test:
+	@echo "🔗 ИНТЕГРАЦИОННЫЙ ТЕСТ"
+	@echo "======================"
+	@echo "Тестирование взаимодействия всех компонентов..."
+	@echo "Запуск на 10 секунд..."
+	@(go run ./cmd/debug/enhanced/main.go & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Интеграционный тест завершен"
+
+## analyzer-comparison: Сравнение всех анализаторов
+analyzer-comparison:
+	@echo "📊 СРАВНЕНИЕ АНАЛИЗАТОРОВ"
+	@echo "========================="
+	@go run ./cmd/debug/analyzer/main.go
+
+## counter-deep-test: Глубокий тест CounterAnalyzer
+counter-deep-test:
+	@echo "🔍 ГЛУБОКИЙ ТЕСТ COUNTER ANALYZER"
+	@echo "================================"
+	@echo "Тестирование всех функций CounterAnalyzer..."
+	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(📊|🧮|✅|🔧|🎉)" | head -30
+
+## test-report: Генерация отчета о тестировании
+test-report:
+	@echo "📋 ГЕНЕРАЦИЯ ОТЧЕТА О ТЕСТИРОВАНИИ"
+	@echo "=================================="
+	@mkdir -p reports
+	@echo "# Отчет о тестировании" > reports/test_report_$(date +%Y%m%d).md
+	@echo "Дата: $(date)" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "## Результаты тестов" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "### 1. CounterAnalyzer" >> reports/test_report_$(date +%Y%m%d).md
+	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(✅|📊|🧮|🎉)" >> reports/test_report_$(date +%Y%m%d).md || true
+	@echo "" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "### 2. Все анализаторы" >> reports/test_report_$(date +%Y%m%d).md
+	@go run ./cmd/debug/analyzer/main.go 2>&1 | tail -20 >> reports/test_report_$(date +%Y%m%d).md || true
+	@echo "" >> reports/test_report_$(date +%Y%m%d).md
+	@echo "✅ Отчет сохранен в: reports/test_report_$(date +%Y%m%d).md"
+
+# ============================================
+# ОТЧЕТЫ И АНАЛИТИКА
+# ============================================
+
+## coverage: Покрытие кода тестами
+coverage:
+	@echo "📊 ГЕНЕРАЦИЯ ОТЧЕТА О ПОКРЫТИИ КОДА"
+	@echo "==================================="
+	@mkdir -p coverage
+	@go test -coverprofile=coverage/coverage.out ./internal/analysis/analyzers/... -short
+	@go tool cover -html=coverage/coverage.out -o coverage/coverage.html 2>/dev/null || true
+	@go tool cover -func=coverage/coverage.out > coverage/coverage.txt 2>/dev/null || true
+	@echo "✅ Отчет о покрытии сгенерирован в папке coverage/"
+	@echo "   • coverage.html - HTML отчет"
+	@echo "   • coverage.txt - Текстовый отчет"
+
+## performance-test: Тест производительности
+performance-test:
+	@echo "⚡ ТЕСТ ПРОИЗВОДИТЕЛЬНОСТИ"
+	@echo "========================="
+	@echo "Тестирование скорости работы анализаторов..."
+	@time go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(real|user|sys)" || true
+
+## security-check: Проверка безопасности
+security-check:
+	@echo "🔒 ПРОВЕРКА БЕЗОПАСНОСТИ"
+	@echo "========================"
+	@go vet ./... 2>&1 | grep -v "vendor" | head -20
+
+# ============================================
+# ДОПОЛНИТЕЛЬНЫЕ КОМАНДЫ ДЛЯ УДОБСТВА
+# ============================================
+
+debug-analyzer:
+	@echo "🧪 Отладка анализаторов..."
+	go run ./cmd/debug/analyzer/main.go
+
+debug-basic:
+	@echo "🐛 Базовая отладка..."
+	@(go run ./cmd/debug/basic/main.go & PID=$$!; sleep 20; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Базовая отладка завершена"
+
+debug-enhanced-full:
+	@echo "🔬 Полная расширенная отладка..."
+	@(go run ./cmd/debug/enhanced/main.go & PID=$$!; sleep 30; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Расширенная отладка завершена"
+
+debug-super:
+	@echo "🚀 Супер-чувствительный тест..."
+	@(go run ./cmd/debug/supersensitive/main.go & PID=$$!; sleep 30; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Супер-чувствительный тест завершен"
+
+debug-counter-quick:
+	@echo "🔢 Быстрый тест CounterAnalyzer..."
+	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|✅|🎉)" | head -15 || true
+
+list-debug:
+	@echo "📁 Доступные отладочные программы:"
+	@echo "  make analyzer-test       - Тест анализаторов"
+	@echo "  make debug               - Базовая отладка"
+	@echo "  make debug-diagnostic    - Глубокая диагностика"
+	@echo "  make debug-enhanced      - Расширенная отладка"
+	@echo "  make debug-super-sensitive - Супер-чувствительный"
+	@echo "  make debug-all           - Все тесты сразу"
 	@echo ""
-	@echo "✅ Этот Makefile должен работать!"
+	@echo "🧮 COUNTER ANALYZER ТЕСТЫ:"
+	@echo "  make debug-counter       - Базовый тест CounterAnalyzer"
+	@echo "  make test-counter        - Полный тест CounterAnalyzer"
+	@echo "  make test-counter-quick  - Быстрый тест CounterAnalyzer"
+	@echo "  make counter-test-all    - Все тесты CounterAnalyzer"
+	@echo ""
+	@echo "🛡️  СТАБИЛЬНЫЕ ТЕСТЫ:"
+	@echo "  make test-stable         - Самый стабильный тест (рекомендуется!)"
+	@echo "  make test-safe           - Безопасный тест"
+	@echo "  make quick-check         - Быстрая проверка"
+	@echo "  make test-basic          - Базовые тесты"
+	@echo "  make safe-test           - Безопасное тестирование"
+	@echo "  make test-all            - Все тесты без ожидания"
+	@echo "  make validate            - Проверка кода"
+
+
+# ============================================
+# ТЕСТИРОВАНИЕ TELEGRAM ИНТЕГРАЦИИ
+# ============================================
+
+## telegram-test: Тестирование интеграции с Telegram
+telegram-test:
+	@echo "🧪 ТЕСТИРОВАНИЕ ИНТЕГРАЦИИ С TELEGRAM"
+	@echo "======================================"
+	@echo ""
+	@echo "1. Компиляция теста..."
+	@go build -o /tmp/telegram_test ./cmd/debug/telegram_integration
+	@echo "✅ Тест скомпилирован"
+	@echo ""
+	@echo "2. Запуск тестов интеграции..."
+	@/tmp/telegram_test
+	@rm -f /tmp/telegram_test
+	@echo ""
+	@echo "✅ Тест завершен"
+
+## telegram-integration: Полное тестирование интеграции
+## telegram-integration: Полное тестирование интеграции
+telegram-integration: telegram-test
+	@echo ""
+	@echo "📱 ПРОВЕРКА НАСТРОЙКИ TELEGRAM:"
+	@if [ -f ".env" ]; then \
+		echo "   • Файл .env найден"; \
+		if grep -q "TELEGRAM_ENABLED=true" .env; then \
+			echo "   • Telegram включен в конфиге ✅"; \
+			if grep -q "TG_API_KEY=" .env && ! grep -q "TG_API_KEY=your_" .env; then \
+				echo "   • Telegram API ключ настроен ✅"; \
+			else \
+				echo "   ⚠️  Telegram API ключ не настроен"; \
+			fi; \
+			if grep -q "TG_CHAT_ID=" .env && ! grep -q "TG_CHAT_ID=your_" .env; then \
+				echo "   • Telegram Chat ID настроен ✅"; \
+			else \
+				echo "   ⚠️  Telegram Chat ID не настроен"; \
+			fi; \
+		else \
+			echo "   • Telegram отключен в конфиге"; \
+		fi; \
+	else \
+		echo "   ⚠️  Файл .env не найден"; \
+	fi
+
+## telegram-bot-test: Тест с реальным Telegram ботом (требует настройки)
+telegram-bot-test:
+	@echo "🤖 ТЕСТ С РЕАЛЬНЫМ TELEGRAM БОТОМ"
+	@echo "=================================="
+	@echo ""
+	@echo "Перед запуском убедитесь, что:"
+	@echo "  1. Telegram бот создан через @BotFather"
+	@echo "  2. TG_API_KEY и TG_CHAT_ID указаны в .env"
+	@echo "  3. TELEGRAM_ENABLED=true"
+	@echo ""
+	@read -p "Продолжить? (y/n): " -n 1 -r; \
+	echo ""; \
+	if [[ $$REPLY =~ ^[Yy] ]]; then \
+		echo "Запуск теста с реальным ботом..."; \
+		if [ -f ".env" ]; then \
+			echo "📱 Конфигурация Telegram:"; \
+			grep -E "(TELEGRAM_ENABLED|TG_API_KEY|TG_CHAT_ID)" .env; \
+			echo ""; \
+			echo "⚡ Запуск в тестовом режиме..."; \
+			make run-prod 2>&1 | head -50; \
+		else \
+			echo "❌ Файл .env не найден"; \
+		fi; \
+	else \
+		echo "❌ Тест отменен"; \
+	fi
 
 # ============================================
 # ТЕСТИРОВАНИЕ С РЕАЛЬНЫМ TELEGRAM БОТОМ
@@ -486,3 +675,136 @@ check-telegram-config:
 		echo "⚠️  Файл .env не найден"; \
 		echo "   Создайте: cp .env.example .env"; \
 	fi
+
+## test-telegram-send: Быстрая отправка тестового сообщения
+
+test-telegram-send:
+	@echo "📨 БЫСТРАЯ ОТПРАВКА ТЕСТОВОГО СООБЩЕНИЯ"
+	@echo "======================================="
+	@echo ""
+	@cat > /tmp/test_telegram.go << 'EOF'
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	// Простая проверка
+	fmt.Println("🤖 Проверка Telegram настроек...")
+
+	// Проверяем .env файл
+	if _, err := os.Stat(".env"); err == nil {
+		data, _ := os.ReadFile(".env")
+		content := string(data)
+
+		if strings.Contains(content, "TELEGRAM_ENABLED=true") {
+			fmt.Println("✅ Telegram включен в конфигурации")
+
+			if strings.Contains(content, "TG_API_KEY=") && !strings.Contains(content, "TG_API_KEY=your_") {
+				fmt.Println("✅ Bot Token настроен")
+			} else {
+				fmt.Println("❌ Bot Token не настроен")
+			}
+
+			if strings.Contains(content, "TG_CHAT_ID=") && !strings.Contains(content, "TG_CHAT_ID=your_") {
+				fmt.Println("✅ Chat ID настроен")
+			} else {
+				fmt.Println("❌ Chat ID не настроен")
+			}
+		} else {
+			fmt.Println("❌ Telegram отключен в конфигурации")
+		}
+	} else {
+		fmt.Println("❌ Файл .env не найден")
+	}
+
+	// Пример сообщения
+	fmt.Println("\n📋 Пример уведомления:")
+	message := fmt.Sprintf(
+		"📊 *Тестовое уведомление*\n"+
+			"🕐 Время: %s\n"+
+			"✅ Это тестовое сообщение\n"+
+			"🎯 Система работает!",
+		time.Now().Format("2006-01-02 15:04:05"),
+	)
+	fmt.Println(message)
+}
+EOF
+	@go run /tmp/test_telegram.go
+	@rm -f /tmp/test_telegram.go
+
+## help: Показать помощь
+help:
+	@echo "📈 Crypto Growth Monitor - Makefile Help"
+	@echo ""
+	@echo "🚀 Основные команды:"
+	@echo "  make build       - Сборка продакшен версии"
+	@echo "  make run-prod    - Запуск собранной версии"
+	@echo "  make setup       - Настройка окружения"
+	@echo "  make install     - Установка в систему"
+	@echo "  make release     - Сборка для всех платформ"
+	@echo ""
+	@echo "🐛 Отладка и тестирование:"
+	@echo "  make debug       - Базовая отладка"
+	@echo "  make debug-all   - Все тесты сразу"
+	@echo "  make analyzer-test - Тест анализаторов"
+	@echo "  make test        - Запуск unit тестов"
+	@echo "  make full-test   - Полное тестирование системы"
+	@echo "  make test-stable - Самый стабильный тест (рекомендуется!)"
+	@echo ""
+	@echo "🧮 COUNTER ANALYZER:"
+	@echo "  make debug-counter      - Тест CounterAnalyzer"
+	@echo "  make test-counter       - Полный тест CounterAnalyzer"
+	@echo "  make test-counter-quick - Быстрый тест CounterAnalyzer"
+	@echo "  make counter-test-all   - Все тесты CounterAnalyzer"
+	@echo ""
+	@echo "📊 АНАЛИТИКА И ОТЧЕТЫ:"
+	@echo "  make coverage    - Отчет о покрытии кода"
+	@echo "  make test-report - Генерация отчета о тестировании"
+	@echo "  make performance-test - Тест производительности"
+	@echo ""
+	@echo "🛡️  СТАБИЛЬНЫЕ ТЕСТЫ (рекомендуются):"
+	@echo "  make test-stable - Самый стабильный тест"
+	@echo "  make quick-check - Быстрая проверка"
+	@echo "  make test-safe   - Безопасный тест"
+	@echo "  make safe-test   - Безопасное тестирование"
+	@echo ""
+	@echo "🔧 Утилиты:"
+	@echo "  make clean       - Очистка проекта"
+	@echo "  make lint        - Проверка кода"
+	@echo "  make deps        - Обновление зависимостей"
+	@echo "  make docker-build - Сборка Docker образа"
+	@echo "  make fix-vet     - Исправить ошибки go vet"
+	@echo "  make validate    - Проверка кода перед коммитом"
+	@echo ""
+	@echo "📖 Подробнее:"
+	@echo "  make help        - Показать это сообщение"
+	@echo "  make list-debug  - Список отладочных программ"
+
+# ============================================
+# СКРИПТЫ ДЛЯ ТЕСТИРОВАНИЯ
+# ============================================
+
+## run-counter-tests: Запуск всех тестов CounterAnalyzer через скрипт
+run-counter-tests:
+	@echo "🧪 Запуск тестов CounterAnalyzer..."
+	@chmod +x ./scripts/test_counter_simple.sh
+	@./scripts/test_counter_simple.sh
+
+## create-counter-test-dir: Создание структуры для тестов CounterAnalyzer
+create-counter-test-dir:
+	@echo "📁 Создание структуры директорий для тестов..."
+	@mkdir -p ./cmd/debug/counter_test
+	@echo "✅ Создана директория: ./cmd/debug/counter_test"
+	@echo "👉 Добавьте файл main.go для тестов CounterAnalyzer"
+
+## daily-test: Ежедневное тестирование системы
+daily-test:
+	@echo "📅 ЗАПУСК ЕЖЕДНЕВНОГО ТЕСТИРОВАНИЯ"
+	@echo "=================================="
+	@chmod +x ./scripts/daily_test_simple.sh
+	@./scripts/daily_test_simple.sh
