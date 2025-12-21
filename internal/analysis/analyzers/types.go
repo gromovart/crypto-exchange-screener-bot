@@ -4,6 +4,7 @@ package analyzers
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
 	"crypto-exchange-screener-bot/internal/types"
+	"sync"
 	"time"
 )
 
@@ -76,4 +77,30 @@ type AnalysisResult struct {
 	Signals   []Signal      `json:"signals"`
 	Timestamp time.Time     `json:"timestamp"`
 	Duration  time.Duration `json:"duration"`
+}
+
+// internalCounter - внутренняя структура счетчика с мьютексом
+type internalCounter struct {
+	types.SignalCounter
+	mu sync.RWMutex
+}
+
+// Lock блокирует счетчик для записи
+func (c *internalCounter) Lock() {
+	c.mu.Lock()
+}
+
+// Unlock разблокирует счетчик для записи
+func (c *internalCounter) Unlock() {
+	c.mu.Unlock()
+}
+
+// RLock блокирует счетчик для чтения
+func (c *internalCounter) RLock() {
+	c.mu.RLock()
+}
+
+// RUnlock разблокирует счетчик для чтения
+func (c *internalCounter) RUnlock() {
+	c.mu.RUnlock()
 }

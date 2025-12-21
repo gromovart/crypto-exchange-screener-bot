@@ -1,9 +1,19 @@
 package types
 
 import (
-	"sync"
 	"time"
 )
+
+// SignalCounter - структура счетчика сигналов (БЕЗ встроенного мьютекса!)
+type SignalCounter struct {
+	Symbol          string        `json:"symbol"`
+	GrowthCount     int           `json:"growth_count"`
+	FallCount       int           `json:"fall_count"`
+	Period          CounterPeriod `json:"period"`
+	PeriodStartTime time.Time     `json:"period_start_time"`
+	LastGrowthTime  time.Time     `json:"last_growth_time"`
+	LastFallTime    time.Time     `json:"last_fall_time"`
+}
 
 // CounterSignalType - тип сигнала для счетчика
 type CounterSignalType string
@@ -37,19 +47,7 @@ type CounterConfig struct {
 	ChartProvider         string                `json:"chart_provider"`
 }
 
-// SignalCounter - счетчик сигналов для символа
-type SignalCounter struct {
-	Symbol          string        `json:"symbol"`
-	GrowthCount     int           `json:"growth_count"`
-	FallCount       int           `json:"fall_count"`
-	LastGrowthTime  time.Time     `json:"last_growth_time"`
-	LastFallTime    time.Time     `json:"last_fall_time"`
-	Period          CounterPeriod `json:"period"`
-	PeriodStartTime time.Time     `json:"period_start_time"`
-	Mu              sync.RWMutex  `json:"-"` // Изменили на экспортируемое Mu
-}
-
-// CounterNotification - уведомление счетчика
+// CounterNotification - уведомление от счетчика
 type CounterNotification struct {
 	Symbol          string            `json:"symbol"`
 	SignalType      CounterSignalType `json:"signal_type"`
@@ -58,22 +56,5 @@ type CounterNotification struct {
 	PeriodStartTime time.Time         `json:"period_start_time"`
 	Timestamp       time.Time         `json:"timestamp"`
 	MaxSignals      int               `json:"max_signals"`
-	Percentage      float64           `json:"percentage"` // Процент заполнения
-}
-
-// Методы для безопасного доступа
-func (c *SignalCounter) Lock() {
-	c.Mu.Lock()
-}
-
-func (c *SignalCounter) Unlock() {
-	c.Mu.Unlock()
-}
-
-func (c *SignalCounter) RLock() {
-	c.Mu.RLock()
-}
-
-func (c *SignalCounter) RUnlock() {
-	c.Mu.RUnlock()
+	Percentage      float64           `json:"percentage"`
 }

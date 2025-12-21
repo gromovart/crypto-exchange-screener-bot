@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto-exchange-screener-bot/internal/analysis"
 	"crypto-exchange-screener-bot/internal/analysis/analyzers"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -17,12 +18,12 @@ func main() {
 	// Тестовые данные для других тестов
 	testData := createTestData()
 
+	// Тестируем CounterAnalyzer (расширенный тест)
+	logger.Debug("\n🧪 ТЕСТ COUNTER ANALYZER:")
+	testCounterAnalyzerExtended()
+
 	// Тестируем новый FallAnalyzer
 	testNewFallAnalyzer()
-
-	// Тестируем CounterAnalyzer
-	logger.Debug("\n🧪 ТЕСТ COUNTER ANALYZER:")
-	testCounterAnalyzer(testData)
 
 	// Тестируем GrowthAnalyzer
 	logger.Debug("\n🧪 ТЕСТ GROWTH ANALYZER:")
@@ -40,7 +41,290 @@ func main() {
 	logger.Debug("\n🧪 ТЕСТ VOLUME ANALYZER:")
 	testVolumeAnalyzer(testData)
 
+	// Тестируем все анализаторы вместе
+	logger.Debug("\n🧪 ИНТЕГРАЦИОННЫЙ ТЕСТ ВСЕХ АНАЛИЗАТОРОВ:")
+	testAllAnalyzersIntegration()
+
 	logger.Debug("\n✅ Тестирование завершено")
+}
+
+func testCounterAnalyzerExtended() {
+	fmt.Println("   🔄 Расширенный тест CounterAnalyzer...")
+
+	config := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.7,
+		MinConfidence: 10.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"base_period_minutes":    1,
+			"analysis_period":        "15m",
+			"growth_threshold":       0.1,
+			"fall_threshold":         0.1,
+			"track_growth":           true,
+			"track_fall":             true,
+			"notification_threshold": 1,
+			"max_signals_5m":         5,
+			"max_signals_15m":        8,
+			"max_signals_30m":        10,
+			"max_signals_1h":         12,
+			"max_signals_4h":         15,
+			"max_signals_1d":         20,
+			"chart_provider":         "coinglass",
+		},
+	}
+
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+
+	// Тест 1: Многократный анализ одного символа
+	fmt.Println("   📈 Тест 1: Многократный анализ BTCUSDT")
+	now := time.Now()
+	btcData := []types.PriceData{
+		{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 100.2, Timestamp: now.Add(-1 * time.Minute)}, // +0.2%
+	}
+
+	var signals []analysis.Signal
+	for i := 1; i <= 5; i++ {
+		sigs, err := analyzer.Analyze(btcData, config)
+		if err != nil {
+			fmt.Printf("      ❌ Итерация %d: ошибка - %v\n", i, err)
+			continue
+		}
+		signals = append(signals, sigs...)
+		if len(sigs) > 0 {
+			fmt.Printf("      %d. Сигнал роста: счетчик=%d, уверенность=%.1f%%\n",
+				i, i, sigs[0].Confidence)
+		}
+	}
+
+	// Проверяем статистику
+	counters := analyzer.GetAllCounters()
+	if btcCounter, ok := counters["BTCUSDT"]; ok {
+		fmt.Printf("   📊 Статистика BTCUSDT: рост=%d, падение=%d\n",
+			btcCounter.GrowthCount, btcCounter.FallCount)
+
+		// Рассчитываем ожидаемую уверенность
+		maxSignals := 8 // для 15-минутного периода
+		expectedConfidence := float64(btcCounter.GrowthCount) / float64(maxSignals) * 100
+		fmt.Printf("      • Ожидаемая уверенность: %.1f%%\n", expectedConfidence)
+
+		if len(signals) > 0 {
+			lastSignal := signals[len(signals)-1]
+			fmt.Printf("      • Фактическая уверенность: %.1f%%\n", lastSignal.Confidence)
+
+			if math.Abs(lastSignal.Confidence-expectedConfidence) < 1.0 {
+				fmt.Println("      ✅ Уверенность рассчитана правильно")
+			} else {
+				fmt.Printf("      ❌ Расхождение в уверенности: %.1f%% vs %.1f%%\n",
+					lastSignal.Confidence, expectedConfidence)
+			}
+		}
+	}
+
+	// Тест 2: Анализ нескольких символов
+	fmt.Println("\n   📈 Тест 2: Анализ нескольких символов")
+	symbols := []string{"ETHUSDT", "SOLUSDT", "ADAUSDT"}
+
+	for _, symbol := range symbols {
+		symbolData := []types.PriceData{
+			{Symbol: symbol, Price: 50.0, Timestamp: now.Add(-2 * time.Minute)},
+			{Symbol: symbol, Price: 50.1, Timestamp: now.Add(-1 * time.Minute)}, // +0.2%
+		}
+
+		sigs, _ := analyzer.Analyze(symbolData, config)
+		if len(sigs) > 0 {
+			fmt.Printf("      • %s: %s %.2f%%\n", symbol, sigs[0].Direction, sigs[0].ChangePercent)
+		}
+	}
+
+	// Общая статистика
+	allCounters := analyzer.GetAllCounters()
+	fmt.Printf("   📊 Общая статистика: %d символов\n", len(allCounters))
+
+	totalGrowth := 0
+	totalFall := 0
+	for symbol, counter := range allCounters {
+		fmt.Printf("      • %s: рост=%d, падение=%d\n",
+			symbol, counter.GrowthCount, counter.FallCount)
+		totalGrowth += counter.GrowthCount
+		totalFall += counter.FallCount
+	}
+
+	fmt.Printf("   🧮 Итого: рост=%d, падение=%d, всего=%d\n",
+		totalGrowth, totalFall, totalGrowth+totalFall)
+
+	// Тест 3: Проверка метаданных
+	fmt.Println("\n   🔍 Тест 3: Проверка метаданных сигналов")
+	if len(signals) > 0 {
+		signal := signals[0]
+		fmt.Printf("      • Тип сигнала: %s\n", signal.Type)
+		fmt.Printf("      • Направление: %s\n", signal.Direction)
+		fmt.Printf("      • Изменение: %.4f%%\n", signal.ChangePercent)
+		fmt.Printf("      • Точки данных: %d\n", signal.DataPoints)
+		fmt.Printf("      • Стратегия: %s\n", signal.Metadata.Strategy)
+		fmt.Printf("      • Тэги: %v\n", signal.Metadata.Tags)
+		fmt.Printf("      • Индикаторы: %v\n", signal.Metadata.Indicators)
+
+		// Проверяем ключевые индикаторы
+		if count, ok := signal.Metadata.Indicators["count"]; ok {
+			fmt.Printf("      • Счетчик в индикаторах: %.0f\n", count)
+		}
+		if period, ok := signal.Metadata.Indicators["period"]; ok {
+			fmt.Printf("      • Период в индикаторах: %.0f мин\n", period)
+		}
+	}
+
+	// Тест 4: Сброс периода
+	fmt.Println("\n   🔄 Тест 4: Сброс периода")
+	originalCount := len(allCounters)
+	analyzer.SetAnalysisPeriod(types.Period5Min)
+
+	countersAfterReset := analyzer.GetAllCounters()
+	fmt.Printf("      • Счетчиков до сброса: %d\n", originalCount)
+	fmt.Printf("      • Счетчиков после сброса: %d\n", len(countersAfterReset))
+
+	// Проверяем сброс счетчиков
+	allReset := true
+	for _, counter := range countersAfterReset {
+		if counter.GrowthCount != 0 || counter.FallCount != 0 {
+			allReset = false
+			fmt.Printf("      ❌ Счетчик %s не сброшен: рост=%d, падение=%d\n",
+				counter.Symbol, counter.GrowthCount, counter.FallCount)
+		}
+	}
+
+	if allReset {
+		fmt.Println("      ✅ Все счетчики сброшены при смене периода")
+	}
+
+	// Статистика анализатора
+	stats := analyzer.GetStats()
+	fmt.Println("\n   📈 Статистика анализатора:")
+	fmt.Printf("      • Всего вызовов: %d\n", stats.TotalCalls)
+	fmt.Printf("      • Успешных: %d\n", stats.SuccessCount)
+	fmt.Printf("      • Ошибок: %d\n", stats.ErrorCount)
+	fmt.Printf("      • Среднее время: %v\n", stats.AverageTime)
+}
+func testAllAnalyzersIntegration() {
+	fmt.Println("   🔄 Интеграционный тест всех анализаторов...")
+
+	// Создаем тестовые данные
+	now := time.Now()
+	testData := []types.PriceData{
+		{Symbol: "BTCUSDT", Price: 100.0, Volume24h: 1000000, Timestamp: now.Add(-5 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 101.0, Volume24h: 1100000, Timestamp: now.Add(-4 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 102.0, Volume24h: 1200000, Timestamp: now.Add(-3 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 101.5, Volume24h: 1150000, Timestamp: now.Add(-2 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 100.5, Volume24h: 1050000, Timestamp: now.Add(-1 * time.Minute)},
+		{Symbol: "BTCUSDT", Price: 101.0, Volume24h: 1100000, Timestamp: now},
+	}
+
+	// Конфигурации для разных анализаторов
+	growthConfig := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.8,
+		MinConfidence: 50.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"min_growth":           1.0,
+			"continuity_threshold": 0.5,
+			"volume_weight":        0.2,
+		},
+	}
+
+	fallConfig := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.8,
+		MinConfidence: 50.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"min_fall":             1.0,
+			"continuity_threshold": 0.5,
+			"volume_weight":        0.2,
+		},
+	}
+
+	counterConfig := analyzers.AnalyzerConfig{
+		Enabled:        true,
+		Weight:         0.7,
+		MinConfidence:  10.0,
+		MinDataPoints:  2,
+		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
+	}
+
+	// Исправленная конфигурация для ContinuousAnalyzer
+	continuousConfig := analyzers.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.6,
+		MinConfidence: 30.0,
+		MinDataPoints: 3,
+		CustomSettings: map[string]interface{}{
+			"min_continuous_points": 3,
+		},
+	}
+
+	// Создаем анализаторы
+	growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
+	fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
+	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, nil, nil)
+	continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
+
+	// Запускаем все анализаторы
+	fmt.Println("   📊 Запуск всех анализаторов на одних данных:")
+
+	analyzersList := []struct {
+		name     string
+		analyzer analyzers.Analyzer
+		config   analyzers.AnalyzerConfig
+	}{
+		{"GrowthAnalyzer", growthAnalyzer, growthConfig},
+		{"FallAnalyzer", fallAnalyzer, fallConfig},
+		{"CounterAnalyzer", counterAnalyzer, counterConfig},
+		{"ContinuousAnalyzer", continuousAnalyzer, continuousConfig},
+	}
+
+	totalSignals := 0
+	for _, item := range analyzersList {
+		signals, err := item.analyzer.Analyze(testData, item.config)
+		if err != nil {
+			fmt.Printf("      ❌ %s: ошибка - %v\n", item.name, err)
+			continue
+		}
+
+		fmt.Printf("      • %s: %d сигналов\n", item.name, len(signals))
+		totalSignals += len(signals)
+
+		// Показываем детали для CounterAnalyzer
+		if item.name == "CounterAnalyzer" && len(signals) > 0 {
+			for _, signal := range signals {
+				fmt.Printf("        - %s: %s %.4f%% (уверенность: %.1f%%)\n",
+					signal.Symbol, signal.Direction, signal.ChangePercent, signal.Confidence)
+				fmt.Printf("          Тэги: %v\n", signal.Metadata.Tags)
+			}
+		}
+
+		// Показываем детали для ContinuousAnalyzer
+		if item.name == "ContinuousAnalyzer" && len(signals) > 0 {
+			for _, signal := range signals {
+				fmt.Printf("        - %s: непрерывный %s %.4f%% (%d точек)\n",
+					signal.Symbol, signal.Direction, signal.ChangePercent, signal.DataPoints)
+			}
+		}
+	}
+
+	fmt.Printf("   📈 Всего сигналов от всех анализаторов: %d\n", totalSignals)
+
+	// Проверяем согласованность результатов
+	if totalSignals > 0 {
+		fmt.Println("   ✅ Анализаторы работают совместно")
+	} else {
+		fmt.Println("   ⚠️  Ни один анализатор не обнаружил сигналов")
+		fmt.Println("   💡 Возможные причины:")
+		fmt.Println("      • Пороги слишком высокие")
+		fmt.Println("      • Тестовые данные не содержат значительных изменений")
+		fmt.Println("      • Анализаторы настроены слишком строго")
+	}
 }
 
 func testCounterAnalyzer(testData []types.PriceData) {

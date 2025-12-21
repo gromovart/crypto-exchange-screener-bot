@@ -50,15 +50,25 @@ func NewVolumeAnalyzer(config AnalyzerConfig) *VolumeAnalyzer {
 
 // NewContinuousAnalyzer создает анализатор непрерывности
 func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
+	// Гарантируем наличие необходимых настроек
+	if config.CustomSettings == nil {
+		config.CustomSettings = make(map[string]interface{})
+	}
+
+	// Устанавливаем значения по умолчанию
+	defaults := map[string]interface{}{
+		"min_continuous_points": 3,
+		"max_gap_ratio":         0.3,
+	}
+
+	for key, defaultValue := range defaults {
+		if _, ok := config.CustomSettings[key]; !ok {
+			config.CustomSettings[key] = defaultValue
+		}
+	}
+
 	return &ContinuousAnalyzer{
 		config: config,
-		stats: AnalyzerStats{
-			TotalCalls:   0,
-			TotalTime:    0,
-			SuccessCount: 0,
-			ErrorCount:   0,
-			LastCallTime: time.Time{},
-			AverageTime:  0,
-		},
+		stats:  AnalyzerStats{},
 	}
 }

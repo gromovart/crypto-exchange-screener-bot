@@ -1,3 +1,4 @@
+// internal/analysis/analyzers/counter_analyzer.go
 package analyzers
 
 import (
@@ -17,7 +18,7 @@ type CounterAnalyzer struct {
 	stats               AnalyzerStats
 	storage             storage.PriceStorage
 	telegramBot         *telegram.TelegramBot
-	counters            map[string]*types.SignalCounter
+	counters            map[string]*internalCounter // Используем внутреннюю структуру
 	mu                  sync.RWMutex
 	notificationEnabled bool
 	chartProvider       string
@@ -29,7 +30,7 @@ func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgB
 		config:              config,
 		storage:             storage,
 		telegramBot:         tgBot,
-		counters:            make(map[string]*types.SignalCounter),
+		counters:            make(map[string]*internalCounter),
 		notificationEnabled: true,
 		chartProvider:       "coinglass",
 	}
@@ -118,21 +119,23 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig)
 }
 
 // getOrCreateCounter получает или создает счетчик для символа
-func (a *CounterAnalyzer) getOrCreateCounter(symbol string) *types.SignalCounter {
+func (a *CounterAnalyzer) getOrCreateCounter(symbol string) *internalCounter {
 	a.mu.RLock()
 	counter, exists := a.counters[symbol]
 	a.mu.RUnlock()
 
 	if !exists {
 		a.mu.Lock()
-		counter = &types.SignalCounter{
-			Symbol:          symbol,
-			GrowthCount:     0,
-			FallCount:       0,
-			Period:          a.getCurrentPeriod(),
-			PeriodStartTime: time.Now(),
-			LastGrowthTime:  time.Time{},
-			LastFallTime:    time.Time{},
+		counter = &internalCounter{
+			SignalCounter: types.SignalCounter{
+				Symbol:          symbol,
+				GrowthCount:     0,
+				FallCount:       0,
+				Period:          a.getCurrentPeriod(),
+				PeriodStartTime: time.Now(),
+				LastGrowthTime:  time.Time{},
+				LastFallTime:    time.Time{},
+			},
 		}
 		a.counters[symbol] = counter
 		a.mu.Unlock()
@@ -166,7 +169,7 @@ func (a *CounterAnalyzer) createAnalysisSignal(symbol, direction string, change 
 }
 
 // sendNotificationIfNeeded отправляет уведомление если достигнут порог
-func (a *CounterAnalyzer) sendNotificationIfNeeded(symbol string, signalType types.CounterSignalType, counter *types.SignalCounter) {
+func (a *CounterAnalyzer) sendNotificationIfNeeded(symbol string, signalType types.CounterSignalType, counter *internalCounter) {
 	if !a.notificationEnabled || a.telegramBot == nil {
 		return
 	}
@@ -307,7 +310,7 @@ func (a *CounterAnalyzer) periodToString(period types.CounterPeriod) string {
 }
 
 // checkPeriodReset проверяет и сбрасывает счетчик если период истек
-func (a *CounterAnalyzer) checkPeriodReset(counter *types.SignalCounter) {
+func (a *CounterAnalyzer) checkPeriodReset(counter *internalCounter) {
 	now := time.Now()
 	periodDuration := a.getPeriodDuration(counter.Period)
 
@@ -507,7 +510,7 @@ func (a *CounterAnalyzer) resetAllCounters() {
 	}
 }
 
-// GetCounterStats возвращает статистику счетчика для символа
+// GetCounterStats возвращает статистику счетчика для символа (ИСПРАВЛЕННАЯ)
 func (a *CounterAnalyzer) GetCounterStats(symbol string) (types.SignalCounter, bool) {
 	a.mu.RLock()
 	counter, exists := a.counters[symbol]
@@ -520,10 +523,19 @@ func (a *CounterAnalyzer) GetCounterStats(symbol string) (types.SignalCounter, b
 	counter.RLock()
 	defer counter.RUnlock()
 
-	return *counter, true
+	// Возвращаем копию данных без мьютекса
+	return types.SignalCounter{
+		Symbol:          counter.Symbol,
+		GrowthCount:     counter.GrowthCount,
+		FallCount:       counter.FallCount,
+		Period:          counter.Period,
+		PeriodStartTime: counter.PeriodStartTime,
+		LastGrowthTime:  counter.LastGrowthTime,
+		LastFallTime:    counter.LastFallTime,
+	}, true
 }
 
-// GetAllCounters возвращает все счетчики
+// GetAllCounters возвращает все счетчики (ИСПРАВЛЕННАЯ)
 func (a *CounterAnalyzer) GetAllCounters() map[string]types.SignalCounter {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
@@ -531,7 +543,18 @@ func (a *CounterAnalyzer) GetAllCounters() map[string]types.SignalCounter {
 	result := make(map[string]types.SignalCounter)
 	for symbol, counter := range a.counters {
 		counter.RLock()
-		result[symbol] = *counter
+
+		// Создаем копию без мьютекса
+		result[symbol] = types.SignalCounter{
+			Symbol:          counter.Symbol,
+			GrowthCount:     counter.GrowthCount,
+			FallCount:       counter.FallCount,
+			Period:          counter.Period,
+			PeriodStartTime: counter.PeriodStartTime,
+			LastGrowthTime:  counter.LastGrowthTime,
+			LastFallTime:    counter.LastFallTime,
+		}
+
 		counter.RUnlock()
 	}
 

@@ -24,11 +24,13 @@ type Signal struct {
 
 // Metadata - метаданные сигнала
 type Metadata struct {
-	Strategy     string             `json:"strategy"`
-	Tags         []string           `json:"tags"`
-	Indicators   map[string]float64 `json:"indicators"`
-	IsContinuous bool               `json:"is_continuous"`
-	Patterns     []string           `json:"patterns"`
+	Strategy       string             `json:"strategy"`
+	Tags           []string           `json:"tags"`
+	Indicators     map[string]float64 `json:"indicators"`
+	IsContinuous   bool               `json:"is_continuous"`
+	ContinuousFrom int                `json:"continuous_from,omitempty"`
+	ContinuousTo   int                `json:"continuous_to,omitempty"`
+	Patterns       []string           `json:"patterns"`
 }
 
 // AnalysisRequest - запрос на анализ
