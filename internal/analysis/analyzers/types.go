@@ -79,28 +79,69 @@ type AnalysisResult struct {
 	Duration  time.Duration `json:"duration"`
 }
 
+// ============== НОВЫЕ ТИПЫ ДЛЯ СЧЕТЧИКА СИГНАЛОВ ==============
+
+// CounterSignalType - тип сигнала для счетчика
+type CounterSignalType string
+
+const (
+	CounterTypeGrowth CounterSignalType = "growth"
+	CounterTypeFall   CounterSignalType = "fall"
+)
+
+// CounterPeriod - период анализа для счетчика
+type CounterPeriod string
+
+const (
+	Period5Min   CounterPeriod = "5m"
+	Period15Min  CounterPeriod = "15m"
+	Period30Min  CounterPeriod = "30m"
+	Period1Hour  CounterPeriod = "1h"
+	Period4Hours CounterPeriod = "4h"
+	Period1Day   CounterPeriod = "1d"
+)
+
+// CounterSettings - настройки счетчика
+type CounterSettings struct {
+	BasePeriodMinutes int           `json:"base_period_minutes"` // Базовый период в минутах (по умолчанию 1)
+	SelectedPeriod    CounterPeriod `json:"selected_period"`     // Выбранный период анализа
+	TrackGrowth       bool          `json:"track_growth"`        // Отслеживать рост
+	TrackFall         bool          `json:"track_fall"`          // Отслеживать падение
+	ChartProvider     string        `json:"chart_provider"`      // Провайдер графиков (coinglass/tradingview)
+	NotifyOnSignal    bool          `json:"notify_on_signal"`    // Уведомлять при каждом сигнале
+}
+
+// SignalCounter - счетчик сигналов для символа
+type SignalCounter struct {
+	Symbol          string          `json:"symbol"`
+	SelectedPeriod  CounterPeriod   `json:"selected_period"`
+	BasePeriodCount int             `json:"base_period_count"` // Количество обработанных базовых периодов
+	SignalCount     int             `json:"signal_count"`      // Общее количество сигналов в текущем периоде
+	GrowthCount     int             `json:"growth_count"`      // Количество сигналов роста
+	FallCount       int             `json:"fall_count"`        // Количество сигналов падения
+	PeriodStartTime time.Time       `json:"period_start_time"` // Начало текущего периода
+	PeriodEndTime   time.Time       `json:"period_end_time"`   // Конец текущего периода
+	LastSignalTime  time.Time       `json:"last_signal_time"`  // Время последнего сигнала
+	Settings        CounterSettings `json:"settings"`          // Настройки счетчика
+}
+
+// CounterNotification - уведомление счетчика
+type CounterNotification struct {
+	Symbol          string            `json:"symbol"`
+	SignalType      CounterSignalType `json:"signal_type"`
+	CurrentCount    int               `json:"current_count"`
+	TotalCount      int               `json:"total_count"` // Общее количество сигналов в периоде
+	Period          CounterPeriod     `json:"period"`
+	PeriodStartTime time.Time         `json:"period_start_time"`
+	PeriodEndTime   time.Time         `json:"period_end_time"`
+	Timestamp       time.Time         `json:"timestamp"`
+	MaxSignals      int               `json:"max_signals"` // Максимальное количество сигналов для периода
+	Percentage      float64           `json:"percentage"`  // Процент заполнения (0-100)
+	ChangePercent   float64           `json:"change_percent"`
+}
+
 // internalCounter - внутренняя структура счетчика с мьютексом
 type internalCounter struct {
-	types.SignalCounter
+	SignalCounter
 	mu sync.RWMutex
-}
-
-// Lock блокирует счетчик для записи
-func (c *internalCounter) Lock() {
-	c.mu.Lock()
-}
-
-// Unlock разблокирует счетчик для записи
-func (c *internalCounter) Unlock() {
-	c.mu.Unlock()
-}
-
-// RLock блокирует счетчик для чтения
-func (c *internalCounter) RLock() {
-	c.mu.RLock()
-}
-
-// RUnlock разблокирует счетчик для чтения
-func (c *internalCounter) RUnlock() {
-	c.mu.RUnlock()
 }

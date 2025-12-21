@@ -189,12 +189,12 @@ func runPeriodAndResetTest() {
 	counters15m := analyzer.GetAllCounters()
 	for symbol, counter := range counters15m {
 		fmt.Printf("      • %s: рост=%d, период=%s\n",
-			symbol, counter.GrowthCount, counter.Period)
+			symbol, counter.GrowthCount, counter.SelectedPeriod)
 	}
 
 	// Тест 2: Меняем период на 5 минут (должен сбросить счетчики)
 	fmt.Println("\n   🔄 Тест 2: Смена периода на 5 минут")
-	analyzer.SetAnalysisPeriod(types.Period5Min)
+	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
 
 	// Проверяем сброс
 	counters5m := analyzer.GetAllCounters()
@@ -219,7 +219,7 @@ func runPeriodAndResetTest() {
 	finalCounters := analyzer.GetAllCounters()
 	for symbol, counter := range finalCounters {
 		fmt.Printf("      • %s: рост=%d, период=%s\n",
-			symbol, counter.GrowthCount, counter.Period)
+			symbol, counter.GrowthCount, counter.SelectedPeriod)
 	}
 }
 
@@ -284,7 +284,7 @@ func runStatisticsAndMetadataTest() {
 
 	for symbol, counter := range allCounters {
 		fmt.Printf("      • %s: рост=%d, падение=%d, период=%s\n",
-			symbol, counter.GrowthCount, counter.FallCount, counter.Period)
+			symbol, counter.GrowthCount, counter.FallCount, counter.SelectedPeriod)
 		totalGrowth += counter.GrowthCount
 		totalFall += counter.FallCount
 

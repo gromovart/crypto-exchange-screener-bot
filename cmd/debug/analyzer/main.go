@@ -178,7 +178,7 @@ func testCounterAnalyzerExtended() {
 	// Тест 4: Сброс периода
 	fmt.Println("\n   🔄 Тест 4: Сброс периода")
 	originalCount := len(allCounters)
-	analyzer.SetAnalysisPeriod(types.Period5Min)
+	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
 
 	countersAfterReset := analyzer.GetAllCounters()
 	fmt.Printf("      • Счетчиков до сброса: %d\n", originalCount)
@@ -434,7 +434,7 @@ func testCounterAnalyzer(testData []types.PriceData) {
 
 	// Тест 5: Сброс периода
 	logger.Debug("\n   🔄 Тест 5: Сброс периода")
-	analyzer.SetAnalysisPeriod(types.Period5Min)
+	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
 	fmt.Printf("      ✅ Период изменен на 5 минут\n")
 
 	// Проверяем сброс счетчиков

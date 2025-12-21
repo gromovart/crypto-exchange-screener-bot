@@ -2,6 +2,7 @@
 package notifier
 
 import (
+	"crypto-exchange-screener-bot/internal/adapters"
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
@@ -45,7 +46,7 @@ func (t *TelegramNotifier) Send(signal types.TrendSignal) error {
 	}
 
 	// Конвертируем TrendSignal в GrowthSignal
-	growthSignal := convertToGrowthSignal(signal)
+	growthSignal := adapters.TrendSignalToGrowthSignal(signal)
 	if err := t.bot.SendNotification(growthSignal); err != nil {
 		return err
 	}

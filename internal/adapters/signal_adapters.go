@@ -28,11 +28,14 @@ func AnalysisSignalToTrendSignal(signal analysis.Signal) types.TrendSignal {
 func AnalysisSignalToGrowthSignal(signal analysis.Signal) types.GrowthSignal {
 	growthPercent := 0.0
 	fallPercent := 0.0
+	direction := signal.Direction
 
 	if signal.Direction == "up" {
 		growthPercent = signal.ChangePercent
+		direction = "growth"
 	} else {
 		fallPercent = -signal.ChangePercent
+		direction = "fall"
 	}
 
 	return types.GrowthSignal{
@@ -44,9 +47,11 @@ func AnalysisSignalToGrowthSignal(signal analysis.Signal) types.GrowthSignal {
 		DataPoints:    signal.DataPoints,
 		StartPrice:    signal.StartPrice,
 		EndPrice:      signal.EndPrice,
-		Direction:     signal.Direction,
+		Direction:     direction, // Исправлено: должно быть "growth" или "fall"
 		Confidence:    signal.Confidence,
 		Timestamp:     signal.Timestamp,
+		Type:          signal.Type,      // Добавлено: передаем тип сигнала
+		Metadata:      &signal.Metadata, // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: передаем метаданные
 	}
 }
 
@@ -69,13 +74,15 @@ func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
 		PeriodMinutes: signal.PeriodMinutes,
 		GrowthPercent: growthPercent,
 		FallPercent:   fallPercent,
-		IsContinuous:  false, // неизвестно из TrendSignal
+		IsContinuous:  false,
 		DataPoints:    signal.DataPoints,
-		StartPrice:    0, // неизвестно из TrendSignal
-		EndPrice:      0, // неизвестно из TrendSignal
+		StartPrice:    0,
+		EndPrice:      0,
 		Direction:     direction,
 		Confidence:    signal.Confidence,
 		Timestamp:     signal.Timestamp,
+		Type:          "",  // Неизвестно из TrendSignal
+		Metadata:      nil, // Нет метаданных в TrendSignal
 	}
 }
 

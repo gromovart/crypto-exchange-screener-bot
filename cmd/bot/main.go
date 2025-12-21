@@ -90,7 +90,28 @@ func runBot(cfg *config.Config) {
 		logger.Error("❌ Failed to create data manager: %v", err)
 		os.Exit(1)
 	}
+	// ПРОВЕРКА: CounterAnalyzer активен ли?
+	engine := dataManager.GetAnalysisEngine()
+	if engine != nil {
+		analyzers := engine.GetAnalyzers()
+		logger.Info("🔍 Зарегистрированные анализаторы: %v", analyzers)
 
+		// Проверяем наличие CounterAnalyzer
+		hasCounter := false
+		for _, name := range analyzers {
+			if name == "counter_analyzer" {
+				hasCounter = true
+				break
+			}
+		}
+
+		if hasCounter {
+			logger.Info("✅ CounterAnalyzer активен!")
+		} else {
+			logger.Warn("⚠️ CounterAnalyzer не найден в списке анализаторов")
+			logger.Warn("⚠️ Проверьте что COUNTER_ANALYZER_ENABLED=true в .env файле")
+		}
+	}
 	// Graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)

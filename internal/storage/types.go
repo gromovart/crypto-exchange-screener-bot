@@ -1,3 +1,4 @@
+// internal/storage/types.go
 package storage
 
 import (

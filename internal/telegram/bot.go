@@ -100,8 +100,8 @@ func NewTelegramBot(cfg *config.Config) *TelegramBot {
 		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
 		chatID:        cfg.TelegramChatID,
 		notifyEnabled: cfg.TelegramEnabled,
-		rateLimiter:   NewRateLimiter(10 * time.Second),
-		minInterval:   10 * time.Second,
+		rateLimiter:   NewRateLimiter(2 * time.Second), // Было 10 секунд
+		minInterval:   2 * time.Second,                 // Было 10 секунд
 	}
 }
 
@@ -207,7 +207,39 @@ func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
 	intervalStr := strconv.Itoa(signal.PeriodMinutes) + "мин"
 	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
 
-	// Форматируем сообщение в зависимости от формата из конфига
+	// ДОБАВЛЯЕМ: Проверяем, является ли сигнал от CounterAnalyzer
+	counterInfo := ""
+
+	// Проверяем наличие информации о счетчике в метаданных
+	if signal.Metadata != nil && signal.Metadata.Indicators != nil {
+		// Для CounterAnalyzer сигналов
+		if count, ok := signal.Metadata.Indicators["current_count"]; ok {
+			if maxSignals, ok2 := signal.Metadata.Indicators["total_max"]; ok2 {
+				percentage := (count / maxSignals) * 100
+
+				// Получаем период из метаданных или используем интервал
+				periodMinutes := signal.PeriodMinutes
+				if period, ok3 := signal.Metadata.Indicators["period_minutes"]; ok3 {
+					periodMinutes = int(period)
+				}
+
+				counterInfo = fmt.Sprintf("\n📊 Счетчик: %d/%d (%.0f%%)",
+					int(count), int(maxSignals), percentage)
+
+				// Добавляем информацию о периоде для счетчика
+				if strings.Contains(signal.Type, "counter") {
+					counterInfo += fmt.Sprintf("\n⏱️  Период анализа: %d мин", periodMinutes)
+				}
+			}
+		} else if count, ok := signal.Metadata.Indicators["count"]; ok { // Альтернативные ключи (для обратной совместимости)
+			if maxSignals, ok2 := signal.Metadata.Indicators["max_signals"]; ok2 {
+				percentage := (count / maxSignals) * 100
+				counterInfo = fmt.Sprintf("\n📊 Счетчик: %d/%d (%.0f%%)",
+					int(count), int(maxSignals), percentage)
+			}
+		}
+	}
+
 	switch tb.config.MessageFormat {
 	case "detailed":
 		return fmt.Sprintf(
@@ -216,14 +248,14 @@ func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
 				"🕐 Время: %s\n"+
 				"⏱️  Период: %s\n"+
 				"%s Направление: %s\n"+
-				"📈 Изменение: %s\n"+
+				"📈 Изменение: %s%s\n"+ // Добавлен counterInfo
 				"📡 Уверенность: %.0f%%\n"+
 				"📊 Объем: $%.0f",
 			intervalStr, signal.Symbol,
 			timeStr,
 			intervalStr,
 			icon, directionStr,
-			changeStr,
+			changeStr, counterInfo,
 			signal.Confidence,
 			signal.Volume24h,
 		)
@@ -231,23 +263,23 @@ func (tb *TelegramBot) FormatSignalMessage(signal types.GrowthSignal) string {
 		return fmt.Sprintf(
 			"⚫ Bybit - %s - %s\n"+
 				"🕐 %s\n"+
-				"%s %s: %s\n"+
+				"%s %s: %s%s\n"+ // Добавлен counterInfo
 				"📡 Уверенность: %.0f%%",
 			intervalStr, signal.Symbol,
 			timeStr,
-			icon, directionStr, changeStr,
+			icon, directionStr, changeStr, counterInfo,
 			signal.Confidence,
 		)
 	default:
 		return fmt.Sprintf(
 			"⚫ Bybit - %s - %s\n"+
 				"🕐 %s\n"+
-				"%s %s: %s\n"+
+				"%s %s: %s%s\n"+ // Добавлен counterInfo
 				"📡 Уверенность: %.0f%%\n"+
 				"📈 Сигнал: 1",
 			intervalStr, signal.Symbol,
 			timeStr,
-			icon, directionStr, changeStr,
+			icon, directionStr, changeStr, counterInfo,
 			signal.Confidence,
 		)
 	}

@@ -8,8 +8,11 @@ import (
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // CounterAnalyzer - анализатор счетчика сигналов
@@ -22,6 +25,8 @@ type CounterAnalyzer struct {
 	mu                  sync.RWMutex
 	notificationEnabled bool
 	chartProvider       string
+	lastPriceCache      map[string]float64 // Кэш последних цен для расчета изменений
+	priceCacheMu        sync.RWMutex
 }
 
 // NewCounterAnalyzer создает новый анализатор счетчика
@@ -33,6 +38,7 @@ func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgB
 		counters:            make(map[string]*internalCounter),
 		notificationEnabled: true,
 		chartProvider:       "coinglass",
+		lastPriceCache:      make(map[string]float64),
 	}
 }
 
@@ -43,7 +49,7 @@ func (a *CounterAnalyzer) Name() string {
 
 // Version возвращает версию
 func (a *CounterAnalyzer) Version() string {
-	return "1.0.0"
+	return "2.0.0" // Увеличиваем версию из-за значительных изменений
 }
 
 // Supports проверяет поддержку символа
@@ -51,7 +57,7 @@ func (a *CounterAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-// Analyze анализирует данные и обновляет счетчики
+// Analyze анализирует данные и обновляет счетчики (ОБНОВЛЕННЫЙ МЕТОД)
 func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
@@ -65,7 +71,20 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig)
 	// Получаем или создаем счетчик для символа
 	counter := a.getOrCreateCounter(symbol)
 
-	// Рассчитываем изменение за базовый период
+	// Получаем базовый период (по умолчанию 1 минута)
+	basePeriodMinutes := a.getBasePeriodMinutes()
+
+	// Получаем текущий выбранный период анализа
+	selectedPeriod := a.getCurrentPeriod()
+
+	// Рассчитываем максимальное количество сигналов для выбранного периода
+	// Согласно требованиям: выбранный период / базовый период = сигнал
+	maxSignals := a.calculateMaxSignals(selectedPeriod, basePeriodMinutes)
+
+	// Проверяем истечение периода
+	a.checkAndResetPeriod(counter, selectedPeriod, maxSignals)
+
+	// Рассчитываем изменение цены за базовый период
 	startPrice := data[0].Price
 	endPrice := data[len(data)-1].Price
 	change := ((endPrice - startPrice) / startPrice) * 100
@@ -75,50 +94,52 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig)
 	fallThreshold := a.getFallThreshold()
 
 	var signals []analysis.Signal
-	var counterUpdated bool
+	var signalDetected bool
+	var signalType CounterSignalType
+
+	counter.Lock()
+
+	// Увеличиваем счетчик обработанных базовых периодов
+	counter.BasePeriodCount++
 
 	// Проверяем рост
-	if change > growthThreshold && a.shouldTrackGrowth() {
-		counter.Lock()
+	if change > growthThreshold && counter.Settings.TrackGrowth {
 		counter.GrowthCount++
-		counter.LastGrowthTime = time.Now()
-		counterUpdated = true
-		counter.Unlock()
+		counter.SignalCount++
+		counter.LastSignalTime = time.Now()
+		signalDetected = true
+		signalType = CounterTypeGrowth
 
 		// Создаем сигнал анализа
-		signal := a.createAnalysisSignal(symbol, "growth", change, counter.GrowthCount)
+		signal := a.createAnalysisSignal(symbol, "growth", change, counter.SignalCount, maxSignals)
 		signals = append(signals, signal)
-
-		// Отправляем уведомление если нужно
-		a.sendNotificationIfNeeded(symbol, types.CounterTypeGrowth, counter)
 	}
 
 	// Проверяем падение
-	if change < -fallThreshold && a.shouldTrackFall() {
-		counter.Lock()
+	if change < -fallThreshold && counter.Settings.TrackFall {
 		counter.FallCount++
-		counter.LastFallTime = time.Now()
-		counterUpdated = true
-		counter.Unlock()
+		counter.SignalCount++
+		counter.LastSignalTime = time.Now()
+		signalDetected = true
+		signalType = CounterTypeFall
 
 		// Создаем сигнал анализа
-		signal := a.createAnalysisSignal(symbol, "fall", change, counter.FallCount)
+		signal := a.createAnalysisSignal(symbol, "fall", math.Abs(change), counter.SignalCount, maxSignals)
 		signals = append(signals, signal)
-
-		// Отправляем уведомление если нужно
-		a.sendNotificationIfNeeded(symbol, types.CounterTypeFall, counter)
 	}
 
-	// Проверяем сброс периода
-	if counterUpdated {
-		a.checkPeriodReset(counter)
+	counter.Unlock()
+
+	// Отправляем уведомление если нужно
+	if signalDetected {
+		a.sendNotificationIfNeeded(symbol, signalType, counter, maxSignals, change)
 	}
 
 	a.updateStats(time.Since(startTime), len(signals) > 0)
 	return signals, nil
 }
 
-// getOrCreateCounter получает или создает счетчик для символа
+// getOrCreateCounter получает или создает счетчик для символа (ОБНОВЛЕННЫЙ)
 func (a *CounterAnalyzer) getOrCreateCounter(symbol string) *internalCounter {
 	a.mu.RLock()
 	counter, exists := a.counters[symbol]
@@ -126,15 +147,26 @@ func (a *CounterAnalyzer) getOrCreateCounter(symbol string) *internalCounter {
 
 	if !exists {
 		a.mu.Lock()
+		// Создаем счетчик с настройками по умолчанию
 		counter = &internalCounter{
-			SignalCounter: types.SignalCounter{
+			SignalCounter: SignalCounter{
 				Symbol:          symbol,
+				SelectedPeriod:  a.getCurrentPeriod(),
+				BasePeriodCount: 0,
+				SignalCount:     0,
 				GrowthCount:     0,
 				FallCount:       0,
-				Period:          a.getCurrentPeriod(),
 				PeriodStartTime: time.Now(),
-				LastGrowthTime:  time.Time{},
-				LastFallTime:    time.Time{},
+				PeriodEndTime:   time.Now().Add(a.getPeriodDuration(a.getCurrentPeriod())),
+				LastSignalTime:  time.Time{},
+				Settings: CounterSettings{
+					BasePeriodMinutes: a.getBasePeriodMinutes(),
+					SelectedPeriod:    a.getCurrentPeriod(),
+					TrackGrowth:       a.shouldTrackGrowth(),
+					TrackFall:         a.shouldTrackFall(),
+					ChartProvider:     a.getChartProvider(),
+					NotifyOnSignal:    a.shouldNotifyOnSignal(),
+				},
 			},
 		}
 		a.counters[symbol] = counter
@@ -144,69 +176,99 @@ func (a *CounterAnalyzer) getOrCreateCounter(symbol string) *internalCounter {
 	return counter
 }
 
-// createAnalysisSignal создает сигнал анализа
-func (a *CounterAnalyzer) createAnalysisSignal(symbol, direction string, change float64, count int) analysis.Signal {
+// createAnalysisSignal создает сигнал анализа (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) createAnalysisSignal(symbol, direction string,
+	change float64, count, maxSignals int) analysis.Signal {
+
+	confidence := a.calculateConfidence(count, maxSignals)
+	selectedPeriod := a.getCurrentPeriod()
+
+	// Создаем сигнал с информацией о счетчике в метаданных
 	return analysis.Signal{
+		ID:            uuid.New().String(),
 		Symbol:        symbol,
 		Type:          "counter_" + direction,
 		Direction:     direction,
 		ChangePercent: change,
-		Confidence:    a.calculateConfidence(count),
+		Confidence:    confidence,
 		DataPoints:    2,
 		StartPrice:    0,
 		EndPrice:      0,
 		Timestamp:     time.Now(),
 		Metadata: analysis.Metadata{
-			Strategy: "counter_analyzer",
-			Tags:     []string{"counter", direction, fmt.Sprintf("count_%d", count)},
+			Strategy: "counter_analyzer_v2",
+			Tags:     []string{"counter", direction, fmt.Sprintf("count_%d", count), string(selectedPeriod), "no_duplicate"},
 			Indicators: map[string]float64{
-				"count":  float64(count),
-				"change": change,
-				"period": a.getPeriodMinutes(),
+				"count":           float64(count),
+				"max_signals":     float64(maxSignals),
+				"current_count":   float64(count),
+				"total_max":       float64(maxSignals),
+				"change":          change,
+				"period_minutes":  float64(selectedPeriod.GetMinutes()),
+				"base_period":     float64(a.getBasePeriodMinutes()),
+				"period_progress": float64(count) / float64(maxSignals) * 100,
+				"percentage":      float64(count) / float64(maxSignals) * 100,
 			},
 		},
 	}
 }
 
-// sendNotificationIfNeeded отправляет уведомление если достигнут порог
-func (a *CounterAnalyzer) sendNotificationIfNeeded(symbol string, signalType types.CounterSignalType, counter *internalCounter) {
+// sendNotificationIfNeeded отправляет уведомление если достигнут порог (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) sendNotificationIfNeeded(symbol string, signalType CounterSignalType, counter *internalCounter, maxSignals int, change float64) {
 	if !a.notificationEnabled || a.telegramBot == nil {
+		return
+	}
+
+	if !counter.Settings.NotifyOnSignal {
 		return
 	}
 
 	counter.RLock()
 	var count int
-	var lastTime time.Time
-	var periodStart = counter.PeriodStartTime
-
-	if signalType == types.CounterTypeGrowth {
+	if signalType == CounterTypeGrowth {
 		count = counter.GrowthCount
-		lastTime = counter.LastGrowthTime
 	} else {
 		count = counter.FallCount
-		lastTime = counter.LastFallTime
+	}
+
+	// Согласно требованию 8: отправляем сообщение при каждом сигнале
+	notification := CounterNotification{
+		Symbol:          symbol,
+		SignalType:      signalType,
+		CurrentCount:    count,
+		TotalCount:      counter.SignalCount,
+		Period:          counter.SelectedPeriod,
+		PeriodStartTime: counter.PeriodStartTime,
+		PeriodEndTime:   counter.PeriodEndTime,
+		Timestamp:       time.Now(),
+		MaxSignals:      maxSignals,
+		Percentage:      float64(counter.SignalCount) / float64(maxSignals) * 100,
+		ChangePercent:   math.Abs(change),
 	}
 	counter.RUnlock()
 
-	// Проверяем порог уведомления
-	if count%a.getNotificationThreshold() == 0 {
-		notification := types.CounterNotification{
-			Symbol:          symbol,
-			SignalType:      signalType,
-			CurrentCount:    count,
-			Period:          counter.Period,
-			PeriodStartTime: periodStart,
-			Timestamp:       lastTime,
-			MaxSignals:      a.getMaxSignalsForPeriod(counter.Period),
-			Percentage:      float64(count) / float64(a.getMaxSignalsForPeriod(counter.Period)) * 100,
-		}
-
+	// Проверяем, не превышен ли лимит уведомлений
+	if a.canSendNotification(symbol, signalType) {
 		a.sendTelegramNotification(notification)
+		a.updateNotificationSent(symbol, signalType)
 	}
 }
 
-// sendTelegramNotification отправляет уведомление в Telegram
-func (a *CounterAnalyzer) sendTelegramNotification(notification types.CounterNotification) {
+// canSendNotification проверяет лимит уведомлений
+func (a *CounterAnalyzer) canSendNotification(symbol string, signalType CounterSignalType) bool {
+	// Здесь можно добавить логику ограничения частоты уведомлений
+	// если требуется (например, не чаще 1 раза в 30 секунд)
+	return true
+}
+
+// updateNotificationSent обновляет время последнего уведомления
+func (a *CounterAnalyzer) updateNotificationSent(symbol string, signalType CounterSignalType) {
+	// Можно добавить кэш времени последнего уведомления
+	// для ограничения частоты
+}
+
+// sendTelegramNotification отправляет уведомление в Telegram (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) sendTelegramNotification(notification CounterNotification) {
 	// Форматируем сообщение
 	message := a.formatNotificationMessage(notification)
 
@@ -219,38 +281,44 @@ func (a *CounterAnalyzer) sendTelegramNotification(notification types.CounterNot
 	}
 }
 
-// formatNotificationMessage форматирует сообщение уведомления
-func (a *CounterAnalyzer) formatNotificationMessage(notification types.CounterNotification) string {
+// formatNotificationMessage форматирует сообщение уведомления (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) formatNotificationMessage(notification CounterNotification) string {
 	icon := "🟢"
 	directionStr := "РОСТ"
-	if notification.SignalType == types.CounterTypeFall {
+	changeStr := fmt.Sprintf("+%.2f%%", notification.ChangePercent)
+
+	if notification.SignalType == CounterTypeFall {
 		icon = "🔴"
 		directionStr = "ПАДЕНИЕ"
+		changeStr = fmt.Sprintf("-%.2f%%", notification.ChangePercent)
 	}
 
-	periodStr := a.periodToString(notification.Period)
 	timeStr := notification.Timestamp.Format("2006/01/02 15:04:05")
 
+	// Компактный формат в стиле обычных сообщений
 	return fmt.Sprintf(
-		"📊 *Счетчик сигналов*\n"+
-			"⚫ Символ: %s\n"+
-			"🕐 Время: %s\n"+
-			"⏱️  Период: %s\n"+
-			"%s Направление: %s\n"+
-			"📈 Счетчик: %d/%d (%.0f%%)\n"+
-			"📊 Базовый период: %d мин",
+		"⚫ Bybit - 1мин - %s\n"+
+			"🕐 %s\n"+
+			"%s %s: %s\n"+
+			"📡 Сигнал: %d\n"+
+			"⏱️  Период: %s",
 		notification.Symbol,
 		timeStr,
-		periodStr,
-		icon, directionStr,
-		notification.CurrentCount, notification.MaxSignals, notification.Percentage,
-		a.getBasePeriodMinutes(),
+		icon, directionStr, changeStr,
+		notification.CurrentCount,
+		notification.Period.ToString(),
 	)
 }
 
-// createNotificationKeyboard создает клавиатуру для уведомления
-func (a *CounterAnalyzer) createNotificationKeyboard(notification types.CounterNotification) *telegram.InlineKeyboardMarkup {
-	chartURL := a.getChartURL(notification.Symbol)
+// createNotificationKeyboard создает клавиатуру для уведомления (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotification) *telegram.InlineKeyboardMarkup {
+	// Используем провайдера из настроек счетчика
+	chartProvider := notification.SignalType.GetChartProvider()
+	if chartProvider == "" {
+		chartProvider = a.chartProvider
+	}
+
+	chartURL := a.getChartURL(notification.Symbol, chartProvider)
 	symbolURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", notification.Symbol)
 
 	return &telegram.InlineKeyboardMarkup{
@@ -272,7 +340,27 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification types.CounterN
 				},
 				{
 					Text:         "⚙️ Настройки счетчика",
-					CallbackData: "counter_settings",
+					CallbackData: fmt.Sprintf("counter_settings_%s", notification.Symbol),
+				},
+			},
+			{
+				{
+					Text:         "📈 Только рост",
+					CallbackData: fmt.Sprintf("counter_track_%s_growth_only", notification.Symbol),
+				},
+				{
+					Text:         "📉 Только падение",
+					CallbackData: fmt.Sprintf("counter_track_%s_fall_only", notification.Symbol),
+				},
+			},
+			{
+				{
+					Text:         "🔄 Сбросить счетчик",
+					CallbackData: fmt.Sprintf("counter_reset_%s", notification.Symbol),
+				},
+				{
+					Text:         "📊 Изменить период",
+					CallbackData: fmt.Sprintf("counter_change_period_%s", notification.Symbol),
 				},
 			},
 		},
@@ -280,8 +368,8 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification types.CounterN
 }
 
 // getChartURL возвращает URL графика в зависимости от провайдера
-func (a *CounterAnalyzer) getChartURL(symbol string) string {
-	switch a.chartProvider {
+func (a *CounterAnalyzer) getChartURL(symbol, provider string) string {
+	switch provider {
 	case "tradingview":
 		return fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)
 	default: // coinglass
@@ -289,182 +377,97 @@ func (a *CounterAnalyzer) getChartURL(symbol string) string {
 	}
 }
 
-// periodToString конвертирует период в строку
-func (a *CounterAnalyzer) periodToString(period types.CounterPeriod) string {
-	switch period {
-	case types.Period5Min:
-		return "5 минут"
-	case types.Period15Min:
-		return "15 минут"
-	case types.Period30Min:
-		return "30 минут"
-	case types.Period1Hour:
-		return "1 час"
-	case types.Period4Hours:
-		return "4 часа"
-	case types.Period1Day:
-		return "1 день"
-	default:
-		return "15 минут"
-	}
-}
+// checkAndResetPeriod проверяет и сбрасывает счетчик если период истек или превышен лимит (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) checkAndResetPeriod(counter *internalCounter, period CounterPeriod, maxSignals int) {
+	counter.Lock()
+	defer counter.Unlock()
 
-// checkPeriodReset проверяет и сбрасывает счетчик если период истек
-func (a *CounterAnalyzer) checkPeriodReset(counter *internalCounter) {
 	now := time.Now()
-	periodDuration := a.getPeriodDuration(counter.Period)
+	periodDuration := period.GetDuration()
 
-	if now.Sub(counter.PeriodStartTime) >= periodDuration {
-		counter.Lock()
+	// Проверяем условия для сброса:
+	// 1. Истек период времени
+	// 2. Достигнут максимум сигналов
+	// 3. Изменился выбранный период
+	if now.Sub(counter.PeriodStartTime) >= periodDuration ||
+		counter.SignalCount >= maxSignals ||
+		counter.SelectedPeriod != period {
+
+		log.Printf("🔄 Счетчик для %s сброшен. Причина: ", counter.Symbol)
+		if now.Sub(counter.PeriodStartTime) >= periodDuration {
+			log.Printf("истек период")
+		} else if counter.SignalCount >= maxSignals {
+			log.Printf("достигнут максимум сигналов (%d/%d)", counter.SignalCount, maxSignals)
+		} else {
+			log.Printf("изменился период на %s", period)
+		}
+
+		// Сбрасываем счетчик
+		counter.BasePeriodCount = 0
+		counter.SignalCount = 0
 		counter.GrowthCount = 0
 		counter.FallCount = 0
 		counter.PeriodStartTime = now
-		counter.Period = a.getCurrentPeriod()
-		counter.Unlock()
-
-		log.Printf("🔄 Счетчик для %s сброшен, новый период: %s", counter.Symbol, counter.Period)
+		counter.PeriodEndTime = now.Add(periodDuration)
+		counter.SelectedPeriod = period
+		counter.Settings.SelectedPeriod = period
 	}
 }
 
-// Вспомогательные методы для получения значений из конфигурации
-func (a *CounterAnalyzer) getGrowthThreshold() float64 {
-	if val, ok := a.config.CustomSettings["growth_threshold"].(float64); ok {
-		return val
+// calculateMaxSignals вычисляет максимальное количество сигналов (НОВЫЙ МЕТОД)
+func (a *CounterAnalyzer) calculateMaxSignals(period CounterPeriod, basePeriodMinutes int) int {
+	// Согласно требованию: выбранный период / базовый период = сигнал
+	totalPossibleSignals := period.GetMinutes() / basePeriodMinutes
+
+	// Согласно требованию 4: ограничиваем 5-15 сигналами
+	if totalPossibleSignals < 5 {
+		return 5
 	}
-	return 0.1 // 0.1% по умолчанию
+	if totalPossibleSignals > 15 {
+		return 15
+	}
+	return totalPossibleSignals
+}
+
+// Вспомогательные методы для получения значений из конфигурации (ОБНОВЛЕННЫЕ)
+func (a *CounterAnalyzer) getGrowthThreshold() float64 {
+	return SafeGetFloat(a.config.CustomSettings["growth_threshold"], 0.1)
 }
 
 func (a *CounterAnalyzer) getFallThreshold() float64 {
-	if val, ok := a.config.CustomSettings["fall_threshold"].(float64); ok {
-		return val
-	}
-	return 0.1 // 0.1% по умолчанию
+	return SafeGetFloat(a.config.CustomSettings["fall_threshold"], 0.1)
 }
 
 func (a *CounterAnalyzer) getBasePeriodMinutes() int {
-	if val, ok := a.config.CustomSettings["base_period_minutes"].(int); ok {
-		return val
-	}
-	return 1
+	return SafeGetInt(a.config.CustomSettings["base_period_minutes"], 1)
 }
 
 func (a *CounterAnalyzer) getNotificationThreshold() int {
-	if val, ok := a.config.CustomSettings["notification_threshold"].(int); ok {
-		return val
-	}
-	return 1
+	return SafeGetInt(a.config.CustomSettings["notification_threshold"], 1)
 }
 
 func (a *CounterAnalyzer) shouldTrackGrowth() bool {
-	if val, ok := a.config.CustomSettings["track_growth"].(bool); ok {
-		return val
-	}
-	return true
+	return SafeGetBool(a.config.CustomSettings["track_growth"], true)
 }
 
 func (a *CounterAnalyzer) shouldTrackFall() bool {
-	if val, ok := a.config.CustomSettings["track_fall"].(bool); ok {
-		return val
-	}
-	return true
+	return SafeGetBool(a.config.CustomSettings["track_fall"], true)
 }
 
-func (a *CounterAnalyzer) getCurrentPeriod() types.CounterPeriod {
-	if val, ok := a.config.CustomSettings["analysis_period"].(string); ok {
-		return types.CounterPeriod(val)
-	}
-	return types.Period15Min
+func (a *CounterAnalyzer) shouldNotifyOnSignal() bool {
+	return SafeGetBool(a.config.CustomSettings["notify_on_signal"], true)
 }
 
-func (a *CounterAnalyzer) getPeriodMinutes() float64 {
-	switch a.getCurrentPeriod() {
-	case types.Period5Min:
-		return 5
-	case types.Period15Min:
-		return 15
-	case types.Period30Min:
-		return 30
-	case types.Period1Hour:
-		return 60
-	case types.Period4Hours:
-		return 240
-	case types.Period1Day:
-		return 1440
-	default:
-		return 15
-	}
+func (a *CounterAnalyzer) getCurrentPeriod() CounterPeriod {
+	periodStr := SafeGetString(a.config.CustomSettings["analysis_period"], "15m")
+	return CounterPeriod(periodStr)
 }
 
-func (a *CounterAnalyzer) getPeriodDuration(period types.CounterPeriod) time.Duration {
-	switch period {
-	case types.Period5Min:
-		return 5 * time.Minute
-	case types.Period15Min:
-		return 15 * time.Minute
-	case types.Period30Min:
-		return 30 * time.Minute
-	case types.Period1Hour:
-		return time.Hour
-	case types.Period4Hours:
-		return 4 * time.Hour
-	case types.Period1Day:
-		return 24 * time.Hour
-	default:
-		return 15 * time.Minute
-	}
+func (a *CounterAnalyzer) getChartProvider() string {
+	return SafeGetString(a.config.CustomSettings["chart_provider"], "coinglass")
 }
 
-func (a *CounterAnalyzer) getMaxSignalsForPeriod(period types.CounterPeriod) int {
-	// Создаем ключ для поиска в настройках
-	key := ""
-	switch period {
-	case types.Period5Min:
-		key = "max_signals_5m"
-	case types.Period15Min:
-		key = "max_signals_15m"
-	case types.Period30Min:
-		key = "max_signals_30m"
-	case types.Period1Hour:
-		key = "max_signals_1h"
-	case types.Period4Hours:
-		key = "max_signals_4h"
-	case types.Period1Day:
-		key = "max_signals_1d"
-	default:
-		key = "max_signals_15m"
-	}
-
-	// Пробуем получить из настроек
-	if maxSignals, ok := a.config.CustomSettings[key]; ok {
-		if intVal, ok := maxSignals.(int); ok {
-			return intVal
-		}
-		if floatVal, ok := maxSignals.(float64); ok {
-			return int(floatVal)
-		}
-	}
-
-	// Значения по умолчанию
-	switch period {
-	case types.Period5Min:
-		return 5
-	case types.Period15Min:
-		return 8
-	case types.Period30Min:
-		return 10
-	case types.Period1Hour:
-		return 12
-	case types.Period4Hours:
-		return 15
-	case types.Period1Day:
-		return 20
-	default:
-		return 8
-	}
-}
-
-func (a *CounterAnalyzer) calculateConfidence(count int) float64 {
-	maxSignals := a.getMaxSignalsForPeriod(a.getCurrentPeriod())
+func (a *CounterAnalyzer) calculateConfidence(count, maxSignals int) float64 {
 	if maxSignals == 0 {
 		return 0.0
 	}
@@ -481,9 +484,9 @@ func (a *CounterAnalyzer) SetChartProvider(provider string) {
 	a.chartProvider = provider
 }
 
-// SetAnalysisPeriod устанавливает период анализа
-func (a *CounterAnalyzer) SetAnalysisPeriod(period types.CounterPeriod) {
-	// Создаем новую мапу настроек
+// SetAnalysisPeriod устанавливает период анализа (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) SetAnalysisPeriod(period CounterPeriod) {
+	// Обновляем настройки
 	newSettings := make(map[string]interface{})
 	for k, v := range a.config.CustomSettings {
 		newSettings[k] = v
@@ -492,67 +495,97 @@ func (a *CounterAnalyzer) SetAnalysisPeriod(period types.CounterPeriod) {
 	a.config.CustomSettings = newSettings
 
 	// Сбрасываем все счетчики при смене периода
-	a.resetAllCounters()
+	a.resetAllCountersForPeriod(period)
 }
 
-// resetAllCounters сбрасывает все счетчики
-func (a *CounterAnalyzer) resetAllCounters() {
+// resetAllCountersForPeriod сбрасывает все счетчики для нового периода (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) resetAllCountersForPeriod(newPeriod CounterPeriod) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	for _, counter := range a.counters {
 		counter.Lock()
+		counter.BasePeriodCount = 0
+		counter.SignalCount = 0
 		counter.GrowthCount = 0
 		counter.FallCount = 0
 		counter.PeriodStartTime = time.Now()
-		counter.Period = a.getCurrentPeriod()
+		counter.PeriodEndTime = time.Now().Add(newPeriod.GetDuration())
+		counter.SelectedPeriod = newPeriod
+		counter.Settings.SelectedPeriod = newPeriod
 		counter.Unlock()
 	}
+
+	log.Printf("🔄 Все счетчики сброшены для нового периода: %s", newPeriod)
 }
 
-// GetCounterStats возвращает статистику счетчика для символа (ИСПРАВЛЕННАЯ)
-func (a *CounterAnalyzer) GetCounterStats(symbol string) (types.SignalCounter, bool) {
+// SetTrackingOptions устанавливает опции отслеживания (НОВЫЙ МЕТОД)
+func (a *CounterAnalyzer) SetTrackingOptions(symbol string, trackGrowth, trackFall bool) error {
 	a.mu.RLock()
 	counter, exists := a.counters[symbol]
 	a.mu.RUnlock()
 
 	if !exists {
-		return types.SignalCounter{}, false
+		return fmt.Errorf("counter for symbol %s not found", symbol)
+	}
+
+	counter.Lock()
+	counter.Settings.TrackGrowth = trackGrowth
+	counter.Settings.TrackFall = trackFall
+	counter.Unlock()
+
+	return nil
+}
+
+// GetCounterStats возвращает статистику счетчика для символа (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) GetCounterStats(symbol string) (SignalCounter, bool) {
+	a.mu.RLock()
+	counter, exists := a.counters[symbol]
+	a.mu.RUnlock()
+
+	if !exists {
+		return SignalCounter{}, false
 	}
 
 	counter.RLock()
 	defer counter.RUnlock()
 
 	// Возвращаем копию данных без мьютекса
-	return types.SignalCounter{
+	return SignalCounter{
 		Symbol:          counter.Symbol,
+		SelectedPeriod:  counter.SelectedPeriod,
+		BasePeriodCount: counter.BasePeriodCount,
+		SignalCount:     counter.SignalCount,
 		GrowthCount:     counter.GrowthCount,
 		FallCount:       counter.FallCount,
-		Period:          counter.Period,
 		PeriodStartTime: counter.PeriodStartTime,
-		LastGrowthTime:  counter.LastGrowthTime,
-		LastFallTime:    counter.LastFallTime,
+		PeriodEndTime:   counter.PeriodEndTime,
+		LastSignalTime:  counter.LastSignalTime,
+		Settings:        counter.Settings,
 	}, true
 }
 
-// GetAllCounters возвращает все счетчики (ИСПРАВЛЕННАЯ)
-func (a *CounterAnalyzer) GetAllCounters() map[string]types.SignalCounter {
+// GetAllCounters возвращает все счетчики (ОБНОВЛЕННЫЙ)
+func (a *CounterAnalyzer) GetAllCounters() map[string]SignalCounter {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	result := make(map[string]types.SignalCounter)
+	result := make(map[string]SignalCounter)
 	for symbol, counter := range a.counters {
 		counter.RLock()
 
 		// Создаем копию без мьютекса
-		result[symbol] = types.SignalCounter{
+		result[symbol] = SignalCounter{
 			Symbol:          counter.Symbol,
+			SelectedPeriod:  counter.SelectedPeriod,
+			BasePeriodCount: counter.BasePeriodCount,
+			SignalCount:     counter.SignalCount,
 			GrowthCount:     counter.GrowthCount,
 			FallCount:       counter.FallCount,
-			Period:          counter.Period,
 			PeriodStartTime: counter.PeriodStartTime,
-			LastGrowthTime:  counter.LastGrowthTime,
-			LastFallTime:    counter.LastFallTime,
+			PeriodEndTime:   counter.PeriodEndTime,
+			LastSignalTime:  counter.LastSignalTime,
+			Settings:        counter.Settings,
 		}
 
 		counter.RUnlock()
@@ -590,26 +623,141 @@ func (a *CounterAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-// DefaultCounterConfig - конфигурация по умолчанию
+// DefaultCounterConfig - конфигурация по умолчанию (ОБНОВЛЕННАЯ)
 var DefaultCounterConfig = AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.7,
 	MinConfidence: 10.0,
 	MinDataPoints: 2,
 	CustomSettings: map[string]interface{}{
-		"base_period_minutes":    1,
-		"analysis_period":        "15m",
-		"growth_threshold":       0.1,
-		"fall_threshold":         0.1,
-		"track_growth":           true,
-		"track_fall":             true,
-		"notification_threshold": 1,
-		"max_signals_5m":         5,
-		"max_signals_15m":        8,
-		"max_signals_30m":        10,
-		"max_signals_1h":         12,
-		"max_signals_4h":         15,
-		"max_signals_1d":         20,
-		"chart_provider":         "coinglass",
+		"base_period_minutes":    1,           // Базовый период 1 минута
+		"analysis_period":        "15m",       // По умолчанию 15 минут
+		"growth_threshold":       0.1,         // Порог роста 0.1%
+		"fall_threshold":         0.1,         // Порог падения 0.1%
+		"track_growth":           true,        // Отслеживать рост
+		"track_fall":             true,        // Отслеживать падение
+		"notify_on_signal":       true,        // Уведомлять при каждом сигнале
+		"notification_threshold": 1,           // Уведомлять на каждый сигнал
+		"chart_provider":         "coinglass", // Основная система - coinglass
 	},
+}
+
+// Вспомогательные методы для новых типов (добавить в types.go)
+
+// ToString возвращает строковое представление периода
+func (cp CounterPeriod) ToString() string {
+	switch cp {
+	case Period5Min:
+		return "5 минут"
+	case Period15Min:
+		return "15 минут"
+	case Period30Min:
+		return "30 минут"
+	case Period1Hour:
+		return "1 час"
+	case Period4Hours:
+		return "4 часа"
+	case Period1Day:
+		return "1 день"
+	default:
+		return "15 минут"
+	}
+}
+
+// ============== МЕТОДЫ ДЛЯ СЧЕТЧИКА ==============
+
+// GetMinutes возвращает количество минут для периода
+func (cp CounterPeriod) GetMinutes() int {
+	switch cp {
+	case Period5Min:
+		return 5
+	case Period15Min:
+		return 15
+	case Period30Min:
+		return 30
+	case Period1Hour:
+		return 60
+	case Period4Hours:
+		return 240
+	case Period1Day:
+		return 1440
+	default:
+		return 15 // По умолчанию 15 минут
+	}
+}
+
+// GetDuration возвращает длительность периода как time.Duration
+func (cp CounterPeriod) GetDuration() time.Duration {
+	return time.Duration(cp.GetMinutes()) * time.Minute
+}
+
+// GetMaxSignals возвращает максимальное количество сигналов для периода
+func (cp CounterPeriod) GetMaxSignals(basePeriodMinutes int) int {
+	if basePeriodMinutes <= 0 {
+		basePeriodMinutes = 1 // По умолчанию 1 минута
+	}
+
+	// Выбранный период / базовый период = максимальное количество сигналов
+	maxSignals := cp.GetMinutes() / basePeriodMinutes
+
+	// Ограничиваем 5-15 сигналами согласно требованиям
+	if maxSignals < 5 {
+		return 5
+	}
+	if maxSignals > 15 {
+		return 15
+	}
+	return maxSignals
+}
+
+// StringToPeriod конвертирует строку в CounterPeriod
+func StringToPeriod(periodStr string) CounterPeriod {
+	switch periodStr {
+	case "5m", "5":
+		return Period5Min
+	case "15m", "15":
+		return Period15Min
+	case "30m", "30":
+		return Period30Min
+	case "1h", "60":
+		return Period1Hour
+	case "4h", "240":
+		return Period4Hours
+	case "1d", "1440":
+		return Period1Day
+	default:
+		return Period15Min
+	}
+}
+
+// GetChartProvider возвращает провайдера графиков для типа сигнала
+func (cst CounterSignalType) GetChartProvider() string {
+	// В реальной реализации можно получить из настроек
+	// Пока возвращаем пустую строку, будет использоваться дефолтный
+	return ""
+}
+
+// Lock блокирует счетчик для записи
+func (c *internalCounter) Lock() {
+	c.mu.Lock()
+}
+
+// Unlock разблокирует счетчик для записи
+func (c *internalCounter) Unlock() {
+	c.mu.Unlock()
+}
+
+// RLock блокирует счетчик для чтения
+func (c *internalCounter) RLock() {
+	c.mu.RLock()
+}
+
+// RUnlock разблокирует счетчика для чтения
+func (c *internalCounter) RUnlock() {
+	c.mu.RUnlock()
+}
+
+// getPeriodDuration возвращает длительность периода
+func (a *CounterAnalyzer) getPeriodDuration(period CounterPeriod) time.Duration {
+	return period.GetDuration()
 }

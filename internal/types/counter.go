@@ -1,3 +1,4 @@
+// internal/types/counter.go
 package types
 
 import (
@@ -25,15 +26,6 @@ const (
 
 // CounterPeriod - период для подсчета сигналов
 type CounterPeriod string
-
-const (
-	Period5Min   CounterPeriod = "5m"
-	Period15Min  CounterPeriod = "15m"
-	Period30Min  CounterPeriod = "30m"
-	Period1Hour  CounterPeriod = "1h"
-	Period4Hours CounterPeriod = "4h"
-	Period1Day   CounterPeriod = "1d"
-)
 
 // CounterConfig - конфигурация счетчика
 type CounterConfig struct {
