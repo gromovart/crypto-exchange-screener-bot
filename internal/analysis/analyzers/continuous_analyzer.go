@@ -1,25 +1,26 @@
 package analyzers
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
 
 // ContinuousAnalyzer - анализатор непрерывности
 type ContinuousAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config analysis.AnalyzerConfig
+	stats  analysis.AnalyzerStats
 	mu     sync.RWMutex
 }
 
 type SequenceInfo struct {
 	StartIdx  int
 	Length    int
-	Direction string
+	Direction analysis.TrendDirection
 	AvgGap    float64
 	AvgChange float64
 }
@@ -36,7 +37,7 @@ func (a *ContinuousAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *ContinuousAnalyzer) Analyze(data []common.PriceData, config analysis.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	minPoints := a.getMinContinuousPoints()
@@ -71,13 +72,12 @@ func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config AnalyzerConf
 }
 
 // checkContinuousGrowth ищет непрерывные последовательности роста
-func (a *ContinuousAnalyzer) checkContinuousGrowth(data []types.PriceData, minPoints int) []analysis.Signal {
+func (a *ContinuousAnalyzer) checkContinuousGrowth(data []common.PriceData, minPoints int) []analysis.Signal {
 	var signals []analysis.Signal
 	symbol := data[0].Symbol
 
 	for i := 0; i <= len(data)-minPoints; i++ {
 		continuous := true
-		totalChange := 0.0
 		startPrice := data[i].Price
 
 		// Проверяем minPoints подряд
@@ -92,14 +92,22 @@ func (a *ContinuousAnalyzer) checkContinuousGrowth(data []types.PriceData, minPo
 				continuous = false
 				break
 			}
-			totalChange += change
 		}
 
 		if continuous {
 			endPrice := data[i+minPoints-1].Price
 			totalChangePercent := ((endPrice - startPrice) / startPrice) * 100
 
-			signal := a.createSignal(symbol, "up", totalChangePercent, minPoints, i, i+minPoints-1)
+			signal := a.createSignal(
+				symbol,
+				analysis.TrendBullish,
+				totalChangePercent,
+				minPoints,
+				i,
+				i+minPoints-1,
+				startPrice,
+				endPrice,
+			)
 			signals = append(signals, signal)
 		}
 	}
@@ -108,13 +116,12 @@ func (a *ContinuousAnalyzer) checkContinuousGrowth(data []types.PriceData, minPo
 }
 
 // checkContinuousFall ищет непрерывные последовательности падения
-func (a *ContinuousAnalyzer) checkContinuousFall(data []types.PriceData, minPoints int) []analysis.Signal {
+func (a *ContinuousAnalyzer) checkContinuousFall(data []common.PriceData, minPoints int) []analysis.Signal {
 	var signals []analysis.Signal
 	symbol := data[0].Symbol
 
 	for i := 0; i <= len(data)-minPoints; i++ {
 		continuous := true
-		totalChange := 0.0
 		startPrice := data[i].Price
 
 		// Проверяем minPoints подряд
@@ -129,14 +136,22 @@ func (a *ContinuousAnalyzer) checkContinuousFall(data []types.PriceData, minPoin
 				continuous = false
 				break
 			}
-			totalChange += change
 		}
 
 		if continuous {
 			endPrice := data[i+minPoints-1].Price
 			totalChangePercent := ((endPrice - startPrice) / startPrice) * 100
 
-			signal := a.createSignal(symbol, "down", totalChangePercent, minPoints, i, i+minPoints-1)
+			signal := a.createSignal(
+				symbol,
+				analysis.TrendBearish,
+				totalChangePercent,
+				minPoints,
+				i,
+				i+minPoints-1,
+				startPrice,
+				endPrice,
+			)
 			signals = append(signals, signal)
 		}
 	}
@@ -145,25 +160,40 @@ func (a *ContinuousAnalyzer) checkContinuousFall(data []types.PriceData, minPoin
 }
 
 // createSignal создает сигнал непрерывного движения
-func (a *ContinuousAnalyzer) createSignal(symbol, direction string, change float64, points, startIdx, endIdx int) analysis.Signal {
+func (a *ContinuousAnalyzer) createSignal(
+	symbol common.Symbol,
+	direction analysis.TrendDirection,
+	change float64,
+	points, startIdx, endIdx int,
+	startPrice, endPrice float64,
+) analysis.Signal {
 	confidence := a.calculateConfidence(points, math.Abs(change))
 
-	startPrice := 0.0
-	endPrice := 0.0
+	// Определяем тип сигнала
+	var signalType analysis.SignalType
+	switch direction {
+	case analysis.TrendBullish:
+		signalType = analysis.SignalTypeContinuous
+	case analysis.TrendBearish:
+		signalType = analysis.SignalTypeContinuous
+	default:
+		signalType = analysis.SignalTypeContinuous
+	}
 
 	return analysis.Signal{
 		Symbol:        symbol,
-		Type:          "continuous_" + direction,
+		Type:          signalType,
 		Direction:     direction,
 		ChangePercent: change,
 		Confidence:    confidence,
+		Strength:      confidence / 100.0, // Преобразуем из 0-100 в 0-1
 		DataPoints:    points,
 		StartPrice:    startPrice,
 		EndPrice:      endPrice,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
+		Metadata: analysis.SignalMetadata{
 			Strategy:       "continuous_analyzer",
-			Tags:           []string{"continuous", direction, fmt.Sprintf("points_%d", points)},
+			Tags:           []string{"continuous", string(direction), fmt.Sprintf("points_%d", points)},
 			IsContinuous:   true,
 			ContinuousFrom: startIdx,
 			ContinuousTo:   endIdx,
@@ -177,7 +207,7 @@ func (a *ContinuousAnalyzer) createSignal(symbol, direction string, change float
 }
 
 // createSequenceSignal создает сигнал на основе найденной последовательности
-func (a *ContinuousAnalyzer) createSequenceSignal(data []types.PriceData, sequence SequenceInfo) analysis.Signal {
+func (a *ContinuousAnalyzer) createSequenceSignal(data []common.PriceData, sequence SequenceInfo) analysis.Signal {
 	symbol := data[0].Symbol
 	startIdx := sequence.StartIdx
 	endIdx := sequence.StartIdx + sequence.Length - 1
@@ -190,17 +220,18 @@ func (a *ContinuousAnalyzer) createSequenceSignal(data []types.PriceData, sequen
 
 	return analysis.Signal{
 		Symbol:        symbol,
-		Type:          "continuous_trend",
+		Type:          analysis.SignalTypeContinuous,
 		Direction:     sequence.Direction,
 		ChangePercent: change,
 		Confidence:    confidence,
+		Strength:      confidence / 100.0, // Преобразуем из 0-100 в 0-1
 		DataPoints:    sequence.Length,
 		StartPrice:    startPrice,
 		EndPrice:      endPrice,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
+		Metadata: analysis.SignalMetadata{
 			Strategy:       "continuous_analyzer",
-			Tags:           []string{"continuous", "trend", sequence.Direction},
+			Tags:           []string{"continuous", "trend", string(sequence.Direction)},
 			IsContinuous:   true,
 			ContinuousFrom: startIdx,
 			ContinuousTo:   endIdx,
@@ -252,7 +283,7 @@ func (a *ContinuousAnalyzer) calculateConfidence(points int, absoluteChange floa
 }
 
 // findBestSequence находит лучшую непрерывную последовательность
-func (a *ContinuousAnalyzer) findBestSequence(data []types.PriceData) SequenceInfo {
+func (a *ContinuousAnalyzer) findBestSequence(data []common.PriceData) SequenceInfo {
 	if len(data) < 2 {
 		return SequenceInfo{}
 	}
@@ -261,7 +292,7 @@ func (a *ContinuousAnalyzer) findBestSequence(data []types.PriceData) SequenceIn
 	current := SequenceInfo{
 		StartIdx:  0,
 		Length:    1,
-		Direction: "neutral",
+		Direction: analysis.TrendSideways,
 	}
 
 	for i := 1; i < len(data); i++ {
@@ -269,16 +300,18 @@ func (a *ContinuousAnalyzer) findBestSequence(data []types.PriceData) SequenceIn
 		currPrice := data[i].Price
 
 		// Определяем направление изменения
-		direction := "neutral"
+		var direction analysis.TrendDirection
 		if currPrice > prevPrice {
-			direction = "up"
+			direction = analysis.TrendBullish
 		} else if currPrice < prevPrice {
-			direction = "down"
+			direction = analysis.TrendBearish
+		} else {
+			direction = analysis.TrendSideways
 		}
 
 		// Если направление совпадает или мы только начинаем
-		if current.Length == 1 || current.Direction == direction || direction == "neutral" {
-			if current.Direction == "neutral" && direction != "neutral" {
+		if current.Length == 1 || current.Direction == direction || direction == analysis.TrendSideways {
+			if current.Direction == analysis.TrendSideways && direction != analysis.TrendSideways {
 				current.Direction = direction
 			}
 			current.Length++
@@ -318,6 +351,18 @@ func (a *ContinuousAnalyzer) findBestSequence(data []types.PriceData) SequenceIn
 	return best
 }
 
+// getTrendDirection преобразует строку в TrendDirection
+func getTrendDirection(dir string) analysis.TrendDirection {
+	switch strings.ToLower(dir) {
+	case "up", "growth", "bullish":
+		return analysis.TrendBullish
+	case "down", "fall", "bearish":
+		return analysis.TrendBearish
+	default:
+		return analysis.TrendSideways
+	}
+}
+
 // Вспомогательные методы
 
 func (a *ContinuousAnalyzer) calculateGap(prev, curr float64) float64 {
@@ -327,23 +372,23 @@ func (a *ContinuousAnalyzer) calculateGap(prev, curr float64) float64 {
 	return math.Abs((curr - prev) / prev)
 }
 
-func (a *ContinuousAnalyzer) determineDirection(data []types.PriceData) string {
+func (a *ContinuousAnalyzer) determineDirection(data []common.PriceData) analysis.TrendDirection {
 	if len(data) < 2 {
-		return "neutral"
+		return analysis.TrendSideways
 	}
 
 	startPrice := data[0].Price
 	endPrice := data[len(data)-1].Price
 
 	if endPrice > startPrice {
-		return "up"
+		return analysis.TrendBullish
 	} else if endPrice < startPrice {
-		return "down"
+		return analysis.TrendBearish
 	}
-	return "neutral"
+	return analysis.TrendSideways
 }
 
-func (a *ContinuousAnalyzer) calculateChange(data []types.PriceData) float64 {
+func (a *ContinuousAnalyzer) calculateChange(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}
@@ -379,20 +424,20 @@ func (a *ContinuousAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-func (a *ContinuousAnalyzer) GetConfig() AnalyzerConfig {
+func (a *ContinuousAnalyzer) GetConfig() analysis.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
-func (a *ContinuousAnalyzer) GetStats() AnalyzerStats {
+func (a *ContinuousAnalyzer) GetStats() analysis.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
 }
 
 // DefaultContinuousConfig - конфигурация по умолчанию
-var DefaultContinuousConfig = AnalyzerConfig{
+var DefaultContinuousConfig = analysis.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.8,
 	MinConfidence: 60.0,

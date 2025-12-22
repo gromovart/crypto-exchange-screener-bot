@@ -1,8 +1,8 @@
 package fetcher
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types"
 	"strings"
 	"time"
 )

@@ -1,9 +1,10 @@
 // internal/analysis/analyzers/volume_analyzer.go (исправленная версия)
+// internal/analysis/analyzers/volume_analyzer.go (исправленная версия)
 package analyzers
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"fmt"
 	"math"
 	"sync"
@@ -12,8 +13,8 @@ import (
 
 // VolumeAnalyzer - анализатор объема
 type VolumeAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config analysis.AnalyzerConfig
+	stats  analysis.AnalyzerStats
 	mu     sync.RWMutex
 }
 
@@ -29,7 +30,7 @@ func (a *VolumeAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *VolumeAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *VolumeAnalyzer) Analyze(data []common.PriceData, config analysis.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	if len(data) < config.MinDataPoints {
@@ -58,7 +59,7 @@ func (a *VolumeAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) 
 	return signals, nil
 }
 
-func (a *VolumeAnalyzer) checkAverageVolume(data []types.PriceData) *analysis.Signal {
+func (a *VolumeAnalyzer) checkAverageVolume(data []common.PriceData) *analysis.Signal {
 	var totalVolume float64
 	validPoints := 0
 
@@ -88,17 +89,19 @@ func (a *VolumeAnalyzer) checkAverageVolume(data []types.PriceData) *analysis.Si
 
 	return &analysis.Signal{
 		Symbol:        data[0].Symbol,
-		Type:          "high_volume",
-		Direction:     "neutral",
+		Type:          analysis.SignalTypeVolume, // Преобразуем string в SignalType
+		Direction:     analysis.TrendSideways,    // Преобразуем string в TrendDirection
 		ChangePercent: 0,
 		Confidence:    confidence,
+		Strength:      confidence / 100.0, // Добавляем Strength
 		DataPoints:    validPoints,
 		StartPrice:    data[0].Price,
 		EndPrice:      data[len(data)-1].Price,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
-			Strategy: "average_volume",
-			Tags:     []string{"volume", "liquidity", "high_volume"},
+		Metadata: analysis.SignalMetadata{
+			Strategy:     "average_volume",
+			Tags:         []string{"volume", "liquidity", "high_volume"},
+			IsContinuous: false,
 			Indicators: map[string]float64{
 				"avg_volume":   avgVolume,
 				"min_volume":   minVolume,
@@ -108,7 +111,7 @@ func (a *VolumeAnalyzer) checkAverageVolume(data []types.PriceData) *analysis.Si
 	}
 }
 
-func (a *VolumeAnalyzer) checkVolumeSpike(data []types.PriceData) *analysis.Signal {
+func (a *VolumeAnalyzer) checkVolumeSpike(data []common.PriceData) *analysis.Signal {
 	if len(data) < 2 {
 		return nil
 	}
@@ -147,17 +150,19 @@ func (a *VolumeAnalyzer) checkVolumeSpike(data []types.PriceData) *analysis.Sign
 
 		return &analysis.Signal{
 			Symbol:        data[0].Symbol,
-			Type:          "volume_spike",
-			Direction:     "neutral",
+			Type:          analysis.SignalType("volume_spike"), // Создаем новый SignalType
+			Direction:     analysis.TrendSideways,
 			ChangePercent: 0,
 			Confidence:    confidence,
+			Strength:      confidence / 100.0,
 			DataPoints:    len(data),
 			StartPrice:    data[0].Price,
 			EndPrice:      data[len(data)-1].Price,
 			Timestamp:     time.Now(),
-			Metadata: analysis.Metadata{
-				Strategy: "volume_spike_detection",
-				Tags:     []string{"volume", "spike", "unusual"},
+			Metadata: analysis.SignalMetadata{
+				Strategy:     "volume_spike_detection",
+				Tags:         []string{"volume", "spike", "unusual"},
+				IsContinuous: false,
 				Indicators: map[string]float64{
 					"spike_volume":   maxVolume,
 					"avg_volume":     avgWithoutMax,
@@ -194,7 +199,7 @@ func (a *VolumeAnalyzer) getMinVolume() float64 {
 	return 100000.0 // значение по умолчанию
 }
 
-func (a *VolumeAnalyzer) checkVolumePriceConfirmation(data []types.PriceData) *analysis.Signal {
+func (a *VolumeAnalyzer) checkVolumePriceConfirmation(data []common.PriceData) *analysis.Signal {
 	if len(data) < 2 {
 		return nil
 	}
@@ -216,30 +221,31 @@ func (a *VolumeAnalyzer) checkVolumePriceConfirmation(data []types.PriceData) *a
 		return nil
 	}
 
-	var signalType, direction string
+	var signalType analysis.SignalType
+	var direction analysis.TrendDirection
 	var confidence float64
 
 	if priceChange > 0 && volumeChange > 0 {
 		// Рост цены + рост объема = сильный бычий сигнал
-		signalType = "volume_confirmation"
-		direction = "up"
+		signalType = analysis.SignalType("volume_confirmation")
+		direction = analysis.TrendBullish
 		confirmationStrength := math.Min(priceChange, volumeChange) / 2
 		confidence = 50 + math.Min(confirmationStrength, 40) // 50-90%
 	} else if priceChange < 0 && volumeChange > 0 {
 		// Падение цены + рост объема = сильный медвежий сигнал
-		signalType = "volume_confirmation"
-		direction = "down"
+		signalType = analysis.SignalType("volume_confirmation")
+		direction = analysis.TrendBearish
 		confirmationStrength := math.Min(math.Abs(priceChange), volumeChange) / 2
 		confidence = 50 + math.Min(confirmationStrength, 40)
 	} else if priceChange > 0 && volumeChange < -20 {
 		// Рост цены + падение объема = бычья дивергенция (слабый сигнал)
-		signalType = "volume_divergence"
-		direction = "up"
+		signalType = analysis.SignalType("volume_divergence")
+		direction = analysis.TrendBullish
 		confidence = 30
 	} else if priceChange < 0 && volumeChange < -20 {
 		// Падение цены + падение объема = медвежья дивергенция (слабый сигнал)
-		signalType = "volume_divergence"
-		direction = "down"
+		signalType = analysis.SignalType("volume_divergence")
+		direction = analysis.TrendBearish
 		confidence = 30
 	} else {
 		// Нет значимой корреляции
@@ -256,13 +262,15 @@ func (a *VolumeAnalyzer) checkVolumePriceConfirmation(data []types.PriceData) *a
 		Direction:     direction,
 		ChangePercent: priceChange,
 		Confidence:    confidence,
+		Strength:      confidence / 100.0,
 		DataPoints:    len(data),
 		StartPrice:    data[0].Price,
 		EndPrice:      data[len(data)-1].Price,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
-			Strategy: "volume_price_analysis",
-			Tags:     []string{"volume", "confirmation", "divergence"},
+		Metadata: analysis.SignalMetadata{
+			Strategy:     "volume_price_analysis",
+			Tags:         []string{"volume", "confirmation", "divergence"},
+			IsContinuous: false,
 			Indicators: map[string]float64{
 				"price_change":  priceChange,
 				"volume_change": volumeChange,
@@ -272,7 +280,7 @@ func (a *VolumeAnalyzer) checkVolumePriceConfirmation(data []types.PriceData) *a
 	}
 }
 
-func (a *VolumeAnalyzer) calculateVolumePriceCorrelation(data []types.PriceData) float64 {
+func (a *VolumeAnalyzer) calculateVolumePriceCorrelation(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}
@@ -307,13 +315,13 @@ func (a *VolumeAnalyzer) calculateVolumePriceCorrelation(data []types.PriceData)
 	return correlation
 }
 
-func (a *VolumeAnalyzer) GetConfig() AnalyzerConfig {
+func (a *VolumeAnalyzer) GetConfig() analysis.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
-func (a *VolumeAnalyzer) GetStats() AnalyzerStats {
+func (a *VolumeAnalyzer) GetStats() analysis.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
@@ -340,7 +348,7 @@ func (a *VolumeAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-var DefaultVolumeConfig = AnalyzerConfig{
+var DefaultVolumeConfig = analysis.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.5,
 	MinConfidence: 30.0,

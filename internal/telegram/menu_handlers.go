@@ -2,7 +2,8 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/telegram"
 	"fmt"
 	"strings"
 	"time"
@@ -280,8 +281,8 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
 	message := "Выберите символ для сброса счетчика:"
 
-	keyboard := &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "BTCUSDT", CallbackData: "reset_btc"},
 				{Text: "ETHUSDT", CallbackData: "reset_eth"},

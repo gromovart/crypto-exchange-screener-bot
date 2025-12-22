@@ -1,8 +1,8 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"log"
 	"os"
 	"strings"
@@ -74,7 +74,7 @@ func getEnv(key, defaultValue string) string {
 }
 
 // SendMonitoringNotification отправляет уведомление только в чаты мониторинга
-func (mcb *MultiChatBot) SendMonitoringNotification(signal types.GrowthSignal) error {
+func (mcb *MultiChatBot) SendMonitoringNotification(signal analysis.GrowthSignal) error {
 	if mcb.bot == nil || !mcb.config.TelegramEnabled {
 		return nil
 	}

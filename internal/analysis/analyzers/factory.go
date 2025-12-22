@@ -1,13 +1,16 @@
 // internal/analysis/analyzers/factory.go
 package analyzers
 
-import "time"
+import (
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"time"
+)
 
 // NewGrowthAnalyzer создает анализатор роста
-func NewGrowthAnalyzer(config AnalyzerConfig) *GrowthAnalyzer {
+func NewGrowthAnalyzer(config analysis.AnalyzerConfig) *GrowthAnalyzer {
 	return &GrowthAnalyzer{
 		config: config,
-		stats: AnalyzerStats{
+		stats: analysis.AnalyzerStats{
 			TotalCalls:   0,
 			TotalTime:    0,
 			SuccessCount: 0,
@@ -19,10 +22,10 @@ func NewGrowthAnalyzer(config AnalyzerConfig) *GrowthAnalyzer {
 }
 
 // NewFallAnalyzer создает анализатор падения
-func NewFallAnalyzer(config AnalyzerConfig) *FallAnalyzer {
+func NewFallAnalyzer(config analysis.AnalyzerConfig) *FallAnalyzer {
 	return &FallAnalyzer{
 		config: config,
-		stats: AnalyzerStats{
+		stats: analysis.AnalyzerStats{
 			TotalCalls:   0,
 			TotalTime:    0,
 			SuccessCount: 0,
@@ -34,10 +37,10 @@ func NewFallAnalyzer(config AnalyzerConfig) *FallAnalyzer {
 }
 
 // NewVolumeAnalyzer создает анализатор объема
-func NewVolumeAnalyzer(config AnalyzerConfig) *VolumeAnalyzer {
+func NewVolumeAnalyzer(config analysis.AnalyzerConfig) *VolumeAnalyzer {
 	return &VolumeAnalyzer{
 		config: config,
-		stats: AnalyzerStats{
+		stats: analysis.AnalyzerStats{
 			TotalCalls:   0,
 			TotalTime:    0,
 			SuccessCount: 0,
@@ -49,7 +52,7 @@ func NewVolumeAnalyzer(config AnalyzerConfig) *VolumeAnalyzer {
 }
 
 // NewContinuousAnalyzer создает анализатор непрерывности
-func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
+func NewContinuousAnalyzer(config analysis.AnalyzerConfig) *ContinuousAnalyzer {
 	// Гарантируем наличие необходимых настроек
 	if config.CustomSettings == nil {
 		config.CustomSettings = make(map[string]interface{})
@@ -69,6 +72,6 @@ func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
 
 	return &ContinuousAnalyzer{
 		config: config,
-		stats:  AnalyzerStats{},
+		stats:  analysis.AnalyzerStats{},
 	}
 }

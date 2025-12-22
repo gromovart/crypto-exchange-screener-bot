@@ -2,12 +2,11 @@
 package fetcher
 
 import (
-	"crypto-exchange-screener-bot/internal/api"
-	"crypto-exchange-screener-bot/internal/api/binance"
-	"crypto-exchange-screener-bot/internal/api/bybit"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/events"
+	"crypto_exchange_screener_bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/types/api/binance"
+	"crypto_exchange_screener_bot/internal/types/api/bybit"
 )
 
 // Factory - фабрика для создания PriceFetcher
@@ -15,7 +14,7 @@ type Factory struct{}
 
 // NewPriceFetcherFromConfig создает PriceFetcher из конфигурации
 func (f *Factory) NewPriceFetcherFromConfig(
-	apiClient api.ExchangeClient,
+	apiClient bybit.ExchangeClient,
 	storage storage.PriceStorage,
 	eventBus *events.EventBus,
 	cfg *config.Config,

@@ -1,10 +1,10 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/manager"
-	"crypto-exchange-screener-bot/internal/types"
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/manager"
+	"crypto_exchange_screener_bot/internal/types"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"fmt"
 	"log"
 	"math"

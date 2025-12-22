@@ -1,5 +1,39 @@
-// internal/api/bybit/types.go
-package bybit
+// internal/types/api/bybit.go
+package api
+
+import (
+	"crypto_exchange_screener_bot/internal/types/common"
+	"time"
+)
+
+// BybitCandle - свеча от Bybit
+type BybitCandle struct {
+	Open      float64          `json:"open"`
+	High      float64          `json:"high"`
+	Low       float64          `json:"low"`
+	Close     float64          `json:"close"`
+	Volume    float64          `json:"volume"`
+	Timestamp time.Time        `json:"timestamp"`
+	Symbol    common.Symbol    `json:"symbol"`
+	Interval  common.Timeframe `json:"interval"`
+}
+
+// BybitTicker - тикер от Bybit
+type BybitTicker struct {
+	Symbol                common.Symbol `json:"symbol"`
+	LastPrice             string        `json:"last_price"`
+	Price24hPercentChange string        `json:"price_24h_percent_change"`
+	Volume24h             string        `json:"volume_24h"`
+	Turnover24h           string        `json:"turnover_24h"`
+}
+
+// BybitResponse - ответ от Bybit API
+type BybitResponse struct {
+	RetCode int         `json:"ret_code"`
+	RetMsg  string      `json:"ret_msg"`
+	Result  interface{} `json:"result"`
+	Time    int64       `json:"time"`
+}
 
 const (
 	CategorySpot    = "spot"
@@ -95,31 +129,19 @@ type TickerResponse struct {
 	RetCode int    `json:"retCode"`
 	RetMsg  string `json:"retMsg"`
 	Result  struct {
-		Category string `json:"category"`
-		List     []struct {
-			Symbol       string `json:"symbol"`
-			LastPrice    string `json:"lastPrice"`
-			Price24hPcnt string `json:"price24hPcnt"`
-			Volume24h    string `json:"volume24h"`
-			Turnover24h  string `json:"turnover24h"`
-		} `json:"list"`
+		Category string          `json:"category"`
+		List     []common.Ticker `json:"list"`
 	} `json:"result"`
 	Time int64 `json:"time"`
 }
 
 // Или создаем внутреннюю структуру для парсинга
-type bybitTickerResponse struct {
+type BybitTickerResponse struct {
 	RetCode int    `json:"retCode"`
 	RetMsg  string `json:"retMsg"`
 	Result  struct {
-		Category string `json:"category"`
-		List     []struct {
-			Symbol       string `json:"symbol"`
-			LastPrice    string `json:"lastPrice"`
-			Price24hPcnt string `json:"price24hPcnt"`
-			Volume24h    string `json:"volume24h"`
-			Turnover24h  string `json:"turnover24h"`
-		} `json:"list"`
+		Category string          `json:"category"`
+		List     []common.Ticker `json:"list"`
 	} `json:"result"`
 	Time int64 `json:"time"`
 }

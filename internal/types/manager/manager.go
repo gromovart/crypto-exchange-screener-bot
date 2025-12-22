@@ -1,7 +1,8 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/types/events"
+	"crypto_exchange_screener_bot/internal/types/storage"
 	"time"
 )
 
@@ -41,37 +42,6 @@ type SystemStats struct {
 	LastUpdated   time.Time              `json:"last_updated"`
 }
 
-// EventType тип события
-type EventType string
-
-const (
-	// События сервисов
-	EventServiceStarted EventType = "service_started"
-	EventServiceStopped EventType = "service_stopped"
-	EventServiceError   EventType = "service_error"
-	EventHealthCheck    EventType = "health_check"
-
-	// События данных
-	EventPriceUpdated   EventType = "price_updated"
-	EventSignalDetected EventType = "signal_detected"
-	EventSymbolAdded    EventType = "symbol_added"
-	EventSymbolRemoved  EventType = "symbol_removed"
-
-	// События интеграций
-	EventTelegramSent  EventType = "telegram_sent"
-	EventConfigChanged EventType = "config_changed"
-)
-
-// Event событие системы
-type Event struct {
-	Type      EventType   `json:"type"`
-	Service   string      `json:"service,omitempty"`
-	Message   string      `json:"message"`
-	Data      interface{} `json:"data,omitempty"`
-	Timestamp time.Time   `json:"timestamp"`
-	Severity  string      `json:"severity"` // info, warning, error
-}
-
 // Service интерфейс сервиса
 type Service interface {
 	Name() string
@@ -86,7 +56,7 @@ type DataSubscriber interface {
 	OnPriceUpdate(symbol string, price, volume float64, timestamp time.Time)
 	OnSymbolAdded(symbol string)
 	OnSymbolRemoved(symbol string)
-	OnEvent(event Event)
+	OnEvent(event events.Event)
 }
 
 // CoordinatorConfig конфигурация координатора

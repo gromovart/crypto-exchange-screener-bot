@@ -1,4 +1,4 @@
-module crypto-exchange-screener-bot
+module crypto_exchange_screener_bot
 
 go 1.25.0
 

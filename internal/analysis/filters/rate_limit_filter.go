@@ -2,7 +2,8 @@
 package filters
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/filters"
 	"sync"
 	"time"
 )
@@ -12,7 +13,7 @@ type RateLimitFilter struct {
 	minDelay   time.Duration
 	lastSignal map[string]time.Time
 	mu         sync.RWMutex
-	stats      FilterStats
+	stats      filters.FilterStats
 }
 
 // NewRateLimitFilter создает новый RateLimitFilter
@@ -20,7 +21,7 @@ func NewRateLimitFilter(minDelay time.Duration) *RateLimitFilter {
 	return &RateLimitFilter{
 		minDelay:   minDelay,
 		lastSignal: make(map[string]time.Time),
-		stats: FilterStats{
+		stats: filters.FilterStats{
 			TotalProcessed: 0,
 			PassedThrough:  0,
 			FilteredOut:    0,
@@ -52,7 +53,7 @@ func (f *RateLimitFilter) Apply(signal analysis.Signal) bool {
 	return true
 }
 
-func (f *RateLimitFilter) GetStats() FilterStats {
+func (f *RateLimitFilter) GetStats() filters.FilterStats {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.stats

@@ -2,7 +2,8 @@
 package events
 
 import (
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/types/events"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"fmt"
 	"log"
 	"sync"
@@ -12,7 +13,7 @@ import (
 // LoggingMiddleware - middleware для логирования
 type LoggingMiddleware struct{}
 
-func (m *LoggingMiddleware) Process(event Event, next HandlerFunc) error {
+func (m *LoggingMiddleware) Process(event events.Event, next events.HandlerFunc) error {
 	logger.Info("🔍 [LoggingMiddleware] Начало обработки %s\n", event.Type)
 	start := time.Now()
 
@@ -36,7 +37,7 @@ type MetricsMiddleware struct {
 	metrics *EventMetrics
 }
 
-func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
+func (m *MetricsMiddleware) Process(event events.Event, next events.HandlerFunc) error {
 	logger.Info("🔍 [MetricsMiddleware] Обработка %s\n", event.Type)
 	start := time.Now()
 
@@ -54,19 +55,19 @@ func (m *MetricsMiddleware) Process(event Event, next HandlerFunc) error {
 
 // RateLimitingMiddleware - middleware для ограничения частоты
 type RateLimitingMiddleware struct {
-	limits   map[EventType]time.Duration
-	lastCall map[EventType]time.Time
+	limits   map[events.EventType]time.Duration
+	lastCall map[events.EventType]time.Time
 	mu       sync.RWMutex
 }
 
-func NewRateLimitingMiddleware(limits map[EventType]time.Duration) *RateLimitingMiddleware {
+func NewRateLimitingMiddleware(limits map[events.EventType]time.Duration) *RateLimitingMiddleware {
 	return &RateLimitingMiddleware{
 		limits:   limits,
-		lastCall: make(map[EventType]time.Time),
+		lastCall: make(map[events.EventType]time.Time),
 	}
 }
 
-func (m *RateLimitingMiddleware) Process(event Event, next HandlerFunc) error {
+func (m *RateLimitingMiddleware) Process(event events.Event, next events.HandlerFunc) error {
 	m.mu.RLock()
 	limit, hasLimit := m.limits[event.Type]
 	last, hasLast := m.lastCall[event.Type]
@@ -91,7 +92,7 @@ func (m *RateLimitingMiddleware) Process(event Event, next HandlerFunc) error {
 // ValidationMiddleware - middleware для валидации событий
 type ValidationMiddleware struct{}
 
-func (m *ValidationMiddleware) Process(event Event, next HandlerFunc) error {
+func (m *ValidationMiddleware) Process(event events.Event, next events.HandlerFunc) error {
 	logger.Info("🔍 [ValidationMiddleware] Проверка %s от %s\n",
 		event.Type, event.Source)
 

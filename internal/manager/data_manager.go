@@ -2,18 +2,19 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/adapters"
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/analysis/engine"
-	"crypto-exchange-screener-bot/internal/api/bybit"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/fetcher"
-	"crypto-exchange-screener-bot/internal/notifier"
-	"crypto-exchange-screener-bot/internal/pipeline"
-	"crypto-exchange-screener-bot/internal/storage"
-	"crypto-exchange-screener-bot/internal/telegram"
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/adapters"
+	"crypto_exchange_screener_bot/internal/analysis/engine"
+	"crypto_exchange_screener_bot/internal/api/bybit"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/fetcher"
+	"crypto_exchange_screener_bot/internal/notifier"
+	"crypto_exchange_screener_bot/internal/pipeline"
+	"crypto_exchange_screener_bot/internal/telegram"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/events"
+	"crypto_exchange_screener_bot/internal/types/manager"
+	"crypto_exchange_screener_bot/internal/types/storage"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"fmt"
 	"log"
 	"runtime"
@@ -26,7 +27,7 @@ type DataManager struct {
 	config *config.Config
 
 	// Компоненты цепочки
-	priceFetcher   fetcher.PriceFetcher
+	priceFetcher   fetcher.BybitPriceFetcher
 	storage        storage.PriceStorage
 	analysisEngine *engine.AnalysisEngine
 	signalPipeline *pipeline.SignalPipeline
@@ -48,7 +49,7 @@ type DataManager struct {
 
 	// Статистика
 	startTime   time.Time
-	systemStats SystemStats
+	systemStats manager.SystemStats
 }
 
 // Старая версия для обратной совместимости
@@ -62,8 +63,8 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 		config:    cfg,
 		stopChan:  make(chan struct{}),
 		startTime: time.Now(),
-		systemStats: SystemStats{
-			Services:    make(map[string]ServiceInfo),
+		systemStats: manager.SystemStats{
+			Services:    make(map[string]manager.ServiceInfo),
 			LastUpdated: time.Now(),
 		},
 	}
@@ -167,7 +168,7 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	dm.registry = NewServiceRegistry()
 
 	// 11. Создаем менеджер жизненного цикла
-	coordinatorConfig := CoordinatorConfig{
+	coordinatorConfig := manager.CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
 		HealthCheckInterval: 30 * time.Second,
@@ -246,7 +247,7 @@ func (dm *DataManager) setupPipeline() {
 // registerServices регистрирует сервисы в реестре
 func (dm *DataManager) registerServices() error {
 	// Регистрируем все сервисы
-	services := map[string]Service{
+	services := map[string]manager.Service{
 		"PriceStorage":        dm.newServiceAdapter("PriceStorage", dm.storage),
 		"PriceFetcher":        dm.newServiceAdapter("PriceFetcher", dm.priceFetcher),
 		"AnalysisEngine":      dm.newServiceAdapter("AnalysisEngine", dm.analysisEngine),
@@ -382,7 +383,7 @@ func (dm *DataManager) updateSystemStats() {
 		eventBusStats = dm.eventBus.GetMetrics()
 	}
 
-	dm.systemStats = SystemStats{
+	dm.systemStats = manager.SystemStats{
 		Services:      servicesInfo,
 		StorageStats:  storageStats,
 		AnalysisStats: analysisStats,
@@ -416,14 +417,14 @@ func (dm *DataManager) checkHealth() {
 }
 
 // GetSystemStats возвращает статистику системы
-func (dm *DataManager) GetSystemStats() SystemStats {
+func (dm *DataManager) GetSystemStats() manager.SystemStats {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 	return dm.systemStats
 }
 
 // GetHealthStatus возвращает статус здоровья системы
-func (dm *DataManager) GetHealthStatus() HealthStatus {
+func (dm *DataManager) GetHealthStatus() manager.HealthStatus {
 	servicesInfo := dm.registry.GetAllInfo()
 	serviceStatus := make(map[string]string)
 
@@ -431,7 +432,7 @@ func (dm *DataManager) GetHealthStatus() HealthStatus {
 
 	for name, info := range servicesInfo {
 		status := "healthy"
-		if info.State != StateRunning {
+		if info.State != manager.StateRunning {
 			status = "unhealthy"
 			allHealthy = false
 		}
@@ -443,7 +444,7 @@ func (dm *DataManager) GetHealthStatus() HealthStatus {
 		overallStatus = "degraded"
 	}
 
-	return HealthStatus{
+	return manager.HealthStatus{
 		Status:    overallStatus,
 		Services:  serviceStatus,
 		Timestamp: time.Now(),
@@ -585,7 +586,7 @@ func (dm *DataManager) StopService(name string) error {
 }
 
 // GetServicesInfo возвращает информацию о всех сервисах
-func (dm *DataManager) GetServicesInfo() map[string]ServiceInfo {
+func (dm *DataManager) GetServicesInfo() map[string]manager.ServiceInfo {
 	return dm.registry.GetAllInfo()
 }
 
@@ -653,7 +654,7 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 type serviceAdapter struct {
 	name    string
 	service interface{}
-	state   ServiceState
+	state   manager.ServiceState
 }
 
 func (sa *serviceAdapter) Name() string {
@@ -661,60 +662,58 @@ func (sa *serviceAdapter) Name() string {
 }
 
 func (sa *serviceAdapter) Start() error {
-	sa.state = StateStarting
+	sa.state = manager.StateStarting
 
 	switch s := sa.service.(type) {
 	case storage.PriceStorage:
 		// Хранилище не требует запуска
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 
-	case fetcher.PriceFetcher:
+	case fetcher.BybitPriceFetcher:
 		// Запускаем с интервалом из конфигурации
 		updateInterval := time.Duration(10) * time.Second // дефолтное значение
 		if err := s.Start(updateInterval); err != nil {
-			sa.state = StateError
+			sa.state = manager.StateError
 			return err
 		}
-		sa.state = StateRunning
-
+		sa.state = manager.StateRunning
 	case *telegram.WebhookServer:
 		if err := s.Start(); err != nil {
-			sa.state = StateError
+			sa.state = manager.StateError
 			return err
 		}
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 	case *engine.AnalysisEngine:
 		if err := s.Start(); err != nil {
-			sa.state = StateError
+			sa.state = manager.StateError
 			return err
 		}
-		sa.state = StateRunning
-
+		sa.state = manager.StateRunning
 	case *pipeline.SignalPipeline:
 		s.Start()
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 
 	case *notifier.CompositeNotificationService:
 		// NotificationService не требует явного запуска
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 
 	case *events.EventBus:
 		s.Start()
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 
 	case *telegram.TelegramBot:
 		// Telegram бот запускается при создании
-		sa.state = StateRunning
+		sa.state = manager.StateRunning
 	}
 
 	return nil
 }
 
 func (sa *serviceAdapter) Stop() error {
-	sa.state = StateStopping
+	sa.state = manager.StateStopping
 
 	switch s := sa.service.(type) {
-	case fetcher.PriceFetcher:
+	case fetcher.BybitPriceFetcher:
 		s.Stop()
 	case *engine.AnalysisEngine:
 		s.Stop()
@@ -729,17 +728,17 @@ func (sa *serviceAdapter) Stop() error {
 		// Telegram бот не требует явной остановки
 	}
 
-	sa.state = StateStopped
+	sa.state = manager.StateStopped
 	return nil
 }
 
-func (sa *serviceAdapter) State() ServiceState {
+func (sa *serviceAdapter) State() manager.ServiceState {
 	return sa.state
 }
 
 func (sa *serviceAdapter) HealthCheck() bool {
 	// Простая проверка здоровья
-	return sa.state == StateRunning
+	return sa.state == manager.StateRunning
 }
 
 // newServiceAdapter создает адаптер сервиса
@@ -747,7 +746,7 @@ func (dm *DataManager) newServiceAdapter(name string, service interface{}) Servi
 	return &serviceAdapter{
 		name:    name,
 		service: service,
-		state:   StateStopped,
+		state:   manager.StateStopped,
 	}
 }
 

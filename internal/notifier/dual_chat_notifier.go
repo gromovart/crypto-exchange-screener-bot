@@ -1,10 +1,10 @@
 package notifier
 
 import (
-	"crypto-exchange-screener-bot/internal/adapters"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/telegram"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/adapters"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/telegram"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"log"
 )
 
@@ -56,7 +56,7 @@ func NewDualChatNotifier(cfg *config.Config) *DualChatNotifier {
 }
 
 // Send отправляет сигнал в оба чата
-func (dcn *DualChatNotifier) Send(signal types.TrendSignal) error {
+func (dcn *DualChatNotifier) Send(signal analysis.TrendSignal) error {
 	if !dcn.enabled {
 		return nil
 	}

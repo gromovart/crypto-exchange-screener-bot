@@ -1,7 +1,7 @@
 package fetcher
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types"
 	"fmt"
 	"log"
 	"sort"

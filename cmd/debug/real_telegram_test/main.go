@@ -2,9 +2,10 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/telegram"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/telegram"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"flag"
 	"fmt"
 	"os"
@@ -149,8 +150,8 @@ func testGrowthSignals(bot *telegram.TelegramBot, cfg *config.Config, count int,
 	for i := 0; i < count && i < len(symbols); i++ {
 		symbol := symbols[i]
 
-		signal := types.GrowthSignal{
-			Symbol:        symbol,
+		signal := analysis.GrowthSignal{
+			Symbol:        common.Symbol(symbol),
 			Direction:     "growth",
 			GrowthPercent: 1.5 + float64(i)*0.5,
 			PeriodMinutes: 5,
@@ -189,8 +190,8 @@ func testFallSignals(bot *telegram.TelegramBot, cfg *config.Config, count int, d
 	for i := 0; i < count && i < len(symbols); i++ {
 		symbol := symbols[i]
 
-		signal := types.GrowthSignal{
-			Symbol:        symbol,
+		signal := analysis.GrowthSignal{
+			Symbol:        common.Symbol(symbol),
 			Direction:     "fall",
 			FallPercent:   1.0 + float64(i)*0.5,
 			PeriodMinutes: 5,

@@ -2,7 +2,7 @@
 package notifier
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"fmt"
 	"log"
 	"time"
@@ -29,7 +29,7 @@ func NewConsoleNotifier(compact bool) *ConsoleNotifier {
 }
 
 // Send отправляет сигнал в консоль
-func (c *ConsoleNotifier) Send(signal types.TrendSignal) error {
+func (c *ConsoleNotifier) Send(signal analysis.TrendSignal) error {
 	if !c.enabled {
 		return nil
 	}

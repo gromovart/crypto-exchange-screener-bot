@@ -2,8 +2,7 @@
 package pipeline
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"sync"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"time"
 )
 
@@ -11,13 +10,6 @@ import (
 type PipelineStage interface {
 	Name() string
 	Process(signal analysis.Signal) (analysis.Signal, error)
-}
-
-// RateLimiter ограничитель частоты
-type RateLimiter struct {
-	lastSent map[string]time.Time
-	minDelay time.Duration
-	mu       sync.RWMutex
 }
 
 // PipelineStats статистика пайплайна

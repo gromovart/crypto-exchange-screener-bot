@@ -2,8 +2,9 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/telegram"
 	"fmt"
 	"log"
 	"net/http"
@@ -138,7 +139,7 @@ func (tb *TelegramBot) IsNotifyEnabled() bool {
 }
 
 // SendNotification отправляет уведомление о сигнале
-func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
+func (tb *TelegramBot) SendNotification(signal analysis.GrowthSignal) error {
 	if !tb.IsNotifyEnabled() {
 		return nil
 	}
@@ -152,7 +153,7 @@ func (tb *TelegramBot) SendMessage(text string) error {
 }
 
 // SendMessageWithKeyboard отправляет сообщение с клавиатурой
-func (tb *TelegramBot) SendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
+func (tb *TelegramBot) SendMessageWithKeyboard(text string, keyboard *telegram.InlineKeyboardMarkup) error {
 	return tb.messageSender.SendTextMessage(text, keyboard, false)
 }
 
@@ -240,8 +241,8 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 	)
 
 	// Простая клавиатура для счетчика
-	keyboard := &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+	keyboard := &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "📊 График", URL: fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)},
 				{Text: "💱 Торговать", URL: fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", symbol)},

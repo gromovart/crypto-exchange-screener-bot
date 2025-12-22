@@ -1,8 +1,8 @@
 package analyzers
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"fmt"
 	"math"
 	"sort"
@@ -12,8 +12,8 @@ import (
 
 // FallAnalyzer - анализатор падения
 type FallAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config analysis.AnalyzerConfig
+	stats  analysis.AnalyzerStats
 	mu     sync.RWMutex
 }
 
@@ -29,7 +29,7 @@ func (a *FallAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *FallAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *FallAnalyzer) Analyze(data []common.PriceData, config analysis.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	if len(data) < config.MinDataPoints {
@@ -92,7 +92,7 @@ func (a *FallAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([
 }
 
 // Находит максимальное падение за любой интервал
-func (a *FallAnalyzer) findMaxFall(data []types.PriceData) (float64, int, int) {
+func (a *FallAnalyzer) findMaxFall(data []common.PriceData) (float64, int, int) {
 	maxFall := 0.0
 	startIdx, endIdx := 0, 0
 
@@ -110,8 +110,8 @@ func (a *FallAnalyzer) findMaxFall(data []types.PriceData) (float64, int, int) {
 }
 
 // Создает сигнал падения
-func (a *FallAnalyzer) createFallSignal(startPoint, endPoint types.PriceData, change, confidence float64) analysis.Signal {
-	intervalData := []types.PriceData{startPoint, endPoint}
+func (a *FallAnalyzer) createFallSignal(startPoint, endPoint common.PriceData, change, confidence float64) analysis.Signal {
+	intervalData := []common.PriceData{startPoint, endPoint}
 	isContinuous := a.checkContinuity(intervalData)
 
 	// Рассчитываем период в минутах
@@ -135,7 +135,7 @@ func (a *FallAnalyzer) createFallSignal(startPoint, endPoint types.PriceData, ch
 		EndPrice:      endPoint.Price,
 		Volume:        avgVolume,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
+		Metadata: analysis.SignalMetadata{
 			Strategy:     "fall_detection",
 			Tags:         []string{"fall", "bearish", "local_drop"},
 			IsContinuous: isContinuous,
@@ -153,7 +153,7 @@ func (a *FallAnalyzer) createFallSignal(startPoint, endPoint types.PriceData, ch
 }
 
 // Уверенность для одиночного падения между двумя точками
-func (a *FallAnalyzer) calculateSingleFallConfidence(data []types.PriceData, fallPercent float64) float64 {
+func (a *FallAnalyzer) calculateSingleFallConfidence(data []common.PriceData, fallPercent float64) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -181,7 +181,7 @@ func (a *FallAnalyzer) calculateSingleFallConfidence(data []types.PriceData, fal
 }
 
 // Уверенность для падения за интервал
-func (a *FallAnalyzer) calculateIntervalConfidence(data []types.PriceData, fallPercent float64) float64 {
+func (a *FallAnalyzer) calculateIntervalConfidence(data []common.PriceData, fallPercent float64) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -201,7 +201,7 @@ func (a *FallAnalyzer) calculateIntervalConfidence(data []types.PriceData, fallP
 	return math.Max(0, math.Min(100, confidence))
 }
 
-func (a *FallAnalyzer) checkContinuity(data []types.PriceData) bool {
+func (a *FallAnalyzer) checkContinuity(data []common.PriceData) bool {
 	if len(data) < 2 {
 		return false
 	}
@@ -223,7 +223,7 @@ func (a *FallAnalyzer) checkContinuity(data []types.PriceData) bool {
 	return continuousRatio > a.config.CustomSettings["continuity_threshold"].(float64)
 }
 
-func (a *FallAnalyzer) calculateTrendStrength(data []types.PriceData) float64 {
+func (a *FallAnalyzer) calculateTrendStrength(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -245,7 +245,7 @@ func (a *FallAnalyzer) calculateTrendStrength(data []types.PriceData) float64 {
 	return math.Max(0, math.Min(100, trendStrength))
 }
 
-func (a *FallAnalyzer) calculateVolatility(data []types.PriceData) float64 {
+func (a *FallAnalyzer) calculateVolatility(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -287,19 +287,19 @@ func (a *FallAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-func (a *FallAnalyzer) GetConfig() AnalyzerConfig {
+func (a *FallAnalyzer) GetConfig() analysis.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
-func (a *FallAnalyzer) GetStats() AnalyzerStats {
+func (a *FallAnalyzer) GetStats() analysis.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
 }
 
-var DefaultFallConfig = AnalyzerConfig{
+var DefaultFallConfig = analysis.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        1.0,
 	MinConfidence: 60.0,

@@ -2,7 +2,8 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/telegram"
 	"log"
 	"sync"
 )
@@ -63,7 +64,7 @@ func (mm *MenuManager) SetupMenu() error {
 
 // RemoveMenu удаляет меню
 func (mm *MenuManager) RemoveMenu() error {
-	menu := ReplyKeyboardMarkup{
+	menu := telegram.ReplyKeyboardMarkup{
 		RemoveKeyboard: true,
 		Selective:      false,
 	}

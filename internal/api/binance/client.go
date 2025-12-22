@@ -2,8 +2,9 @@
 package binance
 
 import (
-	"crypto-exchange-screener-bot/internal/api"
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/api"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,60 +24,60 @@ type BinanceClient struct {
 
 // BinanceTickerResponse - ответ от Binance API для тикеров
 type BinanceTickerResponse struct {
-	Symbol             string `json:"symbol"`
-	PriceChange        string `json:"priceChange"`
-	PriceChangePercent string `json:"priceChangePercent"`
-	WeightedAvgPrice   string `json:"weightedAvgPrice"`
-	PrevClosePrice     string `json:"prevClosePrice"`
-	LastPrice          string `json:"lastPrice"`
-	LastQty            string `json:"lastQty"`
-	BidPrice           string `json:"bidPrice"`
-	BidQty             string `json:"bidQty"`
-	AskPrice           string `json:"askPrice"`
-	AskQty             string `json:"askQty"`
-	OpenPrice          string `json:"openPrice"`
-	HighPrice          string `json:"highPrice"`
-	LowPrice           string `json:"lowPrice"`
-	Volume             string `json:"volume"`
-	QuoteVolume        string `json:"quoteVolume"`
-	OpenTime           int64  `json:"openTime"`
-	CloseTime          int64  `json:"closeTime"`
-	FirstID            int64  `json:"firstId"`
-	LastID             int64  `json:"lastId"`
-	Count              int64  `json:"count"`
+	Symbol             common.Symbol `json:"symbol"`
+	PriceChange        string        `json:"priceChange"`
+	PriceChangePercent string        `json:"priceChangePercent"`
+	WeightedAvgPrice   string        `json:"weightedAvgPrice"`
+	PrevClosePrice     string        `json:"prevClosePrice"`
+	LastPrice          string        `json:"lastPrice"`
+	LastQty            string        `json:"lastQty"`
+	BidPrice           string        `json:"bidPrice"`
+	BidQty             string        `json:"bidQty"`
+	AskPrice           string        `json:"askPrice"`
+	AskQty             string        `json:"askQty"`
+	OpenPrice          string        `json:"openPrice"`
+	HighPrice          string        `json:"highPrice"`
+	LowPrice           string        `json:"lowPrice"`
+	Volume             string        `json:"volume"`
+	QuoteVolume        string        `json:"quoteVolume"`
+	OpenTime           int64         `json:"openTime"`
+	CloseTime          int64         `json:"closeTime"`
+	FirstID            int64         `json:"firstId"`
+	LastID             int64         `json:"lastId"`
+	Count              int64         `json:"count"`
 }
 
 // BinanceFuturesTickerResponse - ответ от Binance Futures API
 type BinanceFuturesTickerResponse struct {
-	Symbol              string `json:"symbol"`
-	PriceChange         string `json:"priceChange"`
-	PriceChangePercent  string `json:"priceChangePercent"`
-	WeightedAvgPrice    string `json:"weightedAvgPrice"`
-	PrevClosePrice      string `json:"prevClosePrice"`
-	LastPrice           string `json:"lastPrice"`
-	LastQty             string `json:"lastQty"`
-	OpenPrice           string `json:"openPrice"`
-	HighPrice           string `json:"highPrice"`
-	LowPrice            string `json:"lowPrice"`
-	Volume              string `json:"volume"`
-	QuoteVolume         string `json:"quoteVolume"`
-	OpenTime            int64  `json:"openTime"`
-	CloseTime           int64  `json:"closeTime"`
-	FirstID             int64  `json:"firstId"`
-	LastID              int64  `json:"lastId"`
-	Count               int64  `json:"count"`
-	BidPrice            string `json:"bidPrice"`
-	BidQty              string `json:"bidQty"`
-	AskPrice            string `json:"askPrice"`
-	AskQty              string `json:"askQty"`
-	Underlying          string `json:"underlying"`
-	UnderlyingType      string `json:"underlyingType"`
-	UnderlyingIndex     string `json:"underlyingIndex"`
-	UnderlyingIndexType string `json:"underlyingIndexType"`
-	MarginAsset         string `json:"marginAsset"`
-	ContractType        string `json:"contractType"`
-	DeliveryDate        int64  `json:"deliveryDate"`
-	OnboardDate         int64  `json:"onboardDate"`
+	Symbol              common.Symbol `json:"symbol"`
+	PriceChange         string        `json:"priceChange"`
+	PriceChangePercent  string        `json:"priceChangePercent"`
+	WeightedAvgPrice    string        `json:"weightedAvgPrice"`
+	PrevClosePrice      string        `json:"prevClosePrice"`
+	LastPrice           string        `json:"lastPrice"`
+	LastQty             string        `json:"lastQty"`
+	OpenPrice           string        `json:"openPrice"`
+	HighPrice           string        `json:"highPrice"`
+	LowPrice            string        `json:"lowPrice"`
+	Volume              string        `json:"volume"`
+	QuoteVolume         string        `json:"quoteVolume"`
+	OpenTime            int64         `json:"openTime"`
+	CloseTime           int64         `json:"closeTime"`
+	FirstID             int64         `json:"firstId"`
+	LastID              int64         `json:"lastId"`
+	Count               int64         `json:"count"`
+	BidPrice            string        `json:"bidPrice"`
+	BidQty              string        `json:"bidQty"`
+	AskPrice            string        `json:"askPrice"`
+	AskQty              string        `json:"askQty"`
+	Underlying          string        `json:"underlying"`
+	UnderlyingType      string        `json:"underlyingType"`
+	UnderlyingIndex     string        `json:"underlyingIndex"`
+	UnderlyingIndexType string        `json:"underlyingIndexType"`
+	MarginAsset         string        `json:"marginAsset"`
+	ContractType        string        `json:"contractType"`
+	DeliveryDate        int64         `json:"deliveryDate"`
+	OnboardDate         int64         `json:"onboardDate"`
 }
 
 // NewBinanceClient создает нового клиента для Binance
@@ -126,12 +127,12 @@ func (c *BinanceClient) parseSpotResponse(response []byte) (*api.TickerResponse,
 		return nil, fmt.Errorf("failed to parse binance response: %w", err)
 	}
 
-	var tickers []api.Ticker
+	var tickers []common.Ticker
 	for _, ticker := range binanceTickers {
 		// Фильтруем только USDT пары
 		if len(ticker.Symbol) >= 4 && ticker.Symbol[len(ticker.Symbol)-4:] == "USDT" {
 			volume, _ := strconv.ParseFloat(ticker.Volume, 64)
-			tickers = append(tickers, api.Ticker{
+			tickers = append(tickers, common.Ticker{
 				Symbol:       ticker.Symbol,
 				LastPrice:    ticker.LastPrice,
 				Volume24h:    fmt.Sprintf("%.2f", volume),
@@ -143,7 +144,7 @@ func (c *BinanceClient) parseSpotResponse(response []byte) (*api.TickerResponse,
 	return &api.TickerResponse{
 		RetCode: 0,
 		RetMsg:  "OK",
-		Result: api.TickerList{
+		Result: common.TickerList{
 			List: tickers,
 		},
 	}, nil
@@ -156,15 +157,15 @@ func (c *BinanceClient) parseFuturesResponse(response []byte) (*api.TickerRespon
 		return nil, fmt.Errorf("failed to parse binance futures response: %w", err)
 	}
 
-	var tickers []api.Ticker
+	var tickers []common.Ticker
 	for _, ticker := range binanceTickers {
 		// Фильтруем только USDT perpetual контракты
 		if ticker.ContractType == "PERPETUAL" &&
 			len(ticker.Symbol) >= 4 &&
 			ticker.Symbol[len(ticker.Symbol)-4:] == "USDT" {
 			volume, _ := strconv.ParseFloat(ticker.Volume, 64)
-			tickers = append(tickers, api.Ticker{
-				Symbol:       ticker.Symbol,
+			tickers = append(tickers, common.Ticker{
+				Symbol:       common.Symbol(ticker.Symbol),
 				LastPrice:    ticker.LastPrice,
 				Volume24h:    fmt.Sprintf("%.2f", volume),
 				Price24hPcnt: ticker.PriceChangePercent,
@@ -175,7 +176,7 @@ func (c *BinanceClient) parseFuturesResponse(response []byte) (*api.TickerRespon
 	return &api.TickerResponse{
 		RetCode: 0,
 		RetMsg:  "OK",
-		Result: api.TickerList{
+		Result: common.TickerList{
 			List: tickers,
 		},
 	}, nil

@@ -2,6 +2,7 @@
 package manager
 
 import (
+	"crypto_exchange_screener_bot/internal/types/manager"
 	"sync"
 	"time"
 )
@@ -9,20 +10,20 @@ import (
 // ServiceRegistry реестр сервисов
 type ServiceRegistry struct {
 	mu       sync.RWMutex
-	services map[string]Service
-	info     map[string]ServiceInfo
+	services map[string]manager.Service
+	info     map[string]manager.ServiceInfo
 }
 
 // NewServiceRegistry создает новый реестр сервисов
 func NewServiceRegistry() *ServiceRegistry {
 	return &ServiceRegistry{
-		services: make(map[string]Service),
-		info:     make(map[string]ServiceInfo),
+		services: make(map[string]manager.Service),
+		info:     make(map[string]manager.ServiceInfo),
 	}
 }
 
 // Register регистрирует сервис
-func (sr *ServiceRegistry) Register(name string, service Service) error {
+func (sr *ServiceRegistry) Register(name string, service manager.Service) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -31,16 +32,16 @@ func (sr *ServiceRegistry) Register(name string, service Service) error {
 	}
 
 	sr.services[name] = service
-	sr.info[name] = ServiceInfo{
+	sr.info[name] = manager.ServiceInfo{
 		Name:  name,
-		State: StateStopped,
+		State: manager.StateStopped,
 	}
 
 	return nil
 }
 
 // Get возвращает сервис по имени
-func (sr *ServiceRegistry) Get(name string) (Service, bool) {
+func (sr *ServiceRegistry) Get(name string) (manager.Service, bool) {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
@@ -49,11 +50,11 @@ func (sr *ServiceRegistry) Get(name string) (Service, bool) {
 }
 
 // GetAll возвращает все сервисы
-func (sr *ServiceRegistry) GetAll() map[string]Service {
+func (sr *ServiceRegistry) GetAll() map[string]manager.Service {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
-	result := make(map[string]Service)
+	result := make(map[string]manager.Service)
 	for k, v := range sr.services {
 		result[k] = v
 	}
@@ -61,7 +62,7 @@ func (sr *ServiceRegistry) GetAll() map[string]Service {
 }
 
 // UpdateInfo обновляет информацию о сервисе
-func (sr *ServiceRegistry) UpdateInfo(name string, info ServiceInfo) {
+func (sr *ServiceRegistry) UpdateInfo(name string, info manager.ServiceInfo) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -84,7 +85,7 @@ func (sr *ServiceRegistry) UpdateInfo(name string, info ServiceInfo) {
 }
 
 // GetInfo возвращает информацию о сервисе
-func (sr *ServiceRegistry) GetInfo(name string) (ServiceInfo, bool) {
+func (sr *ServiceRegistry) GetInfo(name string) (manager.ServiceInfo, bool) {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
@@ -93,11 +94,11 @@ func (sr *ServiceRegistry) GetInfo(name string) (ServiceInfo, bool) {
 }
 
 // GetAllInfo возвращает информацию о всех сервисах
-func (sr *ServiceRegistry) GetAllInfo() map[string]ServiceInfo {
+func (sr *ServiceRegistry) GetAllInfo() map[string]manager.ServiceInfo {
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
-	result := make(map[string]ServiceInfo)
+	result := make(map[string]manager.ServiceInfo)
 	for k, v := range sr.info {
 		result[k] = v
 	}
@@ -142,9 +143,9 @@ func (sr *ServiceRegistry) StartAll() map[string]error {
 	for name, service := range sr.services {
 		if err := service.Start(); err != nil {
 			errors[name] = err
-			sr.updateServiceState(name, StateError, err.Error())
+			sr.updateServiceState(name, manager.StateError, err.Error())
 		} else {
-			sr.updateServiceState(name, StateRunning, "")
+			sr.updateServiceState(name, manager.StateRunning, "")
 		}
 	}
 	return errors
@@ -160,14 +161,14 @@ func (sr *ServiceRegistry) StopAll() map[string]error {
 		if err := service.Stop(); err != nil {
 			errors[name] = err
 		} else {
-			sr.updateServiceState(name, StateStopped, "")
+			sr.updateServiceState(name, manager.StateStopped, "")
 		}
 	}
 	return errors
 }
 
 // updateServiceState обновляет состояние сервиса
-func (sr *ServiceRegistry) updateServiceState(name string, state ServiceState, errorMsg string) {
+func (sr *ServiceRegistry) updateServiceState(name string, state manager.ServiceState, errorMsg string) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -176,9 +177,9 @@ func (sr *ServiceRegistry) updateServiceState(name string, state ServiceState, e
 		info.Error = errorMsg
 
 		switch state {
-		case StateRunning:
+		case manager.StateRunning:
 			info.StartedAt = time.Now()
-		case StateStopped, StateError:
+		case manager.StateStopped, manager.StateError:
 			info.StoppedAt = time.Now()
 		}
 
@@ -197,7 +198,7 @@ func (sr *ServiceRegistry) CheckHealth() map[string]bool {
 
 		// Обновляем состояние если сервис умер
 		if !health[name] {
-			sr.updateServiceState(name, StateError, "health check failed")
+			sr.updateServiceState(name, manager.StateError, "health check failed")
 		}
 	}
 	return health

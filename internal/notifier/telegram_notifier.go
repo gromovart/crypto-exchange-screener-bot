@@ -1,10 +1,10 @@
 package notifier
 
 import (
-	"crypto-exchange-screener-bot/internal/adapters"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/telegram"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/adapters"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/telegram"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"log"
 )
 
@@ -35,7 +35,7 @@ func NewEnhancedTelegramNotifier(cfg *config.Config) *EnhancedTelegramNotifier {
 }
 
 // Send отправляет сигнал в соответствующие чаты
-func (etn *EnhancedTelegramNotifier) Send(signal types.TrendSignal) error {
+func (etn *EnhancedTelegramNotifier) Send(signal analysis.TrendSignal) error {
 	if !etn.enabled || etn.multiChatBot == nil {
 		return nil
 	}

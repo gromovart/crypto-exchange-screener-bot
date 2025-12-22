@@ -2,7 +2,9 @@ package telegram
 
 import (
 	"bytes"
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/common"
+	"crypto_exchange_screener_bot/internal/types/telegram"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,14 +19,14 @@ type MessageSender struct {
 	config         *config.Config
 	baseURL        string
 	httpClient     *http.Client
-	rateLimiter    *RateLimiter
+	rateLimiter    *common.RateLimiter
 	lastSendTime   time.Time
 	minInterval    time.Duration
 	messageCache   map[string]time.Time // Кэш отправленных сообщений
 	messageCacheMu sync.RWMutex
 	cacheTTL       time.Duration
-	chatID         string              // Добавленное поле для текущего chat_id
-	replyMarkup    ReplyKeyboardMarkup // Добавленное поле для клавиатуры
+	chatID         string                       // Добавленное поле для текущего chat_id
+	replyMarkup    telegram.ReplyKeyboardMarkup // Добавленное поле для клавиатуры
 }
 
 // NewMessageSender создает новый отправитель сообщений
@@ -33,12 +35,12 @@ func NewMessageSender(cfg *config.Config) *MessageSender {
 		config:       cfg,
 		baseURL:      fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
-		rateLimiter:  NewRateLimiter(2 * time.Second),
+		rateLimiter:  common.NewRateLimiter(2 * time.Second),
 		minInterval:  2 * time.Second,
 		messageCache: make(map[string]time.Time),
-		cacheTTL:     10 * time.Minute,      // Храним 10 минут
-		chatID:       cfg.TelegramChatID,    // Используем chat_id из конфига
-		replyMarkup:  ReplyKeyboardMarkup{}, // Инициализируем пустую клавиатуру
+		cacheTTL:     10 * time.Minute,               // Храним 10 минут
+		chatID:       cfg.TelegramChatID,             // Используем chat_id из конфига
+		replyMarkup:  telegram.ReplyKeyboardMarkup{}, // Инициализируем пустую клавиатуру
 	}
 }
 
@@ -48,12 +50,12 @@ func NewMessageSenderWithChatID(cfg *config.Config, chatID string) *MessageSende
 		config:       cfg,
 		baseURL:      fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
 		httpClient:   &http.Client{Timeout: 30 * time.Second},
-		rateLimiter:  NewRateLimiter(2 * time.Second),
+		rateLimiter:  common.NewRateLimiter(2 * time.Second),
 		minInterval:  2 * time.Second,
 		messageCache: make(map[string]time.Time),
 		cacheTTL:     10 * time.Minute,
 		chatID:       chatID, // Устанавливаем указанный chat_id
-		replyMarkup:  ReplyKeyboardMarkup{},
+		replyMarkup:  telegram.ReplyKeyboardMarkup{},
 	}
 }
 
@@ -117,7 +119,7 @@ func (ms *MessageSender) cacheMessage(hash string) {
 }
 
 // SendTextMessage отправляет текстовое сообщение
-func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMarkup, hideMenu bool) error {
+func (ms *MessageSender) SendTextMessage(text string, keyboard *telegram.InlineKeyboardMarkup, hideMenu bool) error {
 	if !ms.config.TelegramEnabled && hideMenu {
 		return nil
 	}
@@ -143,7 +145,7 @@ func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMa
 		return nil
 	}
 
-	message := TelegramMessage{
+	message := telegram.TelegramMessage{
 		ChatID:    ms.chatID, // Используем ms.chatID
 		Text:      text,
 		ParseMode: "Markdown",
@@ -163,8 +165,8 @@ func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMa
 }
 
 // SendMessageToChat отправляет сообщение в указанный чат
-func (ms *MessageSender) SendMessageToChat(chatID string, text string, keyboard *InlineKeyboardMarkup) error {
-	message := TelegramMessage{
+func (ms *MessageSender) SendMessageToChat(chatID string, text string, keyboard *telegram.InlineKeyboardMarkup) error {
+	message := telegram.TelegramMessage{
 		ChatID:    chatID,
 		Text:      text,
 		ParseMode: "Markdown",
@@ -194,11 +196,11 @@ func (ms *MessageSender) SendTestMessage() error {
 }
 
 // SetReplyKeyboard устанавливает reply клавиатуру
-func (ms *MessageSender) SetReplyKeyboard(keyboard ReplyKeyboardMarkup) error {
+func (ms *MessageSender) SetReplyKeyboard(keyboard telegram.ReplyKeyboardMarkup) error {
 	message := struct {
-		ChatID      string              `json:"chat_id"`
-		Text        string              `json:"text"`
-		ReplyMarkup ReplyKeyboardMarkup `json:"reply_markup,omitempty"`
+		ChatID      string                       `json:"chat_id"`
+		Text        string                       `json:"text"`
+		ReplyMarkup telegram.ReplyKeyboardMarkup `json:"reply_markup,omitempty"`
 	}{
 		ChatID:      ms.chatID, // Используем ms.chatID
 		Text:        "⚙️ *Меню настроек активировано*\n\nВсе настройки доступны в меню ниже ⬇️",

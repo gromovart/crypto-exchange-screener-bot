@@ -1,6 +1,8 @@
 // internal/telegram/menu_keyboards.go
 package telegram
 
+import "crypto_exchange_screener_bot/internal/types/telegram"
+
 // MenuKeyboards - клавиатуры меню (2 ряда для устранения скролла)
 type MenuKeyboards struct{}
 
@@ -10,9 +12,9 @@ func NewMenuKeyboards() *MenuKeyboards {
 }
 
 // GetMainMenu возвращает главное меню (2 ряда)
-func (mk *MenuKeyboards) GetMainMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetMainMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "⚙️ Настройки"},
 				{Text: "📊 Статус"},
@@ -32,9 +34,9 @@ func (mk *MenuKeyboards) GetMainMenu() ReplyKeyboardMarkup {
 }
 
 // GetSettingsMenu возвращает меню настроек (2 ряда)
-func (mk *MenuKeyboards) GetSettingsMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetSettingsMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "🔔 Вкл/Выкл"},
 				{Text: "📈 Тип сигналов"},
@@ -54,9 +56,9 @@ func (mk *MenuKeyboards) GetSettingsMenu() ReplyKeyboardMarkup {
 }
 
 // GetNotificationsMenu возвращает меню уведомлений (2 ряда)
-func (mk *MenuKeyboards) GetNotificationsMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetNotificationsMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "✅ Включить"},
 				{Text: "❌ Выключить"},
@@ -76,9 +78,9 @@ func (mk *MenuKeyboards) GetNotificationsMenu() ReplyKeyboardMarkup {
 }
 
 // GetSignalTypesMenu возвращает меню типов сигналов (2 ряда)
-func (mk *MenuKeyboards) GetSignalTypesMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetSignalTypesMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "📈 Только рост"},
 				{Text: "📉 Только падение"},
@@ -98,9 +100,9 @@ func (mk *MenuKeyboards) GetSignalTypesMenu() ReplyKeyboardMarkup {
 }
 
 // GetPeriodsMenu возвращает меню периодов (2 ряда)
-func (mk *MenuKeyboards) GetPeriodsMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetPeriodsMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "⏱️ 5 мин"},
 				{Text: "⏱️ 15 мин"},
@@ -120,9 +122,9 @@ func (mk *MenuKeyboards) GetPeriodsMenu() ReplyKeyboardMarkup {
 }
 
 // GetResetMenu возвращает меню сброса (2 ряда)
-func (mk *MenuKeyboards) GetResetMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mk *MenuKeyboards) GetResetMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "🔄 Все счетчики"},
 				{Text: "📊 По символу"},
@@ -142,9 +144,9 @@ func (mk *MenuKeyboards) GetResetMenu() ReplyKeyboardMarkup {
 }
 
 // GetInlineMenuSettings возвращает inline меню настроек (для быстрых действий)
-func (mk *MenuKeyboards) GetInlineMenuSettings() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+func (mk *MenuKeyboards) GetInlineMenuSettings() *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "🔔 Уведомления", CallbackData: "menu_notify"},
 				{Text: "📊 Тип сигналов", CallbackData: "menu_signals"},
@@ -158,9 +160,9 @@ func (mk *MenuKeyboards) GetInlineMenuSettings() *InlineKeyboardMarkup {
 }
 
 // GetInlineMenuPeriods возвращает inline меню периодов
-func (mk *MenuKeyboards) GetInlineMenuPeriods() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+func (mk *MenuKeyboards) GetInlineMenuPeriods() *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "5 мин", CallbackData: "period_5m"},
 				{Text: "15 мин", CallbackData: "period_15m"},
@@ -176,9 +178,9 @@ func (mk *MenuKeyboards) GetInlineMenuPeriods() *InlineKeyboardMarkup {
 }
 
 // GetInlineMenuReset возвращает inline меню сброса
-func (mk *MenuKeyboards) GetInlineMenuReset() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+func (mk *MenuKeyboards) GetInlineMenuReset() *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "🔄 Все счетчики", CallbackData: "reset_all"},
 				{Text: "📊 По символу", CallbackData: "reset_symbol"},

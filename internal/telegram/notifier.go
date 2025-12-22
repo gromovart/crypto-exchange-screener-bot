@@ -2,8 +2,9 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"fmt"
 	"log"
 	"sync"
@@ -15,7 +16,7 @@ type Notifier struct {
 	config        *config.Config
 	messageSender *MessageSender
 	menuUtils     *MenuUtils
-	rateLimiter   *RateLimiter
+	rateLimiter   *common.RateLimiter
 	lastSendTime  time.Time
 	minInterval   time.Duration
 	enabled       bool
@@ -27,7 +28,7 @@ func NewNotifier(cfg *config.Config) *Notifier {
 	return &Notifier{
 		config:      cfg,
 		menuUtils:   NewMenuUtils(),
-		rateLimiter: NewRateLimiter(2 * time.Second),
+		rateLimiter: common.NewRateLimiter(2 * time.Second),
 		minInterval: 2 * time.Second,
 		enabled:     cfg.TelegramEnabled,
 	}
@@ -44,7 +45,7 @@ func (n *Notifier) SetMenuUtils(utils *MenuUtils) {
 }
 
 // SendNotification отправляет уведомление
-func (n *Notifier) SendNotification(signal types.GrowthSignal, menuEnabled bool) error {
+func (n *Notifier) SendNotification(signal analysis.GrowthSignal, menuEnabled bool) error {
 	if !n.IsEnabled() {
 		return nil
 	}

@@ -3,6 +3,9 @@ package storage
 
 import (
 	"container/list"
+	"crypto_exchange_screener_bot/internal/types/common"
+	"crypto_exchange_screener_bot/internal/types/fetcher"
+	"crypto_exchange_screener_bot/internal/types/storage"
 	"regexp"
 	"sort"
 	"sync"
@@ -14,48 +17,23 @@ type InMemoryPriceStorage struct {
 	mu sync.RWMutex
 
 	// Текущие цены
-	current map[string]*PriceSnapshot
+	current map[string]*storage.PriceSnapshot
 
 	// История цен (двусторонний список для каждой пары)
 	history map[string]*list.List
 
 	// Статистика
-	stats StorageStats
+	stats storage.StorageStats
 
 	// Подписки
 	subscriptions *SubscriptionManager
 
 	// Конфигурация
-	config *StorageConfig
+	config *storage.StorageConfig
 
 	// Вспомогательные структуры
-	symbolsByVolume []SymbolVolume
+	symbolsByVolume []storage.SymbolVolume
 	lastCleanup     time.Time
-}
-
-// NewInMemoryPriceStorage создает новое in-memory хранилище
-func NewInMemoryPriceStorage(config *StorageConfig) *InMemoryPriceStorage {
-	if config == nil {
-		config = &StorageConfig{
-			MaxHistoryPerSymbol: 10000,
-			MaxSymbols:          1000,
-			CleanupInterval:     5 * time.Minute,
-			RetentionPeriod:     24 * time.Hour,
-		}
-	}
-
-	storage := &InMemoryPriceStorage{
-		current:       make(map[string]*PriceSnapshot),
-		history:       make(map[string]*list.List),
-		subscriptions: NewSubscriptionManager(),
-		config:        config,
-		lastCleanup:   time.Now(),
-	}
-
-	// Запускаем очистку старых данных
-	go storage.startCleanupRoutine()
-
-	return storage
 }
 
 // StorePrice сохраняет цену
@@ -65,12 +43,12 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 
 	// Проверяем лимит символов
 	if len(s.current) >= s.config.MaxSymbols && !s.SymbolExists(symbol) {
-		return ErrStorageFull
+		return storage.ErrStorageFull
 	}
 
 	// Обновляем текущую цену
-	snapshot := &PriceSnapshot{
-		Symbol:    symbol,
+	snapshot := &storage.PriceSnapshot{
+		Symbol:    common.Symbol(symbol),
 		Price:     price,
 		Volume24h: volume24h,
 		Timestamp: timestamp,
@@ -83,8 +61,8 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 	}
 
 	historyList := s.history[symbol]
-	historyList.PushBack(PriceData{
-		Symbol:    symbol,
+	historyList.PushBack(common.PriceData{
+		Symbol:    common.Symbol(symbol),
 		Price:     price,
 		Volume24h: volume24h,
 		Timestamp: timestamp,
@@ -121,7 +99,7 @@ func (s *InMemoryPriceStorage) GetCurrentPrice(symbol string) (float64, bool) {
 }
 
 // GetCurrentSnapshot возвращает текущий снапшот
-func (s *InMemoryPriceStorage) GetCurrentSnapshot(symbol string) (*PriceSnapshot, bool) {
+func (s *InMemoryPriceStorage) GetCurrentSnapshot(symbol string) (*storage.PriceSnapshot, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -130,11 +108,11 @@ func (s *InMemoryPriceStorage) GetCurrentSnapshot(symbol string) (*PriceSnapshot
 }
 
 // GetAllCurrentPrices возвращает все текущие цены
-func (s *InMemoryPriceStorage) GetAllCurrentPrices() map[string]PriceSnapshot {
+func (s *InMemoryPriceStorage) GetAllCurrentPrices() map[string]storage.PriceSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make(map[string]PriceSnapshot, len(s.current))
+	result := make(map[string]storage.PriceSnapshot, len(s.current))
 	for symbol, snapshot := range s.current {
 		result[symbol] = *snapshot
 	}
@@ -166,13 +144,13 @@ func (s *InMemoryPriceStorage) SymbolExists(symbol string) bool {
 }
 
 // GetPriceHistory возвращает историю цен
-func (s *InMemoryPriceStorage) GetPriceHistory(symbol string, limit int) ([]PriceData, error) {
+func (s *InMemoryPriceStorage) GetPriceHistory(symbol string, limit int) ([]common.PriceData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return nil, ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Если лимит не указан или больше размера, берем все
@@ -180,12 +158,12 @@ func (s *InMemoryPriceStorage) GetPriceHistory(symbol string, limit int) ([]Pric
 		limit = historyList.Len()
 	}
 
-	result := make([]PriceData, 0, limit)
+	result := make([]common.PriceData, 0, limit)
 
 	// Идем с конца (последние данные)
 	element := historyList.Back()
 	for i := 0; i < limit && element != nil; i++ {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			result = append(result, priceData)
 		}
 		element = element.Prev()
@@ -200,20 +178,20 @@ func (s *InMemoryPriceStorage) GetPriceHistory(symbol string, limit int) ([]Pric
 }
 
 // GetPriceHistoryRange возвращает историю за период
-func (s *InMemoryPriceStorage) GetPriceHistoryRange(symbol string, start, end time.Time) ([]PriceData, error) {
+func (s *InMemoryPriceStorage) GetPriceHistoryRange(symbol string, start, end time.Time) ([]common.PriceData, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return nil, ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
-	var result []PriceData
+	var result []common.PriceData
 
 	// Проходим по всей истории
 	for element := historyList.Front(); element != nil; element = element.Next() {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			// Проверяем попадает ли в диапазон
 			if !priceData.Timestamp.Before(start) && !priceData.Timestamp.After(end) {
 				result = append(result, priceData)
@@ -225,7 +203,7 @@ func (s *InMemoryPriceStorage) GetPriceHistoryRange(symbol string, start, end ti
 }
 
 // GetLatestPrice возвращает последнюю цену
-func (s *InMemoryPriceStorage) GetLatestPrice(symbol string) (*PriceData, bool) {
+func (s *InMemoryPriceStorage) GetLatestPrice(symbol string) (*common.PriceData, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -240,7 +218,7 @@ func (s *InMemoryPriceStorage) GetLatestPrice(symbol string) (*PriceData, bool) 
 		return nil, false
 	}
 
-	if priceData, ok := lastElement.Value.(PriceData); ok {
+	if priceData, ok := lastElement.Value.(common.PriceData); ok {
 		return &priceData, true
 	}
 
@@ -248,13 +226,13 @@ func (s *InMemoryPriceStorage) GetLatestPrice(symbol string) (*PriceData, bool) 
 }
 
 // CalculatePriceChange рассчитывает изменение цены
-func (s *InMemoryPriceStorage) CalculatePriceChange(symbol string, interval time.Duration) (*PriceChange, error) {
+func (s *InMemoryPriceStorage) CalculatePriceChange(symbol string, interval time.Duration) (*fetcher.PriceChange, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	currentSnapshot, exists := s.current[symbol]
 	if !exists {
-		return nil, ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Ищем цену за указанный интервал назад
@@ -262,14 +240,14 @@ func (s *InMemoryPriceStorage) CalculatePriceChange(symbol string, interval time
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return nil, ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
-	var previousPrice *PriceData
+	var previousPrice *common.PriceData
 
 	// Ищем ближайшую цену к targetTime
 	for element := historyList.Front(); element != nil; element = element.Next() {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			if priceData.Timestamp.After(targetTime) {
 				previousPrice = &priceData
 				break
@@ -280,22 +258,22 @@ func (s *InMemoryPriceStorage) CalculatePriceChange(symbol string, interval time
 	if previousPrice == nil {
 		// Если не нашли, берем самую старую
 		if front := historyList.Front(); front != nil {
-			if priceData, ok := front.Value.(PriceData); ok {
+			if priceData, ok := front.Value.(common.PriceData); ok {
 				previousPrice = &priceData
 			}
 		}
 	}
 
 	if previousPrice == nil {
-		return nil, ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Рассчитываем изменение
 	change := currentSnapshot.Price - previousPrice.Price
 	changePercent := (change / previousPrice.Price) * 100
 
-	return &PriceChange{
-		Symbol:        symbol,
+	return &fetcher.PriceChange{
+		Symbol:        common.Symbol(symbol),
 		CurrentPrice:  currentSnapshot.Price,
 		PreviousPrice: previousPrice.Price,
 		Change:        change,
@@ -312,7 +290,7 @@ func (s *InMemoryPriceStorage) GetAveragePrice(symbol string, period time.Durati
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return 0, ErrSymbolNotFound
+		return 0, storage.ErrSymbolNotFound
 	}
 
 	cutoffTime := time.Now().Add(-period)
@@ -321,7 +299,7 @@ func (s *InMemoryPriceStorage) GetAveragePrice(symbol string, period time.Durati
 
 	// Проходим с конца (новые данные сначала)
 	for element := historyList.Back(); element != nil; element = element.Prev() {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			if priceData.Timestamp.Before(cutoffTime) {
 				break
 			}
@@ -331,7 +309,7 @@ func (s *InMemoryPriceStorage) GetAveragePrice(symbol string, period time.Durati
 	}
 
 	if count == 0 {
-		return 0, ErrSymbolNotFound
+		return 0, storage.ErrSymbolNotFound
 	}
 
 	return sum / float64(count), nil
@@ -344,7 +322,7 @@ func (s *InMemoryPriceStorage) GetMinMaxPrice(symbol string, period time.Duratio
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return 0, 0, ErrSymbolNotFound
+		return 0, 0, storage.ErrSymbolNotFound
 	}
 
 	cutoffTime := time.Now().Add(-period)
@@ -353,7 +331,7 @@ func (s *InMemoryPriceStorage) GetMinMaxPrice(symbol string, period time.Duratio
 	count := 0
 
 	for element := historyList.Back(); element != nil; element = element.Prev() {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			if priceData.Timestamp.Before(cutoffTime) {
 				break
 			}
@@ -368,7 +346,7 @@ func (s *InMemoryPriceStorage) GetMinMaxPrice(symbol string, period time.Duratio
 	}
 
 	if count == 0 {
-		return 0, 0, ErrSymbolNotFound
+		return 0, 0, storage.ErrSymbolNotFound
 	}
 
 	return min, max, nil
@@ -407,7 +385,7 @@ func (s *InMemoryPriceStorage) CleanOldData(maxAge time.Duration) (int, error) {
 				break
 			}
 
-			if priceData, ok := front.Value.(PriceData); ok {
+			if priceData, ok := front.Value.(common.PriceData); ok {
 				if priceData.Timestamp.Before(cutoffTime) {
 					historyList.Remove(front)
 					removedCount++
@@ -437,7 +415,7 @@ func (s *InMemoryPriceStorage) TruncateHistory(symbol string, maxPoints int) err
 
 	historyList, exists := s.history[symbol]
 	if !exists {
-		return ErrSymbolNotFound
+		return storage.ErrSymbolNotFound
 	}
 
 	// Удаляем лишние элементы с начала
@@ -473,7 +451,7 @@ func (s *InMemoryPriceStorage) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.current = make(map[string]*PriceSnapshot)
+	s.current = make(map[string]*storage.PriceSnapshot)
 	s.history = make(map[string]*list.List)
 	s.symbolsByVolume = nil
 
@@ -483,7 +461,7 @@ func (s *InMemoryPriceStorage) Clear() error {
 }
 
 // GetStats возвращает статистику
-func (s *InMemoryPriceStorage) GetStats() StorageStats {
+func (s *InMemoryPriceStorage) GetStats() storage.StorageStats {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -491,31 +469,31 @@ func (s *InMemoryPriceStorage) GetStats() StorageStats {
 }
 
 // GetSymbolStats возвращает статистику по символу
-func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error) {
+func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (storage.SymbolStats, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	snapshot, exists := s.current[symbol]
 	if !exists {
-		return SymbolStats{}, ErrSymbolNotFound
+		return storage.SymbolStats{}, storage.ErrSymbolNotFound
 	}
 
 	historyList, exists := s.history[symbol]
 	if !exists || historyList.Len() == 0 {
-		return SymbolStats{}, ErrSymbolNotFound
+		return storage.SymbolStats{}, storage.ErrSymbolNotFound
 	}
 
 	// Находим первую и последнюю цены
-	var firstData, lastData PriceData
+	var firstData, lastData common.PriceData
 
 	if front := historyList.Front(); front != nil {
-		if data, ok := front.Value.(PriceData); ok {
+		if data, ok := front.Value.(common.PriceData); ok {
 			firstData = data
 		}
 	}
 
 	if back := historyList.Back(); back != nil {
-		if data, ok := back.Value.(PriceData); ok {
+		if data, ok := back.Value.(common.PriceData); ok {
 			lastData = data
 		}
 	}
@@ -525,7 +503,7 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 	volumeCount := 0
 
 	for element := historyList.Front(); element != nil; element = element.Next() {
-		if priceData, ok := element.Value.(PriceData); ok {
+		if priceData, ok := element.Value.(common.PriceData); ok {
 			totalVolume += priceData.Volume24h
 			volumeCount++
 		}
@@ -542,8 +520,8 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 		priceChange24h = ((lastData.Price - firstData.Price) / firstData.Price) * 100
 	}
 
-	return SymbolStats{
-		Symbol:         symbol,
+	return storage.SymbolStats{
+		Symbol:         common.Symbol(symbol),
 		DataPoints:     historyList.Len(),
 		FirstTimestamp: firstData.Timestamp,
 		LastTimestamp:  lastData.Timestamp,
@@ -576,7 +554,7 @@ func (s *InMemoryPriceStorage) FindSymbolsByPattern(pattern string) ([]string, e
 }
 
 // GetTopSymbolsByVolume возвращает топ символов по объему
-func (s *InMemoryPriceStorage) GetTopSymbolsByVolume(limit int) ([]SymbolVolume, error) {
+func (s *InMemoryPriceStorage) GetTopSymbolsByVolume(limit int) ([]storage.SymbolVolume, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -588,7 +566,7 @@ func (s *InMemoryPriceStorage) GetTopSymbolsByVolume(limit int) ([]SymbolVolume,
 		limit = len(s.symbolsByVolume)
 	}
 
-	result := make([]SymbolVolume, limit)
+	result := make([]storage.SymbolVolume, limit)
 	copy(result, s.symbolsByVolume[:limit])
 
 	return result, nil
@@ -597,7 +575,7 @@ func (s *InMemoryPriceStorage) GetTopSymbolsByVolume(limit int) ([]SymbolVolume,
 // Вспомогательные методы
 
 func (s *InMemoryPriceStorage) updateStats() {
-	s.stats = StorageStats{
+	s.stats = storage.StorageStats{
 		TotalSymbols:        len(s.current),
 		TotalDataPoints:     s.calculateTotalDataPoints(),
 		MemoryUsageBytes:    s.estimateMemoryUsage(),
@@ -633,7 +611,7 @@ func (s *InMemoryPriceStorage) findOldestTimestamp() time.Time {
 
 	for _, historyList := range s.history {
 		if front := historyList.Front(); front != nil {
-			if priceData, ok := front.Value.(PriceData); ok {
+			if priceData, ok := front.Value.(common.PriceData); ok {
 				if first || priceData.Timestamp.Before(oldest) {
 					oldest = priceData.Timestamp
 					first = false
@@ -673,7 +651,7 @@ func (s *InMemoryPriceStorage) updateSymbolVolume(symbol string, volume float64)
 
 	// Если не нашли, добавляем
 	if !found {
-		s.symbolsByVolume = append(s.symbolsByVolume, SymbolVolume{
+		s.symbolsByVolume = append(s.symbolsByVolume, storage.SymbolVolume{
 			Symbol: symbol,
 			Volume: volume,
 		})

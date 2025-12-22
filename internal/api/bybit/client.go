@@ -3,9 +3,10 @@ package bybit
 
 import (
 	"bytes"
-	"crypto-exchange-screener-bot/internal/api"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/api"
+	"crypto_exchange_screener_bot/internal/types/common"
 
 	"crypto/hmac"
 	"crypto/sha256"
@@ -20,6 +21,13 @@ import (
 	"sort"
 	"strconv"
 	"time"
+)
+
+// Константы категорий
+const (
+	CategorySpot    = "spot"
+	CategoryLinear  = "linear"
+	CategoryInverse = "inverse"
 )
 
 // BybitClient - клиент для работы с API Bybit
@@ -45,7 +53,7 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 		category = cfg.FuturesCategory
 	} else {
 		// Если в конфиге не указана категория, используем linear
-		category = "linear"
+		category = CategoryLinear
 	}
 
 	return &BybitClient{
@@ -104,12 +112,6 @@ func (c *BybitClient) sendPublicRequest(method, endpoint string, params url.Valu
 	// Проверяем статус код
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Проверяем код ошибки в ответе API
-	var apiResp APIResponse
-	if err := json.Unmarshal(body, &apiResp); err == nil && apiResp.RetCode != 0 {
-		return nil, fmt.Errorf("API error %d: %s", apiResp.RetCode, apiResp.RetMsg)
 	}
 
 	return body, nil
@@ -192,12 +194,6 @@ func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interfa
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Проверяем код ошибки в ответе API
-	var apiResp APIResponse
-	if err := json.Unmarshal(body, &apiResp); err == nil && apiResp.RetCode != 0 {
-		return nil, fmt.Errorf("API error %d: %s", apiResp.RetCode, apiResp.RetMsg)
-	}
-
 	return body, nil
 }
 
@@ -205,9 +201,9 @@ func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interfa
 func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 	params := url.Values{}
 
-	// Если категория пустая, используем линейные фьючерсы
+	// Если категория пустая, используем поле категории клиента
 	if category == "" {
-		category = "linear"
+		category = c.category
 	}
 
 	params.Set("category", category)
@@ -217,21 +213,28 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 		return nil, err
 	}
 
-	var tickerResp bybitTickerResponse
-	if err := json.Unmarshal(body, &tickerResp); err != nil {
+	// Сначала парсим общий ответ
+	var baseResp api.APIResponse
+	if err := json.Unmarshal(body, &baseResp); err != nil {
+		return nil, fmt.Errorf("failed to parse base response: %w", err)
+	}
+
+	// Парсим специфический ответ Bybit
+	var bybitResp api.BybitTickerResponse
+	if err := json.Unmarshal(body, &bybitResp); err != nil {
 		return nil, fmt.Errorf("failed to parse ticker response: %w", err)
 	}
 
 	// Преобразуем в общую структуру api.TickerResponse
-	return c.convertToApiTickerResponse(&tickerResp), nil
+	return c.convertToApiTickerResponse(&bybitResp, category), nil
 }
 
 // Вспомогательный метод для преобразования
-func (c *BybitClient) convertToApiTickerResponse(bybitResp *bybitTickerResponse) *api.TickerResponse {
-	var tickers []api.Ticker
+func (c *BybitClient) convertToApiTickerResponse(bybitResp *api.BybitTickerResponse, category string) *api.TickerResponse {
+	var tickers []common.Ticker
 
 	for _, t := range bybitResp.Result.List {
-		tickers = append(tickers, api.Ticker{
+		tickers = append(tickers, common.Ticker{
 			Symbol:       t.Symbol,
 			LastPrice:    t.LastPrice,
 			Volume24h:    t.Volume24h,
@@ -243,14 +246,15 @@ func (c *BybitClient) convertToApiTickerResponse(bybitResp *bybitTickerResponse)
 	return &api.TickerResponse{
 		RetCode: bybitResp.RetCode,
 		RetMsg:  bybitResp.RetMsg,
-		Result: api.TickerList{
-			List: tickers,
+		Result: common.TickerList{
+			Category: category,
+			List:     tickers,
 		},
 	}
 }
 
 // GetInstrumentsInfo получает информацию об инструментах фьючерсов
-func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]InstrumentInfo, error) {
+func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]api.InstrumentInfo, error) {
 	params := url.Values{}
 	params.Set("category", category)
 	if symbol != "" {
@@ -266,8 +270,10 @@ func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]Ins
 	}
 
 	var response struct {
-		Result struct {
-			List []InstrumentInfo `json:"list"`
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
+			List []api.InstrumentInfo `json:"list"`
 		} `json:"result"`
 	}
 
@@ -279,7 +285,7 @@ func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]Ins
 }
 
 // GetKlineData получает свечные данные
-func (c *BybitClient) GetKlineData(symbol, category, interval string, limit int) (*KlineResponse, error) {
+func (c *BybitClient) GetKlineData(symbol, category, interval string, limit int) (*api.KlineResponse, error) {
 	params := url.Values{}
 	params.Set("category", category)
 	params.Set("symbol", symbol)
@@ -291,7 +297,7 @@ func (c *BybitClient) GetKlineData(symbol, category, interval string, limit int)
 		return nil, err
 	}
 
-	var klineResp KlineResponse
+	var klineResp api.KlineResponse
 	if err := json.Unmarshal(body, &klineResp); err != nil {
 		return nil, fmt.Errorf("failed to parse kline response: %w", err)
 	}
@@ -300,7 +306,7 @@ func (c *BybitClient) GetKlineData(symbol, category, interval string, limit int)
 }
 
 // GetWalletBalance получает баланс кошелька
-func (c *BybitClient) GetWalletBalance(accountType string) ([]AccountBalance, error) {
+func (c *BybitClient) GetWalletBalance(accountType string) ([]api.AccountBalance, error) {
 	params := url.Values{}
 	params.Set("accountType", accountType)
 
@@ -310,10 +316,12 @@ func (c *BybitClient) GetWalletBalance(accountType string) ([]AccountBalance, er
 	}
 
 	var response struct {
-		Result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
 			List []struct {
-				AccountType string           `json:"accountType"`
-				Coin        []AccountBalance `json:"coin"`
+				AccountType string               `json:"accountType"`
+				Coin        []api.AccountBalance `json:"coin"`
 			} `json:"list"`
 		} `json:"result"`
 	}
@@ -326,7 +334,7 @@ func (c *BybitClient) GetWalletBalance(accountType string) ([]AccountBalance, er
 		return response.Result.List[0].Coin, nil
 	}
 
-	return []AccountBalance{}, nil
+	return []api.AccountBalance{}, nil
 }
 
 // GetServerTime получает время сервера Bybit
@@ -337,7 +345,9 @@ func (c *BybitClient) GetServerTime() (int64, error) {
 	}
 
 	var response struct {
-		Result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
 			TimeSecond string `json:"timeSecond"`
 			TimeNano   string `json:"timeNano"`
 		} `json:"result"`
@@ -448,12 +458,10 @@ func (c *BybitClient) GetTopMovers(symbols []string, intervalMinutes int, topN i
 
 // Category возвращает текущую категорию клиента
 func (c *BybitClient) Category() string {
-	// Возвращаем поле category клиента, а не из конфига
 	if c.category != "" {
 		return c.category
 	}
-	// Если category пустая, возвращаем linear по умолчанию
-	return "linear"
+	return CategoryLinear
 }
 
 // GetRecentKlinesForPeriod получает свечи для анализа периода роста
@@ -497,7 +505,7 @@ func (c *BybitClient) GetRecentKlinesForPeriod(symbol string, periodMinutes int)
 }
 
 // AnalyzeGrowth анализирует рост/падение за период
-func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkContinuity bool) (*types.GrowthAnalysis, error) {
+func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkContinuity bool) (*analysis.GrowthAnalysis, error) {
 	klines, err := c.GetRecentKlinesForPeriod(symbol, periodMinutes)
 	if err != nil {
 		return nil, err
@@ -507,7 +515,7 @@ func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkConti
 		return nil, fmt.Errorf("insufficient data for growth analysis")
 	}
 
-	var dataPoints []types.PriceDataPoint
+	var dataPoints []analysis.PriceDataPoint
 
 	// Парсим данные из свечей
 	for _, kline := range klines {
@@ -524,7 +532,7 @@ func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkConti
 
 			volume, _ := strconv.ParseFloat(kline[5], 64)
 
-			dataPoints = append(dataPoints, types.PriceDataPoint{
+			dataPoints = append(dataPoints, analysis.PriceDataPoint{
 				Price:     closePrice,
 				Timestamp: time.Unix(timestampMs/1000, 0),
 				Volume:    volume,
@@ -541,9 +549,9 @@ func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkConti
 }
 
 // analyzeGrowthData анализирует данные на рост/падение
-func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPoints []types.PriceDataPoint, checkContinuity bool) (*types.GrowthAnalysis, error) {
-	analysis := &types.GrowthAnalysis{
-		Symbol:     symbol,
+func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPoints []analysis.PriceDataPoint, checkContinuity bool) (*analysis.GrowthAnalysis, error) {
+	analysisResult := &analysis.GrowthAnalysis{
+		Symbol:     common.Symbol(symbol),
 		Period:     periodMinutes,
 		DataPoints: dataPoints,
 	}
@@ -558,8 +566,8 @@ func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPo
 	endPrice := dataPoints[len(dataPoints)-1].Price
 
 	// Процент изменения
-	analysis.GrowthPercent = ((endPrice - startPrice) / startPrice) * 100
-	analysis.FallPercent = -analysis.GrowthPercent
+	analysisResult.GrowthPercent = ((endPrice - startPrice) / startPrice) * 100
+	analysisResult.FallPercent = -analysisResult.GrowthPercent
 
 	// Находим min/max
 	minPrice := startPrice
@@ -572,27 +580,27 @@ func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPo
 			maxPrice = point.Price
 		}
 	}
-	analysis.MinPrice = minPrice
-	analysis.MaxPrice = maxPrice
+	analysisResult.MinPrice = minPrice
+	analysisResult.MaxPrice = maxPrice
 
 	// Волатильность
-	analysis.Volatility = ((maxPrice - minPrice) / startPrice) * 100
+	analysisResult.Volatility = ((maxPrice - minPrice) / startPrice) * 100
 
 	// Проверяем непрерывный рост
 	if checkContinuity {
-		analysis.IsGrowing = c.checkContinuousGrowth(dataPoints)
-		analysis.IsFalling = c.checkContinuousFall(dataPoints)
+		analysisResult.IsGrowing = c.checkContinuousGrowth(dataPoints)
+		analysisResult.IsFalling = c.checkContinuousFall(dataPoints)
 	} else {
 		// Просто проверяем общее изменение
-		analysis.IsGrowing = analysis.GrowthPercent > 0
-		analysis.IsFalling = analysis.GrowthPercent < 0
+		analysisResult.IsGrowing = analysisResult.GrowthPercent > 0
+		analysisResult.IsFalling = analysisResult.GrowthPercent < 0
 	}
 
-	return analysis, nil
+	return analysisResult, nil
 }
 
 // checkContinuousGrowth проверяет непрерывный рост
-func (c *BybitClient) checkContinuousGrowth(dataPoints []types.PriceDataPoint) bool {
+func (c *BybitClient) checkContinuousGrowth(dataPoints []analysis.PriceDataPoint) bool {
 	for i := 1; i < len(dataPoints); i++ {
 		if dataPoints[i].Price <= dataPoints[i-1].Price {
 			return false
@@ -602,7 +610,7 @@ func (c *BybitClient) checkContinuousGrowth(dataPoints []types.PriceDataPoint) b
 }
 
 // checkContinuousFall проверяет непрерывное падение
-func (c *BybitClient) checkContinuousFall(dataPoints []types.PriceDataPoint) bool {
+func (c *BybitClient) checkContinuousFall(dataPoints []analysis.PriceDataPoint) bool {
 	for i := 1; i < len(dataPoints); i++ {
 		if dataPoints[i].Price >= dataPoints[i-1].Price {
 			return false
@@ -613,9 +621,9 @@ func (c *BybitClient) checkContinuousFall(dataPoints []types.PriceDataPoint) boo
 
 // FindGrowthSignals ищет сигналы роста/падения
 func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int,
-	growthThreshold, fallThreshold float64, checkContinuity bool) ([]types.GrowthSignal, error) {
+	growthThreshold, fallThreshold float64, checkContinuity bool) ([]analysis.GrowthSignal, error) {
 
-	var signals []types.GrowthSignal
+	var signals []analysis.GrowthSignal
 
 	// Получаем тикеры для всех символов одним запросом
 	tickerResp, err := c.GetTickers("linear")
@@ -628,7 +636,7 @@ func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int,
 	for _, ticker := range tickerResp.Result.List {
 		volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
 		if err == nil {
-			volumeMap[ticker.Symbol] = volume
+			volumeMap[string(ticker.Symbol)] = volume
 		}
 	}
 
@@ -638,43 +646,43 @@ func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int,
 			continue
 		}
 
-		analysis, err := c.AnalyzeGrowth(symbol, periodMinutes, checkContinuity)
+		analysisResult, err := c.AnalyzeGrowth(symbol, periodMinutes, checkContinuity)
 		if err != nil {
 			continue // Пропускаем символы с недостаточными данными
 		}
 
-		var signal *types.GrowthSignal
+		var signal *analysis.GrowthSignal
 
 		// Проверяем рост
-		if analysis.IsGrowing && analysis.GrowthPercent >= growthThreshold {
-			signal = &types.GrowthSignal{
-				Symbol:        symbol,
+		if analysisResult.IsGrowing && analysisResult.GrowthPercent >= growthThreshold {
+			signal = &analysis.GrowthSignal{
+				Symbol:        common.Symbol(symbol),
 				PeriodMinutes: periodMinutes,
-				GrowthPercent: analysis.GrowthPercent,
+				GrowthPercent: analysisResult.GrowthPercent,
 				FallPercent:   0,
 				IsContinuous:  true,
-				DataPoints:    len(analysis.DataPoints),
-				StartPrice:    analysis.MinPrice,
-				EndPrice:      analysis.MaxPrice,
+				DataPoints:    len(analysisResult.DataPoints),
+				StartPrice:    analysisResult.MinPrice,
+				EndPrice:      analysisResult.MaxPrice,
 				Direction:     "growth",
-				Confidence:    c.calculateConfidence(analysis),
+				Confidence:    c.calculateConfidence(analysisResult),
 				Timestamp:     time.Now(),
 			}
 		}
 
 		// Проверяем падение
-		if analysis.IsFalling && analysis.FallPercent >= fallThreshold {
-			signal = &types.GrowthSignal{
-				Symbol:        symbol,
+		if analysisResult.IsFalling && analysisResult.FallPercent >= fallThreshold {
+			signal = &analysis.GrowthSignal{
+				Symbol:        common.Symbol(symbol),
 				PeriodMinutes: periodMinutes,
 				GrowthPercent: 0,
-				FallPercent:   analysis.FallPercent,
+				FallPercent:   analysisResult.FallPercent,
 				IsContinuous:  true,
-				DataPoints:    len(analysis.DataPoints),
-				StartPrice:    analysis.MaxPrice,
-				EndPrice:      analysis.MinPrice,
+				DataPoints:    len(analysisResult.DataPoints),
+				StartPrice:    analysisResult.MaxPrice,
+				EndPrice:      analysisResult.MinPrice,
 				Direction:     "fall",
-				Confidence:    c.calculateConfidence(analysis),
+				Confidence:    c.calculateConfidence(analysisResult),
 				Timestamp:     time.Now(),
 			}
 		}
@@ -695,7 +703,7 @@ func (c *BybitClient) FindGrowthSignals(symbols []string, periodMinutes int,
 }
 
 // calculateConfidence рассчитывает уверенность в сигнале
-func (c *BybitClient) calculateConfidence(analysis *types.GrowthAnalysis) float64 {
+func (c *BybitClient) calculateConfidence(analysis *analysis.GrowthAnalysis) float64 {
 	confidence := 0.0
 
 	// Более высокий процент изменения = более высокая уверенность
@@ -731,7 +739,7 @@ func (c *BybitClient) calculateConfidence(analysis *types.GrowthAnalysis) float6
 }
 
 // GetKlineDataWithInterval получает свечные данные с указанным интервалом
-func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string, limit int) (*KlineResponse, error) {
+func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string, limit int) (*api.KlineResponse, error) {
 	params := url.Values{}
 	params.Set("category", category)
 	params.Set("symbol", symbol)
@@ -743,7 +751,7 @@ func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string
 		return nil, err
 	}
 
-	var klineResp KlineResponse
+	var klineResp api.KlineResponse
 	if err := json.Unmarshal(body, &klineResp); err != nil {
 		return nil, fmt.Errorf("failed to parse kline response: %w", err)
 	}
@@ -759,7 +767,7 @@ func (c *BybitClient) Get24hVolume(symbol string) (float64, error) {
 	}
 
 	for _, ticker := range tickers.Result.List {
-		if ticker.Symbol == symbol {
+		if ticker.Symbol == common.Symbol(symbol) {
 			volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
 			if err != nil {
 				return 0, fmt.Errorf("failed to parse volume: %w", err)
@@ -782,10 +790,12 @@ func (c *BybitClient) GetSymbolVolume(symbols []string) (map[string]float64, err
 	}
 
 	var response struct {
-		Result struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
 			List []struct {
-				Symbol      string `json:"symbol"`
-				Turnover24h string `json:"turnover24h"`
+				Symbol      common.Symbol `json:"symbol"`
+				Turnover24h string        `json:"turnover24h"`
 			} `json:"list"`
 		} `json:"result"`
 	}
@@ -797,7 +807,7 @@ func (c *BybitClient) GetSymbolVolume(symbols []string) (map[string]float64, err
 	volumes := make(map[string]float64)
 	for _, symbol := range symbols {
 		for _, ticker := range response.Result.List {
-			if ticker.Symbol == symbol && ticker.Turnover24h != "" {
+			if ticker.Symbol == common.Symbol(symbol) && ticker.Turnover24h != "" {
 				volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
 				if err == nil {
 					volumes[symbol] = volume

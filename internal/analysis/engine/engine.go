@@ -2,12 +2,14 @@
 package engine
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/analysis/analyzers"
-	"crypto-exchange-screener-bot/internal/analysis/filters"
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/analysis/analyzers"
+	"crypto_exchange_screener_bot/internal/analysis/filters"
+	"crypto_exchange_screener_bot/internal/events"
+	"crypto_exchange_screener_bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
+	types_events "crypto_exchange_screener_bot/internal/types/events"
+	types_filters "crypto_exchange_screener_bot/internal/types/filters"
 	"fmt"
 	"log"
 	"sort"
@@ -20,10 +22,10 @@ import (
 // AnalysisEngine - основной движок анализа
 type AnalysisEngine struct {
 	mu           sync.RWMutex
-	analyzers    map[string]analyzers.Analyzer
+	analyzers    map[string]analysis.Analyzer
 	filters      *FilterChain
-	storage      storage.PriceStorage
-	eventBus     *events.EventBus
+	storage      storage.PriceStorage // исправлено с fetcher.PriceStorage
+	eventBus     *events.EventBus     // исправлено с events.EventBus
 	config       EngineConfig
 	stats        EngineStats
 	lastAnalysis map[string]time.Time
@@ -79,13 +81,13 @@ type AnalyzerConfig struct {
 
 // EngineStats - статистика движка
 type EngineStats struct {
-	TotalAnalyses   int64                              `json:"total_analyses"`
-	TotalSignals    int64                              `json:"total_signals"`
-	AnalysisTime    time.Duration                      `json:"analysis_time"`
-	ActiveAnalyzers int                                `json:"active_analyzers"`
-	LastRunTime     time.Time                          `json:"last_run_time"`
-	SymbolsAnalyzed map[string]int64                   `json:"symbols_analyzed"`
-	AnalyzerStats   map[string]analyzers.AnalyzerStats `json:"analyzer_stats"`
+	TotalAnalyses   int64                             `json:"total_analyses"`
+	TotalSignals    int64                             `json:"total_signals"`
+	AnalysisTime    time.Duration                     `json:"analysis_time"`
+	ActiveAnalyzers int                               `json:"active_analyzers"`
+	LastRunTime     time.Time                         `json:"last_run_time"`
+	SymbolsAnalyzed map[string]int64                  `json:"symbols_analyzed"`
+	AnalyzerStats   map[string]analysis.AnalyzerStats `json:"analyzer_stats"`
 }
 
 // DefaultConfig - конфигурация по умолчанию
@@ -109,14 +111,14 @@ func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, 
 	}
 
 	engine := &AnalysisEngine{
-		analyzers: make(map[string]analyzers.Analyzer),
+		analyzers: make(map[string]analysis.Analyzer),
 		filters:   NewFilterChain(),
 		storage:   storage,
 		eventBus:  eventBus,
 		config:    cfg,
 		stats: EngineStats{
 			SymbolsAnalyzed: make(map[string]int64),
-			AnalyzerStats:   make(map[string]analyzers.AnalyzerStats),
+			AnalyzerStats:   make(map[string]analysis.AnalyzerStats),
 		},
 		lastAnalysis: make(map[string]time.Time),
 		stopChan:     make(chan struct{}),
@@ -169,7 +171,7 @@ func (e *AnalysisEngine) Stop() error {
 }
 
 // RegisterAnalyzer регистрирует анализатор
-func (e *AnalysisEngine) RegisterAnalyzer(analyzer analyzers.Analyzer) error {
+func (e *AnalysisEngine) RegisterAnalyzer(analyzer analysis.Analyzer) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -181,7 +183,7 @@ func (e *AnalysisEngine) RegisterAnalyzer(analyzer analyzers.Analyzer) error {
 	e.analyzers[name] = analyzer
 
 	// Инициализируем статистику
-	e.stats.AnalyzerStats[name] = analyzers.AnalyzerStats{}
+	e.stats.AnalyzerStats[name] = analysis.AnalyzerStats{}
 	e.stats.ActiveAnalyzers++
 
 	log.Printf("✅ Зарегистрирован анализатор: %s v%s", name, analyzer.Version())
@@ -206,7 +208,7 @@ func (e *AnalysisEngine) UnregisterAnalyzer(name string) error {
 }
 
 // AddFilter добавляет фильтр в цепочку
-func (e *AnalysisEngine) AddFilter(filter filters.Filter) {
+func (e *AnalysisEngine) AddFilter(filter types_filters.Filter) {
 	e.filters.Add(filter)
 	log.Printf("➕ Добавлен фильтр: %s", filter.Name())
 }
@@ -238,7 +240,7 @@ func (e *AnalysisEngine) AnalyzeSymbol(symbol string, periods []time.Duration) (
 	e.updateStats(symbol, len(allSignals), len(filteredSignals), time.Since(startTime))
 
 	result := &analysis.AnalysisResult{
-		Symbol:    symbol,
+		Symbol:    common.Symbol(symbol),
 		Signals:   filteredSignals,
 		Timestamp: time.Now(),
 		Duration:  time.Since(startTime),
@@ -295,9 +297,9 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 	var allSignals []analysis.Signal
 
 	e.mu.RLock()
-	analyzersList := make([]analyzers.Analyzer, 0, len(e.analyzers))
+	analyzersList := make([]analysis.Analyzer, 0, len(e.analyzers))
 	for _, analyzer := range e.analyzers {
-		if analyzer.Supports(symbol) {
+		if analyzer.Supports(common.Symbol(symbol)) {
 			analyzersList = append(analyzersList, analyzer)
 		}
 	}
@@ -312,7 +314,7 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 
 		// Добавляем метаданные
 		for i := range signals {
-			signals[i].Symbol = symbol
+			signals[i].Symbol = common.Symbol(symbol)
 			signals[i].Period = int(period.Minutes())
 			signals[i].Timestamp = time.Now()
 			signals[i].ID = uuid.New().String()
@@ -454,11 +456,11 @@ func (e *AnalysisEngine) updateStats(symbol string, totalSignals, filteredSignal
 // publishSignals публикует сигналы в EventBus
 func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
 	for _, signal := range signals {
-		e.eventBus.Publish(events.Event{
-			Type:   events.EventSignalDetected,
+		e.eventBus.Publish(types_events.Event{
+			Type:   types_events.EventSignalDetected,
 			Source: "analysis_engine",
 			Data:   signal,
-			Metadata: events.Metadata{
+			Metadata: types_events.Metadata{
 				CorrelationID: signal.ID,
 				Priority:      int(signal.Confidence / 10),
 				Tags:          signal.Metadata.Tags,
@@ -478,7 +480,7 @@ func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.An
 		totalSignals += len(result.Signals)
 	}
 
-	e.eventBus.Publish(events.Event{
+	e.eventBus.Publish(types_events.Event{
 		Type:   "analysis_complete",
 		Source: "analysis_engine",
 		Data: map[string]interface{}{
@@ -512,23 +514,23 @@ func (e *AnalysisEngine) analysisLoop() {
 
 // subscribeToEvents подписывается на события EventBus
 func (e *AnalysisEngine) subscribeToEvents() {
-	subscriber := events.NewBaseSubscriber(
+	subscriber := types_events.NewBaseSubscriber(
 		"analysis_engine",
-		[]events.EventType{
-			events.EventPriceUpdated,
+		[]types_events.EventType{
+			types_events.EventPriceUpdated,
 			"analysis_request",
 		},
 		e.handleEvent,
 	)
 
-	e.eventBus.Subscribe(events.EventPriceUpdated, subscriber)
+	e.eventBus.Subscribe(types_events.EventPriceUpdated, subscriber)
 	e.eventBus.Subscribe("analysis_request", subscriber)
 }
 
 // handleEvent обрабатывает события EventBus
-func (e *AnalysisEngine) handleEvent(event events.Event) error {
+func (e *AnalysisEngine) handleEvent(event types_events.Event) error {
 	switch event.Type {
-	case events.EventPriceUpdated:
+	case types_events.EventPriceUpdated:
 		// Можно добавить реактивный анализ при обновлении цен
 		// Например, анализировать только обновленный символ
 		if data, ok := event.Data.(map[string]interface{}); ok {
@@ -578,14 +580,14 @@ func (e *AnalysisEngine) saveStats() {
 // registerDefaultAnalyzers регистрирует стандартные анализаторы
 func (e *AnalysisEngine) registerDefaultAnalyzers() {
 	e.mu.Lock()
-	e.analyzers = make(map[string]analyzers.Analyzer)
-	e.stats.AnalyzerStats = make(map[string]analyzers.AnalyzerStats)
+	e.analyzers = make(map[string]analysis.Analyzer)
+	e.stats.AnalyzerStats = make(map[string]analysis.AnalyzerStats)
 	e.stats.ActiveAnalyzers = 0
 	e.mu.Unlock()
 
 	// GrowthAnalyzer - анализатор роста
 	if e.config.AnalyzerConfigs.GrowthAnalyzer.Enabled {
-		growthConfig := analyzers.AnalyzerConfig{
+		growthConfig := analysis.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: e.config.AnalyzerConfigs.GrowthAnalyzer.MinConfidence,
@@ -602,7 +604,7 @@ func (e *AnalysisEngine) registerDefaultAnalyzers() {
 
 	// FallAnalyzer - анализатор падения
 	if e.config.AnalyzerConfigs.FallAnalyzer.Enabled {
-		fallConfig := analyzers.AnalyzerConfig{
+		fallConfig := analysis.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: e.config.AnalyzerConfigs.FallAnalyzer.MinConfidence,
@@ -658,11 +660,11 @@ func (e *AnalysisEngine) setupDefaultFilters() {
 }
 
 // convertToPriceData конвертирует данные хранилища в формат анализа
-func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
-	result := make([]types.PriceData, len(storageData))
+func convertToPriceData(storageData []common.PriceData) []common.PriceData {
+	result := make([]common.PriceData, len(storageData))
 
 	for i, data := range storageData {
-		result[i] = types.PriceData{
+		result[i] = common.PriceData{
 			Symbol:    data.Symbol,
 			Price:     data.Price,
 			Volume24h: data.Volume24h,
@@ -675,19 +677,19 @@ func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
 
 // FilterChain - цепочка фильтров
 type FilterChain struct {
-	filters []filters.Filter
+	filters []types_filters.Filter
 	mu      sync.RWMutex
 }
 
 // NewFilterChain создает новую цепочку фильтров
 func NewFilterChain() *FilterChain {
 	return &FilterChain{
-		filters: make([]filters.Filter, 0),
+		filters: make([]types_filters.Filter, 0),
 	}
 }
 
 // Add добавляет фильтр в цепочку
-func (fc *FilterChain) Add(filter filters.Filter) {
+func (fc *FilterChain) Add(filter types_filters.Filter) {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 	fc.filters = append(fc.filters, filter)
@@ -720,8 +722,8 @@ func (fc *FilterChain) Apply(signals []analysis.Signal) []analysis.Signal {
 }
 
 // GetFilterStats возвращает статистику по всем фильтрам
-func (e *AnalysisEngine) GetFilterStats() map[string]filters.FilterStats {
-	stats := make(map[string]filters.FilterStats)
+func (e *AnalysisEngine) GetFilterStats() map[string]types_filters.FilterStats {
+	stats := make(map[string]types_filters.FilterStats)
 
 	e.filters.mu.RLock()
 	defer e.filters.mu.RUnlock()

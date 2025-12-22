@@ -2,7 +2,7 @@
 package filters
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto_exchange_screener_bot/internal/analysis"
 	"sync"
 )
 

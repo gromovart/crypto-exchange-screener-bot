@@ -2,9 +2,9 @@
 package fetcher
 
 import (
-	"crypto-exchange-screener-bot/internal/api/binance"
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/api/binance"
+	"crypto_exchange_screener_bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/types/events"
 	"fmt"
 	"log"
 	"strconv"

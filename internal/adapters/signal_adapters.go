@@ -2,19 +2,19 @@
 package adapters
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 )
 
 // AnalysisSignalToTrendSignal конвертирует analysis.Signal в types.TrendSignal
-func AnalysisSignalToTrendSignal(signal analysis.Signal) types.TrendSignal {
+func AnalysisSignalToTrendSignal(signal analysis.Signal) analysis.TrendSignal {
 	direction := "growth"
-	if signal.Direction == "down" {
+	if signal.Direction == analysis.TrendBearish || string(signal.Direction) == "down" {
 		direction = "fall"
 	}
 
-	return types.TrendSignal{
-		Symbol:        signal.Symbol,
+	return analysis.TrendSignal{
+		Symbol:        signal.Symbol, // Уже common.Symbol
 		Direction:     direction,
 		ChangePercent: signal.ChangePercent,
 		PeriodMinutes: signal.Period,
@@ -25,12 +25,13 @@ func AnalysisSignalToTrendSignal(signal analysis.Signal) types.TrendSignal {
 }
 
 // AnalysisSignalToGrowthSignal конвертирует analysis.Signal в types.GrowthSignal
-func AnalysisSignalToGrowthSignal(signal analysis.Signal) types.GrowthSignal {
+func AnalysisSignalToGrowthSignal(signal analysis.Signal) analysis.GrowthSignal {
 	growthPercent := 0.0
 	fallPercent := 0.0
-	direction := signal.Direction
+	direction := "growth"
 
-	if signal.Direction == "up" {
+	// Сравниваем с правильными типами
+	if signal.Direction == analysis.TrendBullish || string(signal.Direction) == "up" {
 		growthPercent = signal.ChangePercent
 		direction = "growth"
 	} else {
@@ -38,7 +39,7 @@ func AnalysisSignalToGrowthSignal(signal analysis.Signal) types.GrowthSignal {
 		direction = "fall"
 	}
 
-	return types.GrowthSignal{
+	return analysis.GrowthSignal{
 		Symbol:        signal.Symbol,
 		PeriodMinutes: signal.Period,
 		GrowthPercent: growthPercent,
@@ -47,19 +48,19 @@ func AnalysisSignalToGrowthSignal(signal analysis.Signal) types.GrowthSignal {
 		DataPoints:    signal.DataPoints,
 		StartPrice:    signal.StartPrice,
 		EndPrice:      signal.EndPrice,
-		Direction:     direction, // Исправлено: должно быть "growth" или "fall"
+		Direction:     direction,
 		Confidence:    signal.Confidence,
 		Timestamp:     signal.Timestamp,
-		Type:          signal.Type,      // Добавлено: передаем тип сигнала
-		Metadata:      &signal.Metadata, // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: передаем метаданные
+		Type:          string(signal.Type), // Преобразуем SignalType в string
+		Metadata:      &signal.Metadata,
 	}
 }
 
 // TrendSignalToGrowthSignal конвертирует types.TrendSignal в types.GrowthSignal
-func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
+func TrendSignalToGrowthSignal(signal analysis.TrendSignal) analysis.GrowthSignal {
 	growthPercent := 0.0
 	fallPercent := 0.0
-	direction := "up"
+	direction := "growth"
 
 	if signal.Direction == "growth" {
 		growthPercent = signal.ChangePercent
@@ -69,7 +70,7 @@ func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
 		direction = "fall"
 	}
 
-	return types.GrowthSignal{
+	return analysis.GrowthSignal{
 		Symbol:        signal.Symbol,
 		PeriodMinutes: signal.PeriodMinutes,
 		GrowthPercent: growthPercent,
@@ -87,8 +88,8 @@ func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
 }
 
 // PriceDataToPriceDataPoint конвертирует types.PriceData в types.PriceDataPoint
-func PriceDataToPriceDataPoint(data types.PriceData) types.PriceDataPoint {
-	return types.PriceDataPoint{
+func PriceDataToPriceDataPoint(data common.PriceData) analysis.PriceDataPoint {
+	return analysis.PriceDataPoint{
 		Price:     data.Price,
 		Timestamp: data.Timestamp,
 		Volume:    data.Volume24h,
@@ -96,8 +97,8 @@ func PriceDataToPriceDataPoint(data types.PriceData) types.PriceDataPoint {
 }
 
 // BatchAnalysisSignalToTrendSignal конвертирует пакет analysis.Signal
-func BatchAnalysisSignalToTrendSignal(signals []analysis.Signal) []types.TrendSignal {
-	result := make([]types.TrendSignal, len(signals))
+func BatchAnalysisSignalToTrendSignal(signals []analysis.Signal) []analysis.TrendSignal {
+	result := make([]analysis.TrendSignal, len(signals))
 	for i, signal := range signals {
 		result[i] = AnalysisSignalToTrendSignal(signal)
 	}
@@ -105,8 +106,8 @@ func BatchAnalysisSignalToTrendSignal(signals []analysis.Signal) []types.TrendSi
 }
 
 // BatchAnalysisSignalToGrowthSignal конвертирует пакет analysis.Signal
-func BatchAnalysisSignalToGrowthSignal(signals []analysis.Signal) []types.GrowthSignal {
-	result := make([]types.GrowthSignal, len(signals))
+func BatchAnalysisSignalToGrowthSignal(signals []analysis.Signal) []analysis.GrowthSignal {
+	result := make([]analysis.GrowthSignal, len(signals))
 	for i, signal := range signals {
 		result[i] = AnalysisSignalToGrowthSignal(signal)
 	}

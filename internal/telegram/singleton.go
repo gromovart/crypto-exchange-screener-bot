@@ -1,7 +1,7 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto_exchange_screener_bot/internal/config"
 	"fmt"
 	"log"
 	"net/http"

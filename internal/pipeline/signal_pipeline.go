@@ -2,8 +2,11 @@
 package pipeline
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/events"
+	"crypto_exchange_screener_bot/internal/telegram"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
+	"crypto_exchange_screener_bot/internal/types/events"
+	"crypto_exchange_screener_bot/internal/types/pipeline"
 	"log"
 	"sync"
 	"time"
@@ -12,9 +15,9 @@ import (
 // SignalPipeline обрабатывает и обогащает сигналы перед отправкой
 type SignalPipeline struct {
 	eventBus    *events.EventBus
-	stages      []PipelineStage
-	rateLimiter *RateLimiter
-	stats       PipelineStats
+	stages      []pipeline.PipelineStage
+	rateLimiter *common.RateLimiter
+	stats       pipeline.PipelineStats
 	mu          sync.RWMutex
 }
 
@@ -22,17 +25,17 @@ type SignalPipeline struct {
 func NewSignalPipeline(eventBus *events.EventBus) *SignalPipeline {
 	return &SignalPipeline{
 		eventBus: eventBus,
-		stages:   make([]PipelineStage, 0),
-		rateLimiter: &RateLimiter{
+		stages:   make([]pipeline.PipelineStage, 0),
+		rateLimiter: &pipeline.RateLimiter{
 			lastSent: make(map[string]time.Time),
 			minDelay: 30 * time.Second, // Не чаще чем раз в 30 секунд на символ
 		},
-		stats: PipelineStats{},
+		stats: pipeline.PipelineStats{},
 	}
 }
 
 // AddStage добавляет этап обработки
-func (p *SignalPipeline) AddStage(stage PipelineStage) {
+func (p *SignalPipeline) AddStage(stage pipeline.PipelineStage) {
 	p.stages = append(p.stages, stage)
 }
 
@@ -115,7 +118,7 @@ func (p *SignalPipeline) handleSignal(event events.Event) error {
 }
 
 // CanSend проверяет, можно ли отправить сигнал
-func (rl *RateLimiter) CanSend(key string) bool {
+func (rl *telegram.RateLimiter) CanSend(key string) bool {
 	rl.mu.RLock()
 	last, exists := rl.lastSent[key]
 	rl.mu.RUnlock()
@@ -132,7 +135,7 @@ func (rl *RateLimiter) CanSend(key string) bool {
 }
 
 // GetStats возвращает статистику
-func (p *SignalPipeline) GetStats() PipelineStats {
+func (p *SignalPipeline) GetStats() pipeline.PipelineStats {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.stats

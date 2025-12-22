@@ -2,11 +2,12 @@
 package fetcher
 
 import (
-	"crypto-exchange-screener-bot/internal/api/bybit"
-	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/api/bybit"
+	"crypto_exchange_screener_bot/internal/config"
+	"crypto_exchange_screener_bot/internal/events"
+	"crypto_exchange_screener_bot/internal/storage"
+	"crypto_exchange_screener_bot/internal/types/common"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"fmt"
 	"log"
 	"sync"
@@ -120,7 +121,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		}
 
 		// Добавляем в массив
-		priceDataList = append(priceDataList, PriceData{
+		priceDataList = append(priceDataList, common.PriceData{
 			Symbol:    ticker.Symbol,
 			Price:     price,
 			Volume24h: volume,

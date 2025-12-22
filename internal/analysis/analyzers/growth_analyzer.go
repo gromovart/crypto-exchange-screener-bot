@@ -2,8 +2,8 @@
 package analyzers
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
 	"fmt"
 	"math"
 	"sort"
@@ -13,8 +13,8 @@ import (
 
 // GrowthAnalyzer - анализатор роста
 type GrowthAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config analysis.AnalyzerConfig
+	stats  analysis.AnalyzerStats
 	mu     sync.RWMutex
 }
 
@@ -35,7 +35,7 @@ func (a *GrowthAnalyzer) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные на рост
-func (a *GrowthAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *GrowthAnalyzer) Analyze(data []common.PriceData, config analysis.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	if len(data) < config.MinDataPoints {
@@ -81,7 +81,7 @@ func (a *GrowthAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) 
 		StartPrice:    startPrice,
 		EndPrice:      endPrice,
 		Timestamp:     time.Now(),
-		Metadata: analysis.Metadata{
+		Metadata: analysis.SignalMetadata{
 			Strategy:     "growth_detection",
 			Tags:         []string{"growth", "bullish"},
 			IsContinuous: isContinuous,
@@ -99,21 +99,21 @@ func (a *GrowthAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) 
 }
 
 // GetConfig возвращает конфигурацию
-func (a *GrowthAnalyzer) GetConfig() AnalyzerConfig {
+func (a *GrowthAnalyzer) GetConfig() analysis.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
 // GetStats возвращает статистику
-func (a *GrowthAnalyzer) GetStats() AnalyzerStats {
+func (a *GrowthAnalyzer) GetStats() analysis.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
 }
 
 // checkContinuity проверяет непрерывность роста
-func (a *GrowthAnalyzer) checkContinuity(data []types.PriceData) bool {
+func (a *GrowthAnalyzer) checkContinuity(data []common.PriceData) bool {
 	continuousPoints := 0
 	totalPoints := len(data) - 1
 
@@ -128,7 +128,7 @@ func (a *GrowthAnalyzer) checkContinuity(data []types.PriceData) bool {
 }
 
 // calculateConfidence рассчитывает уверенность
-func (a *GrowthAnalyzer) calculateConfidence(data []types.PriceData, change float64, isContinuous bool) float64 {
+func (a *GrowthAnalyzer) calculateConfidence(data []common.PriceData, change float64, isContinuous bool) float64 {
 	confidence := 0.0
 
 	// 1. Изменение цены (макс 40%)
@@ -147,7 +147,7 @@ func (a *GrowthAnalyzer) calculateConfidence(data []types.PriceData, change floa
 }
 
 // calculateTrendStrength рассчитывает силу тренда
-func (a *GrowthAnalyzer) calculateTrendStrength(data []types.PriceData) float64 {
+func (a *GrowthAnalyzer) calculateTrendStrength(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}
@@ -162,7 +162,7 @@ func (a *GrowthAnalyzer) calculateTrendStrength(data []types.PriceData) float64 
 }
 
 // calculateVolatility рассчитывает волатильность
-func (a *GrowthAnalyzer) calculateVolatility(data []types.PriceData) float64 {
+func (a *GrowthAnalyzer) calculateVolatility(data []common.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}
@@ -206,7 +206,7 @@ func (a *GrowthAnalyzer) updateStats(duration time.Duration, success bool) {
 }
 
 // DefaultGrowthConfig - конфигурация по умолчанию
-var DefaultGrowthConfig = AnalyzerConfig{
+var DefaultGrowthConfig = analysis.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        1.0,
 	MinConfidence: 60.0,

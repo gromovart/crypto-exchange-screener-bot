@@ -2,7 +2,7 @@
 package notifier
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
 	"log"
 	"sync"
 	"time"
@@ -18,7 +18,7 @@ type CompositeNotificationService struct {
 
 // Notifier интерфейс отдельного нотификатора
 type Notifier interface {
-	Send(signal types.TrendSignal) error
+	Send(signal analysis.TrendSignal) error
 	Name() string
 	IsEnabled() bool
 	SetEnabled(bool)
@@ -69,7 +69,7 @@ func (c *CompositeNotificationService) Name() string {
 }
 
 // Send отправляет сигнал через все нотификаторы
-func (c *CompositeNotificationService) Send(signal types.TrendSignal) error {
+func (c *CompositeNotificationService) Send(signal analysis.TrendSignal) error {
 	if !c.enabled {
 		return nil
 	}
@@ -108,7 +108,7 @@ func (c *CompositeNotificationService) Send(signal types.TrendSignal) error {
 }
 
 // SendBatch отправляет пакет сигналов
-func (c *CompositeNotificationService) SendBatch(signals []types.TrendSignal) error {
+func (c *CompositeNotificationService) SendBatch(signals []analysis.TrendSignal) error {
 	if !c.enabled || len(signals) == 0 {
 		return nil
 	}

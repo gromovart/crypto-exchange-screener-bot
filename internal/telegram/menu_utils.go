@@ -2,7 +2,8 @@
 package telegram
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/telegram"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +18,9 @@ func NewMenuUtils() *MenuUtils {
 }
 
 // FormatCompactMenu создает компактное меню
-func (mu *MenuUtils) FormatCompactMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mu *MenuUtils) FormatCompactMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "⚙️ Настройки"},
 				{Text: "📊 Статус"},
@@ -41,9 +42,9 @@ func (mu *MenuUtils) FormatCompactMenu() ReplyKeyboardMarkup {
 }
 
 // FormatSettingsMenu создает меню настроек
-func (mu *MenuUtils) FormatSettingsMenu() ReplyKeyboardMarkup {
-	return ReplyKeyboardMarkup{
-		Keyboard: [][]ReplyKeyboardButton{
+func (mu *MenuUtils) FormatSettingsMenu() telegram.ReplyKeyboardMarkup {
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
 			{
 				{Text: "🔔 Вкл/Выкл"},
 				{Text: "📈 Тип сигналов"},
@@ -65,12 +66,12 @@ func (mu *MenuUtils) FormatSettingsMenu() ReplyKeyboardMarkup {
 }
 
 // FormatNotificationKeyboard создает клавиатуру для уведомлений
-func (mu *MenuUtils) FormatNotificationKeyboard(signal types.GrowthSignal) *InlineKeyboardMarkup {
+func (mu *MenuUtils) FormatNotificationKeyboard(signal analysis.GrowthSignal) *telegram.InlineKeyboardMarkup {
 	chartURL := fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", signal.Symbol)
 	tradeURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
 
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{
 					Text: "📈 График",
@@ -86,7 +87,7 @@ func (mu *MenuUtils) FormatNotificationKeyboard(signal types.GrowthSignal) *Inli
 }
 
 // FormatSignalMessage форматирует сообщение сигнала для компактного отображения
-func (mu *MenuUtils) FormatSignalMessage(signal types.GrowthSignal, format string) string {
+func (mu *MenuUtils) FormatSignalMessage(signal analysis.GrowthSignal, format string) string {
 	var icon, directionStr, changeStr string
 	changePercent := signal.GrowthPercent + signal.FallPercent
 
@@ -223,9 +224,9 @@ func (mu *MenuUtils) CalculateMaxButtons(screenWidth int) (int, int) {
 }
 
 // CreateNotificationMenu создает меню для уведомлений
-func (mu *MenuUtils) CreateNotificationMenu() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+func (mu *MenuUtils) CreateNotificationMenu() *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "✅ Включить", CallbackData: "notify_on"},
 				{Text: "❌ Выключить", CallbackData: "notify_off"},
@@ -239,9 +240,9 @@ func (mu *MenuUtils) CreateNotificationMenu() *InlineKeyboardMarkup {
 }
 
 // CreatePeriodMenu создает меню периодов
-func (mu *MenuUtils) CreatePeriodMenu() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
+func (mu *MenuUtils) CreatePeriodMenu() *telegram.InlineKeyboardMarkup {
+	return &telegram.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
 				{Text: "5 мин", CallbackData: "period_5m"},
 				{Text: "15 мин", CallbackData: "period_15m"},

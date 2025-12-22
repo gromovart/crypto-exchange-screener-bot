@@ -2,14 +2,15 @@
 package filters
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/filters"
 	"sync"
 )
 
 // ConfidenceFilter - фильтр по уверенности сигнала
 type ConfidenceFilter struct {
 	MinConfidence float64
-	stats         FilterStats
+	stats         filters.FilterStats
 	mu            sync.RWMutex
 }
 
@@ -17,7 +18,7 @@ type ConfidenceFilter struct {
 func NewConfidenceFilter(minConfidence float64) *ConfidenceFilter {
 	return &ConfidenceFilter{
 		MinConfidence: minConfidence,
-		stats: FilterStats{
+		stats: filters.FilterStats{
 			TotalProcessed: 0,
 			PassedThrough:  0,
 			FilteredOut:    0,
@@ -44,7 +45,7 @@ func (f *ConfidenceFilter) Apply(signal analysis.Signal) bool {
 	return true
 }
 
-func (f *ConfidenceFilter) GetStats() FilterStats {
+func (f *ConfidenceFilter) GetStats() filters.FilterStats {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.stats

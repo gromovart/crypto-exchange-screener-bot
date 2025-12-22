@@ -2,8 +2,9 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/types/events"
+	"crypto_exchange_screener_bot/internal/types/manager"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"sync"
 	"time"
 )
@@ -13,20 +14,20 @@ type LifecycleManager struct {
 	mu              sync.RWMutex
 	registry        *ServiceRegistry
 	eventBus        *events.EventBus
-	dependencyGraph *DependencyGraph
+	dependencyGraph *manager.DependencyGraph
 	restartAttempts map[string]int
-	config          CoordinatorConfig
+	config          manager.CoordinatorConfig
 	startTime       time.Time
 	healthTicker    *time.Ticker
 	stopChan        chan struct{}
 }
 
 // NewLifecycleManager создает менеджер жизненного цикла
-func NewLifecycleManager(registry *ServiceRegistry, eventBus *events.EventBus, config CoordinatorConfig) *LifecycleManager {
+func NewLifecycleManager(registry *ServiceRegistry, eventBus *events.EventBus, config manager.CoordinatorConfig) *LifecycleManager {
 	lm := &LifecycleManager{
 		registry:        registry,
 		eventBus:        eventBus,
-		dependencyGraph: &DependencyGraph{Services: make(map[string][]string)},
+		dependencyGraph: &manager.DependencyGraph{Services: make(map[string][]string)},
 		restartAttempts: make(map[string]int),
 		config:          config,
 		startTime:       time.Now(),
@@ -56,7 +57,7 @@ func (lm *LifecycleManager) StartService(name string) error {
 	if deps, ok := lm.dependencyGraph.Services[name]; ok {
 		for _, dep := range deps {
 			if depInfo, exists := lm.registry.GetInfo(dep); exists {
-				if depInfo.State != StateRunning {
+				if depInfo.State != manager.StateRunning {
 					return ManagerError{"dependency " + dep + " is not running"}
 				}
 			}
@@ -64,8 +65,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 	}
 
 	// Обновляем состояние
-	lm.registry.UpdateInfo(name, ServiceInfo{
-		State:     StateStarting,
+	lm.registry.UpdateInfo(name, manager.ServiceInfo{
+		State:     manager.StateStarting,
 		StartedAt: time.Now(),
 	})
 
@@ -83,8 +84,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 	// Запускаем сервис
 	err := service.Start()
 	if err != nil {
-		lm.registry.UpdateInfo(name, ServiceInfo{
-			State: StateError,
+		lm.registry.UpdateInfo(name, manager.ServiceInfo{
+			State: manager.StateError,
 			Error: err.Error(),
 		})
 
@@ -108,8 +109,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 	}
 
 	// Обновляем состояние
-	lm.registry.UpdateInfo(name, ServiceInfo{
-		State:     StateRunning,
+	lm.registry.UpdateInfo(name, manager.ServiceInfo{
+		State:     manager.StateRunning,
 		StartedAt: time.Now(),
 	})
 
@@ -141,8 +142,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 	}
 
 	// Обновляем состояние
-	lm.registry.UpdateInfo(name, ServiceInfo{
-		State:     StateStopping,
+	lm.registry.UpdateInfo(name, manager.ServiceInfo{
+		State:     manager.StateStopping,
 		StoppedAt: time.Now(),
 	})
 
@@ -159,8 +160,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 	// Останавливаем сервис
 	err := service.Stop()
 	if err != nil {
-		lm.registry.UpdateInfo(name, ServiceInfo{
-			State: StateError,
+		lm.registry.UpdateInfo(name, manager.ServiceInfo{
+			State: manager.StateError,
 			Error: err.Error(),
 		})
 
@@ -179,8 +180,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 	}
 
 	// Обновляем состояние
-	lm.registry.UpdateInfo(name, ServiceInfo{
-		State:     StateStopped,
+	lm.registry.UpdateInfo(name, manager.ServiceInfo{
+		State:     manager.StateStopped,
 		StoppedAt: time.Now(),
 	})
 
@@ -262,8 +263,8 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 
 		if err := service.Start(); err != nil {
 			errors[serviceName] = err
-			lm.registry.UpdateInfo(serviceName, ServiceInfo{
-				State: StateError,
+			lm.registry.UpdateInfo(serviceName, manager.ServiceInfo{
+				State: manager.StateError,
 				Error: err.Error(),
 			})
 
@@ -283,8 +284,8 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 				lm.scheduleRestart(serviceName)
 			}
 		} else {
-			lm.registry.UpdateInfo(serviceName, ServiceInfo{
-				State:     StateRunning,
+			lm.registry.UpdateInfo(serviceName, manager.ServiceInfo{
+				State:     manager.StateRunning,
 				StartedAt: time.Now(),
 			})
 
@@ -322,8 +323,8 @@ func (lm *LifecycleManager) StopAll() map[string]error {
 
 		if err := service.Stop(); err != nil {
 			errors[serviceName] = err
-			lm.registry.UpdateInfo(serviceName, ServiceInfo{
-				State: StateError,
+			lm.registry.UpdateInfo(serviceName, manager.ServiceInfo{
+				State: manager.StateError,
 				Error: err.Error(),
 			})
 
@@ -338,8 +339,8 @@ func (lm *LifecycleManager) StopAll() map[string]error {
 				Timestamp: time.Now(),
 			})
 		} else {
-			lm.registry.UpdateInfo(serviceName, ServiceInfo{
-				State:     StateStopped,
+			lm.registry.UpdateInfo(serviceName, manager.ServiceInfo{
+				State:     manager.StateStopped,
 				StoppedAt: time.Now(),
 			})
 

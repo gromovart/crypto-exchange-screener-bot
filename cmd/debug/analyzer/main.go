@@ -1,10 +1,10 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/analysis/analyzers"
-	"crypto-exchange-screener-bot/internal/types"
-	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto_exchange_screener_bot/internal/analysis/analyzers"
+	"crypto_exchange_screener_bot/internal/types/analysis"
+	"crypto_exchange_screener_bot/internal/types/common"
+	"crypto_exchange_screener_bot/pkg/logger"
 	"fmt"
 	"math"
 	"strings"
@@ -51,7 +51,7 @@ func main() {
 func testCounterAnalyzerExtended() {
 	fmt.Println("   🔄 Расширенный тест CounterAnalyzer...")
 
-	config := analyzers.AnalyzerConfig{
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,
@@ -79,7 +79,7 @@ func testCounterAnalyzerExtended() {
 	// Тест 1: Многократный анализ одного символа
 	fmt.Println("   📈 Тест 1: Многократный анализ BTCUSDT")
 	now := time.Now()
-	btcData := []types.PriceData{
+	btcData := []common.PriceData{
 		{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
 		{Symbol: "BTCUSDT", Price: 100.2, Timestamp: now.Add(-1 * time.Minute)}, // +0.2%
 	}
@@ -127,9 +127,9 @@ func testCounterAnalyzerExtended() {
 	symbols := []string{"ETHUSDT", "SOLUSDT", "ADAUSDT"}
 
 	for _, symbol := range symbols {
-		symbolData := []types.PriceData{
-			{Symbol: symbol, Price: 50.0, Timestamp: now.Add(-2 * time.Minute)},
-			{Symbol: symbol, Price: 50.1, Timestamp: now.Add(-1 * time.Minute)}, // +0.2%
+		symbolData := []common.PriceData{
+			{Symbol: common.Symbol(symbol), Price: 50.0, Timestamp: now.Add(-2 * time.Minute)},
+			{Symbol: common.Symbol(symbol), Price: 50.1, Timestamp: now.Add(-1 * time.Minute)}, // +0.2%
 		}
 
 		sigs, _ := analyzer.Analyze(symbolData, config)
@@ -178,7 +178,7 @@ func testCounterAnalyzerExtended() {
 	// Тест 4: Сброс периода
 	fmt.Println("\n   🔄 Тест 4: Сброс периода")
 	originalCount := len(allCounters)
-	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
+	analyzer.SetAnalysisPeriod(analysis.Period5Min)
 
 	countersAfterReset := analyzer.GetAllCounters()
 	fmt.Printf("      • Счетчиков до сброса: %d\n", originalCount)
@@ -211,7 +211,7 @@ func testAllAnalyzersIntegration() {
 
 	// Создаем тестовые данные
 	now := time.Now()
-	testData := []types.PriceData{
+	testData := []common.PriceData{
 		{Symbol: "BTCUSDT", Price: 100.0, Volume24h: 1000000, Timestamp: now.Add(-5 * time.Minute)},
 		{Symbol: "BTCUSDT", Price: 101.0, Volume24h: 1100000, Timestamp: now.Add(-4 * time.Minute)},
 		{Symbol: "BTCUSDT", Price: 102.0, Volume24h: 1200000, Timestamp: now.Add(-3 * time.Minute)},
@@ -221,7 +221,7 @@ func testAllAnalyzersIntegration() {
 	}
 
 	// Конфигурации для разных анализаторов
-	growthConfig := analyzers.AnalyzerConfig{
+	growthConfig := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
 		MinConfidence: 50.0,
@@ -233,7 +233,7 @@ func testAllAnalyzersIntegration() {
 		},
 	}
 
-	fallConfig := analyzers.AnalyzerConfig{
+	fallConfig := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
 		MinConfidence: 50.0,
@@ -245,7 +245,7 @@ func testAllAnalyzersIntegration() {
 		},
 	}
 
-	counterConfig := analyzers.AnalyzerConfig{
+	counterConfig := analysis.AnalyzerConfig{
 		Enabled:        true,
 		Weight:         0.7,
 		MinConfidence:  10.0,
@@ -254,7 +254,7 @@ func testAllAnalyzersIntegration() {
 	}
 
 	// Исправленная конфигурация для ContinuousAnalyzer
-	continuousConfig := analyzers.AnalyzerConfig{
+	continuousConfig := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.6,
 		MinConfidence: 30.0,
@@ -275,8 +275,8 @@ func testAllAnalyzersIntegration() {
 
 	analyzersList := []struct {
 		name     string
-		analyzer analyzers.Analyzer
-		config   analyzers.AnalyzerConfig
+		analyzer analysis.Analyzer
+		config   analysis.AnalyzerConfig
 	}{
 		{"GrowthAnalyzer", growthAnalyzer, growthConfig},
 		{"FallAnalyzer", fallAnalyzer, fallConfig},
@@ -327,11 +327,11 @@ func testAllAnalyzersIntegration() {
 	}
 }
 
-func testCounterAnalyzer(testData []types.PriceData) {
+func testCounterAnalyzer(testData []common.PriceData) {
 	// Создаем тестовые данные для счетчика
 	counterTestData := createCounterTestData()
 
-	config := analyzers.AnalyzerConfig{
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,
@@ -434,7 +434,7 @@ func testCounterAnalyzer(testData []types.PriceData) {
 
 	// Тест 5: Сброс периода
 	logger.Debug("\n   🔄 Тест 5: Сброс периода")
-	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
+	analyzer.SetAnalysisPeriod(analysis.Period5Min)
 	fmt.Printf("      ✅ Период изменен на 5 минут\n")
 
 	// Проверяем сброс счетчиков
@@ -444,9 +444,9 @@ func testCounterAnalyzer(testData []types.PriceData) {
 
 // Структура для тестовых данных счетчика
 type counterTestDataStruct struct {
-	growthTest [][]types.PriceData
-	fallTest   [][]types.PriceData
-	mixedTest  []types.PriceData
+	growthTest [][]common.PriceData
+	fallTest   [][]common.PriceData
+	mixedTest  []common.PriceData
 }
 
 func createCounterTestData() counterTestDataStruct {
@@ -454,7 +454,7 @@ func createCounterTestData() counterTestDataStruct {
 
 	return counterTestDataStruct{
 		// Тест роста (0.5% рост за 1 минуту)
-		growthTest: [][]types.PriceData{
+		growthTest: [][]common.PriceData{
 			{
 				{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
 				{Symbol: "BTCUSDT", Price: 100.5, Timestamp: now.Add(-1 * time.Minute)},
@@ -466,7 +466,7 @@ func createCounterTestData() counterTestDataStruct {
 		},
 
 		// Тест падения (0.5% падение за 1 минуту)
-		fallTest: [][]types.PriceData{
+		fallTest: [][]common.PriceData{
 			{
 				{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-2 * time.Minute)},
 				{Symbol: "BTCUSDT", Price: 99.5, Timestamp: now.Add(-1 * time.Minute)},
@@ -478,7 +478,7 @@ func createCounterTestData() counterTestDataStruct {
 		},
 
 		// Смешанный тест
-		mixedTest: []types.PriceData{
+		mixedTest: []common.PriceData{
 			{Symbol: "BTCUSDT", Price: 100.0, Timestamp: now.Add(-3 * time.Minute)},
 			{Symbol: "BTCUSDT", Price: 100.3, Timestamp: now.Add(-2 * time.Minute)},
 			{Symbol: "BTCUSDT", Price: 99.8, Timestamp: now.Add(-1 * time.Minute)},
@@ -486,9 +486,9 @@ func createCounterTestData() counterTestDataStruct {
 	}
 }
 
-func createTestData() []types.PriceData {
+func createTestData() []common.PriceData {
 	now := time.Now()
-	return []types.PriceData{
+	return []common.PriceData{
 		{
 			Symbol:    "BTCUSDT",
 			Price:     100.0,
@@ -528,9 +528,9 @@ func createTestData() []types.PriceData {
 	}
 }
 
-func createTestDataForFall() []types.PriceData {
+func createTestDataForFall() []common.PriceData {
 	now := time.Now()
-	return []types.PriceData{
+	return []common.PriceData{
 		{
 			Symbol:    "BTCUSDT",
 			Price:     100.0,
@@ -575,7 +575,7 @@ func testNewFallAnalyzer() {
 
 	data := createTestDataForFall()
 
-	config := analyzers.AnalyzerConfig{
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        1.0,
 		MinConfidence: 1.0,
@@ -636,8 +636,8 @@ func testNewFallAnalyzer() {
 	}
 }
 
-func testGrowthAnalyzer(data []types.PriceData) {
-	config := analyzers.AnalyzerConfig{
+func testGrowthAnalyzer(data []common.PriceData) {
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        1.0,
 		MinConfidence: 10.0,
@@ -687,8 +687,8 @@ func testGrowthAnalyzer(data []types.PriceData) {
 	}
 }
 
-func testFallAnalyzer(data []types.PriceData) {
-	config := analyzers.AnalyzerConfig{
+func testFallAnalyzer(data []common.PriceData) {
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        1.0,
 		MinConfidence: 1.0,
@@ -754,8 +754,8 @@ func testFallAnalyzer(data []types.PriceData) {
 	}
 }
 
-func testContinuousAnalyzer(data []types.PriceData) {
-	config := analyzers.AnalyzerConfig{
+func testContinuousAnalyzer(data []common.PriceData) {
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
 		MinConfidence: 1.0,
@@ -814,8 +814,8 @@ func testContinuousAnalyzer(data []types.PriceData) {
 		logger.Debug("      - Падение: точки 2→3→4 (-0.5% → -1%)")
 	}
 }
-func testVolumeAnalyzer(data []types.PriceData) {
-	config := analyzers.AnalyzerConfig{
+func testVolumeAnalyzer(data []common.PriceData) {
+	config := analysis.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.5,
 		MinConfidence: 30.0,
