@@ -475,10 +475,3 @@ func printHelp() {
 	fmt.Println("  TEST_MODE=true growth-monitor (test mode via env)")
 	fmt.Println("  growth-monitor --help")
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

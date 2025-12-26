@@ -1,8 +1,9 @@
-// internal/config/config.go (обновленная)
+// internal/infrastructure/config/config.go
 package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +36,8 @@ type CounterAnalyzerConfig struct {
 
 // Config - основная структура конфигурации
 type Config struct {
+	Environment string
+
 	// Выбор биржи
 	Exchange     string `mapstructure:"EXCHANGE"`
 	ExchangeType string `mapstructure:"EXCHANGE_TYPE"`
@@ -529,4 +532,40 @@ func parsePatterns(value string) []string {
 		}
 	}
 	return result
+}
+
+// PrintSummary выводит краткую информацию о конфигурации (без чувствительных данных)
+func (c *Config) PrintSummary() {
+	log.Printf("📋 Конфигурация приложения:")
+	log.Printf("   Окружение: %s", c.Exchange)
+	log.Printf("   Уровень логирования: %s", c.LogLevel)
+	log.Printf("   Telegram включен: %v", c.TelegramEnabled)
+	if c.TelegramEnabled {
+		token := c.TelegramBotToken
+		if len(token) > 10 {
+			token = token[:10] + "..." + token[len(token)-10:]
+		}
+		log.Printf("   Telegram Token: %s", token)
+		log.Printf("   Telegram Chat ID: %s", c.TelegramChatID)
+	}
+	log.Printf("   Counter Analyzer включен: %v", c.CounterAnalyzer.Enabled)
+	log.Printf("   HTTP сервер включен: %v (порт: %d)", c.HTTPEnabled, c.HTTPPort)
+	log.Printf("   Макс. символов для мониторинга: %d", c.MaxSymbolsToMonitor)
+	log.Printf("   Интервал обновления: %d секунд", c.AnalysisEngine.UpdateInterval)
+
+	// Выводим информацию об анализаторах
+	log.Printf("   Анализаторы:")
+	log.Printf("     - Growth Analyzer: %v", c.Analyzers.GrowthAnalyzer.Enabled)
+	log.Printf("     - Fall Analyzer: %v", c.Analyzers.FallAnalyzer.Enabled)
+	log.Printf("     - Continuous Analyzer: %v", c.Analyzers.ContinuousAnalyzer.Enabled)
+
+	// Выводим информацию о Counter Analyzer
+	if c.CounterAnalyzer.Enabled {
+		log.Printf("   Counter Analyzer настройки:")
+		log.Printf("     - Базовый период: %d минут", c.CounterAnalyzer.BasePeriodMinutes)
+		log.Printf("     - Период анализа: %s", c.CounterAnalyzer.AnalysisPeriod)
+		log.Printf("     - Порог роста: %.2f%%", c.CounterAnalyzer.GrowthThreshold)
+		log.Printf("     - Порог падения: %.2f%%", c.CounterAnalyzer.FallThreshold)
+		log.Printf("     - Уведомления: %v", c.CounterAnalyzer.NotificationEnabled)
+	}
 }
