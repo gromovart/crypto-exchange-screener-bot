@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis/analyzers"
+	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"strings"

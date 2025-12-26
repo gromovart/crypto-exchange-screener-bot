@@ -3,8 +3,8 @@ package engine
 
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/analysis/analyzers"
-	"crypto-exchange-screener-bot/internal/analysis/filters"
+	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
