@@ -1,7 +1,14 @@
 #!/bin/bash
-
-echo "🚀 ПОЛНОЕ ТЕСТИРОВАНИЕ СИСТЕМЫ (macOS version)"
+echo "🚀 ПОЛНОЕ ТЕСТИРОВАНИЕ СИСТЕМЫ"
 echo "=============================================="
+echo ""
+
+# Определяем окружение (по умолчанию dev)
+ENV=${1:-dev}
+ENV_FILE="configs/$ENV/.env"
+
+echo "🎯 Окружение: $ENV"
+echo "📁 Конфигурация: $ENV_FILE"
 echo ""
 
 # Цвета
@@ -14,16 +21,23 @@ NC='\033[0m' # No Color
 # Обработка Ctrl+C
 trap 'echo -e "\n${YELLOW}🛑 Прерывание тестирования${NC}"; exit 130' INT TERM
 
+# Проверка конфигурации
+if [ ! -f "$ENV_FILE" ]; then
+    echo -e "${RED}❌ Файл конфигурации не найден: $ENV_FILE${NC}"
+    echo "   Создайте: make config-init ENV=$ENV"
+    exit 1
+fi
+
 # Создаем директорию для логов
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="logs/full_test_${TIMESTAMP}"
+LOG_DIR="logs/full_test_${ENV}_${TIMESTAMP}"
 mkdir -p "$LOG_DIR"
 
 echo -e "${YELLOW}📁 Логи будут сохранены в: $LOG_DIR${NC}"
 echo ""
 
-# Функция timeout для macOS
-mac_timeout() {
+# Функция timeout для macOS/Linux
+safe_timeout() {
     local timeout=$1
     shift
     local cmd=("$@")
@@ -59,8 +73,8 @@ run_test() {
 
     local log_file="$LOG_DIR/${test_num}_${test_name// /_}.log"
 
-    # Запускаем команду с таймаутом (macOS версия)
-    mac_timeout 30 bash -c "$test_cmd" 2>&1 | tee "$log_file"
+    # Запускаем команду с таймаутом
+    safe_timeout 30 bash -c "$test_cmd" 2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
 
     if [ $exit_code -eq 0 ] || [ $exit_code -eq 124 ]; then
@@ -80,56 +94,64 @@ total_tests=0
 passed_tests=0
 failed_tests=0
 
-# 1. Проверка компиляции
-if run_test "01" "Проверка компиляции" "go build ./application/cmd/debug/..."; then
+# 1. Проверка конфигурации
+if run_test "01" "Проверка конфигурации" "make check-config ENV=$ENV"; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 2. Базовый тест CounterAnalyzer
-if run_test "02" "CounterAnalyzer базовый тест" "go run ./application/cmd/debug/counter_test/main.go 2>&1 | head -30"; then
+# 2. Проверка компиляции
+if run_test "02" "Проверка компиляции" "go build ./application/cmd/debug/..."; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 3. Тест всех анализаторов
-if run_test "03" "Тест всех анализаторов" "go run ./application/cmd/debug/analyzer/main.go 2>&1 | head -40"; then
+# 3. Базовый тест CounterAnalyzer
+if run_test "03" "CounterAnalyzer базовый тест" "go run ./application/cmd/debug/counter_test/main.go --config=$ENV_FILE 2>&1 | head -30"; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 4. Тест сборки продакшн
-if run_test "04" "Тест сборки продакшн" "make build"; then
+# 4. Тест всех анализаторов
+if run_test "04" "Тест всех анализаторов" "go run ./application/cmd/debug/analyzer/main.go --config=$ENV_FILE 2>&1 | head -40"; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 5. Проверка типов
-if run_test "05" "Проверка типов (go vet)" "go vet ./internal/analysis/analyzers/... 2>&1 | head -20"; then
+# 5. Тест сборки продакшн
+if run_test "05" "Тест сборки продакшн" "make build ENV=$ENV"; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 6. Быстрый тест CounterAnalyzer
-if run_test "06" "Быстрый тест CounterAnalyzer" "go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E '(✅|📊|🧮)' | head -10"; then
+# 6. Проверка типов
+if run_test "06" "Проверка типов (go vet)" "go vet ./internal/core/domain/signals/detectors/... 2>&1 | head -20"; then
     ((passed_tests++))
 else
     ((failed_tests++))
 fi
 ((total_tests++))
 
-# 7. Тест покрытия
-if run_test "07" "Тест покрытия" "go test ./internal/analysis/analyzers/... -v 2>&1 | tail -15"; then
+# 7. Быстрый тест CounterAnalyzer
+if run_test "07" "Быстрый тест CounterAnalyzer" "go run ./application/cmd/debug/counter_test/main.go --config=$ENV_FILE 2>&1 | grep -E '(✅|📊|🧮)' | head -10"; then
+    ((passed_tests++))
+else
+    ((failed_tests++))
+fi
+((total_tests++))
+
+# 8. Тест Telegram конфигурации
+if run_test "08" "Тест Telegram конфигурации" "make check-telegram-config ENV=$ENV"; then
     ((passed_tests++))
 else
     ((failed_tests++))
@@ -140,6 +162,7 @@ fi
 echo -e "${BLUE}📊 ИТОГОВЫЙ ОТЧЕТ${NC}"
 echo -e "${BLUE}$(printf '%.0s=' {1..60})${NC}"
 
+echo -e "Окружение: $ENV"
 echo -e "Всего тестов: $total_tests"
 echo -e "${GREEN}✅ Пройдено: $passed_tests${NC}"
 echo -e "${RED}❌ Провалено: $failed_tests${NC}"
@@ -191,3 +214,7 @@ fi
 
 echo ""
 echo -e "${GREEN}✨ ТЕСТИРОВАНИЕ ЗАВЕРШЕНО${NC}"
+
+# Пример использования:
+# ./scripts/full_test.sh dev      # Полное тестирование dev
+# ./scripts/full_test.sh prod     # Полное тестирование prod

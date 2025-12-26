@@ -1,12 +1,26 @@
 #!/bin/bash
-
 echo "🧪 ТЕСТИРОВАНИЕ COUNTER ANALYZER"
 echo "================================"
 echo ""
 
+# Определяем окружение (по умолчанию dev)
+ENV=${1:-dev}
+ENV_FILE="configs/$ENV/.env"
+
+echo "🎯 Окружение: $ENV"
+echo "📁 Конфигурация: $ENV_FILE"
+echo ""
+
+# Проверка конфигурации
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Файл конфигурации не найден: $ENV_FILE"
+    echo "   Создайте: make config-init ENV=$ENV"
+    exit 1
+fi
+
 # Создаем директорию для логов
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="logs/counter_test_${TIMESTAMP}"
+LOG_DIR="logs/counter_test_${ENV}_${TIMESTAMP}"
 mkdir -p "$LOG_DIR"
 
 # Цвета
@@ -25,8 +39,8 @@ print_section() {
 
 # 1. Базовый тест
 print_section "1. БАЗОВЫЙ ТЕСТ COUNTER ANALYZER"
-echo "Запуск: make debug-counter"
-if make debug-counter 2>&1 | tee "$LOG_DIR/01_basic_test.log" | grep -q "Тестирование CounterAnalyzer завершено"; then
+echo "Запуск: make debug-counter ENV=$ENV"
+if make debug-counter ENV=$ENV 2>&1 | tee "$LOG_DIR/01_basic_test.log" | grep -q "Тестирование CounterAnalyzer завершено"; then
     echo -e "${GREEN}✅ Базовый тест пройден${NC}"
 else
     echo -e "${RED}❌ Базовый тест не пройден${NC}"
@@ -34,8 +48,8 @@ fi
 
 # 2. Полный тест
 print_section "2. ПОЛНЫЙ ТЕСТ COUNTER ANALYZER"
-echo "Запуск: make test-counter"
-if make test-counter 2>&1 | tee "$LOG_DIR/02_full_test.log" | tail -5 | grep -q "CounterAnalyzer"; then
+echo "Запуск: make test-counter ENV=$ENV"
+if make test-counter ENV=$ENV 2>&1 | tee "$LOG_DIR/02_full_test.log" | tail -5 | grep -q "CounterAnalyzer"; then
     echo -e "${GREEN}✅ Полный тест запущен${NC}"
 else
     echo -e "${RED}❌ Полный тест не запущен${NC}"
@@ -43,13 +57,13 @@ fi
 
 # 3. Быстрый тест
 print_section "3. БЫСТРЫЙ ТЕСТ"
-echo "Запуск: make test-counter-quick"
-make test-counter-quick 2>&1 | tee "$LOG_DIR/03_quick_test.log" | grep -E "(✅|❌|📊|📈)" || true
+echo "Запуск: make test-counter-quick ENV=$ENV"
+make test-counter-quick ENV=$ENV 2>&1 | tee "$LOG_DIR/03_quick_test.log" | grep -E "(✅|❌|📊|📈)" || true
 
 # 4. Интеграционный тест
 print_section "4. ИНТЕГРАЦИОННЫЙ ТЕСТ"
 echo "Проверка работы CounterAnalyzer с другими анализаторами..."
-if go run ./application/cmd/debug/analyzer/main.go 2>&1 | tee "$LOG_DIR/04_integration.log" | grep -q "CounterAnalyzer работает"; then
+if go run ./application/cmd/debug/analyzer/main.go --config="$ENV_FILE" 2>&1 | tee "$LOG_DIR/04_integration.log" | grep -q "CounterAnalyzer работает"; then
     echo -e "${GREEN}✅ Интеграционный тест пройден${NC}"
 else
     echo -e "${YELLOW}⚠️  CounterAnalyzer не найден в интеграционном тесте${NC}"
@@ -89,6 +103,7 @@ done
 
 echo ""
 echo -e "${BLUE}📊 РЕЗУЛЬТАТЫ:${NC}"
+echo -e "  Окружение: $ENV"
 echo -e "  Пройдено тестов: ${passed_tests}/${total_tests}"
 if [ $passed_tests -eq $total_tests ]; then
     echo -e "${GREEN}  🎉 ВСЕ ТЕСТЫ ПРОЙДЕНЫ!${NC}"
@@ -101,3 +116,7 @@ fi
 echo ""
 echo -e "${YELLOW}📁 Логи сохранены в: $LOG_DIR${NC}"
 echo -e "${GREEN}✨ Тестирование CounterAnalyzer завершено${NC}"
+
+# Пример использования:
+# ./scripts/test_counter.sh dev      # Тестирование CounterAnalyzer dev
+# ./scripts/test_counter.sh prod     # Тестирование CounterAnalyzer prod

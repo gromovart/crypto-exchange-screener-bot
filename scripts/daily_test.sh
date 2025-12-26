@@ -1,29 +1,43 @@
 #!/bin/bash
-
 echo "📅 ЕЖЕДНЕВНОЕ ТЕСТИРОВАНИЕ СИСТЕМЫ"
 echo "================================="
 echo "Дата: $(date)"
 echo ""
 
+# Определяем окружение (по умолчанию dev)
+ENV=${1:-dev}
+ENV_FILE="configs/$ENV/.env"
+
 # Создаем директорию для отчетов
-REPORT_DIR="reports/daily_$(date +%Y%m%d)"
+REPORT_DIR="reports/daily_$(date +%Y%m%d)_$ENV"
 mkdir -p "$REPORT_DIR"
+
+echo "🎯 Окружение: $ENV"
+echo "📁 Файл конфигурации: $ENV_FILE"
+echo ""
+
+# Проверяем существование конфигурации
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Файл конфигурации не найден: $ENV_FILE"
+    echo "   Создайте: make config-init ENV=$ENV"
+    exit 1
+fi
 
 # Запускаем тесты
 echo "1. Запуск полного тестирования..."
-make full-test 2>&1 | tee "$REPORT_DIR/full_test.log"
+make test-all ENV=$ENV 2>&1 | tee "$REPORT_DIR/full_test.log"
 
 echo ""
 echo "2. Генерация отчета о покрытии..."
-make coverage 2>&1 | tee "$REPORT_DIR/coverage.log"
+make test ENV=$ENV 2>&1 | tee "$REPORT_DIR/coverage.log"
 
 echo ""
 echo "3. Тест производительности..."
-make performance-test 2>&1 | tee "$REPORT_DIR/performance.log"
+make check-config ENV=$ENV 2>&1 | tee "$REPORT_DIR/config_check.log"
 
 echo ""
 echo "4. Проверка безопасности..."
-make security-check 2>&1 | tee "$REPORT_DIR/security.log"
+make lint 2>&1 | tee "$REPORT_DIR/security.log"
 
 echo ""
 echo "5. Создание итогового отчета..."
@@ -32,6 +46,8 @@ echo "5. Создание итогового отчета..."
 cat > "$REPORT_DIR/summary.md" << EOF
 # Ежедневный отчет о тестировании
 Дата: $(date)
+Окружение: $ENV
+Конфигурация: $ENV_FILE
 
 ## Результаты тестирования
 
@@ -40,28 +56,28 @@ cat > "$REPORT_DIR/summary.md" << EOF
 $(tail -10 "$REPORT_DIR/full_test.log")
 \`\`\`
 
-### 2. Покрытие кода
+### 2. Проверка конфигурации
+\`\`\`
+$(tail -5 "$REPORT_DIR/config_check.log")
+\`\`\`
+
+### 3. Производительность и код
 \`\`\`
 $(tail -5 "$REPORT_DIR/coverage.log")
 \`\`\`
 
-### 3. Производительность
-\`\`\`
-$(tail -5 "$REPORT_DIR/performance.log")
-\`\`\`
-
-### 4. Безопасность
+### 4. Безопасность (lint)
 \`\`\`
 $(tail -5 "$REPORT_DIR/security.log")
 \`\`\`
 
 ## Статус
-$(if grep -q "ОТЛИЧНЫЙ РЕЗУЛЬТАТ" "$REPORT_DIR/full_test.log"; then
+$(if grep -q "ВСЕ ТЕСТЫ ПРОЙДЕНЫ" "$REPORT_DIR/full_test.log"; then
     echo "✅ ВСЕ СИСТЕМЫ РАБОТАЮТ НОРМАЛЬНО"
-elif grep -q "УДОВЛЕТВОРИТЕЛЬНО" "$REPORT_DIR/full_test.log"; then
-    echo "⚠️  ТРЕБУЕТСЯ ВНИМАНИЕ"
+elif grep -q "СИСТЕМА РАБОТАЕТ КОРРЕКТНО" "$REPORT_DIR/full_test.log"; then
+    echo "✅ СИСТЕМА РАБОТАЕТ КОРРЕКТНО"
 else
-    echo "❌ КРИТИЧЕСКИЕ ОШИБКИ"
+    echo "⚠️  ТРЕБУЕТСЯ ВНИМАНИЕ"
 fi)
 EOF
 
@@ -70,3 +86,7 @@ echo "📁 Отчеты сохранены в: $REPORT_DIR"
 echo ""
 echo "📋 Краткий отчет:"
 cat "$REPORT_DIR/summary.md" | tail -10
+
+# Пример использования:
+# ./scripts/daily_test.sh dev      # Тестирование dev окружения
+# ./scripts/daily_test.sh prod     # Тестирование prod окружения
