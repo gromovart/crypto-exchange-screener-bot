@@ -2,7 +2,7 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/events"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"sync"
 	"time"

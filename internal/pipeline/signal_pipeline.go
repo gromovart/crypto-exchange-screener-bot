@@ -3,7 +3,7 @@ package pipeline
 
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/events"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"log"
 	"sync"
 	"time"

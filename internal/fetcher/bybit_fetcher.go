@@ -4,8 +4,8 @@ package fetcher
 import (
 	"crypto-exchange-screener-bot/internal/api/bybit"
 	"crypto-exchange-screener-bot/internal/config"
-	"crypto-exchange-screener-bot/internal/events"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
