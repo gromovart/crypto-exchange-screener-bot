@@ -5,7 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/adapters"
 	"crypto-exchange-screener-bot/internal/analysis"
 	"crypto-exchange-screener-bot/internal/analysis/engine"
-	"crypto-exchange-screener-bot/internal/api/bybit"
+	bybit "crypto-exchange-screener-bot/internal/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/fetcher"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
