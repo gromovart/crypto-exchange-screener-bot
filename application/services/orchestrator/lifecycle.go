@@ -1,5 +1,5 @@
 // lifecycle.go
-package bootstrap
+package orchestrator
 
 import (
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"

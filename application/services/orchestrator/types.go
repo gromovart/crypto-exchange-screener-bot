@@ -1,4 +1,4 @@
-package bootstrap
+package orchestrator
 
 import (
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"

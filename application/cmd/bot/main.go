@@ -2,8 +2,7 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/application/bootstrap"
-	manager "crypto-exchange-screener-bot/application/services"
+	manager "crypto-exchange-screener-bot/application/services/orchestrator"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"flag"
@@ -401,7 +400,7 @@ func checkSystemHealth(dataManager *manager.DataManager) bool {
 	allRunning := true
 	for name, info := range servicesInfo {
 		status := "❌"
-		if info.State == bootstrap.StateRunning {
+		if info.State == manager.StateRunning {
 			status = "✅"
 		} else {
 			allRunning = false

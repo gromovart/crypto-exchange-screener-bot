@@ -2,7 +2,7 @@
 package main
 
 import (
-	manager "crypto-exchange-screener-bot/application/data_manager"
+	manager "crypto-exchange-screener-bot/application/services/orchestrator"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"fmt"
 	"log"
