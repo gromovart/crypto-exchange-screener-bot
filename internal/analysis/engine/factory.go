@@ -4,9 +4,9 @@ import (
 	"crypto-exchange-screener-bot/internal/analysis/analyzers"
 	"crypto-exchange-screener-bot/internal/analysis/filters"
 	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
-	"crypto-exchange-screener-bot/internal/telegram"
 	"log"
 	"time"
 )

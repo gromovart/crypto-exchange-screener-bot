@@ -3,8 +3,8 @@ package analyzers
 
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
-	"crypto-exchange-screener-bot/internal/telegram"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
