@@ -487,5 +487,50 @@ internal/
 └── core/           # Бизнес-логика
 
 
+internal/
+├── core/
+│   ├── types/              # ⭐ ЦЕНТРАЛЬНЫЙ ПАКЕТ БЕЗ ЗАВИСИМОСТЕЙ
+│   │   ├── market.go       # MarketData, Symbol, Price, Volume
+│   │   ├── signals.go      # Signal, SignalType, Confidence
+│   │   ├── users.go        # User, Subscription, Permissions
+│   │   └── events.go       # Event, EventType
+│   │
+│   ├── domain/             # Бизнес-логика с зависимостью от types
+│   │   ├── signal/
+│   │   │   ├── detector.go # Использует core/types
+│   │   │   └── filter.go
+│   │   └── user/
+│   │       ├── service.go
+│   │       └── manager.go
+│   │
+│   └── ports/              # Интерфейсы
+│       ├── primary/        # Входящие (use cases)
+│       │   ├── signal_detector.go
+│       │   └── user_manager.go
+│       └── secondary/      # Исходящие (репозитории, клиенты)
+│           ├── market_client.go
+│           ├── signal_notifier.go
+│           └── user_repository.go
+│
+├── adapters/               # Реализации портов
+│   ├── api/
+│   │   ├── binance/       # Зависит от core/ports
+│   │   └── bybit/
+│   ├── telegram/          # Зависит от core/ports
+│   └── storage/
+│       ├── postgres/      # Зависит от core/ports
+│       └── redis/
+│
+└── application/           # Оркестрация слоев
+    ├── services/
+    └── handlers/
 
 
+
+# Запускайте регулярно:
+go mod graph | grep "cycle"
+go list -f '{{join .Deps "\n"}}' ./... | sort | uniq
+
+# Или используйте:
+go vet ./...
+golangci-lint run
