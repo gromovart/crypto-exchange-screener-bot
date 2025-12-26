@@ -2,7 +2,7 @@ package telegram
 
 import (
 	"bytes"
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"encoding/json"
 	"fmt"
 	"io"

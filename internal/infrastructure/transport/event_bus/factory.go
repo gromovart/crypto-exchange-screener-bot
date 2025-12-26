@@ -2,8 +2,8 @@ package events
 
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/notifier"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"

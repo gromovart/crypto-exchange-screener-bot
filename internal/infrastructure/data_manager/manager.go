@@ -3,12 +3,12 @@ package manager
 
 import (
 	"crypto-exchange-screener-bot/internal/analysis"
-	"crypto-exchange-screener-bot/internal/analysis/engine"
 	bybit "crypto-exchange-screener-bot/internal/api/exchanges/bybit"
-	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/core/adapters"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/fetcher"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/notifier"

@@ -4,7 +4,7 @@ package bybit
 import (
 	"bytes"
 	"crypto-exchange-screener-bot/internal/api"
-	"crypto-exchange-screener-bot/internal/config"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 
 	"crypto/hmac"

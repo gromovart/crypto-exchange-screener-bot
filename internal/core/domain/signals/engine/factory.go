@@ -1,10 +1,10 @@
 package engine
 
 import (
-	"crypto-exchange-screener-bot/internal/config"
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"log"
