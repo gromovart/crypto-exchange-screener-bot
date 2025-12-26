@@ -2,9 +2,10 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	"crypto-exchange-screener-bot/application/pipeline"
 	bybit "crypto-exchange-screener-bot/internal/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/core/adapters"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/fetcher"
@@ -12,7 +13,6 @@ import (
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/notifier"
-	"crypto-exchange-screener-bot/internal/pipeline"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"

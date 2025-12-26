@@ -2,7 +2,7 @@
 package pipeline
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"sync"
 	"time"
 )

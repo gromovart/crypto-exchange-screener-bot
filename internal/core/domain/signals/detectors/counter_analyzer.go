@@ -2,7 +2,7 @@
 package analyzers
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"crypto-exchange-screener-bot/internal/types"

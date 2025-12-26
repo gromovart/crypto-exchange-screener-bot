@@ -2,7 +2,7 @@
 package engine
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"

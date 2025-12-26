@@ -2,7 +2,8 @@
 package pipeline
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	errors "crypto-exchange-screener-bot/internal/core/errors"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"log"
 	"sync"
@@ -145,15 +146,15 @@ func (s *ValidationStage) Name() string { return "validation" }
 
 func (s *ValidationStage) Process(signal analysis.Signal) (analysis.Signal, error) {
 	if signal.Confidence < 50 {
-		return signal, analysis.ErrLowConfidence
+		return signal, errors.ErrLowConfidence
 	}
 
 	if signal.ChangePercent == 0 {
-		return signal, analysis.ErrNoChange
+		return signal, errors.ErrNoChange
 	}
 
 	if signal.Symbol == "" {
-		return signal, analysis.ErrInvalidSymbol
+		return signal, errors.ErrInvalidSymbol
 	}
 
 	return signal, nil

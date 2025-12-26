@@ -2,8 +2,8 @@
 package main
 
 import (
+	manager "crypto-exchange-screener-bot/application/data_manager"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	manager "crypto-exchange-screener-bot/internal/infrastructure/data_manager"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"

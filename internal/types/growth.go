@@ -2,7 +2,7 @@
 package types
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"time"
 )
 

@@ -1,5 +1,5 @@
 // internal/analysis/errors.go
-package analysis
+package errors
 
 import "fmt"
 

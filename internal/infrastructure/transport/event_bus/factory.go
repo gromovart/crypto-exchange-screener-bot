@@ -1,7 +1,7 @@
 package events
 
 import (
-	"crypto-exchange-screener-bot/internal/analysis"
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/notifier"

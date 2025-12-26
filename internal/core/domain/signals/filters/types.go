@@ -1,7 +1,7 @@
 // internal/analysis/filters/types.go
 package filters
 
-import "crypto-exchange-screener-bot/internal/analysis"
+import analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 
 // Filter - интерфейс фильтра
 type Filter interface {
