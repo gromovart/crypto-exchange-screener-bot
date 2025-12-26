@@ -379,3 +379,113 @@ tail -f logs/growth.log
 **Happy trading!** 🚀
 
 *Примечание: Криптовалютные рынки высоковолатильны. Используйте этот инструмент для анализа и принятия решений на свой страх и риск.*
+
+
+internal/
+├── core/                    # Основная бизнес-логика
+│   ├── signals/
+│   │   ├── detectors/       # growth_analyzer, fall_analyzer, etc
+│   │   ├── filters/
+│   │   └── pipeline/
+│   ├── market/
+│   │   ├── data_fetcher/
+│   │   └── storage/
+│   └── events/
+│
+├── delivery/                # Доставка (внешние интерфейсы)
+│   ├── telegram/
+│   ├── rest/                # если будет API
+│   └── websocket/
+│
+└── infrastructure/
+    ├── config/
+    ├── logger/
+    ├── persistence/
+    └── cache/
+
+
+pkg/
+├── exchanges/               # Общие типы для бирж
+├── signals/                 # Общие типы сигналов
+├── utils/
+│   ├── math/
+│   ├── time/
+│   └── validation/
+└── logger/                  # Оставить здесь
+
+
+
+configs/
+├── dev/
+│   ├── config.yaml
+│   └── docker-compose.yml
+├── prod/
+│   ├── config.yaml
+│   └── docker-compose.yml
+└── local/
+    └── config.yaml
+
+deploy/
+├── docker/
+│   ├── Dockerfile.bot
+│   ├── Dockerfile.debug
+│   └── docker-compose.full.yml
+├── k8s/                    # если используете Kubernetes
+└── scripts/
+    ├── deploy.sh
+    └── monitoring/
+
+
+
+internal/
+├── api/
+│   ├── exchanges/
+│   │   ├── binance/
+│   │   ├── bybit/
+│   │   └── interface.go
+│   └── market_data/
+│       ├── client.go
+│       └── aggregator.go
+
+
+cmd/
+├── main/
+│   ├── main.go (основной бот)
+│   └── main_test.go
+├── debug/
+│   ├── analyzer/
+│   ├── counter_test/
+│   └── ...
+└── tools/
+    ├── migration/
+    ├── seed/
+    └── diagnostics/
+
+
+docs/
+├── api/
+│   ├── endpoints.md
+│   └── webhooks.md
+├── architecture/
+│   ├── diagrams/
+│   └── decisions/
+├── guides/
+│   ├── development.md
+│   ├── deployment.md
+│   └── testing.md
+└── signals/
+    ├── algorithms.md
+    └── filters.md
+
+
+
+internal/
+├── ports/           # Интерфейсы
+│   ├── primary/    # Для входящих запросов
+│   └── secondary/  # Для внешних зависимостей
+├── adapters/       # Реализации портов
+└── core/           # Бизнес-логика
+
+
+
+

@@ -131,6 +131,13 @@ type Config struct {
 	TelegramFallThreshold   float64 `mapstructure:"TELEGRAM_FALL_THRESHOLD"`
 	MessageFormat           string  `mapstructure:"MESSAGE_FORMAT"`
 	Include24hStats         bool    `mapstructure:"INCLUDE_24H_STATS"`
+
+	EnableSubscriptions bool   `mapstructure:"ENABLE_SUBSCRIPTIONS"`
+	StripeSecretKey     string `mapstructure:"STRIPE_SECRET_KEY"`
+	StripeWebhookSecret string `mapstructure:"STRIPE_WEBHOOK_SECRET"`
+	DefaultTrialDays    int    `mapstructure:"DEFAULT_TRIAL_DAYS"`
+	EnableAutoRenewal   bool   `mapstructure:"ENABLE_AUTO_RENEWAL"`
+
 	// НОВЫЕ поля для мониторинга
 	MonitoringChatID       string `mapstructure:"MONITORING_CHAT_ID"`
 	MonitoringEnabled      bool   `mapstructure:"MONITORING_ENABLED"`

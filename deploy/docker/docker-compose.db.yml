@@ -1,0 +1,62 @@
+# docker-compose.db.yml
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: cryptobot-postgres
+    environment:
+      POSTGRES_DB: cryptobot
+      POSTGRES_USER: bot
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bot123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./persistence/postgres/migrations:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - cryptonet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cryptobot-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - cryptonet
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: cryptobot-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:redis123
+    ports:
+      - "8081:8081"
+    networks:
+      - cryptonet
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+networks:
+  cryptonet:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
