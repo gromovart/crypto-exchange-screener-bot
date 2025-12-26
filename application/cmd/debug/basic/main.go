@@ -2,7 +2,8 @@
 package main
 
 import (
-	manager "crypto-exchange-screener-bot/application/data_manager"
+	"crypto-exchange-screener-bot/application/bootstrap"
+	manager "crypto-exchange-screener-bot/application/services"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -258,7 +259,7 @@ func (d *Debugger) PrintStats() {
 	total := len(services)
 
 	for _, info := range services {
-		if info.State == manager.StateRunning {
+		if info.State == bootstrap.StateRunning {
 			running++
 		}
 	}

@@ -1,5 +1,5 @@
 // internal/manager/registry.go
-package manager
+package bootstrap
 
 import (
 	"sync"

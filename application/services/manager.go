@@ -2,6 +2,7 @@
 package manager
 
 import (
+	"crypto-exchange-screener-bot/application/bootstrap"
 	"crypto-exchange-screener-bot/application/pipeline"
 	"crypto-exchange-screener-bot/internal/adapters"
 	fetcher "crypto-exchange-screener-bot/internal/adapters/market"
@@ -34,8 +35,8 @@ type DataManager struct {
 
 	// EventBus и координация
 	eventBus  *events.EventBus
-	lifecycle *LifecycleManager
-	registry  *ServiceRegistry
+	lifecycle *bootstrap.LifecycleManager
+	registry  *bootstrap.ServiceRegistry
 
 	// Дополнительные сервисы
 	telegramBot   *telegram.TelegramBot
@@ -48,7 +49,7 @@ type DataManager struct {
 
 	// Статистика
 	startTime   time.Time
-	systemStats SystemStats
+	systemStats bootstrap.SystemStats
 }
 
 // Старая версия для обратной совместимости
@@ -62,8 +63,8 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 		config:    cfg,
 		stopChan:  make(chan struct{}),
 		startTime: time.Now(),
-		systemStats: SystemStats{
-			Services:    make(map[string]ServiceInfo),
+		systemStats: bootstrap.SystemStats{
+			Services:    make(map[string]bootstrap.ServiceInfo),
 			LastUpdated: time.Now(),
 		},
 	}
@@ -164,10 +165,10 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	)
 
 	// 10. Создаем реестр сервисов
-	dm.registry = NewServiceRegistry()
+	dm.registry = bootstrap.NewServiceRegistry()
 
 	// 11. Создаем менеджер жизненного цикла
-	coordinatorConfig := CoordinatorConfig{
+	coordinatorConfig := bootstrap.CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
 		HealthCheckInterval: 30 * time.Second,
@@ -177,7 +178,7 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		EnableMetrics:       true,
 		MetricsPort:         "9090",
 	}
-	dm.lifecycle = NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
+	dm.lifecycle = bootstrap.NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
 
 	// 12. Настраиваем нотификаторы с передачей бота
 	dm.setupNotifiers(dm.telegramBot) // ПЕРЕДАЕМ БОТА
@@ -246,7 +247,7 @@ func (dm *DataManager) setupPipeline() {
 // registerServices регистрирует сервисы в реестре
 func (dm *DataManager) registerServices() error {
 	// Регистрируем все сервисы
-	services := map[string]Service{
+	services := map[string]bootstrap.Service{
 		"PriceStorage":        dm.newServiceAdapter("PriceStorage", dm.storage),
 		"PriceFetcher":        dm.newServiceAdapter("PriceFetcher", dm.priceFetcher),
 		"AnalysisEngine":      dm.newServiceAdapter("AnalysisEngine", dm.analysisEngine),
@@ -382,7 +383,7 @@ func (dm *DataManager) updateSystemStats() {
 		eventBusStats = dm.eventBus.GetMetrics()
 	}
 
-	dm.systemStats = SystemStats{
+	dm.systemStats = bootstrap.SystemStats{
 		Services:      servicesInfo,
 		StorageStats:  storageStats,
 		AnalysisStats: analysisStats,
@@ -416,14 +417,14 @@ func (dm *DataManager) checkHealth() {
 }
 
 // GetSystemStats возвращает статистику системы
-func (dm *DataManager) GetSystemStats() SystemStats {
+func (dm *DataManager) GetSystemStats() bootstrap.SystemStats {
 	dm.mu.RLock()
 	defer dm.mu.RUnlock()
 	return dm.systemStats
 }
 
 // GetHealthStatus возвращает статус здоровья системы
-func (dm *DataManager) GetHealthStatus() HealthStatus {
+func (dm *DataManager) GetHealthStatus() bootstrap.HealthStatus {
 	servicesInfo := dm.registry.GetAllInfo()
 	serviceStatus := make(map[string]string)
 
@@ -431,7 +432,7 @@ func (dm *DataManager) GetHealthStatus() HealthStatus {
 
 	for name, info := range servicesInfo {
 		status := "healthy"
-		if info.State != StateRunning {
+		if info.State != bootstrap.StateRunning {
 			status = "unhealthy"
 			allHealthy = false
 		}
@@ -443,7 +444,7 @@ func (dm *DataManager) GetHealthStatus() HealthStatus {
 		overallStatus = "degraded"
 	}
 
-	return HealthStatus{
+	return bootstrap.HealthStatus{
 		Status:    overallStatus,
 		Services:  serviceStatus,
 		Timestamp: time.Now(),
@@ -585,7 +586,7 @@ func (dm *DataManager) StopService(name string) error {
 }
 
 // GetServicesInfo возвращает информацию о всех сервисах
-func (dm *DataManager) GetServicesInfo() map[string]ServiceInfo {
+func (dm *DataManager) GetServicesInfo() map[string]bootstrap.ServiceInfo {
 	return dm.registry.GetAllInfo()
 }
 
@@ -653,7 +654,7 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 type serviceAdapter struct {
 	name    string
 	service interface{}
-	state   ServiceState
+	state   bootstrap.ServiceState
 }
 
 func (sa *serviceAdapter) Name() string {
@@ -661,57 +662,57 @@ func (sa *serviceAdapter) Name() string {
 }
 
 func (sa *serviceAdapter) Start() error {
-	sa.state = StateStarting
+	sa.state = bootstrap.StateStarting
 
 	switch s := sa.service.(type) {
 	case storage.PriceStorage:
 		// Хранилище не требует запуска
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case fetcher.PriceFetcher:
 		// Запускаем с интервалом из конфигурации
 		updateInterval := time.Duration(10) * time.Second // дефолтное значение
 		if err := s.Start(updateInterval); err != nil {
-			sa.state = StateError
+			sa.state = bootstrap.StateError
 			return err
 		}
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case *telegram.WebhookServer:
 		if err := s.Start(); err != nil {
-			sa.state = StateError
+			sa.state = bootstrap.StateError
 			return err
 		}
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 	case *engine.AnalysisEngine:
 		if err := s.Start(); err != nil {
-			sa.state = StateError
+			sa.state = bootstrap.StateError
 			return err
 		}
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case *pipeline.SignalPipeline:
 		s.Start()
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case *notifier.CompositeNotificationService:
 		// NotificationService не требует явного запуска
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case *events.EventBus:
 		s.Start()
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 
 	case *telegram.TelegramBot:
 		// Telegram бот запускается при создании
-		sa.state = StateRunning
+		sa.state = bootstrap.StateRunning
 	}
 
 	return nil
 }
 
 func (sa *serviceAdapter) Stop() error {
-	sa.state = StateStopping
+	sa.state = bootstrap.StateStopping
 
 	switch s := sa.service.(type) {
 	case fetcher.PriceFetcher:
@@ -729,25 +730,25 @@ func (sa *serviceAdapter) Stop() error {
 		// Telegram бот не требует явной остановки
 	}
 
-	sa.state = StateStopped
+	sa.state = bootstrap.StateStopped
 	return nil
 }
 
-func (sa *serviceAdapter) State() ServiceState {
+func (sa *serviceAdapter) State() bootstrap.ServiceState {
 	return sa.state
 }
 
 func (sa *serviceAdapter) HealthCheck() bool {
 	// Простая проверка здоровья
-	return sa.state == StateRunning
+	return sa.state == bootstrap.StateRunning
 }
 
 // newServiceAdapter создает адаптер сервиса
-func (dm *DataManager) newServiceAdapter(name string, service interface{}) Service {
+func (dm *DataManager) newServiceAdapter(name string, service interface{}) bootstrap.Service {
 	return &serviceAdapter{
 		name:    name,
 		service: service,
-		state:   StateStopped,
+		state:   bootstrap.StateStopped,
 	}
 }
 
