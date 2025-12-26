@@ -5,7 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/analysis/filters"
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"crypto-exchange-screener-bot/internal/telegram"
 	"log"
 	"time"

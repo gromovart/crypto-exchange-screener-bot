@@ -4,7 +4,7 @@ package fetcher
 import (
 	"crypto-exchange-screener-bot/internal/api/binance"
 	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"fmt"
 	"log"
 	"strconv"

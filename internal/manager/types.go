@@ -1,7 +1,7 @@
 package manager
 
 import (
-	"crypto-exchange-screener-bot/internal/storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"time"
 )
 

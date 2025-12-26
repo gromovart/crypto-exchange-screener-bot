@@ -7,7 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/api/bybit"
 	"crypto-exchange-screener-bot/internal/config"
 	"crypto-exchange-screener-bot/internal/events"
-	"crypto-exchange-screener-bot/internal/storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 )
 
 // Factory - фабрика для создания PriceFetcher
