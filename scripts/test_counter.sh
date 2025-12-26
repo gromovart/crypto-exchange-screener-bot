@@ -49,7 +49,7 @@ make test-counter-quick 2>&1 | tee "$LOG_DIR/03_quick_test.log" | grep -E "(✅|
 # 4. Интеграционный тест
 print_section "4. ИНТЕГРАЦИОННЫЙ ТЕСТ"
 echo "Проверка работы CounterAnalyzer с другими анализаторами..."
-if go run ./cmd/debug/analyzer/main.go 2>&1 | tee "$LOG_DIR/04_integration.log" | grep -q "CounterAnalyzer работает"; then
+if go run ./application/cmd/debug/analyzer/main.go 2>&1 | tee "$LOG_DIR/04_integration.log" | grep -q "CounterAnalyzer работает"; then
     echo -e "${GREEN}✅ Интеграционный тест пройден${NC}"
 else
     echo -e "${YELLOW}⚠️  CounterAnalyzer не найден в интеграционном тесте${NC}"
@@ -58,7 +58,7 @@ fi
 # 5. Проверка сборки
 print_section "5. ПРОВЕРКА СБОРКИ"
 echo "Проверка компиляции CounterAnalyzer..."
-if go build -o /tmp/test_counter ./cmd/debug/counter_test 2>&1 | tee "$LOG_DIR/05_build.log"; then
+if go build -o /tmp/test_counter ./application/cmd/debug/counter_test 2>&1 | tee "$LOG_DIR/05_build.log"; then
     echo -e "${GREEN}✅ Сборка успешна${NC}"
     rm -f /tmp/test_counter
 else

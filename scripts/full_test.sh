@@ -81,7 +81,7 @@ passed_tests=0
 failed_tests=0
 
 # 1. Проверка компиляции
-if run_test "01" "Проверка компиляции" "go build ./cmd/debug/..."; then
+if run_test "01" "Проверка компиляции" "go build ./application/cmd/debug/..."; then
     ((passed_tests++))
 else
     ((failed_tests++))
@@ -89,7 +89,7 @@ fi
 ((total_tests++))
 
 # 2. Базовый тест CounterAnalyzer
-if run_test "02" "CounterAnalyzer базовый тест" "go run ./cmd/debug/counter_test/main.go 2>&1 | head -30"; then
+if run_test "02" "CounterAnalyzer базовый тест" "go run ./application/cmd/debug/counter_test/main.go 2>&1 | head -30"; then
     ((passed_tests++))
 else
     ((failed_tests++))
@@ -97,7 +97,7 @@ fi
 ((total_tests++))
 
 # 3. Тест всех анализаторов
-if run_test "03" "Тест всех анализаторов" "go run ./cmd/debug/analyzer/main.go 2>&1 | head -40"; then
+if run_test "03" "Тест всех анализаторов" "go run ./application/cmd/debug/analyzer/main.go 2>&1 | head -40"; then
     ((passed_tests++))
 else
     ((failed_tests++))
@@ -121,7 +121,7 @@ fi
 ((total_tests++))
 
 # 6. Быстрый тест CounterAnalyzer
-if run_test "06" "Быстрый тест CounterAnalyzer" "go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E '(✅|📊|🧮)' | head -10"; then
+if run_test "06" "Быстрый тест CounterAnalyzer" "go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E '(✅|📊|🧮)' | head -10"; then
     ((passed_tests++))
 else
     ((failed_tests++))

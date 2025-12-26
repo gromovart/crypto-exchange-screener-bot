@@ -44,7 +44,7 @@ fi
 # Сборка
 echo -e "${YELLOW}4. Сборка приложения...${NC}"
 mkdir -p build
-go build -o build/debug_bot ./cmd/bot/debug_main.go
+go build -o build/debug_bot ./application/cmd/bot/debug_main.go
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✅ Сборка завершена${NC}"
 else

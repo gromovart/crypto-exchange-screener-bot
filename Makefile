@@ -9,12 +9,12 @@
 
 debug:
 	@echo "🐛 Базовая отладка..."
-	go run ./cmd/debug/basic/main.go
+	go run ./application/cmd/debug/basic/main.go
 
 debug-enhanced:
 	@echo "🔬 Расширенная отладка..."
 	@echo "Запуск на 10 секунд..."
-	@(go run ./cmd/debug/enhanced/main.go & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Отладка завершена"
+	@(go run ./application/cmd/debug/enhanced/main.go & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Отладка завершена"
 
 debug-diagnostic:
 	@echo "🏥 Глубокая диагностика системы..."
@@ -28,7 +28,7 @@ debug-diagnostic:
 	@echo "Пороги: 0.001% (одна тысячная процента!)"
 	@echo ""
 	@echo "Запуск на 15 секунд..."
-	@(go run ./cmd/debug/diagnostic/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Диагностика завершена"
+	@(go run ./application/cmd/debug/diagnostic/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Диагностика завершена"
 
 analyzer-test:
 	@echo "🧪 Тестирование анализаторов..."
@@ -36,12 +36,12 @@ analyzer-test:
 	@echo "Проверяем работу каждого анализатора отдельно"
 	@echo "С тестовыми данных (рост 1%, падение 0.5%)"
 	@echo ""
-	go run ./cmd/debug/analyzer/main.go
+	go run ./application/cmd/debug/analyzer/main.go
 
 debug-super-sensitive:
 	@echo "🚀 Супер-чувствительная отладка..."
 	@echo "Запуск на 10 секунд..."
-	@(go run ./cmd/debug/supersensitive/main.go & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Супер-чувствительный тест завершен"
+	@(go run ./application/cmd/debug/supersensitive/main.go & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Супер-чувствительный тест завершен"
 
 # ============================================
 # COUNTER ANALYZER ТЕСТЫ
@@ -53,17 +53,17 @@ test-safe:
 	@echo "==========================="
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./cmd/debug/... ./cmd/bot/ && echo "✅ Все компилируется"
+	@go build ./application/cmd/debug/... ./application/cmd/bot/ && echo "✅ Все компилируется"
 	@echo ""
 	@echo "2. Упрощенный тест CounterAnalyzer..."
-	@if go run ./cmd/debug/counter_test/main.go 2>&1 | grep -q "ВСЕ ТЕСТЫ COUNTER ANALYZER ЗАВЕРШЕНЫ УСПЕШНО"; then \
+	@if go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -q "ВСЕ ТЕСТЫ COUNTER ANALYZER ЗАВЕРШЕНЫ УСПЕШНО"; then \
 		echo "✅ CounterAnalyzer работает"; \
 	else \
 		echo "⚠️  CounterAnalyzer требует проверки"; \
 	fi
 	@echo ""
 	@echo "3. Упрощенный тест анализаторов..."
-	@if go run ./cmd/debug/analyzer/main.go 2>&1 | grep -q "Тестирование завершено"; then \
+	@if go run ./application/cmd/debug/analyzer/main.go 2>&1 | grep -q "Тестирование завершено"; then \
 		echo "✅ Анализаторы работают"; \
 	else \
 		echo "⚠️  Анализаторы требуют проверки"; \
@@ -80,15 +80,15 @@ test-stable:
 	@echo "========================"
 	@echo ""
 	@echo "1. Компиляция основных компонентов..."
-	@go build ./cmd/debug/basic/ && echo "✅ Базовая компиляция OK"
-	@go build ./cmd/debug/counter_test/ && echo "✅ CounterAnalyzer компиляция OK"
-	@go build ./cmd/debug/analyzer/ && echo "✅ Анализаторы компиляция OK"
+	@go build ./application/cmd/debug/basic/ && echo "✅ Базовая компиляция OK"
+	@go build ./application/cmd/debug/counter_test/ && echo "✅ CounterAnalyzer компиляция OK"
+	@go build ./application/cmd/debug/analyzer/ && echo "✅ Анализаторы компиляция OK"
 	@echo ""
 	@echo "2. Быстрый тест CounterAnalyzer..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | tail -3 | grep -E "(✅|❌)" || echo "⚠️  CounterAnalyzer требует внимания"
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | tail -3 | grep -E "(✅|❌)" || echo "⚠️  CounterAnalyzer требует внимания"
 	@echo ""
 	@echo "3. Быстрый тест анализаторов..."
-	@go run ./cmd/debug/analyzer/main.go 2>&1 | tail -3 | grep -E "(✅|🔧)" || echo "⚠️  Анализаторы работают"
+	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | tail -3 | grep -E "(✅|🔧)" || echo "⚠️  Анализаторы работают"
 	@echo ""
 	@echo "4. Сборка основного приложения..."
 	@make build
@@ -101,13 +101,13 @@ quick-check:
 	@echo "=========================="
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./cmd/debug/counter_test/ ./cmd/debug/analyzer/ ./cmd/bot/ && echo "✅ Все компилируется"
+	@go build ./application/cmd/debug/counter_test/ ./application/cmd/debug/analyzer/ ./application/cmd/bot/ && echo "✅ Все компилируется"
 	@echo ""
 	@echo "2. CounterAnalyzer..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | tail -2
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | tail -2
 	@echo ""
 	@echo "3. Анализаторы..."
-	@go run ./cmd/debug/analyzer/main.go 2>&1 | tail -2
+	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | tail -2
 	@echo ""
 	@echo "🎯 СИСТЕМА РАБОТАЕТ КОРРЕКТНО!"
 
@@ -121,7 +121,7 @@ debug-counter:
 	@echo "  • Периоды анализа"
 	@echo "  • Статистику"
 	@echo ""
-	go run ./cmd/debug/counter_test/main.go
+	go run ./application/cmd/debug/counter_test/main.go
 
 ## test-counter: Полный тест CounterAnalyzer (исправленная версия)
 test-counter:
@@ -129,20 +129,20 @@ test-counter:
 	@echo "================================"
 	@echo ""
 	@echo "1. Базовый функционал..."
-	@go run ./cmd/debug/analyzer/main.go 2>&1 | grep -E "(ТЕСТ COUNTER ANALYZER|📊|🧪|✅|🔧)" || true
+	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | grep -E "(ТЕСТ COUNTER ANALYZER|📊|🧪|✅|🔧)" || true
 	@echo ""
 	@echo "2. Детальный тест..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|🧮|✅|🎉)" || true
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|🧮|✅|🎉)" || true
 	@echo ""
 	@echo "3. Интеграция с системой..."
-	@go run ./cmd/debug/enhanced/main.go 2>&1 | grep -E "(COUNTER ANALYZER|🔢|📈|✅)" | head -20 || true
+	@go run ./application/cmd/debug/enhanced/main.go 2>&1 | grep -E "(COUNTER ANALYZER|🔢|📈|✅)" | head -20 || true
 	@echo ""
 	@echo "✅ Полный тест CounterAnalyzer завершен"
 
 ## test-counter-quick: Быстрый тест CounterAnalyzer
 test-counter-quick:
 	@echo "⚡ Быстрый тест CounterAnalyzer..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|✅|🎉)" | head -15 || true
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|✅|🎉)" | head -15 || true
 
 ## counter-test-all: Все тесты CounterAnalyzer
 counter-test-all:
@@ -151,22 +151,22 @@ counter-test-all:
 	@echo ""
 	@echo "Этап 1/4: Базовый тест анализаторов"
 	@echo "----------------------"
-	@(go run ./cmd/debug/analyzer/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|📊|🧪)" | head -20 || true
+	@(go run ./application/cmd/debug/analyzer/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|📊|🧪)" | head -20 || true
 	@echo ""
 
 	@echo "Этап 2/4: Полный тест CounterAnalyzer"
 	@echo "---------------------"
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -25 || true
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -25 || true
 	@echo ""
 
 	@echo "Этап 3/4: Интеграционный тест"
 	@echo "------------------------------"
-	@(go run ./cmd/debug/enhanced/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(COUNTER ANALYZER|🔢|📈)" | head -15 || true
+	@(go run ./application/cmd/debug/enhanced/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(COUNTER ANALYZER|🔢|📈)" | head -15 || true
 	@echo ""
 
 	@echo "Этап 4/4: Диагностический тест"
 	@echo "-------------------------------"
-	@(go run ./cmd/debug/diagnostic/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|🔍|📊)" | head -10 || true
+	@(go run ./application/cmd/debug/diagnostic/main.go & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|🔍|📊)" | head -10 || true
 	@echo ""
 	@echo "✅ Все тесты CounterAnalyzer завершены"
 
@@ -202,13 +202,13 @@ test-basic:
 	@echo "========================"
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./cmd/debug/... && echo "✅ Компиляция успешна"
+	@go build ./application/cmd/debug/... && echo "✅ Компиляция успешна"
 	@echo ""
 	@echo "2. Тест CounterAnalyzer..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -15 || echo "⚠️  CounterAnalyzer требует внимания"
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -15 || echo "⚠️  CounterAnalyzer требует внимания"
 	@echo ""
 	@echo "3. Тест всех анализаторов..."
-	@go run ./cmd/debug/analyzer/main.go 2>&1 | grep -E "(🧪|📊|✅|🔧)" | head -20 || echo "⚠️  Анализаторы требуют внимания"
+	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | grep -E "(🧪|📊|✅|🔧)" | head -20 || echo "⚠️  Анализаторы требуют внимания"
 	@echo ""
 	@echo "4. Проверка типов..."
 	@go vet ./internal/analysis/analyzers/... 2>&1 | head -10 || echo "⚠️  Есть предупреждения go vet"
@@ -219,10 +219,10 @@ test-quick:
 	@echo "⚡ БЫСТРЫЕ ТЕСТЫ"
 	@echo "==============="
 	@echo "CounterAnalyzer (первые 10 строк)..."
-	@go run ./cmd/debug/counter_test/main.go 2>&1 | head -10
+	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | head -10
 	@echo ""
 	@echo "Анализаторы (первые 10 строк)..."
-	@go run ./cmd/debug/analyzer/main.go 2>&1 | head -10
+	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | head -10
 
 ## test-all: Все тесты (без бесконечного ожидания)
 test-all: test-basic build
@@ -282,7 +282,7 @@ build:
 	@mkdir -p bin
 	CGO_ENABLED=0 go build \
 		-ldflags="-s -w -X main.version=1.0.0 -X 'main.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'" \
-		-o bin/growth-monitor ./cmd/bot
+		-o bin/growth-monitor ./application/cmd/bot
 	@echo "✅ Built: bin/growth-monitor"
 
 ## release: Сборка релизных версий для всех платформ
@@ -294,26 +294,26 @@ release:
 	@echo "📦 Building for Linux..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-linux ./cmd/bot
+		-o releases/growth-monitor-linux ./application/cmd/bot
 
 	# macOS
 	@echo "🍏 Building for macOS..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-macos ./cmd/bot
+		-o releases/growth-monitor-macos ./application/cmd/bot
 
 	# Windows
 	@echo "🪟 Building for Windows..."
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-windows.exe ./cmd/bot
+		-o releases/growth-monitor-windows.exe ./application/cmd/bot
 
 	@echo "✅ Release builds created in releases/"
 
 ## run: Запуск в режиме разработки (из исходников)
 run:
 	@echo "🚀 Запуск основного бота (разработка)..."
-	go run ./cmd/bot/main.go
+	go run ./application/cmd/bot/main.go
 
 ## run-prod: Запуск собранной версии
 run-prod: build
@@ -467,7 +467,7 @@ real-telegram-test:
 	echo ""; \
 	if [[ $$REPLY =~ ^[Yy] ]]; then \
 		echo "Запуск теста..."; \
-		go run ./cmd/debug/real_telegram_test/main.go --debug; \
+		go run ./application/cmd/debug/real_telegram_test/main.go --debug; \
 	else \
 		echo "❌ Тест отменен"; \
 	fi

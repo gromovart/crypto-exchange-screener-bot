@@ -2,7 +2,7 @@
 package binance
 
 import (
-	"crypto-exchange-screener-bot/internal/api"
+	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"encoding/json"
 	"fmt"

@@ -4,7 +4,7 @@ echo "⚡ БЫСТРЫЙ ТЕСТ СИСТЕМЫ"
 echo "====================="
 
 echo "1. Проверяем компиляцию..."
-if go build ./cmd/debug/counter_test/; then
+if go build ./application/cmd/debug/counter_test/; then
     echo "✅ CounterAnalyzer компилируется"
 else
     echo "❌ Ошибка компиляции CounterAnalyzer"
@@ -19,12 +19,12 @@ timeout() {
 
 # Пробуем разные варианты timeout
 if command -v gtimeout &> /dev/null; then
-    gtimeout 3 go run ./cmd/debug/counter_test/main.go | head -10
+    gtimeout 3 go run ./application/cmd/debug/counter_test/main.go | head -10
 elif command -v timeout &> /dev/null; then
-    timeout 3 go run ./cmd/debug/counter_test/main.go | head -10
+    timeout 3 go run ./application/cmd/debug/counter_test/main.go | head -10
 else
     # Запускаем без timeout, но убиваем через 3 секунды
-    go run ./cmd/debug/counter_test/main.go &
+    go run ./application/cmd/debug/counter_test/main.go &
     PID=$!
     sleep 3
     kill $PID 2>/dev/null || true

@@ -52,13 +52,13 @@ echo "5. Сборка"
 echo ""
 
 # 1. Компиляция
-run_safe "Компиляция" "go build ./cmd/debug/..."
+run_safe "Компиляция" "go build ./application/cmd/debug/..."
 
 # 2. CounterAnalyzer
-run_safe "CounterAnalyzer" "go run ./cmd/debug/counter_test/main.go"
+run_safe "CounterAnalyzer" "go run ./application/cmd/debug/counter_test/main.go"
 
 # 3. Анализаторы
-run_safe "Анализаторы" "go run ./cmd/debug/analyzer/main.go"
+run_safe "Анализаторы" "go run ./application/cmd/debug/analyzer/main.go"
 
 # 4. Проверка типов
 run_safe "Проверка типов" "go vet ./internal/analysis/analyzers/..."

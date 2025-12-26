@@ -1,7 +1,7 @@
 package notifier
 
 import (
-	"crypto-exchange-screener-bot/internal/core/adapters"
+	"crypto-exchange-screener-bot/internal/adapters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
