@@ -1,3 +1,4 @@
+// application/main.go
 package main
 
 import (
@@ -314,7 +315,8 @@ func validateConfig(cfg *config.Config) error {
 
 	// Проверка CounterAnalyzer если включен
 	if cfg.IsCounterAnalyzerEnabled() {
-		if cfg.CounterAnalyzer.BasePeriodMinutes <= 0 {
+		// Используем геттер для получения базового периода
+		if cfg.GetCounterBasePeriodMinutes() <= 0 {
 			errors = append(errors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
 		}
 	}
@@ -351,11 +353,13 @@ func logConfig(cfg *config.Config, testMode bool) {
 	// Counter Analyzer
 	if cfg.IsCounterAnalyzerEnabled() {
 		logger.Info("   📊 Counter Analyzer: ENABLED")
-		logger.Info("      • Period: %s", cfg.CounterDefaultPeriod)
-		logger.Info("      • Base period: %d minutes", cfg.CounterBasePeriodMinutes)
-		logger.Info("      • Growth threshold: %.2f%%", cfg.CounterGrowthThreshold)
-		logger.Info("      • Fall threshold: %.2f%%", cfg.CounterFallThreshold)
-		logger.Info("      • Notify: %v", cfg.CounterNotifyOnSignal)
+		logger.Info("      • Period: %s", cfg.GetCounterAnalysisPeriod())
+		logger.Info("      • Base period: %d minutes", cfg.GetCounterBasePeriodMinutes())
+		logger.Info("      • Growth threshold: %.2f%%", cfg.GetCounterGrowthThreshold())
+		logger.Info("      • Fall threshold: %.2f%%", cfg.GetCounterFallThreshold())
+		logger.Info("      • Track growth: %v", cfg.GetCounterTrackGrowth())
+		logger.Info("      • Track fall: %v", cfg.GetCounterTrackFall())
+		logger.Info("      • Notification enabled: %v", cfg.GetCounterNotificationEnabled())
 	} else {
 		logger.Info("   📊 Counter Analyzer: DISABLED")
 	}
@@ -504,7 +508,7 @@ func printHelp() {
 	fmt.Println("  Required: API_KEY, API_SECRET (or BYBIT_API_KEY/BYBIT_SECRET_KEY)")
 	fmt.Println("  Optional: SYMBOL_FILTER, MIN_VOLUME_FILTER, etc.")
 	fmt.Println("  Telegram: TG_API_KEY, TG_CHAT_ID, TELEGRAM_ENABLED=true")
-	fmt.Println("  Counter: COUNTER_ANALYZER_ENABLED=true, COUNTER_DEFAULT_PERIOD=15m")
+	fmt.Println("  Counter: COUNTER_ANALYZER_ENABLED=true, COUNTER_ANALYSIS_PERIOD=15m")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  go run application/main.go --env=dev --log-level=info")

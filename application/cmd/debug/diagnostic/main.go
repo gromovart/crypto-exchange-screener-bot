@@ -1,7 +1,7 @@
 package main
 
 import (
-	manager "crypto-exchange-screener-bot/application/data_manager"
+	manager "crypto-exchange-screener-bot/application/services/orchestrator"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -164,10 +164,10 @@ func createDebugConfig() *config.Config {
 	cfg.LogLevel = "error" // Только ошибки
 
 	// Минимальные пороги
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.001 // 0.001%!
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 1.0
-	cfg.Analyzers.FallAnalyzer.MinFall = 0.001
-	cfg.Analyzers.FallAnalyzer.MinConfidence = 1.0
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth = 0.001 // 0.001%!
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence = 1.0
+	cfg.AnalyzerConfigs.FallAnalyzer.MinFall = 0.001
+	cfg.AnalyzerConfigs.FallAnalyzer.MinConfidence = 1.0
 
 	// Отключаем все фильтры
 	cfg.SignalFilters.Enabled = false
@@ -183,11 +183,11 @@ func createDebugConfig() *config.Config {
 func printConfig(cfg *config.Config) {
 	logger.Debug("   ⚙️  Настройки анализа:")
 	fmt.Printf("      • Рост: порог=%.3f%%, уверенность=%.1f%%\n",
-		cfg.Analyzers.GrowthAnalyzer.MinGrowth,
-		cfg.Analyzers.GrowthAnalyzer.MinConfidence)
+		cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth,
+		cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence)
 	fmt.Printf("      • Падение: порог=%.3f%%, уверенность=%.1f%%\n",
-		cfg.Analyzers.FallAnalyzer.MinFall,
-		cfg.Analyzers.FallAnalyzer.MinConfidence)
+		cfg.AnalyzerConfigs.FallAnalyzer.MinFall,
+		cfg.AnalyzerConfigs.FallAnalyzer.MinConfidence)
 	fmt.Printf("      • Фильтры: %v\n", cfg.SignalFilters.Enabled)
 	fmt.Printf("      • Фильтр объема: %.0f\n", cfg.MinVolumeFilter)
 	fmt.Printf("      • Символов: %d\n", cfg.MaxSymbolsToMonitor)

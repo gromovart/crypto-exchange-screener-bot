@@ -98,6 +98,9 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 	now := time.Now()
 	updatedCount := 0
 
+	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
+	var priceDataList []PriceData
+
 	for _, ticker := range tickers.Result.List {
 		// Парсим цену
 		price, err := strconv.ParseFloat(ticker.LastPrice, 64)
@@ -105,30 +108,45 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 			continue
 		}
 
-		// Парсим объем
-		volume, _ := strconv.ParseFloat(ticker.Volume24h, 64)
+		// Парсим объем в базовой валюте
+		volumeBase, _ := strconv.ParseFloat(ticker.Volume24h, 64)
 
-		// Сохраняем в хранилище
-		if err := f.storage.StorePrice(ticker.Symbol, price, volume, now); err != nil {
+		// Binance не предоставляет turnover, рассчитываем сами
+		volumeUSD := price * volumeBase
+
+		// 🔴 ОБНОВЛЕННЫЙ ВЫЗОВ: 4 параметра вместо 3
+		if err := f.storage.StorePrice(ticker.Symbol, price, volumeBase, volumeUSD, now); err != nil {
 			log.Printf("Binance: Ошибка сохранения цены для %s: %v", ticker.Symbol, err)
 			continue
 		}
 
-		// Публикуем событие
-		f.eventBus.Publish(events.Event{
-			Type:   events.EventPriceUpdated,
-			Source: "binance_price_fetcher",
-			Data: map[string]interface{}{
-				"symbol":    ticker.Symbol,
-				"price":     price,
-				"volume":    volume,
-				"timestamp": now,
-				"exchange":  "binance",
-			},
+		// Добавляем в массив для batch события
+		priceDataList = append(priceDataList, PriceData{
+			Symbol:    ticker.Symbol,
+			Price:     price,
+			Volume24h: volumeBase,
+			VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
 			Timestamp: now,
 		})
 
 		updatedCount++
+	}
+
+	// 🔴 ПУБЛИКУЕМ ОДНО СОБЫТИЕ СО ВСЕМИ ЦЕНАМИ (как в Bybit)
+	if updatedCount > 0 && f.eventBus != nil {
+		event := events.Event{
+			Type:      events.EventPriceUpdated,
+			Source:    "binance_price_fetcher",
+			Data:      priceDataList,
+			Timestamp: now,
+		}
+
+		err := f.eventBus.Publish(event)
+		if err != nil {
+			log.Printf("Binance: Ошибка публикации события: %v", err)
+		} else {
+			log.Printf("✅ Binance: Опубликовано событие с %d ценами", updatedCount)
+		}
 	}
 
 	if updatedCount > 0 {

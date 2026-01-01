@@ -1,4 +1,4 @@
-// internal/analysis/analyzers/volume_analyzer.go (исправленная версия)
+// internal/core/domain/signals/detectors/volume_analyzer.go
 package analyzers
 
 import (

@@ -1,7 +1,8 @@
+// application/cmd/debug/enhanced/main.go
 package main
 
 import (
-	manager "crypto-exchange-screener-bot/application/data_manager"
+	manager "crypto-exchange-screener-bot/application/services/orchestrator"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -29,24 +30,29 @@ func main() {
 	logger.Debug("\n⚙️  НАСТРОЙКА ДЛЯ ОТЛАДКИ:")
 
 	// Основные настройки
-	cfg.DebugMode = true
-	cfg.LogLevel = "info"
-	cfg.LogToConsole = true
-	cfg.LogToFile = false
+	cfg.Logging.DebugMode = true
+	cfg.Logging.Level = "debug"
+	cfg.Logging.ToConsole = true
+	cfg.Logging.ToFile = false
 
 	// Минимальные пороги
 	cfg.UpdateInterval = 20
 	cfg.MaxSymbolsToMonitor = 20
-	cfg.MaxConcurrentRequests = 3
+	cfg.Performance.MaxConcurrentRequests = 3
 	cfg.MinVolumeFilter = 0
 
 	// Настройки CounterAnalyzer
-	cfg.CounterAnalyzer.Enabled = true
-	cfg.CounterAnalyzer.BasePeriodMinutes = 1
-	cfg.CounterAnalyzer.AnalysisPeriod = "5m"
-	cfg.CounterAnalyzer.TrackGrowth = true
-	cfg.CounterAnalyzer.TrackFall = true
-	cfg.CounterAnalyzer.NotificationThreshold = 1
+	cfg.AnalyzerConfigs.CounterAnalyzer.Enabled = true
+	// Настройки CounterAnalyzer через CustomSettings
+	counterSettings := make(map[string]interface{})
+	counterSettings["base_period_minutes"] = 1
+	counterSettings["analysis_period"] = "5m"
+	counterSettings["track_growth"] = true
+	counterSettings["track_fall"] = true
+	counterSettings["notification_threshold"] = 1
+	counterSettings["growth_threshold"] = 0.1
+	counterSettings["fall_threshold"] = 0.1
+	cfg.AnalyzerConfigs.CounterAnalyzer.CustomSettings = counterSettings
 
 	// Анализ - СУПЕР НИЗКИЕ ПОРОГИ
 	cfg.AnalysisEngine.UpdateInterval = 20
@@ -56,15 +62,15 @@ func main() {
 	cfg.AnalysisEngine.MinDataPoints = 2
 
 	// Анализаторы - ОЧЕНЬ НИЗКИЕ ПОРОГИ
-	cfg.Analyzers.GrowthAnalyzer.Enabled = true
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 10.0
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.1
+	cfg.AnalyzerConfigs.GrowthAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence = 10.0
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth = 0.1
 
-	cfg.Analyzers.FallAnalyzer.Enabled = true
-	cfg.Analyzers.FallAnalyzer.MinConfidence = 10.0
-	cfg.Analyzers.FallAnalyzer.MinFall = 0.1
+	cfg.AnalyzerConfigs.FallAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.FallAnalyzer.MinConfidence = 10.0
+	cfg.AnalyzerConfigs.FallAnalyzer.MinFall = 0.1
 
-	cfg.Analyzers.ContinuousAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.ContinuousAnalyzer.Enabled = true
 
 	// Фильтры - ОТКЛЮЧАЕМ
 	cfg.SignalFilters.Enabled = false
@@ -72,21 +78,22 @@ func main() {
 	cfg.SignalFilters.MaxSignalsPerMin = 100
 
 	// Отключаем Telegram
+	cfg.Telegram.Enabled = false
 	cfg.TelegramEnabled = false
 
 	// Выводим настройки
 	fmt.Printf("   📊 Конфигурация анализа:\n")
 	fmt.Printf("      • Символов: %d\n", cfg.MaxSymbolsToMonitor)
 	fmt.Printf("      • Периоды: %v мин\n", cfg.AnalysisEngine.AnalysisPeriods)
-	fmt.Printf("      • COUNTER ANALYZER: %v\n", cfg.CounterAnalyzer.Enabled)
-	if cfg.CounterAnalyzer.Enabled {
-		fmt.Printf("        - Период: %s\n", cfg.CounterAnalyzer.AnalysisPeriod)
-		fmt.Printf("        - Базовый период: %d мин\n", cfg.CounterAnalyzer.BasePeriodMinutes)
+	fmt.Printf("      • COUNTER ANALYZER: %v\n", cfg.AnalyzerConfigs.CounterAnalyzer.Enabled)
+	if cfg.AnalyzerConfigs.CounterAnalyzer.Enabled {
+		fmt.Printf("        - Период: %s\n", cfg.GetCounterAnalysisPeriod())
+		fmt.Printf("        - Базовый период: %d мин\n", cfg.GetCounterBasePeriodMinutes())
 	}
 	fmt.Printf("      • ПОРОГИ СИГНАЛОВ:\n")
-	fmt.Printf("        - Рост: %.2f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
-	fmt.Printf("        - Падение: %.2f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
-	fmt.Printf("        - Уверенность: %.0f%%\n", cfg.Analyzers.GrowthAnalyzer.MinConfidence)
+	fmt.Printf("        - Рост: %.2f%%\n", cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
+	fmt.Printf("        - Падение: %.2f%%\n", cfg.AnalyzerConfigs.FallAnalyzer.MinFall)
+	fmt.Printf("        - Уверенность: %.0f%%\n", cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence)
 	fmt.Printf("      • Фильтр объема: %v\n", cfg.MinVolumeFilter > 0)
 
 	// Создаем менеджер

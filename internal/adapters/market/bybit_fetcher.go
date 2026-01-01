@@ -91,31 +91,53 @@ func (f *BybitPriceFetcher) Stop() error {
 }
 
 func (f *BybitPriceFetcher) fetchPrices() error {
+	// 🔴 ДОБАВЛЯЕМ ЛОГИРОВАНИЕ
+	logger.Info("🔄 BybitFetcher: начало получения цен...")
+
 	// Получаем тикеры
 	tickers, err := f.client.GetTickers(f.client.Category())
 	if err != nil {
+		logger.Error("❌ BybitFetcher: ошибка получения тикеров: %v", err)
 		return fmt.Errorf("failed to get tickers: %w", err)
 	}
 
+	logger.Info("📊 BybitFetcher: получено %d тикеров", len(tickers.Result.List))
+
 	now := time.Now()
 	updatedCount := 0
+	errorCount := 0
 
 	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
 	var priceDataList []PriceData
 
-	for _, ticker := range tickers.Result.List {
+	for i, ticker := range tickers.Result.List {
 		// Парсим цену
 		price, err := parseFloat(ticker.LastPrice)
 		if err != nil {
+			logger.Debug("⚠️  BybitFetcher: ошибка парсинга цены для %s: %v", ticker.Symbol, err)
 			continue
 		}
 
-		// Парсим объем
-		volume, _ := parseFloat(ticker.Volume24h)
+		// Парсим объем в базовой валюте
+		volumeBase, _ := parseFloat(ticker.Volume24h)
 
-		// Сохраняем в хранилище
-		if err := f.storage.StorePrice(ticker.Symbol, price, volume, now); err != nil {
-			logger.Info("Ошибка сохранения цены для %s: %v", ticker.Symbol, err)
+		// Парсим объем в USDT (turnover) - ОСНОВНОЙ ДЛЯ АНАЛИЗА
+		volumeUSD, _ := parseFloat(ticker.Turnover24h)
+
+		// Если turnover недоступен, используем расчетный объем
+		if volumeUSD == 0 && price > 0 && volumeBase > 0 {
+			volumeUSD = price * volumeBase
+			logger.Debug("📝 BybitFetcher: расчетный VolumeUSD для %s: %f", ticker.Symbol, volumeUSD)
+		}
+
+		// 🔴 ДОБАВЛЯЕМ ДЕБАГ ЛОГ
+		logger.Debug("💰 BybitFetcher: сохранение %s: price=%f, volume24h=%f, volumeUSD=%f",
+			ticker.Symbol, price, volumeBase, volumeUSD)
+
+		// 🔴 ОБНОВЛЕННЫЙ ВЫЗОВ: 4 параметра вместо 3
+		if err := f.storage.StorePrice(ticker.Symbol, price, volumeBase, volumeUSD, now); err != nil {
+			errorCount++
+			logger.Error("❌ BybitFetcher: ошибка StorePrice для %s: %v", ticker.Symbol, err)
 			continue
 		}
 
@@ -123,32 +145,36 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		priceDataList = append(priceDataList, PriceData{
 			Symbol:    ticker.Symbol,
 			Price:     price,
-			Volume24h: volume,
+			Volume24h: volumeBase,
+			VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
 			Timestamp: now,
 		})
 
 		updatedCount++
+
+		// Логируем каждый 50-й тикер
+		if (i+1)%50 == 0 {
+			logger.Debug("📈 BybitFetcher: обработано %d тикеров...", i+1)
+		}
 	}
+
+	logger.Info("✅ BybitFetcher: успешно сохранено %d цен, ошибок: %d", updatedCount, errorCount)
 
 	// 🔴 ПУБЛИКУЕМ ОДНО СОБЫТИЕ СО ВСЕМИ ЦЕНАМИ
 	if updatedCount > 0 && f.eventBus != nil {
 		event := events.Event{
 			Type:      events.EventPriceUpdated,
-			Source:    "price_fetcher",
-			Data:      priceDataList, // ← МАССИВ ВСЕХ ЦЕН
+			Source:    "bybit_price_fetcher",
+			Data:      priceDataList,
 			Timestamp: now,
 		}
 
 		err := f.eventBus.Publish(event)
 		if err != nil {
-			logger.Info("Ошибка публикации события: %v", err)
+			logger.Error("❌ BybitFetcher: ошибка публикации события: %v", err)
 		} else {
-			logger.Info("✅ Опубликовано событие с %d ценами", updatedCount)
+			logger.Info("📨 BybitFetcher: опубликовано событие с %d ценами", updatedCount)
 		}
-	}
-
-	if updatedCount > 0 {
-		logger.Info("💰 Обновлено %d цен", updatedCount)
 	}
 
 	return nil

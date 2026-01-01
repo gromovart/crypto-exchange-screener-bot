@@ -1,4 +1,4 @@
-// internal/analysis/filters/confidence_filter.go
+// internal/core/domain/signals/filters/confidence_filter.go
 package filters
 
 import (

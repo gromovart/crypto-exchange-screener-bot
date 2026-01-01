@@ -114,8 +114,8 @@ func (tb *TelegramBot) SendWelcomeMessage() error {
 		"Используйте меню ниже для управления ботом ⬇️"
 
 	// Используем настройки из конфигурации анализаторов
-	growthThreshold := tb.config.Analyzers.GrowthAnalyzer.MinGrowth
-	fallThreshold := tb.config.Analyzers.FallAnalyzer.MinFall
+	growthThreshold := tb.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth
+	fallThreshold := tb.config.AnalyzerConfigs.FallAnalyzer.MinFall
 
 	message = fmt.Sprintf(message, growthThreshold, fallThreshold)
 

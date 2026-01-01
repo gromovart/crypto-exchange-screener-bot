@@ -1,4 +1,3 @@
-// internal/adapters/market/types.go
 package market
 
 import (
@@ -27,12 +26,30 @@ type PriceFetcherConfig struct {
 	FuturesCategory     string
 }
 
-// PriceData данные о цене
+// PriceData данные о цене с улучшенной обработкой объемов
 type PriceData struct {
 	Symbol    string    `json:"symbol"`
 	Price     float64   `json:"price"`
-	Volume24h float64   `json:"volume_24h"`
+	Volume24h float64   `json:"volume_24h"` // Объем в БАЗОВОЙ валюте (для отображения)
+	VolumeUSD float64   `json:"volume_usd"` // Объем в USDT (turnover) для анализа ← ДОБАВЛЕНО!
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// Геттеры для обратной совместимости
+func (p PriceData) GetVolume() float64 {
+	return p.Volume24h
+}
+
+func (p PriceData) GetVolumeUSD() float64 {
+	return p.VolumeUSD
+}
+
+// Метод для получения нормализованного объема (использует VolumeUSD если доступен)
+func (p PriceData) GetNormalizedVolume() float64 {
+	if p.VolumeUSD > 0 {
+		return p.VolumeUSD
+	}
+	return p.Volume24h // fallback на старый формат
 }
 
 // TrendSignal сигнал тренда
@@ -44,6 +61,7 @@ type TrendSignal struct {
 	Confidence    float64   `json:"confidence"`
 	Timestamp     time.Time `json:"timestamp"`
 	DataPoints    int       `json:"data_points"`
+	VolumeUSD     float64   `json:"volume_usd,omitempty"` // ← ОПЦИОНАЛЬНО: можно добавить для анализа
 }
 
 // NotificationService интерфейс сервиса уведомлений
@@ -64,4 +82,5 @@ type PriceChange struct {
 	ChangePercent float64   `json:"change_percent"`
 	Interval      string    `json:"interval"`
 	Timestamp     time.Time `json:"timestamp"`
+	VolumeUSD     float64   `json:"volume_usd,omitempty"` // ← ДОБАВЛЕНО для анализа
 }

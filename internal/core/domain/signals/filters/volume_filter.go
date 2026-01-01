@@ -1,4 +1,4 @@
-// internal/analysis/filters/volume_filter.go
+// internal/core/domain/signals/filters/volume_filter.go
 package filters
 
 import (

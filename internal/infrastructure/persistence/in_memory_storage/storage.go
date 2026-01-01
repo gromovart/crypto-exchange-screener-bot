@@ -1,4 +1,4 @@
-// in_memory_storage.go
+// internal/infrastructure/persistence/in_memory_storage/storage.go
 package storage
 
 import (
@@ -16,7 +16,7 @@ type InMemoryPriceStorage struct {
 	// Текущие цены
 	current map[string]*PriceSnapshot
 
-	// История цен (двусторонний список для каждой пары)
+	// История цен
 	history map[string]*list.List
 
 	// Статистика
@@ -59,7 +59,7 @@ func NewInMemoryPriceStorage(config *StorageConfig) *InMemoryPriceStorage {
 }
 
 // StorePrice сохраняет цену
-func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float64, timestamp time.Time) error {
+func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -73,6 +73,7 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 		Symbol:    symbol,
 		Price:     price,
 		Volume24h: volume24h,
+		VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
 		Timestamp: timestamp,
 	}
 	s.current[symbol] = snapshot
@@ -87,6 +88,7 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 		Symbol:    symbol,
 		Price:     price,
 		Volume24h: volume24h,
+		VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
 		Timestamp: timestamp,
 	})
 
@@ -101,10 +103,10 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h float6
 	s.updateStats()
 
 	// Обновляем сортировку по объему
-	s.updateSymbolVolume(symbol, volume24h)
+	s.updateSymbolVolume(symbol, volume24h, volumeUSD)
 
-	// Уведомляем подписчиков (без блокировки, чтобы избежать deadlock)
-	go s.subscriptions.NotifyAll(symbol, price, volume24h, timestamp)
+	// Уведомляем подписчиков
+	go s.subscriptions.NotifyAll(symbol, price, volume24h, volumeUSD, timestamp)
 
 	return nil
 }
@@ -521,19 +523,22 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 	}
 
 	// Рассчитываем средний объем
-	var totalVolume float64
+	var totalVolume24h, totalVolumeUSD float64
 	volumeCount := 0
 
 	for element := historyList.Front(); element != nil; element = element.Next() {
 		if priceData, ok := element.Value.(PriceData); ok {
-			totalVolume += priceData.Volume24h
+			totalVolume24h += priceData.Volume24h
+			totalVolumeUSD += priceData.VolumeUSD
 			volumeCount++
 		}
 	}
 
-	avgVolume := 0.0
+	avgVolume24h := 0.0
+	avgVolumeUSD := 0.0
 	if volumeCount > 0 {
-		avgVolume = totalVolume / float64(volumeCount)
+		avgVolume24h = totalVolume24h / float64(volumeCount)
+		avgVolumeUSD = totalVolumeUSD / float64(volumeCount)
 	}
 
 	// Рассчитываем изменение за 24 часа
@@ -548,9 +553,38 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 		FirstTimestamp: firstData.Timestamp,
 		LastTimestamp:  lastData.Timestamp,
 		CurrentPrice:   snapshot.Price,
-		AvgVolume24h:   avgVolume,
+		AvgVolume24h:   avgVolume24h,
+		AvgVolumeUSD:   avgVolumeUSD,
 		PriceChange24h: priceChange24h,
 	}, nil
+}
+
+// GetTopSymbolsByVolumeUSD возвращает топ символов по объему в USDT
+func (s *InMemoryPriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]SymbolVolume, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Создаем список для сортировки
+	var symbolsByVolumeUSD []SymbolVolume
+
+	for symbol, snapshot := range s.current {
+		symbolsByVolumeUSD = append(symbolsByVolumeUSD, SymbolVolume{
+			Symbol:    symbol,
+			VolumeUSD: snapshot.VolumeUSD,
+			Volume:    snapshot.Volume24h,
+		})
+	}
+
+	// Сортируем по убыванию VolumeUSD
+	sort.Slice(symbolsByVolumeUSD, func(i, j int) bool {
+		return symbolsByVolumeUSD[i].VolumeUSD > symbolsByVolumeUSD[j].VolumeUSD
+	})
+
+	if limit <= 0 || limit > len(symbolsByVolumeUSD) {
+		limit = len(symbolsByVolumeUSD)
+	}
+
+	return symbolsByVolumeUSD[:limit], nil
 }
 
 // FindSymbolsByPattern ищет символы по шаблону
@@ -660,12 +694,15 @@ func (s *InMemoryPriceStorage) findNewestTimestamp() time.Time {
 	return newest
 }
 
-func (s *InMemoryPriceStorage) updateSymbolVolume(symbol string, volume float64) {
-	// Находим символ в списке
+func (s *InMemoryPriceStorage) updateSymbolVolume(symbol string, volume24h, volumeUSD float64) {
+	// Обновляем основной список (по Volume24h)
 	found := false
 	for i, sv := range s.symbolsByVolume {
 		if sv.Symbol == symbol {
-			s.symbolsByVolume[i].Volume = volume
+			s.symbolsByVolume[i].Volume = volume24h
+			if sv.VolumeUSD == 0 && volumeUSD > 0 {
+				s.symbolsByVolume[i].VolumeUSD = volumeUSD
+			}
 			found = true
 			break
 		}
@@ -674,12 +711,13 @@ func (s *InMemoryPriceStorage) updateSymbolVolume(symbol string, volume float64)
 	// Если не нашли, добавляем
 	if !found {
 		s.symbolsByVolume = append(s.symbolsByVolume, SymbolVolume{
-			Symbol: symbol,
-			Volume: volume,
+			Symbol:    symbol,
+			Volume:    volume24h,
+			VolumeUSD: volumeUSD,
 		})
 	}
 
-	// Сортируем по убыванию объема
+	// Сортируем по убыванию Volume24h (для обратной совместимости)
 	sort.Slice(s.symbolsByVolume, func(i, j int) bool {
 		return s.symbolsByVolume[i].Volume > s.symbolsByVolume[j].Volume
 	})

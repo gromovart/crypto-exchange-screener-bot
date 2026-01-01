@@ -1,4 +1,4 @@
-// internal/telegram/menu_handlers.go
+// internal/delivery/telegram/menu_handlers.go
 package telegram
 
 import (
@@ -184,8 +184,11 @@ func (mh *MenuHandlers) SendSignalTypesInfo(chatID string) error {
 
 // SendPeriodsInfo отправляет информацию о периодах
 func (mh *MenuHandlers) SendPeriodsInfo(chatID string) error {
+	// Получаем период из кастомных настроек
+	period := getPeriodFromConfig(mh.config)
+
 	message := "⏱️ *Настройка периодов анализа*\n\n" +
-		"Текущий период: " + mh.config.CounterAnalyzer.DefaultPeriod + "\n\n" +
+		"Текущий период: " + period + "\n\n" +
 		"Выберите период из меню ниже:\n\n" +
 		"• ⏱️ 5 мин - 5 минутный период\n" +
 		"• ⏱️ 15 мин - 15 минутный период\n" +
@@ -280,6 +283,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
 	message := "Выберите символ для сброса счетчика:"
 
+	// Создаем inline клавиатуру
 	keyboard := &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
@@ -315,6 +319,9 @@ func (mh *MenuHandlers) SendStatus(chatID string) error {
 		fallStatus = "❌ Выключен"
 	}
 
+	// Получаем период из кастомных настроек
+	period := getPeriodFromConfig(mh.config)
+
 	message := fmt.Sprintf(
 		"📊 *Статус системы*\n\n"+
 			"✅ Бот работает\n"+
@@ -326,7 +333,7 @@ func (mh *MenuHandlers) SendStatus(chatID string) error {
 		notifyStatus,
 		growthStatus,
 		fallStatus,
-		mh.config.CounterAnalyzer.DefaultPeriod,
+		period,
 		time.Now().Format("15:04:05"),
 	)
 
@@ -381,8 +388,11 @@ func (mh *MenuHandlers) HandlePeriodChange(chatID string, period string) error {
 		periodName = "15 минут"
 	}
 
-	mh.config.CounterAnalyzer.DefaultPeriod = period
-	mh.config.CounterAnalyzer.AnalysisPeriod = period
+	// Обновляем кастомные настройки
+	if mh.config.AnalyzerConfigs.CounterAnalyzer.CustomSettings == nil {
+		mh.config.AnalyzerConfigs.CounterAnalyzer.CustomSettings = make(map[string]interface{})
+	}
+	mh.config.AnalyzerConfigs.CounterAnalyzer.CustomSettings["analysis_period"] = period
 
 	message := fmt.Sprintf("✅ Период анализа установлен на: %s\n\n"+
 		"Все счетчики будут перезапущены с новым периодом.", periodName)
@@ -394,4 +404,14 @@ func (mh *MenuHandlers) HandlePeriodChange(chatID string, period string) error {
 func (mh *MenuHandlers) HandleResetAllCounters(chatID string) error {
 	message := "🔄 Все счетчики сигналов сброшены"
 	return mh.messageSender.SendMessageToChat(chatID, message, nil)
+}
+
+// getPeriodFromConfig получает период из конфигурации
+func getPeriodFromConfig(config *config.Config) string {
+	if config.AnalyzerConfigs.CounterAnalyzer.CustomSettings != nil {
+		if period, ok := config.AnalyzerConfigs.CounterAnalyzer.CustomSettings["analysis_period"].(string); ok {
+			return period
+		}
+	}
+	return "15m"
 }

@@ -1,4 +1,4 @@
-// internal/analysis/filters/types.go
+// internal/core/domain/signals/filters/types.go
 package filters
 
 import analysis "crypto-exchange-screener-bot/internal/core/domain/signals"

@@ -1,4 +1,4 @@
-// internal/analysis/engine/engine.go
+// internal/core/domain/signals/engine/engine.go
 package engine
 
 import (
@@ -16,6 +16,16 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// AnalyzerConfigs - конфигурация анализаторов
+type AnalyzerConfigs struct {
+	GrowthAnalyzer       AnalyzerConfig `json:"growth_analyzer"`
+	FallAnalyzer         AnalyzerConfig `json:"fall_analyzer"`
+	ContinuousAnalyzer   AnalyzerConfig `json:"continuous_analyzer"`
+	VolumeAnalyzer       AnalyzerConfig `json:"volume_analyzer"`
+	OpenInterestAnalyzer AnalyzerConfig `json:"open_interest_analyzer"`
+	CounterAnalyzer      AnalyzerConfig `json:"counter_analyzer"`
+}
 
 // AnalysisEngine - основной движок анализа
 type AnalysisEngine struct {
@@ -50,13 +60,6 @@ type EngineConfig struct {
 	FilterConfigs   FilterConfigs   `json:"filter_configs"`
 }
 
-// AnalyzerConfigs - конфигурация анализаторов
-type AnalyzerConfigs struct {
-	GrowthAnalyzer     AnalyzerConfig `json:"growth_analyzer"`
-	FallAnalyzer       AnalyzerConfig `json:"fall_analyzer"`
-	ContinuousAnalyzer AnalyzerConfig `json:"continuous_analyzer"`
-}
-
 // FilterConfigs - конфигурация фильтров
 type FilterConfigs struct {
 	SignalFilters SignalFilterConfig `json:"signal_filters"`
@@ -71,10 +74,11 @@ type SignalFilterConfig struct {
 
 // AnalyzerConfig - конфигурация анализатора
 type AnalyzerConfig struct {
-	Enabled       bool    `json:"enabled"`
-	MinConfidence float64 `json:"min_confidence"`
-	MinGrowth     float64 `json:"min_growth"`
-	MinFall       float64 `json:"min_fall"`
+	Enabled        bool                   `json:"enabled"`
+	MinConfidence  float64                `json:"min_confidence"`
+	MinGrowth      float64                `json:"min_growth"`
+	MinFall        float64                `json:"min_fall"`
+	CustomSettings map[string]interface{} `json:"custom_settings,omitempty"`
 }
 
 // EngineStats - статистика движка
@@ -618,17 +622,40 @@ func (e *AnalysisEngine) registerDefaultAnalyzers() {
 	}
 
 	// VolumeAnalyzer - анализатор объема
-	volumeConfig := analyzers.DefaultVolumeConfig
-	volumeConfig.MinDataPoints = e.config.MinDataPoints
-	volumeAnalyzer := analyzers.NewVolumeAnalyzer(volumeConfig)
-	e.RegisterAnalyzer(volumeAnalyzer)
+	if e.config.AnalyzerConfigs.VolumeAnalyzer.Enabled {
+		volumeConfig := analyzers.DefaultVolumeConfig
+		volumeConfig.MinDataPoints = e.config.MinDataPoints
+		volumeConfig.MinConfidence = e.config.AnalyzerConfigs.VolumeAnalyzer.MinConfidence
+		volumeAnalyzer := analyzers.NewVolumeAnalyzer(volumeConfig)
+		e.RegisterAnalyzer(volumeAnalyzer)
+	}
 
 	// ContinuousAnalyzer - анализатор непрерывности
 	if e.config.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
 		continuousConfig := analyzers.DefaultContinuousConfig
 		continuousConfig.MinDataPoints = e.config.MinDataPoints
+		continuousConfig.MinConfidence = e.config.AnalyzerConfigs.ContinuousAnalyzer.MinConfidence
 		continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
 		e.RegisterAnalyzer(continuousAnalyzer)
+	}
+
+	// OpenInterestAnalyzer - анализатор открытого интереса (НОВЫЙ)
+	if e.config.AnalyzerConfigs.OpenInterestAnalyzer.Enabled {
+		openInterestConfig := analyzers.DefaultOpenInterestConfig
+		openInterestConfig.MinDataPoints = e.config.MinDataPoints
+		openInterestConfig.MinConfidence = e.config.AnalyzerConfigs.OpenInterestAnalyzer.MinConfidence
+
+		// Копируем пользовательские настройки если они есть
+		if e.config.AnalyzerConfigs.OpenInterestAnalyzer.CustomSettings != nil {
+			openInterestConfig.CustomSettings = make(map[string]interface{})
+			for k, v := range e.config.AnalyzerConfigs.OpenInterestAnalyzer.CustomSettings {
+				openInterestConfig.CustomSettings[k] = v
+			}
+		}
+
+		openInterestAnalyzer := analyzers.NewOpenInterestAnalyzer(openInterestConfig)
+		e.RegisterAnalyzer(openInterestAnalyzer)
+		log.Printf("✅ OpenInterestAnalyzer инициализирован")
 	}
 }
 

@@ -1,4 +1,4 @@
-// internal/analysis/filters/rate_limit_filter.go
+// internal/core/domain/signals/filters/rate_limit_filter.go
 package filters
 
 import (

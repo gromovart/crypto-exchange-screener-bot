@@ -1,3 +1,4 @@
+// internal/infrastructure/persistence/in_memory_storage/subscriber.go
 package storage
 
 import (
@@ -7,18 +8,17 @@ import (
 
 // Subscriber интерфейс подписчика
 type Subscriber interface {
-	OnPriceUpdate(symbol string, price float64, volume24h float64, timestamp time.Time)
+	OnPriceUpdate(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time)
 	OnSymbolAdded(symbol string)
 	OnSymbolRemoved(symbol string)
 }
 
 // SubscriberFunc функциональный тип подписчика
-type SubscriberFunc func(symbol string, price float64, volume24h float64, timestamp time.Time)
+type SubscriberFunc func(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time)
 
-func (f SubscriberFunc) OnPriceUpdate(symbol string, price float64, volume24h float64, timestamp time.Time) {
-	f(symbol, price, volume24h, timestamp)
+func (f SubscriberFunc) OnPriceUpdate(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) {
+	f(symbol, price, volume24h, volumeUSD, timestamp)
 }
-
 func (f SubscriberFunc) OnSymbolAdded(symbol string) {
 	// По умолчанию ничего не делаем
 }
@@ -40,6 +40,14 @@ func NewSubscriptionManager() *SubscriptionManager {
 		subscribers:    make(map[string]map[Subscriber]struct{}),
 		allSubscribers: make([]Subscriber, 0),
 	}
+}
+
+// StorePriceLegacy поддерживает старый интерфейс (для обратной совместимости)
+// Используется другими частями системы, которые еще не обновлены
+func (s *InMemoryPriceStorage) StorePriceLegacy(symbol string, price, volume24h float64, timestamp time.Time) error {
+	// Рассчитываем VolumeUSD на основе цены и объема
+	volumeUSD := price * volume24h
+	return s.StorePrice(symbol, price, volume24h, volumeUSD, timestamp)
 }
 
 // Subscribe подписывает на обновления символа
@@ -82,20 +90,20 @@ func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber Subscriber)
 }
 
 // NotifyAll уведомляет всех подписчиков на символ
-func (sm *SubscriptionManager) NotifyAll(symbol string, price, volume float64, timestamp time.Time) {
+func (sm *SubscriptionManager) NotifyAll(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 
 	// Уведомляем подписчиков на конкретный символ
 	if subs, exists := sm.subscribers[symbol]; exists {
 		for subscriber := range subs {
-			go subscriber.OnPriceUpdate(symbol, price, volume, timestamp)
+			go subscriber.OnPriceUpdate(symbol, price, volume24h, volumeUSD, timestamp)
 		}
 	}
 
 	// Уведомляем подписчиков на все символы
 	for _, subscriber := range sm.allSubscribers {
-		go subscriber.OnPriceUpdate(symbol, price, volume, timestamp)
+		go subscriber.OnPriceUpdate(symbol, price, volume24h, volumeUSD, timestamp)
 	}
 }
 

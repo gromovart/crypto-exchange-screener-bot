@@ -1,4 +1,4 @@
-// cmd/bot/debug_super_sensitive.go (исправленная версия)
+// application/cmd/debug/supersensitive/main.go
 package main
 
 import (
@@ -36,8 +36,8 @@ func main() {
 	}
 
 	// Переопределяем настройки для супер-чувствительного режима
-	cfg.DebugMode = true
-	cfg.LogLevel = "debug"
+	cfg.Logging.DebugMode = true
+	cfg.Logging.Level = "debug"
 	cfg.UpdateInterval = 10
 	cfg.MaxSymbolsToMonitor = 50
 	cfg.MinVolumeFilter = 0
@@ -54,18 +54,30 @@ func main() {
 	cfg.AnalysisEngine.RetentionPeriod = 1
 
 	// Анализаторы - СУПЕР ЧУВСТВИТЕЛЬНЫЕ
-	cfg.Analyzers.GrowthAnalyzer.Enabled = true
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 1.0 // Всего 1%!
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 0.01    // Всего 0.01%!
-	cfg.Analyzers.GrowthAnalyzer.ContinuityThreshold = 0.5
+	cfg.AnalyzerConfigs.GrowthAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence = 1.0 // Всего 1%!
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth = 0.01    // Всего 0.01%!
+	// Устанавливаем ContinuityThreshold через CustomSettings
+	if cfg.AnalyzerConfigs.GrowthAnalyzer.CustomSettings == nil {
+		cfg.AnalyzerConfigs.GrowthAnalyzer.CustomSettings = make(map[string]interface{})
+	}
+	cfg.AnalyzerConfigs.GrowthAnalyzer.CustomSettings["continuity_threshold"] = 0.5
 
-	cfg.Analyzers.FallAnalyzer.Enabled = true
-	cfg.Analyzers.FallAnalyzer.MinConfidence = 1.0
-	cfg.Analyzers.FallAnalyzer.MinFall = 0.01
-	cfg.Analyzers.FallAnalyzer.ContinuityThreshold = 0.5
+	cfg.AnalyzerConfigs.FallAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.FallAnalyzer.MinConfidence = 1.0
+	cfg.AnalyzerConfigs.FallAnalyzer.MinFall = 0.01
+	// Устанавливаем ContinuityThreshold через CustomSettings
+	if cfg.AnalyzerConfigs.FallAnalyzer.CustomSettings == nil {
+		cfg.AnalyzerConfigs.FallAnalyzer.CustomSettings = make(map[string]interface{})
+	}
+	cfg.AnalyzerConfigs.FallAnalyzer.CustomSettings["continuity_threshold"] = 0.5
 
-	cfg.Analyzers.ContinuousAnalyzer.Enabled = true
-	cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints = 2
+	cfg.AnalyzerConfigs.ContinuousAnalyzer.Enabled = true
+	// Устанавливаем MinContinuousPoints через CustomSettings
+	if cfg.AnalyzerConfigs.ContinuousAnalyzer.CustomSettings == nil {
+		cfg.AnalyzerConfigs.ContinuousAnalyzer.CustomSettings = make(map[string]interface{})
+	}
+	cfg.AnalyzerConfigs.ContinuousAnalyzer.CustomSettings["min_continuous_points"] = 2
 
 	// Фильтры - ВЫКЛЮЧЕНЫ
 	cfg.SignalFilters.Enabled = false
@@ -75,19 +87,19 @@ func main() {
 	cfg.SignalFilters.ExcludePatterns = []string{}
 
 	// Уведомления - ВЫКЛЮЧЕНЫ
-	cfg.TelegramEnabled = false
-	cfg.TelegramNotifyGrowth = false
-	cfg.TelegramNotifyFall = false
+	cfg.Telegram.Enabled = false
+	cfg.Telegram.NotifyGrowth = false
+	cfg.Telegram.NotifyFall = false
 
 	// Логирование
-	cfg.LogToConsole = true
-	cfg.LogToFile = true
+	cfg.Logging.ToConsole = true
+	cfg.Logging.ToFile = true
 
 	// Выводим сумасшедшие настройки
 	logger.Debug("\n⚡ НАСТРОЙКИ (СУПЕР ЧУВСТВИТЕЛЬНЫЕ):")
-	fmt.Printf("   • Порог роста: %.3f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
-	fmt.Printf("   • Порог падения: %.3f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
-	fmt.Printf("   • Уверенность: %.1f%%\n", cfg.Analyzers.GrowthAnalyzer.MinConfidence)
+	fmt.Printf("   • Порог роста: %.3f%%\n", cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
+	fmt.Printf("   • Порог падения: %.3f%%\n", cfg.AnalyzerConfigs.FallAnalyzer.MinFall)
+	fmt.Printf("   • Уверенность: %.1f%%\n", cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence)
 	fmt.Printf("   • Периоды: %v мин\n", cfg.AnalysisEngine.AnalysisPeriods)
 	fmt.Printf("   • Символов: %d\n", cfg.MaxSymbolsToMonitor)
 	fmt.Printf("   • Фильтры: %v\n", cfg.SignalFilters.Enabled)

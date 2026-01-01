@@ -123,7 +123,7 @@ func main() {
 	}
 
 	// Тест 4: Отправка уведомлений счетчика (ОГРАНИЧЕННОЕ КОЛИЧЕСТВО)
-	if *testCount > 0 && cfg.CounterAnalyzer.Enabled && cfg.CounterAnalyzer.NotificationEnabled {
+	if *testCount > 0 && cfg.AnalyzerConfigs.CounterAnalyzer.Enabled && cfg.GetCounterNotificationEnabled() {
 		fmt.Println("\n6. 🔢 Отправка уведомлений счетчика...")
 		testCounterNotifications(bot, cfg, *testCount, *debugMode)
 	} else {

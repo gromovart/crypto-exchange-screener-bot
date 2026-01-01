@@ -185,8 +185,8 @@ func (ms *MessageSender) SendTestMessage() error {
 		"⚡ Настройки: рост=%.2f%%, падение=%.2f%%"
 
 	// Используем настройки из конфигурации анализаторов
-	growthThreshold := ms.config.Analyzers.GrowthAnalyzer.MinGrowth
-	fallThreshold := ms.config.Analyzers.FallAnalyzer.MinFall
+	growthThreshold := ms.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth
+	fallThreshold := ms.config.AnalyzerConfigs.FallAnalyzer.MinFall
 
 	message = fmt.Sprintf(message, growthThreshold, fallThreshold)
 

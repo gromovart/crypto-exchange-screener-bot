@@ -53,13 +53,13 @@ func main() {
 	cfg.SignalFilters.MaxSignalsPerMin = 10
 
 	// Настройки анализаторов
-	cfg.Analyzers.GrowthAnalyzer.Enabled = true
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = 50.0
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = 1.0 // Более низкий порог для отладки
+	cfg.AnalyzerConfigs.GrowthAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinConfidence = 50.0
+	cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth = 1.0 // Более низкий порог для отладки
 
-	cfg.Analyzers.FallAnalyzer.Enabled = true
-	cfg.Analyzers.FallAnalyzer.MinConfidence = 50.0
-	cfg.Analyzers.FallAnalyzer.MinFall = 1.0
+	cfg.AnalyzerConfigs.FallAnalyzer.Enabled = true
+	cfg.AnalyzerConfigs.FallAnalyzer.MinConfidence = 50.0
+	cfg.AnalyzerConfigs.FallAnalyzer.MinFall = 1.0
 
 	// Отключаем Telegram для отладки
 	cfg.TelegramEnabled = false
@@ -70,8 +70,8 @@ func main() {
 	fmt.Printf("   Интервал обновления: %d сек\n", cfg.UpdateInterval)
 	fmt.Printf("   Символов для мониторинга: %d\n", cfg.MaxSymbolsToMonitor)
 	fmt.Printf("   Периоды анализа: %v минут\n", cfg.AnalysisEngine.AnalysisPeriods)
-	fmt.Printf("   Порог роста: %.1f%%\n", cfg.Analyzers.GrowthAnalyzer.MinGrowth)
-	fmt.Printf("   Порог падения: %.1f%%\n", cfg.Analyzers.FallAnalyzer.MinFall)
+	fmt.Printf("   Порог роста: %.1f%%\n", cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
+	fmt.Printf("   Порог падения: %.1f%%\n", cfg.AnalyzerConfigs.FallAnalyzer.MinFall)
 	fmt.Printf("   Telegram: %v\n", cfg.TelegramEnabled)
 
 	logger.Debug("\n🛠️  Создание менеджера данных...")
@@ -140,8 +140,8 @@ func main() {
 	fmt.Printf("   • Интервал обновления: %d сек\n", cfg.UpdateInterval)
 	fmt.Printf("   • Анализ каждые: %d сек\n", cfg.AnalysisEngine.UpdateInterval)
 	fmt.Printf("   • Порог сигнала: рост %.1f%% / падение %.1f%%\n",
-		cfg.Analyzers.GrowthAnalyzer.MinGrowth,
-		cfg.Analyzers.FallAnalyzer.MinFall)
+		cfg.AnalyzerConfigs.GrowthAnalyzer.MinGrowth,
+		cfg.AnalyzerConfigs.FallAnalyzer.MinFall)
 	fmt.Printf("   • Фильтры: %v\n", cfg.SignalFilters.Enabled)
 	logger.Debug("\n⏰ Первый анализ через 10 секунд...")
 	logger.Debug("📊 Статистика каждые 30 секунд")

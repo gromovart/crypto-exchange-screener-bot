@@ -12,58 +12,74 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// CounterAnalyzerConfig - конфигурация анализатора счетчика
-type CounterAnalyzerConfig struct {
-	Enabled               bool    `mapstructure:"COUNTER_ANALYZER_ENABLED"`
-	BasePeriodMinutes     int     `mapstructure:"COUNTER_BASE_PERIOD_MINUTES"`
-	DefaultPeriod         string  `mapstructure:"COUNTER_DEFAULT_PERIOD"`
-	MaxSignals5Min        int     `mapstructure:"COUNTER_MAX_SIGNALS_5MIN"`
-	MaxSignals15Min       int     `mapstructure:"COUNTER_MAX_SIGNALS_15MIN"`
-	MaxSignals30Min       int     `mapstructure:"COUNTER_MAX_SIGNALS_30MIN"`
-	MaxSignals1Hour       int     `mapstructure:"COUNTER_MAX_SIGNALS_1HOUR"`
-	MaxSignals4Hours      int     `mapstructure:"COUNTER_MAX_SIGNALS_4HOURS"`
-	MaxSignals1Day        int     `mapstructure:"COUNTER_MAX_SIGNALS_1DAY"`
-	GrowthThreshold       float64 `mapstructure:"COUNTER_GROWTH_THRESHOLD"`
-	FallThreshold         float64 `mapstructure:"COUNTER_FALL_THRESHOLD"`
-	TrackGrowth           bool    `mapstructure:"COUNTER_TRACK_GROWTH"`
-	TrackFall             bool    `mapstructure:"COUNTER_TRACK_FALL"`
-	NotifyOnSignal        bool    `mapstructure:"COUNTER_NOTIFY_ON_SIGNAL"`
-	NotificationThreshold int     `mapstructure:"COUNTER_NOTIFICATION_THRESHOLD"`
-	NotificationEnabled   bool    `mapstructure:"COUNTER_NOTIFICATION_ENABLED"`
-	ChartProvider         string  `mapstructure:"COUNTER_CHART_PROVIDER"`
-	AnalysisPeriod        string  `mapstructure:"COUNTER_ANALYSIS_PERIOD"`
+// ============================================
+// КОНФИГУРАЦИЯ АНАЛИЗАТОРОВ
+// ============================================
+
+// AnalyzerConfig - конфигурация анализатора
+type AnalyzerConfig struct {
+	Enabled        bool                   `mapstructure:"ENABLED"`
+	MinConfidence  float64                `mapstructure:"MIN_CONFIDENCE"`
+	MinGrowth      float64                `mapstructure:"MIN_GROWTH"`
+	MinFall        float64                `mapstructure:"MIN_FALL"`
+	CustomSettings map[string]interface{} `mapstructure:"CUSTOM_SETTINGS,omitempty"`
 }
+
+// AnalyzerConfigs - конфигурация всех анализаторов
+type AnalyzerConfigs struct {
+	GrowthAnalyzer       AnalyzerConfig `mapstructure:"GROWTH_ANALYZER"`
+	FallAnalyzer         AnalyzerConfig `mapstructure:"FALL_ANALYZER"`
+	ContinuousAnalyzer   AnalyzerConfig `mapstructure:"CONTINUOUS_ANALYZER"`
+	VolumeAnalyzer       AnalyzerConfig `mapstructure:"VOLUME_ANALYZER"`
+	OpenInterestAnalyzer AnalyzerConfig `mapstructure:"OPEN_INTEREST_ANALYZER"`
+	CounterAnalyzer      AnalyzerConfig `mapstructure:"COUNTER_ANALYZER"`
+}
+
+// ============================================
+// ОСНОВНАЯ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
+// ============================================
 
 // Config - основная структура конфигурации
 type Config struct {
-	Environment string
+	// ======================
+	// ОСНОВНЫЕ НАСТРОЙКИ
+	// ======================
+	Environment string `mapstructure:"ENVIRONMENT"`
+	Version     string `mapstructure:"VERSION"`
 
-	// Выбор биржи
+	// ======================
+	// БИРЖА И API КЛЮЧИ
+	// ======================
 	Exchange     string `mapstructure:"EXCHANGE"`
 	ExchangeType string `mapstructure:"EXCHANGE_TYPE"`
 
-	// API ключи
+	// API ключи (общий формат)
 	ApiKey    string `mapstructure:"API_KEY"`
 	ApiSecret string `mapstructure:"API_SECRET"`
 	BaseURL   string `mapstructure:"BASE_URL"`
 
-	// Bybit специфичные
+	// Bybit специфичные (для обратной совместимости)
 	BybitApiKey     string `mapstructure:"BYBIT_API_KEY"`
 	BybitSecretKey  string `mapstructure:"BYBIT_SECRET_KEY"`
 	BybitApiUrl     string `mapstructure:"BYBIT_API_URL"`
 	FuturesCategory string `mapstructure:"FUTURES_CATEGORY"`
 
-	// Binance специфичные
+	// Binance специфичные (для обратной совместимости)
 	BinanceApiKey    string `mapstructure:"BINANCE_API_KEY"`
 	BinanceApiSecret string `mapstructure:"BINANCE_API_SECRET"`
 
-	// Символы и фильтрация
+	// ======================
+	// СИМВОЛЫ И ФИЛЬТРАЦИЯ
+	// ======================
 	SymbolFilter        string  `mapstructure:"SYMBOL_FILTER"`
 	ExcludeSymbols      string  `mapstructure:"EXCLUDE_SYMBOLS"`
 	MaxSymbolsToMonitor int     `mapstructure:"MAX_SYMBOLS_TO_MONITOR"`
 	MinVolumeFilter     float64 `mapstructure:"MIN_VOLUME_FILTER"`
+	UpdateInterval      int     `mapstructure:"UPDATE_INTERVAL"` // Интервал обновления данных
 
-	// Движок анализа
+	// ======================
+	// ДВИЖОК АНАЛИЗА
+	// ======================
 	AnalysisEngine struct {
 		UpdateInterval   int     `mapstructure:"ANALYSIS_UPDATE_INTERVAL"`
 		AnalysisPeriods  []int   `mapstructure:"ANALYSIS_PERIODS"`
@@ -76,33 +92,14 @@ type Config struct {
 		MinDataPoints    int     `mapstructure:"ANALYSIS_MIN_DATA_POINTS"`
 	} `mapstructure:",squash"`
 
-	CounterBasePeriodMinutes int    `mapstructure:"COUNTER_BASE_PERIOD_MINUTES"`
-	CounterDefaultPeriod     string `mapstructure:"COUNTER_DEFAULT_PERIOD"`
-	CounterGrowthThreshold   int    `mapstructure:"COUNTER_GROWTH_THRESHOLD"`
-	CounterFallThreshold     int    `mapstructure:"COUNTER_FALL_THRESHOLD"`
-	CounterNotifyOnSignal    bool   `mapstructure:"COUNTER_NOTIFY_ON_SIGNAL"`
+	// ======================
+	// АНАЛИЗАТОРЫ
+	// ======================
+	AnalyzerConfigs AnalyzerConfigs `mapstructure:"ANALYZERS"`
 
-	// Анализаторы
-	Analyzers struct {
-		GrowthAnalyzer struct {
-			Enabled             bool    `mapstructure:"GROWTH_ANALYZER_ENABLED"`
-			MinConfidence       float64 `mapstructure:"GROWTH_ANALYZER_MIN_CONFIDENCE"`
-			MinGrowth           float64 `mapstructure:"GROWTH_ANALYZER_MIN_GROWTH"`
-			ContinuityThreshold float64 `mapstructure:"GROWTH_ANALYZER_CONTINUITY_THRESHOLD"`
-		} `mapstructure:",squash"`
-		FallAnalyzer struct {
-			Enabled             bool    `mapstructure:"FALL_ANALYZER_ENABLED"`
-			MinConfidence       float64 `mapstructure:"FALL_ANALYZER_MIN_CONFIDENCE"`
-			MinFall             float64 `mapstructure:"FALL_ANALYZER_MIN_FALL"`
-			ContinuityThreshold float64 `mapstructure:"FALL_ANALYZER_CONTINUITY_THRESHOLD"`
-		} `mapstructure:",squash"`
-		ContinuousAnalyzer struct {
-			Enabled             bool `mapstructure:"CONTINUOUS_ANALYZER_ENABLED"`
-			MinContinuousPoints int  `mapstructure:"CONTINUOUS_ANALYZER_MIN_POINTS"`
-		} `mapstructure:",squash"`
-	} `mapstructure:",squash"`
-
-	// Шина событий
+	// ======================
+	// ШИНА СОБЫТИЙ
+	// ======================
 	EventBus struct {
 		BufferSize    int  `mapstructure:"EVENT_BUS_BUFFER_SIZE"`
 		WorkerCount   int  `mapstructure:"EVENT_BUS_WORKER_COUNT"`
@@ -110,7 +107,9 @@ type Config struct {
 		EnableLogging bool `mapstructure:"EVENT_BUS_ENABLE_LOGGING"`
 	} `mapstructure:",squash"`
 
-	// Фильтры сигналов
+	// ======================
+	// ФИЛЬТРЫ СИГНАЛОВ
+	// ======================
 	SignalFilters struct {
 		Enabled          bool     `mapstructure:"SIGNAL_FILTERS_ENABLED"`
 		MinConfidence    float64  `mapstructure:"MIN_CONFIDENCE"`
@@ -119,7 +118,9 @@ type Config struct {
 		ExcludePatterns  []string `mapstructure:"SIGNAL_EXCLUDE_PATTERNS"`
 	} `mapstructure:",squash"`
 
-	// Настройки отображения
+	// ======================
+	// НАСТРОЙКИ ОТОБРАЖЕНИЯ
+	// ======================
 	Display struct {
 		Mode               string `mapstructure:"DISPLAY_MODE"`
 		MaxSignalsPerBatch int    `mapstructure:"MAX_SIGNALS_PER_BATCH"`
@@ -130,88 +131,149 @@ type Config struct {
 		UseColors          bool   `mapstructure:"USE_COLORS"`
 	} `mapstructure:",squash"`
 
-	// Telegram
-	TelegramEnabled         bool    `mapstructure:"TELEGRAM_ENABLED"`
-	TelegramBotToken        string  `mapstructure:"TG_API_KEY"`
-	TelegramChatID          string  `mapstructure:"TG_CHAT_ID"`
-	TelegramNotifyGrowth    bool    `mapstructure:"TELEGRAM_NOTIFY_GROWTH"`
-	TelegramNotifyFall      bool    `mapstructure:"TELEGRAM_NOTIFY_FALL"`
-	TelegramGrowthThreshold float64 `mapstructure:"TELEGRAM_GROWTH_THRESHOLD"`
-	TelegramFallThreshold   float64 `mapstructure:"TELEGRAM_FALL_THRESHOLD"`
-	MessageFormat           string  `mapstructure:"MESSAGE_FORMAT"`
-	Include24hStats         bool    `mapstructure:"INCLUDE_24H_STATS"`
+	// ======================
+	// TELEGRAM УВЕДОМЛЕНИЯ
+	// ======================
+	Telegram struct {
+		Enabled         bool    `mapstructure:"TELEGRAM_ENABLED"`
+		BotToken        string  `mapstructure:"TG_API_KEY"`
+		ChatID          string  `mapstructure:"TG_CHAT_ID"`
+		NotifyGrowth    bool    `mapstructure:"TELEGRAM_NOTIFY_GROWTH"`
+		NotifyFall      bool    `mapstructure:"TELEGRAM_NOTIFY_FALL"`
+		GrowthThreshold float64 `mapstructure:"TELEGRAM_GROWTH_THRESHOLD"`
+		FallThreshold   float64 `mapstructure:"TELEGRAM_FALL_THRESHOLD"`
+		MessageFormat   string  `mapstructure:"MESSAGE_FORMAT"`
+		Include24hStats bool    `mapstructure:"INCLUDE_24H_STATS"`
+	} `mapstructure:",squash"`
 
-	EnableSubscriptions bool   `mapstructure:"ENABLE_SUBSCRIPTIONS"`
-	StripeSecretKey     string `mapstructure:"STRIPE_SECRET_KEY"`
-	StripeWebhookSecret string `mapstructure:"STRIPE_WEBHOOK_SECRET"`
-	DefaultTrialDays    int    `mapstructure:"DEFAULT_TRIAL_DAYS"`
-	EnableAutoRenewal   bool   `mapstructure:"ENABLE_AUTO_RENEWAL"`
+	// ======================
+	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
+	// ======================
+	Monitoring struct {
+		ChatID       string `mapstructure:"MONITORING_CHAT_ID"`
+		Enabled      bool   `mapstructure:"MONITORING_ENABLED"`
+		NotifyGrowth bool   `mapstructure:"MONITORING_NOTIFY_GROWTH"`
+		NotifyFall   bool   `mapstructure:"MONITORING_NOTIFY_FALL"`
+		TestMode     bool   `mapstructure:"MONITORING_TEST_MODE"`
+	} `mapstructure:",squash"`
 
-	// НОВЫЕ поля для мониторинга
-	MonitoringChatID       string `mapstructure:"MONITORING_CHAT_ID"`
-	MonitoringEnabled      bool   `mapstructure:"MONITORING_ENABLED"`
-	MonitoringNotifyGrowth bool   `mapstructure:"MONITORING_NOTIFY_GROWTH"`
-	MonitoringNotifyFall   bool   `mapstructure:"MONITORING_NOTIFY_FALL"`
-	MonitoringTestMode     bool   `mapstructure:"MONITORING_TEST_MODE"`
+	// ======================
+	// ПОДПИСКИ И БИЛЛИНГ
+	// ======================
+	Subscriptions struct {
+		Enabled           bool   `mapstructure:"ENABLE_SUBSCRIPTIONS"`
+		StripeSecretKey   string `mapstructure:"STRIPE_SECRET_KEY"`
+		StripeWebhookKey  string `mapstructure:"STRIPE_WEBHOOK_SECRET"`
+		DefaultTrialDays  int    `mapstructure:"DEFAULT_TRIAL_DAYS"`
+		EnableAutoRenewal bool   `mapstructure:"ENABLE_AUTO_RENEWAL"`
+	} `mapstructure:",squash"`
 
-	// Производительность и логирование
-	LogLevel     string `mapstructure:"LOG_LEVEL"`
-	LogFile      string `mapstructure:"LOG_FILE"`
-	HTTPPort     int    `mapstructure:"HTTP_PORT"`
-	HTTPEnabled  bool   `mapstructure:"HTTP_ENABLED"`
-	DebugMode    bool   `mapstructure:"DEBUG_MODE,omitempty"`
-	LogToConsole bool   `mapstructure:"LOG_TO_CONSOLE,omitempty"`
-	LogToFile    bool   `mapstructure:"LOG_TO_FILE,omitempty"`
+	// ======================
+	// ЛОГИРОВАНИЕ И МОНИТОРИНГ
+	// ======================
+	Logging struct {
+		Level       string `mapstructure:"LOG_LEVEL"`
+		File        string `mapstructure:"LOG_FILE"`
+		ToConsole   bool   `mapstructure:"LOG_TO_CONSOLE,omitempty"`
+		ToFile      bool   `mapstructure:"LOG_TO_FILE,omitempty"`
+		DebugMode   bool   `mapstructure:"DEBUG_MODE,omitempty"`
+		HTTPEnabled bool   `mapstructure:"HTTP_ENABLED"`
+		HTTPPort    int    `mapstructure:"HTTP_PORT"`
+	} `mapstructure:",squash"`
 
-	// Устаревшие настройки (для обратной совместимости)
-	UpdateInterval  int     `mapstructure:"UPDATE_INTERVAL"`
-	CheckContinuity bool    `mapstructure:"CHECK_CONTINUITY"`
-	MinDataPoints   int     `mapstructure:"MIN_DATA_POINTS"`
-	GrowthThreshold float64 `mapstructure:"GROWTH_THRESHOLD"`
-	FallThreshold   float64 `mapstructure:"FALL_THRESHOLD"`
-	GrowthPeriods   []int   `mapstructure:"GROWTH_PERIODS"`
+	// ======================
+	// ПРОИЗВОДИТЕЛЬНОСТЬ
+	// ======================
+	Performance struct {
+		RateLimitDelay        time.Duration `mapstructure:"RATE_LIMIT_DELAY,omitempty"`
+		MaxConcurrentRequests int           `mapstructure:"MAX_CONCURRENT_REQUESTS,omitempty"`
+	} `mapstructure:",squash"`
 
-	// Конфигурация Rate Limiting
-	RateLimitDelay        time.Duration `mapstructure:"RATE_LIMIT_DELAY,omitempty"`
-	MaxConcurrentRequests int           `mapstructure:"MAX_CONCURRENT_REQUESTS,omitempty"`
+	// ======================
+	// ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ
+	// ======================
 
-	// CounterAnalyzer - анализатор счетчика
-	CounterAnalyzer CounterAnalyzerConfig `mapstructure:",squash"`
+	// Старые поля Telegram (для совместимости)
+	TelegramEnabled         bool    `mapstructure:"-"`
+	TelegramBotToken        string  `mapstructure:"-"`
+	TelegramChatID          string  `mapstructure:"-"`
+	TelegramNotifyGrowth    bool    `mapstructure:"-"`
+	TelegramNotifyFall      bool    `mapstructure:"-"`
+	TelegramGrowthThreshold float64 `mapstructure:"-"`
+	TelegramFallThreshold   float64 `mapstructure:"-"`
+	MessageFormat           string  `mapstructure:"-"`
+	Include24hStats         bool    `mapstructure:"-"`
+
+	// Старые поля мониторинга
+	MonitoringChatID       string `mapstructure:"-"`
+	MonitoringEnabled      bool   `mapstructure:"-"`
+	MonitoringNotifyGrowth bool   `mapstructure:"-"`
+	MonitoringNotifyFall   bool   `mapstructure:"-"`
+	MonitoringTestMode     bool   `mapstructure:"-"`
+
+	// Старые поля производительности
+	LogLevel              string        `mapstructure:"-"`
+	LogFile               string        `mapstructure:"-"`
+	HTTPPort              int           `mapstructure:"-"`
+	HTTPEnabled           bool          `mapstructure:"-"`
+	DebugMode             bool          `mapstructure:"-"`
+	LogToConsole          bool          `mapstructure:"-"`
+	LogToFile             bool          `mapstructure:"-"`
+	RateLimitDelay        time.Duration `mapstructure:"-"`
+	MaxConcurrentRequests int           `mapstructure:"-"`
 }
+
+// ============================================
+// ЗАГРУЗКА КОНФИГУРАЦИИ
+// ============================================
 
 // LoadConfig загружает конфигурацию из .env файла
 func LoadConfig(path string) (*Config, error) {
 	if err := godotenv.Load(path); err != nil {
-		// Пробуем загрузить из переменных окружения, если файла нет
 		fmt.Printf("⚠️  Config file not found, using environment variables\n")
 	}
 
 	cfg := &Config{}
 
-	// Выбор биржи
+	// ======================
+	// ОСНОВНЫЕ НАСТРОЙКИ
+	// ======================
+	cfg.Environment = getEnv("ENVIRONMENT", "dev")
+	cfg.Version = getEnv("VERSION", "1.0.0")
+
+	// ======================
+	// БИРЖА И API КЛЮЧИ
+	// ======================
 	cfg.Exchange = getEnv("EXCHANGE", "bybit")
 	cfg.ExchangeType = getEnv("EXCHANGE_TYPE", "futures")
 
-	// API ключи (поддерживаем старые и новые форматы)
-	if cfg.Exchange == "bybit" {
-		// Сначала пробуем новые названия переменных
-		cfg.ApiKey = getEnv("API_KEY", "")
-		cfg.ApiSecret = getEnv("API_SECRET", "")
+	// API ключи (универсальный формат)
+	cfg.ApiKey = getEnv("API_KEY", "")
+	cfg.ApiSecret = getEnv("API_SECRET", "")
+	cfg.BaseURL = getEnv("BASE_URL", "")
 
-		// Если не нашли в новых, пробуем старые
+	// Обратная совместимость
+	if cfg.Exchange == "bybit" {
 		if cfg.ApiKey == "" {
 			cfg.ApiKey = getEnv("BYBIT_API_KEY", "")
 		}
 		if cfg.ApiSecret == "" {
 			cfg.ApiSecret = getEnv("BYBIT_SECRET_KEY", "")
 		}
-
-		cfg.BaseURL = getEnv("BYBIT_API_URL", "https://api.bybit.com")
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = getEnv("BYBIT_API_URL", "https://api.bybit.com")
+		}
 		cfg.FuturesCategory = getEnv("FUTURES_CATEGORY", "linear")
 	} else if cfg.Exchange == "binance" {
-		cfg.ApiKey = getEnv("BINANCE_API_KEY", "")
-		cfg.ApiSecret = getEnv("BINANCE_API_SECRET", "")
-		cfg.BaseURL = "https://api.binance.com"
+		if cfg.ApiKey == "" {
+			cfg.ApiKey = getEnv("BINANCE_API_KEY", "")
+		}
+		if cfg.ApiSecret == "" {
+			cfg.ApiSecret = getEnv("BINANCE_API_SECRET", "")
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = "https://api.binance.com"
+		}
 	}
 
 	// Сохраняем для обратной совместимости
@@ -221,15 +283,20 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.BinanceApiKey = cfg.ApiKey
 	cfg.BinanceApiSecret = cfg.ApiSecret
 
-	// Символы и фильтрация
-	cfg.SymbolFilter = getEnv("SYMBOL_FILTER", "BTC,ETH,USDT")
+	// ======================
+	// СИМВОЛЫ И ФИЛЬТРАЦИЯ
+	// ======================
+	cfg.SymbolFilter = getEnv("SYMBOL_FILTER", "")
 	cfg.ExcludeSymbols = getEnv("EXCLUDE_SYMBOLS", "")
 	cfg.MaxSymbolsToMonitor = getEnvInt("MAX_SYMBOLS_TO_MONITOR", 50)
 	cfg.MinVolumeFilter = getEnvFloat("MIN_VOLUME_FILTER", 100000)
+	cfg.UpdateInterval = getEnvInt("UPDATE_INTERVAL", 30)
 
-	// Движок анализа
-	cfg.AnalysisEngine.UpdateInterval = getEnvInt("ANALYSIS_UPDATE_INTERVAL", 10)
-	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "5,15,30,60"))
+	// ======================
+	// ДВИЖОК АНАЛИЗА
+	// ======================
+	cfg.AnalysisEngine.UpdateInterval = getEnvInt("ANALYSIS_UPDATE_INTERVAL", 30)
+	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "5,15,30"))
 	cfg.AnalysisEngine.MaxSymbolsPerRun = getEnvInt("ANALYSIS_MAX_SYMBOLS_PER_RUN", 50)
 	cfg.AnalysisEngine.SignalThreshold = getEnvFloat("ANALYSIS_SIGNAL_THRESHOLD", 2.0)
 	cfg.AnalysisEngine.RetentionPeriod = getEnvInt("ANALYSIS_RETENTION_PERIOD", 24)
@@ -238,42 +305,96 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.AnalysisEngine.MaxWorkers = getEnvInt("ANALYSIS_MAX_WORKERS", 5)
 	cfg.AnalysisEngine.MinDataPoints = getEnvInt("ANALYSIS_MIN_DATA_POINTS", 3)
 
-	// Анализаторы
-	cfg.Analyzers.GrowthAnalyzer.Enabled = getEnvBool("GROWTH_ANALYZER_ENABLED", true)
-	cfg.Analyzers.GrowthAnalyzer.MinConfidence = getEnvFloat("GROWTH_ANALYZER_MIN_CONFIDENCE", 60.0)
-	cfg.Analyzers.GrowthAnalyzer.MinGrowth = getEnvFloat("GROWTH_ANALYZER_MIN_GROWTH", 2.0)
-	cfg.Analyzers.GrowthAnalyzer.ContinuityThreshold = getEnvFloat("GROWTH_ANALYZER_CONTINUITY_THRESHOLD", 0.7)
+	// ======================
+	// АНАЛИЗАТОРЫ
+	// ======================
+	cfg.AnalyzerConfigs = AnalyzerConfigs{
+		GrowthAnalyzer: AnalyzerConfig{
+			Enabled:       getEnvBool("GROWTH_ANALYZER_ENABLED", true),
+			MinConfidence: getEnvFloat("GROWTH_ANALYZER_MIN_CONFIDENCE", 60.0),
+			MinGrowth:     getEnvFloat("GROWTH_ANALYZER_MIN_GROWTH", 2.0),
+			CustomSettings: map[string]interface{}{
+				"continuity_threshold": getEnvFloat("GROWTH_ANALYZER_CONTINUITY_THRESHOLD", 0.7),
+				"volume_weight":        0.2,
+			},
+		},
+		FallAnalyzer: AnalyzerConfig{
+			Enabled:       getEnvBool("FALL_ANALYZER_ENABLED", true),
+			MinConfidence: getEnvFloat("FALL_ANALYZER_MIN_CONFIDENCE", 60.0),
+			MinFall:       getEnvFloat("FALL_ANALYZER_MIN_FALL", 2.0),
+			CustomSettings: map[string]interface{}{
+				"continuity_threshold": getEnvFloat("FALL_ANALYZER_CONTINUITY_THRESHOLD", 0.7),
+				"volume_weight":        0.2,
+			},
+		},
+		ContinuousAnalyzer: AnalyzerConfig{
+			Enabled: getEnvBool("CONTINUOUS_ANALYZER_ENABLED", true),
+			CustomSettings: map[string]interface{}{
+				"min_continuous_points": getEnvInt("CONTINUOUS_ANALYZER_MIN_POINTS", 3),
+			},
+		},
+		VolumeAnalyzer: AnalyzerConfig{
+			Enabled:       getEnvBool("VOLUME_ANALYZER_ENABLED", true),
+			MinConfidence: getEnvFloat("VOLUME_ANALYZER_MIN_CONFIDENCE", 30.0),
+			CustomSettings: map[string]interface{}{
+				"min_volume": getEnvFloat("VOLUME_ANALYZER_MIN_VOLUME", 100000.0),
+			},
+		},
+		OpenInterestAnalyzer: AnalyzerConfig{
+			Enabled:       getEnvBool("OPEN_INTEREST_ANALYZER_ENABLED", false),
+			MinConfidence: getEnvFloat("OPEN_INTEREST_MIN_CONFIDENCE", 50.0),
+			CustomSettings: map[string]interface{}{
+				"min_price_change":     getEnvFloat("OPEN_INTEREST_MIN_PRICE_CHANGE", 1.0),
+				"min_price_fall":       getEnvFloat("OPEN_INTEREST_MIN_PRICE_FALL", 1.0),
+				"min_oi_change":        getEnvFloat("OPEN_INTEREST_MIN_OI_CHANGE", 5.0),
+				"extreme_oi_threshold": getEnvFloat("OPEN_INTEREST_EXTREME_THRESHOLD", 1.5),
+				"analyzer_weight":      getEnvFloat("OPEN_INTEREST_ANALYZER_WEIGHT", 0.6),
+				"notify_enabled":       getEnvBool("OPEN_INTEREST_NOTIFY_ENABLED", true),
+			},
+		},
+		CounterAnalyzer: AnalyzerConfig{
+			Enabled: getEnvBool("COUNTER_ANALYZER_ENABLED", true),
+			CustomSettings: map[string]interface{}{
+				"base_period_minutes":    getEnvInt("COUNTER_BASE_PERIOD_MINUTES", 1),
+				"analysis_period":        getEnv("COUNTER_ANALYSIS_PERIOD", "15m"),
+				"growth_threshold":       getEnvFloat("COUNTER_GROWTH_THRESHOLD", 0.1),
+				"fall_threshold":         getEnvFloat("COUNTER_FALL_THRESHOLD", 0.1),
+				"track_growth":           getEnvBool("COUNTER_TRACK_GROWTH", true),
+				"track_fall":             getEnvBool("COUNTER_TRACK_FALL", true),
+				"notify_on_signal":       getEnvBool("COUNTER_NOTIFY_ON_SIGNAL", true),
+				"notification_threshold": getEnvInt("COUNTER_NOTIFICATION_THRESHOLD", 1),
+				"chart_provider":         getEnv("COUNTER_CHART_PROVIDER", "coinglass"),
+				"notification_enabled":   getEnvBool("COUNTER_NOTIFICATION_ENABLED", true),
+				"max_signals_5m":         getEnvInt("COUNTER_MAX_SIGNALS_5MIN", 5),
+				"max_signals_15m":        getEnvInt("COUNTER_MAX_SIGNALS_15MIN", 8),
+				"max_signals_30m":        getEnvInt("COUNTER_MAX_SIGNALS_30MIN", 10),
+				"max_signals_1h":         getEnvInt("COUNTER_MAX_SIGNALS_1HOUR", 12),
+				"max_signals_4h":         getEnvInt("COUNTER_MAX_SIGNALS_4HOURS", 15),
+				"max_signals_1d":         getEnvInt("COUNTER_MAX_SIGNALS_1DAY", 20),
+			},
+		},
+	}
 
-	cfg.Analyzers.FallAnalyzer.Enabled = getEnvBool("FALL_ANALYZER_ENABLED", true)
-	cfg.Analyzers.FallAnalyzer.MinConfidence = getEnvFloat("FALL_ANALYZER_MIN_CONFIDENCE", 60.0)
-	cfg.Analyzers.FallAnalyzer.MinFall = getEnvFloat("FALL_ANALYZER_MIN_FALL", 2.0)
-	cfg.Analyzers.FallAnalyzer.ContinuityThreshold = getEnvFloat("FALL_ANALYZER_CONTINUITY_THRESHOLD", 0.7)
-
-	cfg.Analyzers.ContinuousAnalyzer.Enabled = getEnvBool("CONTINUOUS_ANALYZER_ENABLED", true)
-	cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints = getEnvInt("CONTINUOUS_ANALYZER_MIN_POINTS", 3)
-
-	// Добавьте это после загрузки CounterAnalyzer:
-	// Алиасы для обратной совместимости
-	cfg.CounterBasePeriodMinutes = cfg.CounterAnalyzer.BasePeriodMinutes
-	cfg.CounterDefaultPeriod = cfg.CounterAnalyzer.DefaultPeriod
-	cfg.CounterGrowthThreshold = int(cfg.CounterAnalyzer.GrowthThreshold) // или float64
-	cfg.CounterFallThreshold = int(cfg.CounterAnalyzer.FallThreshold)     // или float64
-	cfg.CounterNotifyOnSignal = cfg.CounterAnalyzer.NotifyOnSignal
-
-	// Шина событий
+	// ======================
+	// ШИНА СОБЫТИЙ
+	// ======================
 	cfg.EventBus.BufferSize = getEnvInt("EVENT_BUS_BUFFER_SIZE", 1000)
 	cfg.EventBus.WorkerCount = getEnvInt("EVENT_BUS_WORKER_COUNT", 10)
 	cfg.EventBus.EnableMetrics = getEnvBool("EVENT_BUS_ENABLE_METRICS", true)
 	cfg.EventBus.EnableLogging = getEnvBool("EVENT_BUS_ENABLE_LOGGING", true)
 
-	// Фильтры сигналов
-	cfg.SignalFilters.Enabled = getEnvBool("SIGNAL_FILTERS_ENABLED", false)
+	// ======================
+	// ФИЛЬТРЫ СИГНАЛОВ
+	// ======================
+	cfg.SignalFilters.Enabled = getEnvBool("SIGNAL_FILTERS_ENABLED", true)
 	cfg.SignalFilters.MinConfidence = getEnvFloat("MIN_CONFIDENCE", 50.0)
 	cfg.SignalFilters.MaxSignalsPerMin = getEnvInt("MAX_SIGNALS_PER_MIN", 5)
 	cfg.SignalFilters.IncludePatterns = parsePatterns(getEnv("SIGNAL_INCLUDE_PATTERNS", ""))
 	cfg.SignalFilters.ExcludePatterns = parsePatterns(getEnv("SIGNAL_EXCLUDE_PATTERNS", ""))
 
-	// Настройки отображения
+	// ======================
+	// НАСТРОЙКИ ОТОБРАЖЕНИЯ
+	// ======================
 	cfg.Display.Mode = getEnv("DISPLAY_MODE", "compact")
 	cfg.Display.MaxSignalsPerBatch = getEnvInt("MAX_SIGNALS_PER_BATCH", 10)
 	cfg.Display.MinConfidence = getEnvInt("MIN_CONFIDENCE_DISPLAY", 30)
@@ -282,69 +403,98 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Display.DisplayPeriods = parseIntList(getEnv("DISPLAY_PERIODS", "5,15,30"))
 	cfg.Display.UseColors = getEnvBool("USE_COLORS", true)
 
-	// Telegram
-	cfg.TelegramEnabled = getEnvBool("TELEGRAM_ENABLED", false)
-	cfg.TelegramBotToken = getEnv("TG_API_KEY", "")
-	cfg.TelegramChatID = getEnv("TG_CHAT_ID", "")
-	cfg.TelegramNotifyGrowth = getEnvBool("TELEGRAM_NOTIFY_GROWTH", true)
-	cfg.TelegramNotifyFall = getEnvBool("TELEGRAM_NOTIFY_FALL", true)
-	cfg.TelegramGrowthThreshold = getEnvFloat("TELEGRAM_GROWTH_THRESHOLD", 0.5)
-	cfg.TelegramFallThreshold = getEnvFloat("TELEGRAM_FALL_THRESHOLD", 0.5)
-	cfg.MessageFormat = getEnv("MESSAGE_FORMAT", "compact")
-	cfg.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
-	cfg.MonitoringChatID = getEnv("MONITORING_CHAT_ID", "")
-	cfg.MonitoringEnabled = getEnvBool("MONITORING_ENABLED", false)
-	cfg.MonitoringNotifyGrowth = getEnvBool("MONITORING_NOTIFY_GROWTH", true)
-	cfg.MonitoringNotifyFall = getEnvBool("MONITORING_NOTIFY_FALL", true)
+	// ======================
+	// TELEGRAM УВЕДОМЛЕНИЯ
+	// ======================
+	cfg.Telegram.Enabled = getEnvBool("TELEGRAM_ENABLED", false)
+	cfg.Telegram.BotToken = getEnv("TG_API_KEY", "")
+	cfg.Telegram.ChatID = getEnv("TG_CHAT_ID", "")
+	cfg.Telegram.NotifyGrowth = getEnvBool("TELEGRAM_NOTIFY_GROWTH", true)
+	cfg.Telegram.NotifyFall = getEnvBool("TELEGRAM_NOTIFY_FALL", true)
+	cfg.Telegram.GrowthThreshold = getEnvFloat("TELEGRAM_GROWTH_THRESHOLD", 0.5)
+	cfg.Telegram.FallThreshold = getEnvFloat("TELEGRAM_FALL_THRESHOLD", 0.5)
+	cfg.Telegram.MessageFormat = getEnv("MESSAGE_FORMAT", "compact")
+	cfg.Telegram.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
 
-	// Производительность и логирование
-	cfg.LogLevel = getEnv("LOG_LEVEL", "info")
-	cfg.LogFile = getEnv("LOG_FILE", "logs/growth.log")
-	cfg.HTTPPort = getEnvInt("HTTP_PORT", 8080)
-	cfg.HTTPEnabled = getEnvBool("HTTP_ENABLED", false)
-	cfg.DebugMode = getEnvBool("DEBUG_MODE", false)
-	cfg.LogToConsole = getEnvBool("LOG_TO_CONSOLE", true)
-	cfg.LogToFile = getEnvBool("LOG_TO_FILE", true)
+	// ======================
+	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
+	// ======================
+	cfg.Monitoring.ChatID = getEnv("MONITORING_CHAT_ID", "")
+	cfg.Monitoring.Enabled = getEnvBool("MONITORING_ENABLED", false)
+	cfg.Monitoring.NotifyGrowth = getEnvBool("MONITORING_NOTIFY_GROWTH", true)
+	cfg.Monitoring.NotifyFall = getEnvBool("MONITORING_NOTIFY_FALL", true)
+	cfg.Monitoring.TestMode = getEnvBool("MONITORING_TEST_MODE", false)
 
-	// Устаревшие настройки (для обратной совместимости)
-	cfg.UpdateInterval = getEnvInt("UPDATE_INTERVAL", 5)
-	cfg.CheckContinuity = getEnvBool("CHECK_CONTINUITY", false)
-	cfg.MinDataPoints = getEnvInt("MIN_DATA_POINTS", 2)
-	cfg.GrowthThreshold = getEnvFloat("GROWTH_THRESHOLD", 0.05)
-	cfg.FallThreshold = getEnvFloat("FALL_THRESHOLD", 0.05)
-	cfg.GrowthPeriods = parseIntList(getEnv("GROWTH_PERIODS", "5,15,30"))
+	// ======================
+	// ПОДПИСКИ И БИЛЛИНГ
+	// ======================
+	cfg.Subscriptions.Enabled = getEnvBool("ENABLE_SUBSCRIPTIONS", false)
+	cfg.Subscriptions.StripeSecretKey = getEnv("STRIPE_SECRET_KEY", "")
+	cfg.Subscriptions.StripeWebhookKey = getEnv("STRIPE_WEBHOOK_SECRET", "")
+	cfg.Subscriptions.DefaultTrialDays = getEnvInt("DEFAULT_TRIAL_DAYS", 7)
+	cfg.Subscriptions.EnableAutoRenewal = getEnvBool("ENABLE_AUTO_RENEWAL", true)
 
-	// Rate limiting настройки
-	cfg.RateLimitDelay = getEnvDuration("RATE_LIMIT_DELAY", 100*time.Millisecond)
-	cfg.MaxConcurrentRequests = getEnvInt("MAX_CONCURRENT_REQUESTS", 10)
+	// ======================
+	// ЛОГИРОВАНИЕ И МОНИТОРИНГ
+	// ======================
+	cfg.Logging.Level = getEnv("LOG_LEVEL", "info")
+	cfg.Logging.File = getEnv("LOG_FILE", "logs/growth_monitor.log")
+	cfg.Logging.ToConsole = getEnvBool("LOG_TO_CONSOLE", true)
+	cfg.Logging.ToFile = getEnvBool("LOG_TO_FILE", true)
+	cfg.Logging.DebugMode = getEnvBool("DEBUG_MODE", false)
+	cfg.Logging.HTTPEnabled = getEnvBool("HTTP_ENABLED", false)
+	cfg.Logging.HTTPPort = getEnvInt("HTTP_PORT", 8080)
 
-	// Counter Analyzer настройки
-	cfg.CounterAnalyzer.Enabled = getEnvBool("COUNTER_ANALYZER_ENABLED", true)
-	cfg.CounterAnalyzer.BasePeriodMinutes = getEnvInt("COUNTER_BASE_PERIOD_MINUTES", 1)
-	cfg.CounterAnalyzer.DefaultPeriod = getEnv("COUNTER_DEFAULT_PERIOD", "15m")
-	cfg.CounterAnalyzer.MaxSignals5Min = getEnvInt("COUNTER_MAX_SIGNALS_5MIN", 5)
-	cfg.CounterAnalyzer.MaxSignals15Min = getEnvInt("COUNTER_MAX_SIGNALS_15MIN", 8)
-	cfg.CounterAnalyzer.MaxSignals30Min = getEnvInt("COUNTER_MAX_SIGNALS_30MIN", 10)
-	cfg.CounterAnalyzer.MaxSignals1Hour = getEnvInt("COUNTER_MAX_SIGNALS_1HOUR", 12)
-	cfg.CounterAnalyzer.MaxSignals4Hours = getEnvInt("COUNTER_MAX_SIGNALS_4HOURS", 15)
-	cfg.CounterAnalyzer.MaxSignals1Day = getEnvInt("COUNTER_MAX_SIGNALS_1DAY", 20)
-	cfg.CounterAnalyzer.GrowthThreshold = getEnvFloat("COUNTER_GROWTH_THRESHOLD", 0.1)
-	cfg.CounterAnalyzer.FallThreshold = getEnvFloat("COUNTER_FALL_THRESHOLD", 0.1)
-	cfg.CounterAnalyzer.TrackGrowth = getEnvBool("COUNTER_TRACK_GROWTH", true)
-	cfg.CounterAnalyzer.TrackFall = getEnvBool("COUNTER_TRACK_FALL", true)
-	cfg.CounterAnalyzer.NotifyOnSignal = getEnvBool("COUNTER_NOTIFY_ON_SIGNAL", true)
-	cfg.CounterAnalyzer.NotificationThreshold = getEnvInt("COUNTER_NOTIFICATION_THRESHOLD", 1)
-	cfg.CounterAnalyzer.ChartProvider = getEnv("COUNTER_CHART_PROVIDER", "coinglass")
-	cfg.CounterAnalyzer.NotificationEnabled = getEnvBool("COUNTER_NOTIFICATION_ENABLED", true)
-	cfg.CounterAnalyzer.AnalysisPeriod = getEnv("COUNTER_ANALYSIS_PERIOD", "15m")
+	// ======================
+	// ПРОИЗВОДИТЕЛЬНОСТЬ
+	// ======================
+	cfg.Performance.RateLimitDelay = getEnvDuration("RATE_LIMIT_DELAY", 100*time.Millisecond)
+	cfg.Performance.MaxConcurrentRequests = getEnvInt("MAX_CONCURRENT_REQUESTS", 10)
 
-	// Проверка обязательных параметров
+	// ======================
+	// ОБРАТНАЯ СОВМЕСТИМОСТЬ
+	// ======================
+	// Назначаем старые поля из новых структур для обратной совместимости
+	cfg.TelegramEnabled = cfg.Telegram.Enabled
+	cfg.TelegramBotToken = cfg.Telegram.BotToken
+	cfg.TelegramChatID = cfg.Telegram.ChatID
+	cfg.TelegramNotifyGrowth = cfg.Telegram.NotifyGrowth
+	cfg.TelegramNotifyFall = cfg.Telegram.NotifyFall
+	cfg.TelegramGrowthThreshold = cfg.Telegram.GrowthThreshold
+	cfg.TelegramFallThreshold = cfg.Telegram.FallThreshold
+	cfg.MessageFormat = cfg.Telegram.MessageFormat
+	cfg.Include24hStats = cfg.Telegram.Include24hStats
+
+	cfg.MonitoringChatID = cfg.Monitoring.ChatID
+	cfg.MonitoringEnabled = cfg.Monitoring.Enabled
+	cfg.MonitoringNotifyGrowth = cfg.Monitoring.NotifyGrowth
+	cfg.MonitoringNotifyFall = cfg.Monitoring.NotifyFall
+	cfg.MonitoringTestMode = cfg.Monitoring.TestMode
+
+	cfg.LogLevel = cfg.Logging.Level
+	cfg.LogFile = cfg.Logging.File
+	cfg.LogToConsole = cfg.Logging.ToConsole
+	cfg.LogToFile = cfg.Logging.ToFile
+	cfg.DebugMode = cfg.Logging.DebugMode
+	cfg.HTTPEnabled = cfg.Logging.HTTPEnabled
+	cfg.HTTPPort = cfg.Logging.HTTPPort
+
+	cfg.RateLimitDelay = cfg.Performance.RateLimitDelay
+	cfg.MaxConcurrentRequests = cfg.Performance.MaxConcurrentRequests
+
+	// ======================
+	// ВАЛИДАЦИЯ КОНФИГУРАЦИИ
+	// ======================
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
 	return cfg, nil
 }
+
+// ============================================
+// ВАЛИДАЦИЯ
+// ============================================
 
 // validate проверяет обязательные параметры конфигурации
 func (c *Config) validate() error {
@@ -368,22 +518,25 @@ func (c *Config) validate() error {
 	}
 
 	// Проверка Telegram если включен
-	if c.TelegramEnabled {
-		if c.TelegramBotToken == "" {
+	if c.Telegram.Enabled {
+		if c.Telegram.BotToken == "" {
 			errors = append(errors, "TG_API_KEY is required when Telegram is enabled")
 		}
-		if c.TelegramChatID == "" {
+		if c.Telegram.ChatID == "" {
 			errors = append(errors, "TG_CHAT_ID is required when Telegram is enabled")
 		}
 	}
 
-	// Проверка Counter Analyzer
-	if c.CounterAnalyzer.Enabled {
-		if c.CounterAnalyzer.BasePeriodMinutes <= 0 {
-			errors = append(errors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
-		}
-		if !isValidPeriod(c.CounterAnalyzer.DefaultPeriod) {
-			errors = append(errors, "COUNTER_DEFAULT_PERIOD must be one of: 5m, 15m, 30m, 1h, 4h, 1d")
+	// Проверка Counter Analyzer если включен
+	if c.AnalyzerConfigs.CounterAnalyzer.Enabled {
+		settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings
+		if settings != nil {
+			if basePeriod, ok := settings["base_period_minutes"].(int); ok && basePeriod <= 0 {
+				errors = append(errors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
+			}
+			if period, ok := settings["analysis_period"].(string); ok && !isValidPeriod(period) {
+				errors = append(errors, "COUNTER_ANALYSIS_PERIOD must be one of: 5m, 15m, 30m, 1h, 4h, 1d")
+			}
 		}
 	}
 
@@ -394,43 +547,13 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// isValidPeriod проверяет валидность периода
-func isValidPeriod(period string) bool {
-	validPeriods := map[string]bool{
-		"5m":  true,
-		"15m": true,
-		"30m": true,
-		"1h":  true,
-		"4h":  true,
-		"1d":  true,
-	}
-	return validPeriods[period]
-}
-
-// GetCounterConfig возвращает конфигурацию для анализатора счетчика
-func (c *Config) GetCounterConfig() map[string]interface{} {
-	return map[string]interface{}{
-		"base_period_minutes":    c.CounterAnalyzer.BasePeriodMinutes,
-		"analysis_period":        c.CounterAnalyzer.DefaultPeriod,
-		"growth_threshold":       c.CounterAnalyzer.GrowthThreshold,
-		"fall_threshold":         c.CounterAnalyzer.FallThreshold,
-		"track_growth":           c.CounterAnalyzer.TrackGrowth,
-		"track_fall":             c.CounterAnalyzer.TrackFall,
-		"notify_on_signal":       c.CounterAnalyzer.NotifyOnSignal,
-		"notification_threshold": c.CounterAnalyzer.NotificationThreshold,
-		"chart_provider":         c.CounterAnalyzer.ChartProvider,
-		"max_signals_5m":         c.CounterAnalyzer.MaxSignals5Min,
-		"max_signals_15m":        c.CounterAnalyzer.MaxSignals15Min,
-		"max_signals_30m":        c.CounterAnalyzer.MaxSignals30Min,
-		"max_signals_1h":         c.CounterAnalyzer.MaxSignals1Hour,
-		"max_signals_4h":         c.CounterAnalyzer.MaxSignals4Hours,
-		"max_signals_1d":         c.CounterAnalyzer.MaxSignals1Day,
-	}
-}
+// ============================================
+// ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+// ============================================
 
 // IsCounterAnalyzerEnabled проверяет, включен ли анализатор счетчика
 func (c *Config) IsCounterAnalyzerEnabled() bool {
-	return c.CounterAnalyzer.Enabled
+	return c.AnalyzerConfigs.CounterAnalyzer.Enabled
 }
 
 // GetSymbolList возвращает список символов для мониторинга
@@ -470,6 +593,10 @@ func (c *Config) ShouldExcludeSymbol(symbol string) bool {
 	}
 	return false
 }
+
+// ============================================
+// УТИЛИТЫ ДЛЯ РАБОТЫ С .ENV
+// ============================================
 
 // Вспомогательные функции
 func getEnv(key, defaultValue string) string {
@@ -548,38 +675,193 @@ func parsePatterns(value string) []string {
 	return result
 }
 
-// PrintSummary выводит краткую информацию о конфигурации (без чувствительных данных)
+func isValidPeriod(period string) bool {
+	validPeriods := map[string]bool{
+		"5m":  true,
+		"15m": true,
+		"30m": true,
+		"1h":  true,
+		"4h":  true,
+		"1d":  true,
+	}
+	return validPeriods[period]
+}
+
+// ============================================
+// ИНФОРМАЦИОННЫЕ МЕТОДЫ
+// ============================================
+
+// PrintSummary выводит краткую информацию о конфигурации
 func (c *Config) PrintSummary() {
 	log.Printf("📋 Конфигурация приложения:")
-	log.Printf("   Окружение: %s", c.Exchange)
-	log.Printf("   Уровень логирования: %s", c.LogLevel)
-	log.Printf("   Telegram включен: %v", c.TelegramEnabled)
-	if c.TelegramEnabled {
-		token := c.TelegramBotToken
+	log.Printf("   • Окружение: %s", c.Environment)
+	log.Printf("   • Биржа: %s %s", strings.ToUpper(c.Exchange), c.ExchangeType)
+	log.Printf("   • Уровень логирования: %s", c.Logging.Level)
+	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
+
+	if c.Telegram.Enabled {
+		token := c.Telegram.BotToken
 		if len(token) > 10 {
 			token = token[:10] + "..." + token[len(token)-10:]
 		}
-		log.Printf("   Telegram Token: %s", token)
-		log.Printf("   Telegram Chat ID: %s", c.TelegramChatID)
+		log.Printf("   • Telegram Token: %s", token)
+		log.Printf("   • Telegram Chat ID: %s", c.Telegram.ChatID)
 	}
-	log.Printf("   Counter Analyzer включен: %v", c.CounterAnalyzer.Enabled)
-	log.Printf("   HTTP сервер включен: %v (порт: %d)", c.HTTPEnabled, c.HTTPPort)
-	log.Printf("   Макс. символов для мониторинга: %d", c.MaxSymbolsToMonitor)
-	log.Printf("   Интервал обновления: %d секунд", c.AnalysisEngine.UpdateInterval)
+
+	log.Printf("   • Counter Analyzer включен: %v", c.AnalyzerConfigs.CounterAnalyzer.Enabled)
+	log.Printf("   • HTTP сервер: %v (порт: %d)", c.Logging.HTTPEnabled, c.Logging.HTTPPort)
+	log.Printf("   • Макс. символов: %d", c.MaxSymbolsToMonitor)
+	log.Printf("   • Интервал обновления: %d сек", c.UpdateInterval)
 
 	// Выводим информацию об анализаторах
-	log.Printf("   Анализаторы:")
-	log.Printf("     - Growth Analyzer: %v", c.Analyzers.GrowthAnalyzer.Enabled)
-	log.Printf("     - Fall Analyzer: %v", c.Analyzers.FallAnalyzer.Enabled)
-	log.Printf("     - Continuous Analyzer: %v", c.Analyzers.ContinuousAnalyzer.Enabled)
+	log.Printf("   • Анализаторы:")
+	log.Printf("     - Growth: %v (порог: %.2f%%)",
+		c.AnalyzerConfigs.GrowthAnalyzer.Enabled,
+		c.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
+	log.Printf("     - Fall: %v (порог: %.2f%%)",
+		c.AnalyzerConfigs.FallAnalyzer.Enabled,
+		c.AnalyzerConfigs.FallAnalyzer.MinFall)
+	log.Printf("     - Counter: %v (период: %s)",
+		c.AnalyzerConfigs.CounterAnalyzer.Enabled,
+		c.GetCounterAnalysisPeriod())
+}
 
-	// Выводим информацию о Counter Analyzer
-	if c.CounterAnalyzer.Enabled {
-		log.Printf("   Counter Analyzer настройки:")
-		log.Printf("     - Базовый период: %d минут", c.CounterAnalyzer.BasePeriodMinutes)
-		log.Printf("     - Период анализа: %s", c.CounterAnalyzer.AnalysisPeriod)
-		log.Printf("     - Порог роста: %.2f%%", c.CounterAnalyzer.GrowthThreshold)
-		log.Printf("     - Порог падения: %.2f%%", c.CounterAnalyzer.FallThreshold)
-		log.Printf("     - Уведомления: %v", c.CounterAnalyzer.NotificationEnabled)
+// GetEnabledAnalyzers возвращает список включенных анализаторов
+func (c *Config) GetEnabledAnalyzers() []string {
+	var enabled []string
+
+	if c.AnalyzerConfigs.GrowthAnalyzer.Enabled {
+		enabled = append(enabled, "growth_analyzer")
 	}
+	if c.AnalyzerConfigs.FallAnalyzer.Enabled {
+		enabled = append(enabled, "fall_analyzer")
+	}
+	if c.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
+		enabled = append(enabled, "continuous_analyzer")
+	}
+	if c.AnalyzerConfigs.VolumeAnalyzer.Enabled {
+		enabled = append(enabled, "volume_analyzer")
+	}
+	if c.AnalyzerConfigs.OpenInterestAnalyzer.Enabled {
+		enabled = append(enabled, "open_interest_analyzer")
+	}
+	if c.AnalyzerConfigs.CounterAnalyzer.Enabled {
+		enabled = append(enabled, "counter_analyzer")
+	}
+
+	return enabled
+}
+
+// ============================================
+// ГЕТТЕРЫ ДЛЯ УДОБНОГО ДОСТУПА
+// ============================================
+
+// GetCounterBasePeriodMinutes получает базовый период CounterAnalyzer
+func (c *Config) GetCounterBasePeriodMinutes() int {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if minutes, ok := settings["base_period_minutes"].(int); ok {
+			return minutes
+		}
+	}
+	return 1
+}
+
+// GetCounterAnalysisPeriod получает период анализа CounterAnalyzer
+func (c *Config) GetCounterAnalysisPeriod() string {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if period, ok := settings["analysis_period"].(string); ok {
+			return period
+		}
+	}
+	return "15m"
+}
+
+// GetCounterGrowthThreshold получает порог роста CounterAnalyzer
+func (c *Config) GetCounterGrowthThreshold() float64 {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if threshold, ok := settings["growth_threshold"].(float64); ok {
+			return threshold
+		}
+	}
+	return 0.1
+}
+
+// GetCounterFallThreshold получает порог падения CounterAnalyzer
+func (c *Config) GetCounterFallThreshold() float64 {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if threshold, ok := settings["fall_threshold"].(float64); ok {
+			return threshold
+		}
+	}
+	return 0.1
+}
+
+// GetCounterNotificationEnabled проверяет, включены ли уведомления CounterAnalyzer
+func (c *Config) GetCounterNotificationEnabled() bool {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if enabled, ok := settings["notification_enabled"].(bool); ok {
+			return enabled
+		}
+	}
+	return true
+}
+
+// GetCounterTrackGrowth проверяет, отслеживается ли рост
+func (c *Config) GetCounterTrackGrowth() bool {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if track, ok := settings["track_growth"].(bool); ok {
+			return track
+		}
+	}
+	return true
+}
+
+// GetCounterTrackFall проверяет, отслеживается ли падение
+func (c *Config) GetCounterTrackFall() bool {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if track, ok := settings["track_fall"].(bool); ok {
+			return track
+		}
+	}
+	return true
+}
+
+// GetCounterNotificationThreshold получает порог уведомлений
+func (c *Config) GetCounterNotificationThreshold() int {
+	if settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings; settings != nil {
+		if threshold, ok := settings["notification_threshold"].(int); ok {
+			return threshold
+		}
+	}
+	return 1
+}
+
+// GetGrowthContinuityThreshold получает порог непрерывности для GrowthAnalyzer
+func (c *Config) GetGrowthContinuityThreshold() float64 {
+	if settings := c.AnalyzerConfigs.GrowthAnalyzer.CustomSettings; settings != nil {
+		if threshold, ok := settings["continuity_threshold"].(float64); ok {
+			return threshold
+		}
+	}
+	return 0.7
+}
+
+// GetFallContinuityThreshold получает порог непрерывности для FallAnalyzer
+func (c *Config) GetFallContinuityThreshold() float64 {
+	if settings := c.AnalyzerConfigs.FallAnalyzer.CustomSettings; settings != nil {
+		if threshold, ok := settings["continuity_threshold"].(float64); ok {
+			return threshold
+		}
+	}
+	return 0.7
+}
+
+// GetContinuousAnalyzerMinPoints получает минимальное количество точек для ContinuousAnalyzer
+func (c *Config) GetContinuousAnalyzerMinPoints() int {
+	if settings := c.AnalyzerConfigs.ContinuousAnalyzer.CustomSettings; settings != nil {
+		if points, ok := settings["min_continuous_points"].(int); ok {
+			return points
+		}
+	}
+	return 3
 }

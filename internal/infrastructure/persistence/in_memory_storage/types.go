@@ -1,23 +1,24 @@
-// internal/storage/types.go
 package storage
 
 import (
 	"time"
 )
 
-// PriceData представляет точку данных цены
+// PriceData представляет точку данных цены (обновленная версия)
 type PriceData struct {
 	Symbol    string    `json:"symbol"`
 	Price     float64   `json:"price"`
-	Volume24h float64   `json:"volume_24h"`
+	Volume24h float64   `json:"volume_24h"` // Объем в базовой валюте
+	VolumeUSD float64   `json:"volume_usd"` // Объем в USDT ← ДОБАВЛЕНО!
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// PriceSnapshot текущий снапшот цены
+// PriceSnapshot текущий снапшот цены (обновленная версия)
 type PriceSnapshot struct {
 	Symbol    string    `json:"symbol"`
 	Price     float64   `json:"price"`
-	Volume24h float64   `json:"volume_24h"`
+	Volume24h float64   `json:"volume_24h"` // Объем в базовой валюте
+	VolumeUSD float64   `json:"volume_usd"` // Объем в USDT ← ДОБАВЛЕНО!
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -34,7 +35,7 @@ type StorageStats struct {
 	RetentionPeriod     time.Duration `json:"retention_period"`
 }
 
-// PriceHistory запрос истории цен
+// PriceHistoryRequest запрос истории цен
 type PriceHistoryRequest struct {
 	Symbol    string    `json:"symbol"`
 	StartTime time.Time `json:"start_time,omitempty"`
@@ -42,7 +43,7 @@ type PriceHistoryRequest struct {
 	Limit     int       `json:"limit,omitempty"`
 }
 
-// PriceChange изменение цены
+// PriceChange изменение цены (обновленная версия)
 type PriceChange struct {
 	Symbol        string    `json:"symbol"`
 	CurrentPrice  float64   `json:"current_price"`
@@ -51,6 +52,7 @@ type PriceChange struct {
 	ChangePercent float64   `json:"change_percent"`
 	Interval      string    `json:"interval"`
 	Timestamp     time.Time `json:"timestamp"`
+	VolumeUSD     float64   `json:"volume_usd,omitempty"` // ← ДОБАВЛЕНО!
 }
 
 // Ошибки хранилища

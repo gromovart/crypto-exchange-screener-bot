@@ -1,3 +1,4 @@
+// internal/infrastructure/persistence/in_memory_storage/price_storage.go
 package storage
 
 import "time"
@@ -5,7 +6,7 @@ import "time"
 // PriceStorage интерфейс хранилища цен
 type PriceStorage interface {
 	// Основные операции
-	StorePrice(symbol string, price, volume24h float64, timestamp time.Time) error
+	StorePrice(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) error
 	GetCurrentPrice(symbol string) (float64, bool)
 	GetCurrentSnapshot(symbol string) (*PriceSnapshot, bool)
 	GetAllCurrentPrices() map[string]PriceSnapshot
@@ -40,6 +41,7 @@ type PriceStorage interface {
 	// Поиск
 	FindSymbolsByPattern(pattern string) ([]string, error)
 	GetTopSymbolsByVolume(limit int) ([]SymbolVolume, error)
+	GetTopSymbolsByVolumeUSD(limit int) ([]SymbolVolume, error)
 }
 
 // SymbolStats статистика по символу
@@ -50,13 +52,15 @@ type SymbolStats struct {
 	LastTimestamp  time.Time `json:"last_timestamp"`
 	CurrentPrice   float64   `json:"current_price"`
 	AvgVolume24h   float64   `json:"avg_volume_24h"`
+	AvgVolumeUSD   float64   `json:"avg_volume_usd"`
 	PriceChange24h float64   `json:"price_change_24h"`
 }
 
 // SymbolVolume символ с объемом
 type SymbolVolume struct {
-	Symbol string  `json:"symbol"`
-	Volume float64 `json:"volume"`
+	Symbol    string  `json:"symbol"`
+	Volume    float64 `json:"volume"`
+	VolumeUSD float64 `json:"volume_usd,omitempty"`
 }
 
 // StorageFactory фабрика хранилищ

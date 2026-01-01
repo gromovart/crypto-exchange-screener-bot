@@ -1,4 +1,4 @@
-// internal/analysis/analysis_types.go
+// internal/core/domain/signals/types.go
 package analysis
 
 import (
