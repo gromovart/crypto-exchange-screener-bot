@@ -1,4 +1,5 @@
-package fetcher
+// internal/adapters/market/display.go
+package market
 
 import (
 	"crypto-exchange-screener-bot/internal/types"

@@ -1,4 +1,5 @@
-package notifier
+// internal/adapters/notification/telegram_notifier.go
+package notification
 
 import (
 	"crypto-exchange-screener-bot/internal/adapters"

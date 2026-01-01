@@ -1,5 +1,5 @@
-// internal/fetcher/factory.go
-package fetcher
+// internal/adapters/market/factory.go
+package market
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/api"

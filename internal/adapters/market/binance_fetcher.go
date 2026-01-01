@@ -1,5 +1,5 @@
-// internal/fetcher/binance_fetcher.go
-package fetcher
+// internal/adapters/market/binance_fetcher.go
+package market
 
 import (
 	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"

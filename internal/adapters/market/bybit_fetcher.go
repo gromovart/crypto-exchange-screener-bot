@@ -1,5 +1,5 @@
-// internal/fetcher/bybit_fetcher.go
-package fetcher
+// internal/adapters/market/bybit_fetcher.go
+package market
 
 import (
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"

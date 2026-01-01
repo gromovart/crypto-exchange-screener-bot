@@ -1,4 +1,5 @@
-package fetcher
+// internal/adapters/market/types.go
+package market
 
 import (
 	"time"

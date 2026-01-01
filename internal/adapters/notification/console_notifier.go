@@ -1,5 +1,5 @@
-// internal/notifier/console_notifier.go
-package notifier
+// internal/adapters/notification/console_notifier.go
+package notification
 
 import (
 	"crypto-exchange-screener-bot/internal/types"
