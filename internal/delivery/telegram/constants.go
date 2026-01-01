@@ -46,3 +46,52 @@ var ButtonStyles = struct {
 	Dark:      "dark",
 	Link:      "link",
 }
+
+// SignalIcons содержит иконки для разных типов сигналов
+var SignalIcons = struct {
+	Growth     string
+	Fall       string
+	Extreme    string
+	Divergence string
+	Counter    string
+	Test       string
+}{
+	Growth:     "🚀",
+	Fall:       "📉",
+	Extreme:    "⚡",
+	Divergence: "🔀",
+	Counter:    "📊",
+	Test:       "🧪",
+}
+
+// SignalTypes содержит типы сигналов
+var SignalTypes = struct {
+	Growth        string
+	Fall          string
+	ExtremeOI     string
+	Divergence    string
+	CounterGrowth string
+	CounterFall   string
+}{
+	Growth:        "growth",
+	Fall:          "fall",
+	ExtremeOI:     "extreme_oi",
+	Divergence:    "divergence",
+	CounterGrowth: "counter_growth",
+	CounterFall:   "counter_fall",
+}
+
+// DirectionIcons содержит иконки направлений
+var DirectionIcons = struct {
+	Up      string
+	Down    string
+	Neutral string
+	Bullish string
+	Bearish string
+}{
+	Up:      "⬆️",
+	Down:    "⬇️",
+	Neutral: "➡️",
+	Bullish: "🐂",
+	Bearish: "🐻",
+}
