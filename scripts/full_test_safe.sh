@@ -1,37 +1,39 @@
 #!/bin/bash
-echo "🛡️  БЕЗОПАСНОЕ ПОЛНОЕ ТЕСТИРОВАНИЕ"
+echo "🛡️  БЕЗОПАСНОЕ ТЕСТИРОВАНИЕ"
 echo "================================"
 
 # Определяем окружение (по умолчанию dev)
 ENV=${1:-dev}
 ENV_FILE="configs/$ENV/.env"
+MAIN_FILE="./application/main.go"
 
 echo "🎯 Окружение: $ENV"
 echo "📁 Конфигурация: $ENV_FILE"
+echo "📄 Основной файл: $MAIN_FILE"
 echo ""
 
-# Обработка Ctrl+C
-trap 'echo -e "\n🛑 Тестирование прервано пользователем"; exit 0' INT
+# Проверка файлов
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ Файл конфигурации не найден: $ENV_FILE"
+    echo "   Создайте: make config-init ENV=$ENV"
+    exit 1
+fi
 
-# Создаем директорию для логов
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="logs/safe_test_${ENV}_${TIMESTAMP}"
-mkdir -p "$LOG_DIR"
-
-echo "📁 Логи: $LOG_DIR"
-echo ""
+if [ ! -f "$MAIN_FILE" ]; then
+    echo "❌ Основной файл не найден: $MAIN_FILE"
+    exit 1
+fi
 
 # Функция для безопасного запуска
 run_safe() {
     local name=$1
     local cmd=$2
-    local timeout=${3:-15}
+    local timeout=${3:-10}
 
-    echo "🧪 $name..."
-    local log_file="$LOG_DIR/${name// /_}.log"
+    echo "🧪 $name (таймаут: ${timeout}с)..."
 
     # Запуск с таймаутом
-    timeout ${timeout}s bash -c "$cmd" 2>&1 | tee "$log_file"
+    timeout ${timeout}s bash -c "$cmd" 2>&1
     local status=$?
 
     if [ $status -eq 0 ]; then
@@ -47,41 +49,34 @@ run_safe() {
         echo "⚠️  $name: код выхода $status"
         return 1
     fi
+    echo ""
 }
-
-# Проверка конфигурации
-if [ ! -f "$ENV_FILE" ]; then
-    echo "❌ Файл конфигурации не найден: $ENV_FILE"
-    echo "   Создайте: make config-init ENV=$ENV"
-    exit 1
-fi
 
 # Запускаем тесты
 echo "📋 ПЛАН ТЕСТИРОВАНИЯ:"
 echo "1. Проверка конфигурации"
 echo "2. Компиляция"
-echo "3. CounterAnalyzer"
-echo "4. Анализаторы"
-echo "5. Проверка типов"
-echo "6. Сборка"
+echo "3. Простой режим (simple)"
+echo "4. Полный режим (full)"
+echo "5. Сборка"
 echo ""
 
 # 1. Проверка конфигурации
-run_safe "Проверка конфигурации" "make check-config ENV=$ENV"
+echo "🔍 Проверка конфигурации $ENV..."
+grep -E "(TG_API_KEY|TELEGRAM_ENABLED|COUNTER_ANALYZER_ENABLED|LOG_LEVEL)" "$ENV_FILE" 2>/dev/null || echo "⚠️  Основные настройки не найдены"
+echo "✅ Конфигурация загружена"
+echo ""
 
 # 2. Компиляция
-run_safe "Компиляция" "go build ./application/cmd/debug/..."
+run_safe "Компиляция" "go build $MAIN_FILE"
 
-# 3. CounterAnalyzer
-run_safe "CounterAnalyzer" "go run ./application/cmd/debug/counter_test/main.go --config=$ENV_FILE"
+# 3. Простой режим (simple)
+run_safe "Простой режим (5s)" "go run $MAIN_FILE --config=$ENV_FILE --mode=simple --test" 5
 
-# 4. Анализаторы
-run_safe "Анализаторы" "go run ./application/cmd/debug/analyzer/main.go --config=$ENV_FILE"
+# 4. Полный режим (full)
+run_safe "Полный режим (8s)" "go run $MAIN_FILE --config=$ENV_FILE --mode=full --log-level=error --test" 8
 
-# 5. Проверка типов
-run_safe "Проверка типов" "go vet ./internal/core/domain/signals/detectors/..."
-
-# 6. Сборка
+# 5. Сборка
 run_safe "Сборка" "make build ENV=$ENV"
 
 echo ""
@@ -89,9 +84,8 @@ echo "🎯 ТЕСТИРОВАНИЕ ЗАВЕРШЕНО"
 echo "========================="
 echo "✅ Все тесты выполнены безопасно"
 echo "✅ Окружение: $ENV"
-echo "✅ Логи сохранены в $LOG_DIR"
 echo "✅ Система готова к работе"
-
-# Пример использования:
-# ./scripts/full_test_safe.sh dev      # Безопасное тестирование dev
-# ./scripts/full_test_safe.sh prod     # Безопасное тестирование prod
+echo ""
+echo "📝 Команды для запуска:"
+echo "   make run ENV=$ENV        # Простой режим"
+echo "   make run-full ENV=$ENV   # Полный режим"

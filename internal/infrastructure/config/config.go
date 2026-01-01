@@ -76,6 +76,12 @@ type Config struct {
 		MinDataPoints    int     `mapstructure:"ANALYSIS_MIN_DATA_POINTS"`
 	} `mapstructure:",squash"`
 
+	CounterBasePeriodMinutes int    `mapstructure:"COUNTER_BASE_PERIOD_MINUTES"`
+	CounterDefaultPeriod     string `mapstructure:"COUNTER_DEFAULT_PERIOD"`
+	CounterGrowthThreshold   int    `mapstructure:"COUNTER_GROWTH_THRESHOLD"`
+	CounterFallThreshold     int    `mapstructure:"COUNTER_FALL_THRESHOLD"`
+	CounterNotifyOnSignal    bool   `mapstructure:"COUNTER_NOTIFY_ON_SIGNAL"`
+
 	// Анализаторы
 	Analyzers struct {
 		GrowthAnalyzer struct {
@@ -245,6 +251,14 @@ func LoadConfig(path string) (*Config, error) {
 
 	cfg.Analyzers.ContinuousAnalyzer.Enabled = getEnvBool("CONTINUOUS_ANALYZER_ENABLED", true)
 	cfg.Analyzers.ContinuousAnalyzer.MinContinuousPoints = getEnvInt("CONTINUOUS_ANALYZER_MIN_POINTS", 3)
+
+	// Добавьте это после загрузки CounterAnalyzer:
+	// Алиасы для обратной совместимости
+	cfg.CounterBasePeriodMinutes = cfg.CounterAnalyzer.BasePeriodMinutes
+	cfg.CounterDefaultPeriod = cfg.CounterAnalyzer.DefaultPeriod
+	cfg.CounterGrowthThreshold = int(cfg.CounterAnalyzer.GrowthThreshold) // или float64
+	cfg.CounterFallThreshold = int(cfg.CounterAnalyzer.FallThreshold)     // или float64
+	cfg.CounterNotifyOnSignal = cfg.CounterAnalyzer.NotifyOnSignal
 
 	// Шина событий
 	cfg.EventBus.BufferSize = getEnvInt("EVENT_BUS_BUFFER_SIZE", 1000)

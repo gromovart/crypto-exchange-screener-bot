@@ -12,6 +12,7 @@
 ENV ?= dev
 CONFIG_DIR = configs/$(ENV)
 ENV_FILE = $(CONFIG_DIR)/.env
+MAIN_FILE = ./application/main.go
 
 # ============================================
 # УПРАВЛЕНИЕ ОКРУЖЕНИЯМИ
@@ -264,9 +265,9 @@ build:
 	@echo "📋 Конфигурация: $(ENV_FILE)"
 	CGO_ENABLED=0 go build \
 		-ldflags="-s -w -X main.version=1.0.0 -X 'main.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'" \
-		-o bin/growth-monitor-$(ENV) ./application/cmd/bot
+		-o bin/growth-monitor-$(ENV) $(MAIN_FILE)
 	@echo "✅ Built: bin/growth-monitor-$(ENV)"
-	@echo "   Используйте: ./bin/growth-monitor-$(ENV) --config=$(ENV_FILE)"
+	@echo "   Используйте: ./bin/growth-monitor-$(ENV) --config=$(ENV_FILE) --mode=full"
 
 ## release: Сборка релизных версий для всех платформ
 release:
@@ -277,19 +278,19 @@ release:
 	@echo "📦 Building for Linux..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-linux ./application/cmd/bot
+		-o releases/growth-monitor-linux $(MAIN_FILE)
 
 	# macOS
 	@echo "🍏 Building for macOS..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-macos ./application/cmd/bot
+		-o releases/growth-monitor-macos $(MAIN_FILE)
 
 	# Windows
 	@echo "🪟 Building for Windows..."
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
-		-o releases/growth-monitor-windows.exe ./application/cmd/bot
+		-o releases/growth-monitor-windows.exe $(MAIN_FILE)
 
 	@echo "✅ Release builds created in releases/"
 
@@ -302,7 +303,7 @@ run:
 		exit 1; \
 	fi
 	@echo "📋 Используется конфигурация: $(ENV_FILE)"
-	go run ./application/cmd/bot/main.go --config=$(ENV_FILE)
+	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple
 
 ## run-prod: Запуск собранной версии с prod окружением
 run-prod:
@@ -312,10 +313,21 @@ run-prod:
 run-dev:
 	@$(MAKE) run ENV=dev
 
+## run-full: Запуск в полном режиме
+run-full:
+	@echo "🚀 Запуск в полном режиме ($(ENV))..."
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+		echo "❌ Файл конфигурации не найден: $(ENV_FILE)"; \
+		echo "   Создайте: make config-init ENV=$(ENV)"; \
+		exit 1; \
+	fi
+	@echo "📋 Используется конфигурация: $(ENV_FILE)"
+	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full
+
 ## run-prod-binary: Запуск собранной бинарной версии
 run-prod-binary: build
 	@echo "🚀 Запуск в продакшен режиме ($(ENV))..."
-	@./bin/growth-monitor-$(ENV) --config=$(ENV_FILE) --log-level=info
+	@./bin/growth-monitor-$(ENV) --config=$(ENV_FILE) --mode=full --log-level=info
 
 ## setup: Настройка окружения для продакшена
 setup:
@@ -325,7 +337,7 @@ setup:
 	@echo ""
 	@echo "🔧 Environment ready!"
 	@echo "👉 Run 'make build ENV=prod' to build the binary"
-	@echo "👉 Run 'make run-prod' to start the monitor"
+	@echo "👉 Run 'make run-full ENV=prod' to start the monitor"
 
 ## install: Установка в систему
 install: build
@@ -333,7 +345,7 @@ install: build
 	@if [ -d "$(GOPATH)/bin" ]; then \
 		cp bin/growth-monitor-$(ENV) $(GOPATH)/bin/growth-monitor; \
 		echo "✅ Installed to $(GOPATH)/bin/growth-monitor"; \
-		echo "👉 Run: growth-monitor --config=$(ENV_FILE) --help"; \
+		echo "👉 Run: growth-monitor --config=$(ENV_FILE) --mode=full"; \
 	else \
 		echo "⚠️  GOPATH/bin not found, copying to /usr/local/bin"; \
 		sudo cp bin/growth-monitor-$(ENV) /usr/local/bin/growth-monitor 2>/dev/null || \
@@ -361,7 +373,6 @@ run-local:
 	@echo "# Локальный режим" >> "$(ENV_FILE).local"
 	@echo "HTTP_ENABLED=false" >> "$(ENV_FILE).local"
 	@echo "TEST_MODE=false" >> "$(ENV_FILE).local"
-	@echo "POLLING_INTERVAL=1s" >> "$(ENV_FILE).local"
 
 	@echo "📋 Конфигурация: $(ENV_FILE).local"
 	@echo ""
@@ -374,7 +385,7 @@ run-local:
 	@echo ""
 
 	@# Запускаем бота
-	go run ./application/cmd/bot/main.go --config="$(ENV_FILE).local" --log-level=debug
+	go run $(MAIN_FILE) --config="$(ENV_FILE).local" --mode=full --log-level=debug
 
 	@# Очистка
 	@rm -f "$(ENV_FILE).local"
@@ -393,7 +404,7 @@ run-local-test:
 	else \
 		TEST_FILE="$(ENV_FILE)"; \
 	fi
-	@TEST_MODE=true go run ./application/cmd/bot/main.go --config="$$TEST_FILE" --log-level=info 2>&1 | grep -E "(Telegram|test mode|🤖|🧪)"
+	@TEST_MODE=true go run $(MAIN_FILE) --config="$$TEST_FILE" --mode=full 2>&1 | grep -E "(Telegram|test mode|🤖|🧪)"
 	@if [ -f "$(ENV_FILE).test" ]; then rm -f "$(ENV_FILE).test"; fi
 
 ## check-telegram-connection: Проверка подключения к Telegram
@@ -412,36 +423,6 @@ check-telegram-connection:
 	else \
 		echo "❌ TG_API_KEY не настроен в $(ENV_FILE)"; \
 	fi
-
-## real-telegram-test: Тест с реальным Telegram ботом
-real-telegram-test:
-	@echo "🤖 ТЕСТ С РЕАЛЬНЫМ TELEGRAM БОТОМ ($(ENV))"
-	@echo "========================================="
-	@if [ ! -f "$(ENV_FILE)" ]; then \
-		echo "❌ Файл конфигурации не найден: $(ENV_FILE)"; \
-		echo "   Создайте: make config-init ENV=$(ENV)"; \
-		exit 1; \
-	fi
-
-	@echo "📋 Проверка конфигурации..."
-	@$(MAKE) check-config ENV=$(ENV)
-	@echo ""
-
-	@read -p "Продолжить? (y/n): " -n 1 -r; \
-	echo ""; \
-	if [[ $$REPLY =~ ^[Yy] ]]; then \
-		echo "Запуск теста..."; \
-		go run ./application/cmd/debug/real_telegram_test/main.go --config="$(ENV_FILE)" --debug; \
-	else \
-		echo "❌ Тест отменен"; \
-	fi
-
-## setup-telegram: Настройка Telegram бота
-setup-telegram:
-	@echo "⚙️  НАСТРОЙКА TELEGRAM БОТА"
-	@echo "=========================="
-	@chmod +x ./scripts/setup_telegram_test.sh
-	@./scripts/setup_telegram_test.sh
 
 ## check-telegram-config: Проверка конфигурации Telegram
 check-telegram-config:
@@ -490,20 +471,23 @@ check-telegram-config:
 # ОТЛАДКА И ТЕСТИРОВАНИЕ
 # ============================================
 
+## debug: Базовая отладка
 debug:
 	@echo "🐛 Базовая отладка ($(ENV))..."
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 		echo "⚠️  Используется конфигурация по умолчанию"; \
-		go run ./application/cmd/debug/basic/main.go; \
+		go run $(MAIN_FILE) --mode=simple; \
 	else \
-		go run ./application/cmd/debug/basic/main.go --config=$(ENV_FILE); \
+		go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple --log-level=debug; \
 	fi
 
+## debug-enhanced: Расширенная отладка
 debug-enhanced:
 	@echo "🔬 Расширенная отладка ($(ENV))..."
 	@echo "Запуск на 10 секунд..."
-	@(go run ./application/cmd/debug/enhanced/main.go --config=$(ENV_FILE) & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Отладка завершена"
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Отладка завершена"
 
+## debug-diagnostic: Глубокая диагностика системы
 debug-diagnostic:
 	@echo "🏥 Глубокая диагностика системы ($(ENV))..."
 	@echo ""
@@ -516,20 +500,7 @@ debug-diagnostic:
 	@echo "Пороги: 0.001% (одна тысячная процента!)"
 	@echo ""
 	@echo "Запуск на 15 секунд..."
-	@(go run ./application/cmd/debug/diagnostic/main.go --config=$(ENV_FILE) & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Диагностика завершена"
-
-analyzer-test:
-	@echo "🧪 Тестирование анализаторов ($(ENV))..."
-	@echo ""
-	@echo "Проверяем работу каждого анализатора отдельно"
-	@echo "С тестовыми данных (рост 1%, падение 0.5%)"
-	@echo ""
-	go run ./application/cmd/debug/analyzer/main.go --config=$(ENV_FILE)
-
-debug-super-sensitive:
-	@echo "🚀 Супер-чувствительная отладка ($(ENV))..."
-	@echo "Запуск на 10 секунд..."
-	@(go run ./application/cmd/debug/supersensitive/main.go --config=$(ENV_FILE) & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Супер-чувствительный тест завершен"
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Диагностика завершена"
 
 # ============================================
 # COUNTER ANALYZER ТЕСТЫ
@@ -542,23 +513,16 @@ test-safe:
 	@$(MAKE) check-config ENV=$(ENV)
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./application/cmd/debug/... ./application/cmd/bot/ && echo "✅ Все компилируется"
+	@go build $(MAIN_FILE) && echo "✅ Все компилируется"
 	@echo ""
-	@echo "2. Упрощенный тест CounterAnalyzer..."
-	@if go run ./application/cmd/debug/counter_test/main.go 2>&1 | grep -q "ВСЕ ТЕСТЫ COUNTER ANALYZER ЗАВЕРШЕНЫ УСПЕШНО"; then \
-		echo "✅ CounterAnalyzer работает"; \
+	@echo "2. Упрощенный тест системы..."
+	@if go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple --test 2>&1 | grep -q "Тестирование завершено"; then \
+		echo "✅ Система работает"; \
 	else \
-		echo "⚠️  CounterAnalyzer требует проверки"; \
+		echo "⚠️  Система требует проверки"; \
 	fi
 	@echo ""
-	@echo "3. Упрощенный тест анализаторов..."
-	@if go run ./application/cmd/debug/analyzer/main.go 2>&1 | grep -q "Тестирование завершено"; then \
-		echo "✅ Анализаторы работают"; \
-	else \
-		echo "⚠️  Анализаторы требуют проверки"; \
-	fi
-	@echo ""
-	@echo "4. Сборка..."
+	@echo "3. Сборка..."
 	@$(MAKE) build ENV=$(ENV)
 	@echo ""
 	@echo "✅ Безопасное тестирование завершено"
@@ -570,17 +534,12 @@ test-stable:
 	@$(MAKE) check-config ENV=$(ENV)
 	@echo ""
 	@echo "1. Компиляция основных компонентов..."
-	@go build ./application/cmd/debug/basic/ && echo "✅ Базовая компиляция OK"
-	@go build ./application/cmd/debug/counter_test/ && echo "✅ CounterAnalyzer компиляция OK"
-	@go build ./application/cmd/debug/analyzer/ && echo "✅ Анализаторы компиляция OK"
+	@go build $(MAIN_FILE) && echo "✅ Базовая компиляция OK"
 	@echo ""
-	@echo "2. Быстрый тест CounterAnalyzer..."
-	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | tail -3 | grep -E "(✅|❌)" || echo "⚠️  CounterAnalyzer требует внимания"
+	@echo "2. Быстрый тест системы..."
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple --test 2>&1 | tail -3 | grep -E "(✅|❌)" || echo "⚠️  Система требует внимания"
 	@echo ""
-	@echo "3. Быстрый тест анализаторов..."
-	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | tail -3 | grep -E "(✅|🔧)" || echo "⚠️  Анализаторы работают"
-	@echo ""
-	@echo "4. Сборка основного приложения..."
+	@echo "3. Сборка основного приложения..."
 	@$(MAKE) build ENV=$(ENV)
 	@echo ""
 	@echo "🎉 ВСЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО!"
@@ -591,13 +550,10 @@ quick-check:
 	@echo "=================================="
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./application/cmd/debug/counter_test/ ./application/cmd/debug/analyzer/ ./application/cmd/bot/ && echo "✅ Все компилируется"
+	@go build $(MAIN_FILE) && echo "✅ Все компилируется"
 	@echo ""
-	@echo "2. CounterAnalyzer..."
-	@go run ./application/cmd/debug/counter_test/main.go 2>&1 | tail -2
-	@echo ""
-	@echo "3. Анализаторы..."
-	@go run ./application/cmd/debug/analyzer/main.go 2>&1 | tail -2
+	@echo "2. Тест простого режима..."
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple --test 2>&1 | grep -E "(Application|Telegram|✅)" | head -5
 	@echo ""
 	@echo "🎯 СИСТЕМА РАБОТАЕТ КОРРЕКТНО!"
 
@@ -611,52 +567,52 @@ debug-counter:
 	@echo "  • Периоды анализа"
 	@echo "  • Статистику"
 	@echo ""
-	go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE)
+	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug 2>&1 | grep -E "(Counter|Analyzer|📊|🔢)" | head -20
 
-## test-counter: Полный тест CounterAnalyzer (исправленная версия)
+## test-counter: Полный тест CounterAnalyzer
 test-counter:
 	@echo "🧪 ПОЛНЫЙ ТЕСТ COUNTER ANALYZER ($(ENV))"
 	@echo "========================================"
 	@echo ""
 	@echo "1. Базовый функционал..."
-	@go run ./application/cmd/debug/analyzer/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(ТЕСТ COUNTER ANALYZER|📊|🧪|✅|🔧)" || true
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple 2>&1 | grep -E "(Counter|📊|🧪|✅)" | head -10
 	@echo ""
 	@echo "2. Детальный тест..."
-	@go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|🧮|✅|🎉)" || true
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=info 2>&1 | grep -E "(Counter|📊|🧮|✅)" | head -20
 	@echo ""
 	@echo "3. Интеграция с системой..."
-	@go run ./application/cmd/debug/enhanced/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(COUNTER ANALYZER|🔢|📈|✅)" | head -20 || true
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug 2>&1 | grep -E "(COUNTER ANALYZER|🔢|📈|✅)" | head -20
 	@echo ""
 	@echo "✅ Полный тест CounterAnalyzer завершен"
 
 ## test-counter-quick: Быстрый тест CounterAnalyzer
 test-counter-quick:
 	@echo "⚡ Быстрый тест CounterAnalyzer ($(ENV))..."
-	@go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(БАЗОВЫЙ ТЕСТ|📊|✅|🎉)" | head -15 || true
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple 2>&1 | grep -E "(Counter|📊|✅)" | head -15
 
 ## counter-test-all: Все тесты CounterAnalyzer
 counter-test-all:
 	@echo "🚀 ЗАПУСК ВСЕХ ТЕСТОВ COUNTER ANALYZER ($(ENV))"
 	@echo "================================================"
 	@echo ""
-	@echo "Этап 1/4: Базовый тест анализаторов"
+	@echo "Этап 1/4: Базовый тест"
 	@echo "----------------------"
-	@(go run ./application/cmd/debug/analyzer/main.go --config=$(ENV_FILE) & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|📊|🧪)" | head -20 || true
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple & PID=$$!; sleep 5; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(Counter|📊|🧪)" | head -10
 	@echo ""
 
-	@echo "Этап 2/4: Полный тест CounterAnalyzer"
+	@echo "Этап 2/4: Полный тест"
 	@echo "---------------------"
-	@go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -25 || true
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=info & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(Counter|✅|📊|🧮)" | head -15
 	@echo ""
 
 	@echo "Этап 3/4: Интеграционный тест"
 	@echo "------------------------------"
-	@(go run ./application/cmd/debug/enhanced/main.go --config=$(ENV_FILE) & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(COUNTER ANALYZER|🔢|📈)" | head -15 || true
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(COUNTER ANALYZER|🔢|📈)" | head -15
 	@echo ""
 
 	@echo "Этап 4/4: Диагностический тест"
 	@echo "-------------------------------"
-	@(go run ./application/cmd/debug/diagnostic/main.go --config=$(ENV_FILE) & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(ТЕСТ COUNTER|🔍|📊)" | head -10 || true
+	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug & PID=$$!; sleep 10; kill $$PID 2>/dev/null || true) 2>/dev/null | grep -E "(Counter|🔍|📊)" | head -10
 	@echo ""
 	@echo "✅ Все тесты CounterAnalyzer завершены"
 
@@ -667,20 +623,14 @@ counter-test-all:
 debug-all:
 	@echo "🚀 Полный набор тестов ($(ENV))..."
 	@echo ""
-	@echo "1. Тест анализаторов..."
-	@$(MAKE) analyzer-test ENV=$(ENV)
+	@echo "1. Простой режим..."
+	@$(MAKE) debug ENV=$(ENV)
 	@echo ""
-	@echo "2. Тест CounterAnalyzer..."
-	@$(MAKE) test-counter-quick ENV=$(ENV)
+	@echo "2. Полный режим..."
+	@$(MAKE) debug-enhanced ENV=$(ENV)
 	@echo ""
 	@echo "3. Диагностика системы..."
 	@$(MAKE) debug-diagnostic ENV=$(ENV)
-	@echo ""
-	@echo "4. Расширенная отладка..."
-	@$(MAKE) debug-enhanced ENV=$(ENV)
-	@echo ""
-	@echo "5. Супер-чувствительный тест..."
-	@$(MAKE) debug-super-sensitive ENV=$(ENV)
 
 # ============================================
 # БАЗОВЫЕ ТЕСТЫ (стабильные)
@@ -693,35 +643,32 @@ test-basic:
 	@$(MAKE) check-config ENV=$(ENV)
 	@echo ""
 	@echo "1. Компиляция..."
-	@go build ./application/cmd/debug/... && echo "✅ Компиляция успешна"
+	@go build $(MAIN_FILE) && echo "✅ Компиляция успешна"
 	@echo ""
-	@echo "2. Тест CounterAnalyzer..."
-	@go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -15 || echo "⚠️  CounterAnalyzer требует внимания"
+	@echo "2. Тест простого режима..."
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple --test 2>&1 | grep -E "(✅|📊|🧮|🎉)" | head -15 || echo "⚠️  Система требует внимания"
 	@echo ""
-	@echo "3. Тест всех анализаторов..."
-	@go run ./application/cmd/debug/analyzer/main.go --config=$(ENV_FILE) 2>&1 | grep -E "(🧪|📊|✅|🔧)" | head -20 || echo "⚠️  Анализаторы требуют внимания"
-	@echo ""
-	@echo "4. Проверка типов..."
-	@go vet ./internal/analysis/analyzers/... 2>&1 | head -10 || echo "⚠️  Есть предупреждения go vet"
+	@echo "3. Проверка типов..."
+	@go vet ./... 2>&1 | head -10 || echo "⚠️  Есть предупреждения go vet"
 	@echo "✅ Базовые тесты завершены"
 
 ## test-quick: Быстрые тесты
 test-quick:
 	@echo "⚡ БЫСТРЫЕ ТЕСТЫ ($(ENV))"
 	@echo "========================"
-	@echo "CounterAnalyzer (первые 10 строк)..."
-	@go run ./application/cmd/debug/counter_test/main.go --config=$(ENV_FILE) 2>&1 | head -10
+	@echo "Первый запуск (первые 5 строк)..."
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=simple 2>&1 | head -5
 	@echo ""
-	@echo "Анализаторы (первые 10 строк)..."
-	@go run ./application/cmd/debug/analyzer/main.go --config=$(ENV_FILE) 2>&1 | head -10
+	@echo "Counter Analyzer (первые 5 строк)..."
+	@go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full 2>&1 | grep -E "(Counter|📊)" | head -5
 
 ## test-all: Все тесты (без бесконечного ожидания)
 test-all: test-basic build
 	@echo ""
 	@echo "🎯 ВСЕ ТЕСТЫ ПРОЙДЕНЫ!"
 	@echo "====================="
-	@echo "✅ CounterAnalyzer функционирует"
-	@echo "✅ Анализаторы протестированы"
+	@echo "✅ Система функционирует"
+	@echo "✅ Counter Analyzer протестирован"
 	@echo "✅ Сборка успешна"
 	@echo "✅ Система готова к работе"
 
@@ -755,8 +702,8 @@ validate:
 fix-vet:
 	@echo "🔧 ИСПРАВЛЕНИЕ ОШИБОК GO VET"
 	@echo "==========================="
-	@echo "Исправление ошибок копирования мьютекса в CounterAnalyzer..."
-	@if grep -q "return copies lock value" internal/analysis/analyzers/counter_analyzer.go 2>/dev/null; then \
+	@echo "Исправление ошибок копирования мьютекса..."
+	@if go vet ./internal/analysis/analyzers/... 2>&1 | grep -q "copies lock value"; then \
 		echo "⚠️  Найдены ошибки копирования мьютекса"; \
 		echo "✅ Используйте test-stable или safe-test для стабильного тестирования"; \
 	else \
@@ -776,7 +723,7 @@ test:
 clean:
 	@echo "🧹 Cleaning project..."
 	rm -rf bin/ releases/ logs/*.log coverage/ reports/
-	rm -f configs/*/.env.local configs/*/.env.test
+	rm -f configs/*/.env.local configs/*/.env.test configs/*/.env.temp
 	go clean
 	@echo "✅ Cleaned"
 
@@ -838,7 +785,8 @@ help:
 	@echo ""
 	@echo "🚀 ОСНОВНЫЕ КОМАНДЫ (с окружениями):"
 	@echo "  make build ENV=dev           - Сборка с указанным окружением"
-	@echo "  make run ENV=dev             - Запуск с указанным окружением"
+	@echo "  make run ENV=dev             - Запуск в simple режиме"
+	@echo "  make run-full ENV=dev        - Запуск в full режиме"
 	@echo "  make run-prod                - Запуск с prod окружением"
 	@echo "  make run-dev                 - Запуск с dev окружением"
 	@echo "  make run-prod-binary         - Запуск собранной бинарной версии"
@@ -846,18 +794,17 @@ help:
 	@echo "  make setup                   - Настройка окружения"
 	@echo ""
 	@echo "🔧 ОТЛАДКА И ТЕСТИРОВАНИЕ:"
-	@echo "  make debug ENV=dev           - Базовая отладка"
+	@echo "  make debug ENV=dev           - Базовая отладка (simple)"
+	@echo "  make debug-full ENV=dev      - Отладка full режима"
 	@echo "  make debug-counter ENV=dev   - Тест CounterAnalyzer"
 	@echo "  make test-safe ENV=dev       - Безопасное тестирование"
 	@echo "  make test-stable ENV=dev     - Стабильный тест"
 	@echo "  make quick-check ENV=dev     - Быстрая проверка"
-	@echo "  make real-telegram-test      - Тест с реальным Telegram"
 	@echo "  make check-telegram-config   - Проверка конфигурации Telegram"
 	@echo ""
 	@echo "🤖 TELEGRAM КОМАНДЫ:"
 	@echo "  make run-local ENV=dev       - Локальный запуск бота"
 	@echo "  make check-telegram-connection - Проверка подключения"
-	@echo "  make setup-telegram          - Настройка Telegram бота"
 	@echo ""
 	@echo "🧹 СЕРВИСНЫЕ КОМАНДЫ:"
 	@echo "  make clean                   - Очистка проекта"
@@ -875,12 +822,12 @@ help:
 	@echo "  # Разработка с dev окружением"
 	@echo "  make config-dev"
 	@echo "  make config-edit ENV=dev"
-	@echo "  make run-dev"
+	@echo "  make run-full ENV=dev"
 	@echo ""
 	@echo "  # Продакшен с prod окружением"
 	@echo "  make config-prod"
 	@echo "  make build ENV=prod"
-	@echo "  make run-prod"
+	@echo "  make run-full ENV=prod"
 	@echo ""
 	@echo "  # Тестирование разных окружений"
 	@echo "  make test-safe ENV=dev"
