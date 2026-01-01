@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,7 @@ type TelegramBot struct {
 	testModeMu sync.RWMutex
 
 	buttonBuilder *ButtonURLBuilder
+	menuUtils     *MenuUtils // ДОБАВЛЕНО
 }
 
 // NewTelegramBot создает новый экземпляр Telegram бота
@@ -49,8 +51,12 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 
 	// Создаем новый бот для мониторинга (не Singleton!)
 	messageSender := NewMessageSender(&chatConfig)
+	menuUtils := NewMenuUtils(cfg.Exchange) // ДОБАВЛЕНО
 	notifier := NewNotifier(&chatConfig)
 	notifier.SetMessageSender(messageSender)
+
+	// Используем menuUtils для создания менеджера меню
+	menuManager := NewMenuManagerWithUtils(&chatConfig, messageSender, menuUtils)
 
 	bot := &TelegramBot{
 		config:        &chatConfig,
@@ -58,12 +64,13 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
 		chatID:        chatID,
 		notifier:      notifier,
-		menuManager:   NewMenuManager(&chatConfig, messageSender),
+		menuManager:   menuManager,
 		messageSender: messageSender,
 		startupTime:   time.Now(),
 		welcomeSent:   true, // НЕ отправляем приветствие для мониторинг-бота!
 		testMode:      cfg.MonitoringTestMode || false,
 		buttonBuilder: NewButtonURLBuilder(cfg.Exchange),
+		menuUtils:     menuUtils, // ДОБАВЛЕНО
 	}
 
 	log.Printf("🤖 Создан Telegram бот для мониторинга (chat_id: %s)", chatID)
@@ -218,6 +225,32 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 		return nil
 	}
 
+	// Используем menuUtils для форматирования сообщения
+	var message string
+	if tb.menuUtils != nil {
+		// Используем компактный формат
+		message = tb.menuUtils.FormatCounterMessage(symbol, signalType, count, maxSignals, period)
+	} else {
+		// Fallback на старый формат
+		message = formatLegacyCounterMessage(symbol, signalType, count, maxSignals, period)
+	}
+
+	// Создаем клавиатуру с использованием buttonBuilder
+	var keyboard *InlineKeyboardMarkup
+	if tb.buttonBuilder != nil {
+		// Получаем период в минутах для торгового URL
+		periodMinutes := parsePeriodToMinutes(period)
+		keyboard = tb.buttonBuilder.CounterNotificationKeyboard(symbol, periodMinutes)
+	} else {
+		// Fallback на старую клавиатуру
+		keyboard = createLegacyCounterKeyboard(symbol)
+	}
+
+	return tb.messageSender.SendTextMessage(message, keyboard, true)
+}
+
+// formatLegacyCounterMessage форматирует сообщение счетчика в старом формате (для обратной совместимости)
+func formatLegacyCounterMessage(symbol string, signalType string, count int, maxSignals int, period string) string {
 	icon := "🟢"
 	directionStr := "РОСТ"
 	if signalType == "fall" {
@@ -228,7 +261,7 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 	percentage := float64(count) / float64(maxSignals) * 100
 	timeStr := time.Now().Format("15:04:05")
 
-	message := fmt.Sprintf(
+	return fmt.Sprintf(
 		"📊 *Счетчик сигналов*\n"+
 			"%s %s\n"+
 			"Символ: %s\n"+
@@ -241,9 +274,11 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 		period,
 		timeStr,
 	)
+}
 
-	// Простая клавиатура для счетчика
-	keyboard := &InlineKeyboardMarkup{
+// createLegacyCounterKeyboard создает клавиатуру в старом формате (для обратной совместимости)
+func createLegacyCounterKeyboard(symbol string) *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
 				{Text: "📊 График", URL: fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)},
@@ -251,6 +286,24 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 			},
 		},
 	}
+}
 
-	return tb.messageSender.SendTextMessage(message, keyboard, true)
+// parsePeriodToMinutes преобразует строку периода в минуты
+func parsePeriodToMinutes(period string) int {
+	switch strings.ToLower(period) {
+	case "5m", "5 минут":
+		return 5
+	case "15m", "15 минут":
+		return 15
+	case "30m", "30 минут":
+		return 30
+	case "1h", "1 час":
+		return 60
+	case "4h", "4 часа":
+		return 240
+	case "1d", "1 день":
+		return 1440
+	default:
+		return 15 // по умолчанию 15 минут
+	}
 }

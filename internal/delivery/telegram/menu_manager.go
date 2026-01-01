@@ -15,11 +15,32 @@ type MenuManager struct {
 	messageSender *MessageSender
 	handlers      *MenuHandlers
 	keyboards     *MenuKeyboards
+	menuUtils     *MenuUtils // ДОБАВЛЕНО
 }
 
-// NewMenuManager создает новый менеджер меню
+// NewMenuManager создает новый менеджер меню (старый конструктор)
 func NewMenuManager(cfg *config.Config, messageSender *MessageSender) *MenuManager {
+	// Используем старый конструктор для обратной совместимости
 	handlers := NewMenuHandlers(cfg, messageSender)
+	keyboards := NewMenuKeyboards()
+
+	// Создаем menuUtils по умолчанию
+	menuUtils := NewDefaultMenuUtils()
+
+	return &MenuManager{
+		config:        cfg,
+		enabled:       true,
+		messageSender: messageSender,
+		handlers:      handlers,
+		keyboards:     keyboards,
+		menuUtils:     menuUtils, // ДОБАВЛЕНО
+	}
+}
+
+// NewMenuManagerWithUtils создает менеджер меню с утилитами
+func NewMenuManagerWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuManager {
+	// Используем новый конструктор с утилитами
+	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
 	keyboards := NewMenuKeyboards()
 
 	return &MenuManager{
@@ -28,6 +49,7 @@ func NewMenuManager(cfg *config.Config, messageSender *MessageSender) *MenuManag
 		messageSender: messageSender,
 		handlers:      handlers,
 		keyboards:     keyboards,
+		menuUtils:     menuUtils, // ДОБАВЛЕНО
 	}
 }
 
@@ -57,7 +79,15 @@ func (mm *MenuManager) SetupMenu() error {
 		return nil
 	}
 
-	menu := mm.keyboards.GetMainMenu()
+	// Используем menuUtils для создания меню, если доступно
+	var menu ReplyKeyboardMarkup
+	if mm.menuUtils != nil {
+		menu = mm.menuUtils.FormatCompactMenu()
+	} else {
+		// Fallback на старый метод
+		menu = mm.keyboards.GetMainMenu()
+	}
+
 	return mm.messageSender.SetReplyKeyboard(menu)
 }
 
@@ -88,9 +118,23 @@ func (mm *MenuManager) HandleCallback(callbackData string, chatID string) error 
 	return mm.handlers.HandleCallback(callbackData, chatID)
 }
 
-// Делегирующие методы для совместимости
+// GetMenuUtils возвращает утилиты меню (ДОБАВЛЕН МЕТОД)
+func (mm *MenuManager) GetMenuUtils() *MenuUtils {
+	return mm.menuUtils
+}
+
+// SendSettingsMessage отправляет сообщение настроек
 func (mm *MenuManager) SendSettingsMessage(chatID string) error {
-	mm.messageSender.SetReplyKeyboard(mm.keyboards.GetSettingsMenu())
+	// Используем menuUtils для создания меню настроек
+	var menu ReplyKeyboardMarkup
+	if mm.menuUtils != nil {
+		menu = mm.menuUtils.FormatSettingsMenu()
+	} else {
+		// Fallback на старый метод
+		menu = mm.keyboards.GetSettingsMenu()
+	}
+
+	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendSettingsInfo(chatID)
 }
 

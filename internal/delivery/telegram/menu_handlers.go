@@ -13,14 +13,29 @@ type MenuHandlers struct {
 	config        *config.Config
 	messageSender *MessageSender
 	keyboards     *MenuKeyboards
+	menuUtils     *MenuUtils // ДОБАВЛЕНО
 }
 
-// NewMenuHandlers создает новые обработчики меню
+// NewMenuHandlers создает новые обработчики меню (старый конструктор для обратной совместимости)
 func NewMenuHandlers(cfg *config.Config, messageSender *MessageSender) *MenuHandlers {
+	// Для обратной совместимости создаем menuUtils по умолчанию
+	menuUtils := NewDefaultMenuUtils()
+
 	return &MenuHandlers{
 		config:        cfg,
 		messageSender: messageSender,
 		keyboards:     NewMenuKeyboards(),
+		menuUtils:     menuUtils, // ДОБАВЛЕНО
+	}
+}
+
+// NewMenuHandlersWithUtils создает обработчики меню с утилитами
+func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuHandlers {
+	return &MenuHandlers{
+		config:        cfg,
+		messageSender: messageSender,
+		keyboards:     NewMenuKeyboards(),
+		menuUtils:     menuUtils,
 	}
 }
 
@@ -34,9 +49,27 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 		"• /notify_on - Включить уведомления\n" +
 		"• /notify_off - Выключить уведомления\n" +
 		"• /help - Справка\n\n" +
-		"*Используйте меню ниже для быстрого управления* ⬇️"
+		"Используйте меню ниже для управления ботом:"
 
-	return mh.messageSender.SendMessageToChat(chatID, message, nil)
+	// Создаем inline клавиатуру для главного меню
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "⚙️ Настройки", CallbackData: "menu_settings"},
+				{Text: "📊 Статус", CallbackData: "menu_status"},
+			},
+			{
+				{Text: "🔔 Уведомления", CallbackData: "menu_notify"},
+				{Text: "📋 Помощь", CallbackData: "menu_help"},
+			},
+			{
+				{Text: "📈 Рост/Падение", CallbackData: "menu_signals"},
+				{Text: "⏱️ Период", CallbackData: "menu_periods"},
+			},
+		},
+	}
+
+	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
 }
 
 // HandleMessage обрабатывает текстовые сообщения из меню
@@ -120,9 +153,126 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 	}
 }
 
+// HandleCallback обрабатывает callback от inline кнопок
+func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error {
+	// Используем menuUtils для парсинга callback данных
+	var action string
+	var params []string
+
+	if mh.menuUtils != nil {
+		action, params = mh.menuUtils.ParseCallbackData(callbackData)
+	} else {
+		// Fallback для обратной совместимости
+		parts := strings.Split(callbackData, "_")
+		if len(parts) > 0 {
+			action = parts[0]
+			if len(parts) > 1 {
+				params = parts[1:]
+			}
+		}
+	}
+
+	switch action {
+	case "menu":
+		if len(params) > 0 {
+			switch params[0] {
+			case "notify":
+				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetNotificationsMenu())
+				return mh.SendNotificationsInfo(chatID)
+			case "signals":
+				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSignalTypesMenu())
+				return mh.SendSignalTypesInfo(chatID)
+			case "periods":
+				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetPeriodsMenu())
+				return mh.SendPeriodsInfo(chatID)
+			case "reset":
+				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetResetMenu())
+				return mh.SendResetInfo(chatID)
+			case "back":
+				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
+				return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
+			}
+		}
+	case "period":
+		if len(params) > 0 {
+			return mh.HandlePeriodChange(chatID, params[0])
+		}
+	case "reset":
+		if len(params) > 0 {
+			switch params[0] {
+			case "all":
+				return mh.HandleResetAllCounters(chatID)
+			case "growth":
+				return mh.messageSender.SendMessageToChat(chatID, "📈 Счетчик роста сброшен", nil)
+			case "fall":
+				return mh.messageSender.SendMessageToChat(chatID, "📉 Счетчик падения сброшен", nil)
+			case "symbol":
+				return mh.SendSymbolSelectionInline(chatID)
+			}
+		}
+	case "notify":
+		if len(params) > 0 {
+			switch params[0] {
+			case "on":
+				return mh.HandleNotifyOn(chatID)
+			case "off":
+				return mh.HandleNotifyOff(chatID)
+			case "growth":
+				mh.config.TelegramNotifyGrowth = true
+				mh.config.TelegramNotifyFall = false
+				return mh.messageSender.SendMessageToChat(chatID, "📈 Теперь отслеживается только рост", nil)
+			case "fall":
+				mh.config.TelegramNotifyGrowth = false
+				mh.config.TelegramNotifyFall = true
+				return mh.messageSender.SendMessageToChat(chatID, "📉 Теперь отслеживается только падение", nil)
+			case "all":
+				mh.config.TelegramNotifyGrowth = true
+				mh.config.TelegramNotifyFall = true
+				return mh.messageSender.SendMessageToChat(chatID, "📊 Теперь отслеживаются все сигналы", nil)
+			}
+		}
+	}
+
+	return fmt.Errorf("unknown callback data: %s", callbackData)
+}
+
+// SendSymbolSelectionInline отправляет inline меню выбора символа
+func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
+	message := "Выберите символ для сброса счетчика:"
+
+	// Создаем inline клавиатуру
+	keyboard := &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "BTCUSDT", CallbackData: "reset_btc"},
+				{Text: "ETHUSDT", CallbackData: "reset_eth"},
+				{Text: "SOLUSDT", CallbackData: "reset_sol"},
+			},
+			{
+				{Text: "XRPUSDT", CallbackData: "reset_xrp"},
+				{Text: "BNBUSDT", CallbackData: "reset_bnb"},
+				{Text: "🔙 Назад", CallbackData: "menu_reset"},
+			},
+		},
+	}
+
+	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
+}
+
 // SendSettingsInfo отправляет информацию о настройках
 func (mh *MenuHandlers) SendSettingsInfo(chatID string) error {
+	// Используем menuUtils для получения имени периода
+	periodName := "15 минут"
+	if mh.menuUtils != nil {
+		period := getPeriodFromConfig(mh.config)
+		periodName = mh.menuUtils.GetPeriodName(period)
+	}
+
 	message := "⚙️ *Настройки бота*\n\n" +
+		"*Текущие настройки:*\n" +
+		"• 🔔 Уведомления: " + getNotificationStatus(mh.config) + "\n" +
+		"• 📈 Тип сигналов: " + getSignalTypesStatus(mh.config) + "\n" +
+		"• ⏱️ Период анализа: " + periodName + "\n\n" +
 		"Выберите действие из меню ниже:\n\n" +
 		"• 🔔 Вкл/Выкл - управление уведомлениями\n" +
 		"• 📈 Тип сигналов - выбор отслеживаемых сигналов\n" +
@@ -135,10 +285,7 @@ func (mh *MenuHandlers) SendSettingsInfo(chatID string) error {
 
 // SendNotificationsInfo отправляет информацию об уведомлениях
 func (mh *MenuHandlers) SendNotificationsInfo(chatID string) error {
-	status := "❌ Выключены"
-	if mh.config.TelegramEnabled {
-		status = "✅ Включены"
-	}
+	status := getNotificationStatus(mh.config)
 
 	message := fmt.Sprintf("🔔 *Управление уведомлениями*\n\n"+
 		"Текущий статус: %s\n\n"+
@@ -186,9 +333,10 @@ func (mh *MenuHandlers) SendSignalTypesInfo(chatID string) error {
 func (mh *MenuHandlers) SendPeriodsInfo(chatID string) error {
 	// Получаем период из кастомных настроек
 	period := getPeriodFromConfig(mh.config)
+	periodName := mh.menuUtils.GetPeriodName(period)
 
 	message := "⏱️ *Настройка периодов анализа*\n\n" +
-		"Текущий период: " + period + "\n\n" +
+		"Текущий период: " + periodName + "\n\n" +
 		"Выберите период из меню ниже:\n\n" +
 		"• ⏱️ 5 мин - 5 минутный период\n" +
 		"• ⏱️ 15 мин - 15 минутный период\n" +
@@ -238,89 +386,18 @@ func (mh *MenuHandlers) HandleCommand(cmd, chatID string) error {
 	}
 }
 
-// HandleCallback обрабатывает callback от inline кнопок
-func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error {
-	switch callbackData {
-	case "menu_notify":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetNotificationsMenu())
-		return mh.SendNotificationsInfo(chatID)
-	case "menu_signals":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSignalTypesMenu())
-		return mh.SendSignalTypesInfo(chatID)
-	case "menu_periods":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetPeriodsMenu())
-		return mh.SendPeriodsInfo(chatID)
-	case "menu_reset":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetResetMenu())
-		return mh.SendResetInfo(chatID)
-	case "menu_back":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
-		return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
-	case "period_5m":
-		return mh.HandlePeriodChange(chatID, "5m")
-	case "period_15m":
-		return mh.HandlePeriodChange(chatID, "15m")
-	case "period_30m":
-		return mh.HandlePeriodChange(chatID, "30m")
-	case "period_1h":
-		return mh.HandlePeriodChange(chatID, "1h")
-	case "period_4h":
-		return mh.HandlePeriodChange(chatID, "4h")
-	case "reset_all":
-		return mh.HandleResetAllCounters(chatID)
-	case "reset_growth":
-		return mh.messageSender.SendMessageToChat(chatID, "📈 Счетчик роста сброшен", nil)
-	case "reset_fall":
-		return mh.messageSender.SendMessageToChat(chatID, "📉 Счетчик падения сброшен", nil)
-	case "reset_symbol":
-		return mh.SendSymbolSelectionInline(chatID)
-	default:
-		return fmt.Errorf("unknown callback data: %s", callbackData)
-	}
-}
-
-// SendSymbolSelectionInline отправляет inline меню выбора символа
-func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
-	message := "Выберите символ для сброса счетчика:"
-
-	// Создаем inline клавиатуру
-	keyboard := &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{Text: "BTCUSDT", CallbackData: "reset_btc"},
-				{Text: "ETHUSDT", CallbackData: "reset_eth"},
-				{Text: "SOLUSDT", CallbackData: "reset_sol"},
-			},
-			{
-				{Text: "XRPUSDT", CallbackData: "reset_xrp"},
-				{Text: "BNBUSDT", CallbackData: "reset_bnb"},
-				{Text: "🔙 Назад", CallbackData: "menu_reset"},
-			},
-		},
-	}
-
-	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
-}
-
 // SendStatus отправляет статус системы
 func (mh *MenuHandlers) SendStatus(chatID string) error {
-	notifyStatus := "✅ Включены"
-	if !mh.config.TelegramEnabled {
-		notifyStatus = "❌ Выключены"
-	}
+	notifyStatus := getNotificationStatus(mh.config)
+	growthStatus := getSignalTypeStatus(mh.config.TelegramNotifyGrowth, "Рост")
+	fallStatus := getSignalTypeStatus(mh.config.TelegramNotifyFall, "Падение")
 
-	growthStatus := "✅ Включен"
-	if !mh.config.TelegramNotifyGrowth {
-		growthStatus = "❌ Выключен"
+	// Используем menuUtils для получения имени периода
+	periodName := "15 минут"
+	if mh.menuUtils != nil {
+		period := getPeriodFromConfig(mh.config)
+		periodName = mh.menuUtils.GetPeriodName(period)
 	}
-
-	fallStatus := "✅ Включен"
-	if !mh.config.TelegramNotifyFall {
-		fallStatus = "❌ Выключен"
-	}
-
-	// Получаем период из кастомных настроек
-	period := getPeriodFromConfig(mh.config)
 
 	message := fmt.Sprintf(
 		"📊 *Статус системы*\n\n"+
@@ -333,7 +410,7 @@ func (mh *MenuHandlers) SendStatus(chatID string) error {
 		notifyStatus,
 		growthStatus,
 		fallStatus,
-		period,
+		periodName,
 		time.Now().Format("15:04:05"),
 	)
 
@@ -375,17 +452,10 @@ func (mh *MenuHandlers) HandleNotifyOff(chatID string) error {
 
 // HandlePeriodChange обрабатывает изменение периода
 func (mh *MenuHandlers) HandlePeriodChange(chatID string, period string) error {
-	periodMap := map[string]string{
-		"5m":  "5 минут",
-		"15m": "15 минут",
-		"30m": "30 минут",
-		"1h":  "1 час",
-		"4h":  "4 часа",
-	}
-
-	periodName, exists := periodMap[period]
-	if !exists {
-		periodName = "15 минут"
+	// Используем menuUtils для получения имени периода
+	periodName := period
+	if mh.menuUtils != nil {
+		periodName = mh.menuUtils.GetPeriodName(period)
 	}
 
 	// Обновляем кастомные настройки
@@ -414,4 +484,32 @@ func getPeriodFromConfig(config *config.Config) string {
 		}
 	}
 	return "15m"
+}
+
+// getNotificationStatus возвращает статус уведомлений
+func getNotificationStatus(config *config.Config) string {
+	if config.TelegramEnabled {
+		return "✅ Включены"
+	}
+	return "❌ Выключены"
+}
+
+// getSignalTypeStatus возвращает статус типа сигнала
+func getSignalTypeStatus(enabled bool, signalType string) string {
+	if enabled {
+		return "✅ Включен"
+	}
+	return "❌ Выключен"
+}
+
+// getSignalTypesStatus возвращает статус типов сигналов
+func getSignalTypesStatus(config *config.Config) string {
+	if config.TelegramNotifyGrowth && config.TelegramNotifyFall {
+		return "Все"
+	} else if config.TelegramNotifyGrowth {
+		return "Только рост"
+	} else if config.TelegramNotifyFall {
+		return "Только падение"
+	}
+	return "Ничего"
 }
