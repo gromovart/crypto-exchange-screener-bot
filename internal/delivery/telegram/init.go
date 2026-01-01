@@ -1,4 +1,4 @@
-// internal/telegram/init.go
+// internal/delivery/telegram/init.go
 package telegram
 
 import (

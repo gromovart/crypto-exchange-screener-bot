@@ -1,4 +1,4 @@
-// internal/telegram/menu_utils.go
+// internal/delivery/telegram/menu_utils.go
 package telegram
 
 import (
@@ -9,11 +9,22 @@ import (
 )
 
 // MenuUtils - утилиты для работы с меню
-type MenuUtils struct{}
+type MenuUtils struct {
+	buttonBuilder *ButtonURLBuilder
+	exchange      string
+}
 
 // NewMenuUtils создает новые утилиты меню
-func NewMenuUtils() *MenuUtils {
-	return &MenuUtils{}
+func NewMenuUtils(exchange string) *MenuUtils {
+	return &MenuUtils{
+		buttonBuilder: NewButtonURLBuilder(exchange),
+		exchange:      exchange,
+	}
+}
+
+// NewDefaultMenuUtils создает утилиты с биржей по умолчанию (Bybit)
+func NewDefaultMenuUtils() *MenuUtils {
+	return NewMenuUtils("bybit")
 }
 
 // FormatCompactMenu создает компактное меню
@@ -66,23 +77,20 @@ func (mu *MenuUtils) FormatSettingsMenu() ReplyKeyboardMarkup {
 
 // FormatNotificationKeyboard создает клавиатуру для уведомлений
 func (mu *MenuUtils) FormatNotificationKeyboard(signal types.GrowthSignal) *InlineKeyboardMarkup {
-	chartURL := fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", signal.Symbol)
-	tradeURL := fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", signal.Symbol)
+	// Используем строитель для создания кнопок
+	return mu.buttonBuilder.StandardNotificationKeyboard(signal.Symbol, signal.PeriodMinutes)
+}
 
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{
-					Text: "📈 График",
-					URL:  chartURL,
-				},
-				{
-					Text: "💱 Торговать",
-					URL:  tradeURL,
-				},
-			},
-		},
-	}
+// FormatEnhancedNotificationKeyboard создает расширенную клавиатуру для уведомлений
+func (mu *MenuUtils) FormatEnhancedNotificationKeyboard(signal types.GrowthSignal) *InlineKeyboardMarkup {
+	// Используем строитель для создания расширенных кнопок
+	return mu.buttonBuilder.EnhancedNotificationKeyboard(signal.Symbol, signal.PeriodMinutes)
+}
+
+// FormatCounterNotificationKeyboard создает клавиатуру для уведомлений счетчика
+func (mu *MenuUtils) FormatCounterNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
+	// Используем строитель для создания кнопок счетчика
+	return mu.buttonBuilder.CounterNotificationKeyboard(symbol, periodMinutes)
 }
 
 // FormatSignalMessage форматирует сообщение сигнала для компактного отображения
@@ -100,17 +108,17 @@ func (mu *MenuUtils) FormatSignalMessage(signal types.GrowthSignal, format strin
 		changeStr = fmt.Sprintf("-%.2f%%", -changePercent)
 	}
 
-	timeStr := signal.Timestamp.Format("15:04:05")
+	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
 
 	switch format {
 	case "compact":
 		return fmt.Sprintf(
-			"%s *%s*\n"+
-				"%s %s: %s\n"+
-				"🕐 %s",
-			icon, signal.Symbol,
-			directionStr, changeStr,
+			"⚫ %s - %dмин - %s\n"+
+				"🕐 %s\n"+
+				"%s %s: %s",
+			strings.ToUpper(mu.exchange), signal.PeriodMinutes, signal.Symbol,
 			timeStr,
+			icon, directionStr, changeStr,
 		)
 	case "full":
 		return fmt.Sprintf(
@@ -137,7 +145,7 @@ func (mu *MenuUtils) FormatSignalMessage(signal types.GrowthSignal, format strin
 	}
 }
 
-// FormatCounterMessage форматирует сообщение счетчика
+// FormatCounterMessage форматирует сообщение счетчика в компактном формате
 func (mu *MenuUtils) FormatCounterMessage(symbol string, signalType string, count int, maxSignals int, period string) string {
 	icon := "🟢"
 	directionStr := "РОСТ"
@@ -146,8 +154,33 @@ func (mu *MenuUtils) FormatCounterMessage(symbol string, signalType string, coun
 		directionStr = "ПАДЕНИЕ"
 	}
 
+	// УДАЛЕНА неиспользуемая переменная percentage
+	// percentage := float64(count) / float64(maxSignals) * 100
+	timeStr := time.Now().Format("2006/01/02 15:04:05")
+
+	return fmt.Sprintf(
+		"⚫ %s - 1мин - %s\n"+
+			"🕐 %s\n"+
+			"%s %s\n"+
+			"📡 Сигнал: %d",
+		strings.ToUpper(mu.exchange), symbol,
+		timeStr,
+		icon, directionStr,
+		count,
+	)
+}
+
+// FormatCounterMessageFull форматирует полное сообщение счетчика
+func (mu *MenuUtils) FormatCounterMessageFull(symbol string, signalType string, count int, maxSignals int, period string) string {
+	icon := "🟢"
+	directionStr := "РОСТ"
+	if signalType == "fall" {
+		icon = "🔴"
+		directionStr = "ПАДЕНИЕ"
+	}
+
 	percentage := float64(count) / float64(maxSignals) * 100
-	timeStr := time.Now().Format("15:04:05")
+	timeStr := time.Now().Format("2006/01/02 15:04:05")
 
 	return fmt.Sprintf(
 		"📊 *Счетчик сигналов*\n"+
@@ -256,4 +289,14 @@ func (mu *MenuUtils) CreatePeriodMenu() *InlineKeyboardMarkup {
 			},
 		},
 	}
+}
+
+// GetChartButton возвращает кнопку "График"
+func (mu *MenuUtils) GetChartButton(symbol string) InlineKeyboardButton {
+	return mu.buttonBuilder.GetChartButton(symbol)
+}
+
+// GetTradeButton возвращает кнопку "Торговать"
+func (mu *MenuUtils) GetTradeButton(symbol string, periodMinutes int) InlineKeyboardButton {
+	return mu.buttonBuilder.GetTradeButton(symbol, periodMinutes)
 }

@@ -1,4 +1,4 @@
-// internal/telegram/notifier.go
+// internal/delivery/telegram/notifier.go
 package telegram
 
 import (
@@ -24,9 +24,15 @@ type Notifier struct {
 
 // NewNotifier создает новый нотификатор
 func NewNotifier(cfg *config.Config) *Notifier {
+	// Используем биржу из конфигурации
+	exchange := cfg.Exchange
+	if exchange == "" {
+		exchange = "bybit" // значение по умолчанию
+	}
+
 	return &Notifier{
 		config:      cfg,
-		menuUtils:   NewMenuUtils(),
+		menuUtils:   NewMenuUtils(exchange), // ПЕРЕДАЕМ аргумент
 		rateLimiter: NewRateLimiter(2 * time.Second),
 		minInterval: 2 * time.Second,
 		enabled:     cfg.TelegramEnabled,

@@ -1,3 +1,4 @@
+// internal/delivery/telegram/singleton.go
 package telegram
 
 import (

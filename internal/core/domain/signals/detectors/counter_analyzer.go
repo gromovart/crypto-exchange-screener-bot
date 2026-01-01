@@ -27,6 +27,7 @@ type CounterAnalyzer struct {
 	chartProvider       string
 	lastPriceCache      map[string]float64 // Кэш последних цен для расчета изменений
 	priceCacheMu        sync.RWMutex
+	buttonBuilder       *telegram.ButtonURLBuilder
 }
 
 // NewCounterAnalyzer создает новый анализатор счетчика
@@ -39,6 +40,7 @@ func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgB
 		notificationEnabled: true,
 		chartProvider:       "coinglass",
 		lastPriceCache:      make(map[string]float64),
+		buttonBuilder:       telegram.NewButtonURLBuilder("bybit"),
 	}
 }
 
@@ -312,45 +314,17 @@ func (a *CounterAnalyzer) formatNotificationMessage(notification CounterNotifica
 
 // createNotificationKeyboard создает клавиатуру для уведомления (ОБНОВЛЕННЫЙ)
 func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotification) *telegram.InlineKeyboardMarkup {
-	// Используем провайдера из настроек счетчика
-	chartProvider := notification.SignalType.GetChartProvider()
-	if chartProvider == "" {
-		chartProvider = a.chartProvider
-	}
-
-	chartURL := a.getChartURL(notification.Symbol, chartProvider)
-
-	// ФИКС: получаем период из настроек счетчика
-	periodMinutes := a.getCurrentPeriod().GetMinutes()
-	symbolURL := a.getTradingURL(notification.Symbol, periodMinutes)
+	// Используем строитель для создания кнопок
+	periodMinutes := notification.Period.GetMinutes()
 
 	return &telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
-				{
-					Text: "📊 График",
-					URL:  chartURL,
-				},
-				{
-					Text: "💱 Торговать",
-					URL:  symbolURL,
-				},
+				a.buttonBuilder.GetChartButton(notification.Symbol),
+				a.buttonBuilder.GetTradeButton(notification.Symbol, periodMinutes),
 			},
 		},
 	}
-}
-
-// НОВЫЙ МЕТОД: формирует URL для торговли с учетом периода
-func (a *CounterAnalyzer) getTradingURL(symbol string, periodMinutes int) string {
-	// Определяем интервал для графика на основе периода анализа
-	interval := a.getTradingInterval(periodMinutes)
-
-	// Формируем URL для Bybit с параметром интервала
-	return fmt.Sprintf(
-		"https://www.bybit.com/trade/usdt/%s?interval=%s",
-		symbol,
-		interval,
-	)
 }
 
 // Метод для преобразования минут в интервал торгового терминала
@@ -370,16 +344,6 @@ func (a *CounterAnalyzer) getTradingInterval(periodMinutes int) string {
 		return "1D"
 	default:
 		return "15" // по умолчанию 15 минут
-	}
-}
-
-// getChartURL возвращает URL графика в зависимости от провайдера
-func (a *CounterAnalyzer) getChartURL(symbol, provider string) string {
-	switch provider {
-	case "tradingview":
-		return fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)
-	default: // coinglass
-		return fmt.Sprintf("https://www.coinglass.com/tv/%s", symbol)
 	}
 }
 

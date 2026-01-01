@@ -1,4 +1,4 @@
-// internal/telegram/webhook.go
+// internal/delivery/telegram/webhook.go
 package telegram
 
 import (

@@ -1,4 +1,4 @@
-// internal/telegram/callbacks.go
+// internal/delivery/telegram/callbacks.go
 package telegram
 
 // Callback constants

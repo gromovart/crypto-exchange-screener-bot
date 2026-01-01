@@ -1,4 +1,4 @@
-// internal/telegram/menu_manager.go
+// internal/delivery/telegram/menu_manager.go
 package telegram
 
 import (

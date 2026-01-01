@@ -1,4 +1,4 @@
-// internal/telegram/bot.go
+// internal/delivery/telegram/bot.go
 package telegram
 
 import (
@@ -27,6 +27,8 @@ type TelegramBot struct {
 	// ДОБАВЛЕНО: флаг для тестового режима
 	testMode   bool
 	testModeMu sync.RWMutex
+
+	buttonBuilder *ButtonURLBuilder
 }
 
 // NewTelegramBot создает новый экземпляр Telegram бота
@@ -61,6 +63,7 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 		startupTime:   time.Now(),
 		welcomeSent:   true, // НЕ отправляем приветствие для мониторинг-бота!
 		testMode:      cfg.MonitoringTestMode || false,
+		buttonBuilder: NewButtonURLBuilder(cfg.Exchange),
 	}
 
 	log.Printf("🤖 Создан Telegram бот для мониторинга (chat_id: %s)", chatID)

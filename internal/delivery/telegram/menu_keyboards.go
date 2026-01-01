@@ -1,4 +1,4 @@
-// internal/telegram/menu_keyboards.go
+// internal/delivery/telegram/menu_keyboards.go
 package telegram
 
 // MenuKeyboards - клавиатуры меню (2 ряда для устранения скролла)
