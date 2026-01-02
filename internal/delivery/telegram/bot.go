@@ -468,3 +468,58 @@ func (tb *TelegramBot) GetTestModeStatus() string {
 	}
 	return "❌ Выключен"
 }
+
+// =============================================
+// Статические методы для клавиатур (доступны без экземпляра)
+// =============================================
+
+// CreateWelcomeKeyboard создает приветственную клавиатуру
+func CreateWelcomeKeyboard() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+			},
+			{
+				{Text: ButtonTexts.Help, CallbackData: "help"},
+				{Text: ButtonTexts.Chart, CallbackData: "chart"},
+			},
+		},
+	}
+}
+
+// CreateSettingsKeyboard создает клавиатуру настроек (статическая версия)
+func CreateSettingsKeyboard() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "🔔 Включить уведомления", CallbackData: CallbackSettingsNotifyToggle},
+				{Text: "⚙️ Изменить пороги", CallbackData: "change_thresholds"},
+			},
+			{
+				{Text: "📊 Изменить период", CallbackData: CallbackSettingsChangePeriod},
+				{Text: "🧪 Тестовый режим", CallbackData: "toggle_test_mode"},
+			},
+			{
+				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+			},
+		},
+	}
+}
+
+// CreateTestKeyboard создает тестовую клавиатуру
+func CreateTestKeyboard() *InlineKeyboardMarkup {
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{
+				{Text: "✅ Тест", CallbackData: "test_ok"},
+				{Text: "❌ Отмена", CallbackData: "test_cancel"},
+			},
+			{
+				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+			},
+		},
+	}
+}

@@ -9,47 +9,60 @@ import (
 
 // MenuManager - менеджер меню
 type MenuManager struct {
-	config        *config.Config
-	enabled       bool
-	mu            sync.RWMutex
-	messageSender *MessageSender
-	handlers      *MenuHandlers
-	keyboards     *MenuKeyboards
-	menuUtils     *MenuUtils // ДОБАВЛЕНО
+	config         *config.Config
+	enabled        bool
+	mu             sync.RWMutex
+	messageSender  *MessageSender
+	handlers       *MenuHandlers
+	keyboardSystem *KeyboardSystem // ВМЕСТО MenuKeyboards
+	menuUtils      *MenuUtils
 }
 
 // NewMenuManager создает новый менеджер меню (старый конструктор)
 func NewMenuManager(cfg *config.Config, messageSender *MessageSender) *MenuManager {
-	// Используем старый конструктор для обратной совместимости
-	handlers := NewMenuHandlers(cfg, messageSender)
-	keyboards := NewMenuKeyboards()
-
-	// Создаем menuUtils по умолчанию
+	// Используем новый конструктор с KeyboardSystem
+	keyboardSystem := NewKeyboardSystem(cfg.Exchange)
 	menuUtils := NewDefaultMenuUtils()
+	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
 
 	return &MenuManager{
-		config:        cfg,
-		enabled:       true,
-		messageSender: messageSender,
-		handlers:      handlers,
-		keyboards:     keyboards,
-		menuUtils:     menuUtils, // ДОБАВЛЕНО
+		config:         cfg,
+		enabled:        true,
+		messageSender:  messageSender,
+		handlers:       handlers,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
 	}
 }
 
 // NewMenuManagerWithUtils создает менеджер меню с утилитами
 func NewMenuManagerWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuManager {
-	// Используем новый конструктор с утилитами
+	// Используем новый конструктор с KeyboardSystem
+	keyboardSystem := NewKeyboardSystem(cfg.Exchange)
 	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
-	keyboards := NewMenuKeyboards()
 
 	return &MenuManager{
-		config:        cfg,
-		enabled:       true,
-		messageSender: messageSender,
-		handlers:      handlers,
-		keyboards:     keyboards,
-		menuUtils:     menuUtils, // ДОБАВЛЕНО
+		config:         cfg,
+		enabled:        true,
+		messageSender:  messageSender,
+		handlers:       handlers,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
+	}
+}
+
+// NewMenuManagerWithKeyboardSystem создает менеджер меню с KeyboardSystem
+func NewMenuManagerWithKeyboardSystem(cfg *config.Config, messageSender *MessageSender, keyboardSystem *KeyboardSystem) *MenuManager {
+	menuUtils := NewDefaultMenuUtils()
+	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
+
+	return &MenuManager{
+		config:         cfg,
+		enabled:        true,
+		messageSender:  messageSender,
+		handlers:       handlers,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
 	}
 }
 
@@ -73,21 +86,14 @@ func (mm *MenuManager) IsEnabled() bool {
 	return mm.enabled
 }
 
-// SetupMenu устанавливает главное меню (2 ряда)
+// SetupMenu устанавливает главное меню
 func (mm *MenuManager) SetupMenu() error {
 	if !mm.IsEnabled() {
 		return nil
 	}
 
-	// Используем menuUtils для создания меню, если доступно
-	var menu ReplyKeyboardMarkup
-	if mm.menuUtils != nil {
-		menu = mm.menuUtils.FormatCompactMenu()
-	} else {
-		// Fallback на старый метод
-		menu = mm.keyboards.GetMainMenu()
-	}
-
+	// Используем KeyboardSystem для получения главного меню
+	menu := mm.keyboardSystem.GetMainMenu()
 	return mm.messageSender.SetReplyKeyboard(menu)
 }
 
@@ -118,66 +124,108 @@ func (mm *MenuManager) HandleCallback(callbackData string, chatID string) error 
 	return mm.handlers.HandleCallback(callbackData, chatID)
 }
 
-// GetMenuUtils возвращает утилиты меню (ДОБАВЛЕН МЕТОД)
+// GetMenuUtils возвращает утилиты меню
 func (mm *MenuManager) GetMenuUtils() *MenuUtils {
 	return mm.menuUtils
 }
 
+// GetKeyboardSystem возвращает систему клавиатур
+func (mm *MenuManager) GetKeyboardSystem() *KeyboardSystem {
+	return mm.keyboardSystem
+}
+
 // SendSettingsMessage отправляет сообщение настроек
 func (mm *MenuManager) SendSettingsMessage(chatID string) error {
-	// Используем menuUtils для создания меню настроек
-	var menu ReplyKeyboardMarkup
-	if mm.menuUtils != nil {
-		menu = mm.menuUtils.FormatSettingsMenu()
-	} else {
-		// Fallback на старый метод
-		menu = mm.keyboards.GetSettingsMenu()
-	}
-
+	// Используем KeyboardSystem для получения меню настроек
+	menu := mm.keyboardSystem.GetSettingsMenu()
 	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendSettingsInfo(chatID)
 }
 
+// SendStatus отправляет статус системы
 func (mm *MenuManager) SendStatus(chatID string) error {
 	return mm.handlers.SendStatus(chatID)
 }
 
+// SendHelp отправляет справку
 func (mm *MenuManager) SendHelp(chatID string) error {
 	return mm.handlers.SendHelp(chatID)
 }
 
+// SendNotificationsMenu отправляет меню уведомлений
 func (mm *MenuManager) SendNotificationsMenu(chatID string) error {
-	mm.messageSender.SetReplyKeyboard(mm.keyboards.GetNotificationsMenu())
+	menu := mm.keyboardSystem.GetNotificationsMenu()
+	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendNotificationsInfo(chatID)
 }
 
+// SendSignalTypesMenu отправляет меню типов сигналов
 func (mm *MenuManager) SendSignalTypesMenu(chatID string) error {
-	mm.messageSender.SetReplyKeyboard(mm.keyboards.GetSignalTypesMenu())
+	menu := mm.keyboardSystem.GetSignalTypesMenu()
+	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendSignalTypesInfo(chatID)
 }
 
+// SendPeriodMenu отправляет меню периодов
 func (mm *MenuManager) SendPeriodMenu(chatID string) error {
-	mm.messageSender.SetReplyKeyboard(mm.keyboards.GetPeriodsMenu())
+	menu := mm.keyboardSystem.GetPeriodsMenu()
+	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendPeriodsInfo(chatID)
 }
 
+// SendResetMenu отправляет меню сброса
 func (mm *MenuManager) SendResetMenu(chatID string) error {
-	mm.messageSender.SetReplyKeyboard(mm.keyboards.GetResetMenu())
+	menu := mm.keyboardSystem.GetResetMenu()
+	mm.messageSender.SetReplyKeyboard(menu)
 	return mm.handlers.SendResetInfo(chatID)
 }
 
+// HandleNotifyOn включает уведомления
 func (mm *MenuManager) HandleNotifyOn(chatID string) error {
 	return mm.handlers.HandleNotifyOn(chatID)
 }
 
+// HandleNotifyOff выключает уведомления
 func (mm *MenuManager) HandleNotifyOff(chatID string) error {
 	return mm.handlers.HandleNotifyOff(chatID)
 }
 
+// HandlePeriodChange обрабатывает изменение периода
 func (mm *MenuManager) HandlePeriodChange(chatID string, period string) error {
 	return mm.handlers.HandlePeriodChange(chatID, period)
 }
 
+// HandleResetAllCounters сбрасывает все счетчики
 func (mm *MenuManager) HandleResetAllCounters(chatID string) error {
 	return mm.handlers.HandleResetAllCounters(chatID)
+}
+
+// GetMainMenu возвращает главное меню (для внешнего использования)
+func (mm *MenuManager) GetMainMenu() ReplyKeyboardMarkup {
+	return mm.keyboardSystem.GetMainMenu()
+}
+
+// GetSettingsMenu возвращает меню настроек (для внешнего использования)
+func (mm *MenuManager) GetSettingsMenu() ReplyKeyboardMarkup {
+	return mm.keyboardSystem.GetSettingsMenu()
+}
+
+// CreateNotificationKeyboard создает клавиатуру для уведомлений
+func (mm *MenuManager) CreateNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
+	return mm.keyboardSystem.CreateNotificationKeyboard(symbol, periodMinutes)
+}
+
+// CreateEnhancedNotificationKeyboard создает расширенную клавиатуру для уведомлений
+func (mm *MenuManager) CreateEnhancedNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
+	return mm.keyboardSystem.CreateEnhancedNotificationKeyboard(symbol, periodMinutes)
+}
+
+// CreateCounterNotificationKeyboard создает клавиатуру для счетчика
+func (mm *MenuManager) CreateCounterNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
+	return mm.keyboardSystem.CreateCounterNotificationKeyboard(symbol, periodMinutes)
+}
+
+// ClearKeyboardCache очищает кэш клавиатур
+func (mm *MenuManager) ClearKeyboardCache() {
+	mm.keyboardSystem.ClearCache()
 }

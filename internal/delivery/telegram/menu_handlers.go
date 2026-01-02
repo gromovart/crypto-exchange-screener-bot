@@ -10,34 +10,34 @@ import (
 
 // MenuHandlers - обработчики меню
 type MenuHandlers struct {
-	config        *config.Config
-	messageSender *MessageSender
-	keyboards     *MenuKeyboards
-	menuUtils     *MenuUtils
+	config         *config.Config
+	messageSender  *MessageSender
+	keyboardSystem *KeyboardSystem // ВМЕСТО MenuKeyboards
+	menuUtils      *MenuUtils
 }
 
 // NewMenuHandlers создает новые обработчики меню (старый конструктор для обратной совместимости)
 func NewMenuHandlers(cfg *config.Config, messageSender *MessageSender) *MenuHandlers {
 	menuUtils := NewDefaultMenuUtils()
-	keyboards := NewMenuKeyboards()
+	keyboardSystem := NewKeyboardSystem(cfg.Exchange) // НОВЫЙ KeyboardSystem
 
 	return &MenuHandlers{
-		config:        cfg,
-		messageSender: messageSender,
-		keyboards:     keyboards,
-		menuUtils:     menuUtils,
+		config:         cfg,
+		messageSender:  messageSender,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
 	}
 }
 
 // NewMenuHandlersWithUtils создает обработчики меню с утилитами
 func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuHandlers {
-	keyboards := NewMenuKeyboards()
+	keyboardSystem := NewKeyboardSystem(cfg.Exchange) // НОВЫЙ KeyboardSystem
 
 	return &MenuHandlers{
-		config:        cfg,
-		messageSender: messageSender,
-		keyboards:     keyboards,
-		menuUtils:     menuUtils,
+		config:         cfg,
+		messageSender:  messageSender,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
 	}
 }
 
@@ -53,8 +53,8 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 		"• /help - Справка\n\n" +
 		"Используйте меню ниже для управления ботом:"
 
-	// Используем централизованную клавиатуру
-	keyboard := CreateWelcomeKeyboard()
+	// Используем KeyboardSystem для создания клавиатуры
+	keyboard := mh.keyboardSystem.CreateWelcomeKeyboard()
 
 	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
 }
@@ -63,14 +63,14 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 	switch text {
 	case "⚙️ Настройки":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSettingsMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
 		return mh.SendSettingsInfo(chatID)
 
 	case "📊 Статус":
 		return mh.SendStatus(chatID)
 
 	case "🔔 Уведомления":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetNotificationsMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetNotificationsMenu())
 		return mh.SendNotificationsInfo(chatID)
 
 	case "✅ Включить":
@@ -80,7 +80,7 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.HandleNotifyOff(chatID)
 
 	case "📈 Сигналы":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSignalTypesMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSignalTypesMenu())
 		return mh.SendSignalTypesInfo(chatID)
 
 	case "📈 Только рост":
@@ -99,7 +99,7 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.messageSender.SendMessageToChat(chatID, "📊 Теперь отслеживаются все сигналы", nil)
 
 	case "⏱️ Периоды":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetPeriodsMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetPeriodsMenu())
 		return mh.SendPeriodsInfo(chatID)
 
 	case "⏱️ 5мин", "⏱️ 5 мин":
@@ -118,7 +118,7 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.HandlePeriodChange(chatID, "4h")
 
 	case "🔄 Сбросить":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetResetMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetResetMenu())
 		return mh.SendResetInfo(chatID)
 
 	case "🔄 Все счетчики":
@@ -128,7 +128,7 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.SendHelp(chatID)
 
 	case "🔙 Назад", "🔙 Главное меню":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
 		return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
 
 	default:
@@ -150,19 +150,19 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 		if len(params) > 0 {
 			switch params[0] {
 			case "notify":
-				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetNotificationsMenu())
+				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetNotificationsMenu())
 				return mh.SendNotificationsInfo(chatID)
 			case "signals":
-				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSignalTypesMenu())
+				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSignalTypesMenu())
 				return mh.SendSignalTypesInfo(chatID)
 			case "periods":
-				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetPeriodsMenu())
+				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetPeriodsMenu())
 				return mh.SendPeriodsInfo(chatID)
 			case "reset":
-				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetResetMenu())
+				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetResetMenu())
 				return mh.SendResetInfo(chatID)
 			case "back":
-				mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
+				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
 				return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
 			}
 		}
@@ -199,7 +199,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 		return mh.SendStatus(chatID)
 
 	case CallbackSettings:
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSettingsMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
 		return mh.SendSettingsInfo(chatID)
 
 	case CallbackSettingsNotifyToggle:
@@ -211,7 +211,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 
 	case CallbackSettingsSignalType:
 		// Показываем inline клавиатуру для выбора типа сигналов
-		keyboard := CreateSignalTypeKeyboard(
+		keyboard := mh.keyboardSystem.CreateSignalTypeKeyboard(
 			mh.config.TelegramNotifyGrowth,
 			mh.config.TelegramNotifyFall,
 		)
@@ -238,7 +238,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 
 	case CallbackSettingsChangePeriod:
 		// Показываем inline клавиатуру для выбора периода
-		keyboard := CreatePeriodSelectionKeyboard()
+		keyboard := mh.keyboardSystem.CreatePeriodSelectionKeyboard()
 		return mh.messageSender.SendMessageToChat(chatID,
 			"⏱️ *Выберите период анализа:*", keyboard)
 
@@ -262,18 +262,21 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 
 	case CallbackSettingsBack:
 		// Возвращаемся к основному меню настроек
-		keyboard := CreateSettingsKeyboard()
+		keyboard := mh.keyboardSystem.CreateSettingsKeyboard(
+			mh.config.TelegramEnabled,
+			false, // testMode - можно добавить если нужно
+		)
 		return mh.messageSender.SendMessageToChat(chatID,
 			"⚙️ *Настройки бота:*", keyboard)
 
 	case CallbackSettingsBackToMain:
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
 		return mh.messageSender.SendMessageToChat(chatID,
 			"🔙 Возврат в главное меню", nil)
 
 	case CallbackSettingsResetCounter:
 		// Показываем inline клавиатуру для сброса
-		keyboard := CreateResetKeyboard()
+		keyboard := mh.keyboardSystem.CreateResetKeyboard()
 		return mh.messageSender.SendMessageToChat(chatID,
 			"🔄 *Выберите что сбросить:*", keyboard)
 
@@ -312,8 +315,8 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
 	message := "Выберите символ для сброса счетчика:"
 
-	// Используем централизованную клавиатуру
-	keyboard := CreateSymbolSelectionKeyboard()
+	// Используем KeyboardSystem для создания клавиатуры
+	keyboard := mh.keyboardSystem.CreateSymbolSelectionKeyboard()
 
 	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
 }
@@ -433,7 +436,7 @@ func (mh *MenuHandlers) HandleCommand(cmd, chatID string) error {
 	case "/notify_off":
 		return mh.HandleNotifyOff(chatID)
 	case "/settings":
-		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSettingsMenu())
+		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
 		return mh.SendSettingsInfo(chatID)
 	case "/test":
 		return mh.messageSender.SendTestMessage()
