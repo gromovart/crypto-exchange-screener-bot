@@ -24,13 +24,10 @@ type TelegramBot struct {
 	mu            sync.RWMutex
 	startupTime   time.Time
 	welcomeSent   bool
-
-	// ДОБАВЛЕНО: флаг для тестового режима
-	testMode   bool
-	testModeMu sync.RWMutex
-
+	testMode      bool
+	testModeMu    sync.RWMutex
 	buttonBuilder *ButtonURLBuilder
-	menuUtils     *MenuUtils // ДОБАВЛЕНО
+	menuUtils     *MenuUtils
 }
 
 // NewTelegramBot создает новый экземпляр Telegram бота
@@ -51,12 +48,15 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 
 	// Создаем новый бот для мониторинга (не Singleton!)
 	messageSender := NewMessageSender(&chatConfig)
-	menuUtils := NewMenuUtils(cfg.Exchange) // ДОБАВЛЕНО
+	menuUtils := NewMenuUtils(cfg.Exchange)
 	notifier := NewNotifier(&chatConfig)
 	notifier.SetMessageSender(messageSender)
 
 	// Используем menuUtils для создания менеджера меню
 	menuManager := NewMenuManagerWithUtils(&chatConfig, messageSender, menuUtils)
+
+	// Создаем buttonBuilder для кнопок
+	buttonBuilder := NewButtonURLBuilder(cfg.Exchange)
 
 	bot := &TelegramBot{
 		config:        &chatConfig,
@@ -69,8 +69,8 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 		startupTime:   time.Now(),
 		welcomeSent:   true, // НЕ отправляем приветствие для мониторинг-бота!
 		testMode:      cfg.MonitoringTestMode || false,
-		buttonBuilder: NewButtonURLBuilder(cfg.Exchange),
-		menuUtils:     menuUtils, // ДОБАВЛЕНО
+		buttonBuilder: buttonBuilder,
+		menuUtils:     menuUtils,
 	}
 
 	log.Printf("🤖 Создан Telegram бот для мониторинга (chat_id: %s)", chatID)
@@ -117,19 +117,20 @@ func (tb *TelegramBot) SendWelcomeMessage() error {
 		return nil
 	}
 
-	message := "🤖 *Бот активирован!*\n\n" +
-		"✅ Система мониторинга роста/падения запущена.\n" +
-		"🔔 Уведомления отправляются с ограничением 1 сообщение в 10 секунд.\n" +
-		"⚡ Настройки: рост=%.2f%%, падение=%.2f%%\n\n" +
-		"Используйте меню ниже для управления ботом ⬇️"
+	message := fmt.Sprintf(
+		"🤖 *Бот активирован!*\n\n"+
+			"✅ Система мониторинга роста/падения запущена.\n"+
+			"🔔 Уведомления отправляются с ограничением 1 сообщение в 10 секунд.\n"+
+			"⚡ Настройки: рост=%.2f%%, падение=%.2f%%\n\n"+
+			"Используйте меню ниже для управления ботом ⬇️",
+		tb.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth,
+		tb.config.AnalyzerConfigs.FallAnalyzer.MinFall,
+	)
 
-	// Используем настройки из конфигурации анализаторов
-	growthThreshold := tb.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth
-	fallThreshold := tb.config.AnalyzerConfigs.FallAnalyzer.MinFall
+	// Всегда используем CreateWelcomeKeyboard() - она статическая и не требует buttonBuilder
+	keyboard := CreateWelcomeKeyboard()
 
-	message = fmt.Sprintf(message, growthThreshold, fallThreshold)
-
-	err := tb.messageSender.SendTextMessage(message, nil, false)
+	err := tb.messageSender.SendTextMessage(message, keyboard, false)
 	if err == nil {
 		tb.welcomeSent = true
 		log.Println("✅ Приветственное сообщение отправлено (Singleton)")
@@ -153,7 +154,69 @@ func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
 		return nil
 	}
 
-	return tb.notifier.SendNotification(signal, tb.menuManager.IsEnabled())
+	// Используем notifier, если он есть
+	if tb.notifier != nil {
+		return tb.notifier.SendNotification(signal, tb.menuManager.IsEnabled())
+	}
+
+	// Если notifier не работает, отправляем напрямую
+	message := tb.formatSignalMessage(signal)
+
+	var keyboard *InlineKeyboardMarkup
+	if tb.buttonBuilder != nil && signal.Symbol != "" {
+		periodMinutes := signal.PeriodMinutes
+		if periodMinutes == 0 {
+			periodMinutes = tb.getDefaultPeriod()
+		}
+
+		// Определяем, нужна ли расширенная клавиатура
+		changePercent := tb.getSignalChangePercent(signal)
+		volume := signal.Volume24h
+
+		if changePercent >= 5.0 || volume >= 1000000 {
+			keyboard = tb.buttonBuilder.EnhancedNotificationKeyboard(signal.Symbol, periodMinutes)
+		} else {
+			keyboard = tb.buttonBuilder.StandardNotificationKeyboard(signal.Symbol, periodMinutes)
+		}
+	}
+
+	return tb.messageSender.SendTextMessage(message, keyboard, true)
+}
+
+// createSimpleKeyboard создает простую клавиатуру (fallback)
+func (tb *TelegramBot) createSimpleKeyboard(symbol string) *InlineKeyboardMarkup {
+	// Создаем кнопки вручную, если buttonBuilder недоступен
+	chartButton := InlineKeyboardButton{
+		Text: ButtonTexts.Chart,
+		URL: fmt.Sprintf("https://www.tradingview.com/chart/?symbol=%s:%s",
+			strings.ToUpper(tb.config.Exchange), symbol),
+	}
+
+	tradeButton := InlineKeyboardButton{
+		Text: ButtonTexts.Trade,
+		URL: fmt.Sprintf("%s/trade/usdt/%s?interval=15",
+			tb.getExchangeBaseURL(), symbol),
+	}
+
+	return &InlineKeyboardMarkup{
+		InlineKeyboard: [][]InlineKeyboardButton{
+			{chartButton, tradeButton},
+		},
+	}
+}
+
+// getExchangeBaseURL возвращает базовый URL биржи
+func (tb *TelegramBot) getExchangeBaseURL() string {
+	switch strings.ToLower(tb.config.Exchange) {
+	case "binance":
+		return "https://www.binance.com"
+	case "kucoin":
+		return "https://www.kucoin.com"
+	case "okx":
+		return "https://www.okx.com"
+	default:
+		return "https://www.bybit.com"
+	}
 }
 
 // SendMessage отправляет текстовое сообщение
@@ -177,7 +240,10 @@ func (tb *TelegramBot) SendTestMessage() error {
 	message := "🧪 *Тестовое сообщение от бота*\n\n" +
 		"Проверка работоспособности системы..."
 
-	return tb.messageSender.SendTextMessage(message, nil, false)
+	// Используем CreateTestKeyboard() - статический метод
+	keyboard := CreateTestKeyboard()
+
+	return tb.messageSender.SendTextMessage(message, keyboard, false)
 }
 
 // HandleMessage обрабатывает текстовые сообщения из меню
@@ -198,10 +264,10 @@ func (tb *TelegramBot) HandleCallback(callbackData string, chatID string) error 
 
 // StartCommandHandler обрабатывает команду /start
 func (tb *TelegramBot) StartCommandHandler(chatID string) error {
-	if tb.menuManager == nil {
-		return fmt.Errorf("menu manager not initialized")
+	if tb.menuManager != nil {
+		return tb.menuManager.StartCommandHandler(chatID)
 	}
-	return tb.menuManager.StartCommandHandler(chatID)
+	return nil
 }
 
 // SetMenuEnabled включает/выключает меню
@@ -225,32 +291,64 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 		return nil
 	}
 
-	// Используем menuUtils для форматирования сообщения
-	var message string
-	if tb.menuUtils != nil {
-		// Используем компактный формат
-		message = tb.menuUtils.FormatCounterMessage(symbol, signalType, count, maxSignals, period)
-	} else {
-		// Fallback на старый формат
-		message = formatLegacyCounterMessage(symbol, signalType, count, maxSignals, period)
-	}
+	// Форматируем сообщение
+	message := tb.formatCounterMessage(symbol, signalType, count, maxSignals, period)
 
-	// Создаем клавиатуру с использованием buttonBuilder
+	// Создаем клавиатуру с использованием ButtonURLBuilder
 	var keyboard *InlineKeyboardMarkup
 	if tb.buttonBuilder != nil {
-		// Получаем период в минутах для торгового URL
-		periodMinutes := parsePeriodToMinutes(period)
+		periodMinutes := tb.parsePeriodToMinutes(period)
 		keyboard = tb.buttonBuilder.CounterNotificationKeyboard(symbol, periodMinutes)
 	} else {
-		// Fallback на старую клавиатуру
-		keyboard = createLegacyCounterKeyboard(symbol)
+		// Fallback на простую клавиатуру
+		keyboard = tb.createSimpleKeyboard(symbol)
 	}
 
 	return tb.messageSender.SendTextMessage(message, keyboard, true)
 }
 
-// formatLegacyCounterMessage форматирует сообщение счетчика в старом формате (для обратной совместимости)
-func formatLegacyCounterMessage(symbol string, signalType string, count int, maxSignals int, period string) string {
+// formatSignalMessage форматирует сообщение о сигнале
+func (tb *TelegramBot) formatSignalMessage(signal types.GrowthSignal) string {
+	// Определяем иконку и направление
+	icon, directionStr, changePercent := tb.getSignalInfo(signal)
+
+	// Форматируем сообщение
+	return fmt.Sprintf(
+		"%s *%s %s на %.2f%%*\n\n"+
+			"💰 Цена: $%.2f → $%.2f\n"+
+			"📊 Точок данных: %d\n"+
+			"📈 Уверенность: %.1f%%\n"+
+			"🕐 Время: %s\n\n"+
+			"Используйте кнопки ниже для торговли ⬇️",
+		icon,
+		directionStr,
+		signal.Symbol,
+		changePercent,
+		signal.StartPrice,
+		signal.EndPrice,
+		signal.DataPoints,
+		signal.Confidence,
+		signal.Timestamp.Format("15:04:05"),
+	)
+}
+
+// getSignalInfo возвращает информацию о сигнале
+func (tb *TelegramBot) getSignalInfo(signal types.GrowthSignal) (icon, direction string, changePercent float64) {
+	// Определяем направление и процент изменения
+	if signal.Direction == "growth" {
+		icon = "🚀"
+		direction = "РОСТ"
+		changePercent = signal.GrowthPercent
+	} else {
+		icon = "📉"
+		direction = "ПАДЕНИЕ"
+		changePercent = signal.FallPercent
+	}
+	return
+}
+
+// formatCounterMessage форматирует сообщение счетчика
+func (tb *TelegramBot) formatCounterMessage(symbol string, signalType string, count int, maxSignals int, period string) string {
 	icon := "🟢"
 	directionStr := "РОСТ"
 	if signalType == "fall" {
@@ -263,33 +361,23 @@ func formatLegacyCounterMessage(symbol string, signalType string, count int, max
 
 	return fmt.Sprintf(
 		"📊 *Счетчик сигналов*\n"+
-			"%s %s\n"+
-			"Символ: %s\n"+
-			"Текущее: %d/%d (%.0f%%)\n"+
-			"Период: %s\n"+
+			"%s %s %s\n"+
+			"📈 Текущее: %d/%d (%.0f%%)\n"+
+			"⏱️ Период: %s\n"+
 			"🕐 %s",
-		icon, directionStr,
+		icon,
+		directionStr,
 		symbol,
-		count, maxSignals, percentage,
+		count,
+		maxSignals,
+		percentage,
 		period,
 		timeStr,
 	)
 }
 
-// createLegacyCounterKeyboard создает клавиатуру в старом формате (для обратной совместимости)
-func createLegacyCounterKeyboard(symbol string) *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{Text: "📊 График", URL: fmt.Sprintf("https://www.tradingview.com/chart/?symbol=BYBIT:%s", symbol)},
-				{Text: "💱 Торговать", URL: fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", symbol)},
-			},
-		},
-	}
-}
-
 // parsePeriodToMinutes преобразует строку периода в минуты
-func parsePeriodToMinutes(period string) int {
+func (tb *TelegramBot) parsePeriodToMinutes(period string) int {
 	switch strings.ToLower(period) {
 	case "5m", "5 минут":
 		return 5
@@ -304,6 +392,30 @@ func parsePeriodToMinutes(period string) int {
 	case "1d", "1 день":
 		return 1440
 	default:
-		return 15 // по умолчанию 15 минут
+		return tb.getDefaultPeriod()
 	}
+}
+
+// getDefaultPeriod возвращает период по умолчанию
+func (tb *TelegramBot) getDefaultPeriod() int {
+	return 15 // по умолчанию 15 минут
+}
+
+// getSignalChangePercent получает процент изменения из сигнала
+func (tb *TelegramBot) getSignalChangePercent(signal types.GrowthSignal) float64 {
+	if signal.Direction == "growth" {
+		return signal.GrowthPercent
+	}
+	return signal.FallPercent
+}
+
+// GetSettingsKeyboard возвращает клавиатуру настроек
+func (tb *TelegramBot) GetSettingsKeyboard() *InlineKeyboardMarkup {
+	// Используем buttonBuilder если есть, чтобы получить клавиатуру с актуальными статусами
+	if tb.buttonBuilder != nil {
+		return tb.buttonBuilder.UpdateSettingsKeyboard(tb)
+	}
+
+	// Fallback на статическую клавиатуру
+	return CreateSettingsKeyboard()
 }
