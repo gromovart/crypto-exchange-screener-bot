@@ -13,28 +13,30 @@ type MenuHandlers struct {
 	config        *config.Config
 	messageSender *MessageSender
 	keyboards     *MenuKeyboards
-	menuUtils     *MenuUtils // ДОБАВЛЕНО
+	menuUtils     *MenuUtils
 }
 
 // NewMenuHandlers создает новые обработчики меню (старый конструктор для обратной совместимости)
 func NewMenuHandlers(cfg *config.Config, messageSender *MessageSender) *MenuHandlers {
-	// Для обратной совместимости создаем menuUtils по умолчанию
 	menuUtils := NewDefaultMenuUtils()
+	keyboards := NewMenuKeyboards()
 
 	return &MenuHandlers{
 		config:        cfg,
 		messageSender: messageSender,
-		keyboards:     NewMenuKeyboards(),
-		menuUtils:     menuUtils, // ДОБАВЛЕНО
+		keyboards:     keyboards,
+		menuUtils:     menuUtils,
 	}
 }
 
 // NewMenuHandlersWithUtils создает обработчики меню с утилитами
 func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuHandlers {
+	keyboards := NewMenuKeyboards()
+
 	return &MenuHandlers{
 		config:        cfg,
 		messageSender: messageSender,
-		keyboards:     NewMenuKeyboards(),
+		keyboards:     keyboards,
 		menuUtils:     menuUtils,
 	}
 }
@@ -51,23 +53,8 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 		"• /help - Справка\n\n" +
 		"Используйте меню ниже для управления ботом:"
 
-	// Создаем inline клавиатуру для главного меню
-	keyboard := &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{Text: "⚙️ Настройки", CallbackData: "menu_settings"},
-				{Text: "📊 Статус", CallbackData: "menu_status"},
-			},
-			{
-				{Text: "🔔 Уведомления", CallbackData: "menu_notify"},
-				{Text: "📋 Помощь", CallbackData: "menu_help"},
-			},
-			{
-				{Text: "📈 Рост/Падение", CallbackData: "menu_signals"},
-				{Text: "⏱️ Период", CallbackData: "menu_periods"},
-			},
-		},
-	}
+	// Используем централизованную клавиатуру
+	keyboard := CreateWelcomeKeyboard()
 
 	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
 }
@@ -156,21 +143,7 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 // HandleCallback обрабатывает callback от inline кнопок
 func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error {
 	// Используем menuUtils для парсинга callback данных
-	var action string
-	var params []string
-
-	if mh.menuUtils != nil {
-		action, params = mh.menuUtils.ParseCallbackData(callbackData)
-	} else {
-		// Fallback для обратной совместимости
-		parts := strings.Split(callbackData, "_")
-		if len(parts) > 0 {
-			action = parts[0]
-			if len(parts) > 1 {
-				params = parts[1:]
-			}
-		}
-	}
+	action, params := mh.menuUtils.ParseCallbackData(callbackData)
 
 	switch action {
 	case "menu":
@@ -202,12 +175,15 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 			switch params[0] {
 			case "all":
 				return mh.HandleResetAllCounters(chatID)
-			case "growth":
-				return mh.messageSender.SendMessageToChat(chatID, "📈 Счетчик роста сброшен", nil)
-			case "fall":
-				return mh.messageSender.SendMessageToChat(chatID, "📉 Счетчик падения сброшен", nil)
 			case "symbol":
 				return mh.SendSymbolSelectionInline(chatID)
+			default:
+				// Проверяем, не начинается ли с symbol_
+				if strings.HasPrefix(callbackData, "symbol_") {
+					symbol := strings.TrimPrefix(callbackData, "symbol_")
+					return mh.messageSender.SendMessageToChat(chatID,
+						fmt.Sprintf("📊 Счетчик для %s сброшен", strings.ToUpper(symbol)), nil)
+				}
 			}
 		}
 	case "notify":
@@ -217,20 +193,116 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 				return mh.HandleNotifyOn(chatID)
 			case "off":
 				return mh.HandleNotifyOff(chatID)
-			case "growth":
-				mh.config.TelegramNotifyGrowth = true
-				mh.config.TelegramNotifyFall = false
-				return mh.messageSender.SendMessageToChat(chatID, "📈 Теперь отслеживается только рост", nil)
-			case "fall":
-				mh.config.TelegramNotifyGrowth = false
-				mh.config.TelegramNotifyFall = true
-				return mh.messageSender.SendMessageToChat(chatID, "📉 Теперь отслеживается только падение", nil)
-			case "all":
-				mh.config.TelegramNotifyGrowth = true
-				mh.config.TelegramNotifyFall = true
-				return mh.messageSender.SendMessageToChat(chatID, "📊 Теперь отслеживаются все сигналы", nil)
 			}
 		}
+	case CallbackStats:
+		return mh.SendStatus(chatID)
+
+	case CallbackSettings:
+		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetSettingsMenu())
+		return mh.SendSettingsInfo(chatID)
+
+	case CallbackSettingsNotifyToggle:
+		if mh.config.TelegramEnabled {
+			return mh.HandleNotifyOff(chatID)
+		} else {
+			return mh.HandleNotifyOn(chatID)
+		}
+
+	case CallbackSettingsSignalType:
+		// Показываем inline клавиатуру для выбора типа сигналов
+		keyboard := CreateSignalTypeKeyboard(
+			mh.config.TelegramNotifyGrowth,
+			mh.config.TelegramNotifyFall,
+		)
+		return mh.messageSender.SendMessageToChat(chatID,
+			"📊 *Выберите тип отслеживаемых сигналов:*", keyboard)
+
+	case CallbackTrackGrowthOnly:
+		mh.config.TelegramNotifyGrowth = true
+		mh.config.TelegramNotifyFall = false
+		return mh.messageSender.SendMessageToChat(chatID,
+			"✅ Теперь отслеживается только рост", nil)
+
+	case CallbackTrackFallOnly:
+		mh.config.TelegramNotifyGrowth = false
+		mh.config.TelegramNotifyFall = true
+		return mh.messageSender.SendMessageToChat(chatID,
+			"✅ Теперь отслеживается только падение", nil)
+
+	case CallbackTrackBoth:
+		mh.config.TelegramNotifyGrowth = true
+		mh.config.TelegramNotifyFall = true
+		return mh.messageSender.SendMessageToChat(chatID,
+			"✅ Теперь отслеживаются все сигналы", nil)
+
+	case CallbackSettingsChangePeriod:
+		// Показываем inline клавиатуру для выбора периода
+		keyboard := CreatePeriodSelectionKeyboard()
+		return mh.messageSender.SendMessageToChat(chatID,
+			"⏱️ *Выберите период анализа:*", keyboard)
+
+	case CallbackPeriod5m:
+		return mh.HandlePeriodChange(chatID, "5m")
+
+	case CallbackPeriod15m:
+		return mh.HandlePeriodChange(chatID, "15m")
+
+	case CallbackPeriod30m:
+		return mh.HandlePeriodChange(chatID, "30m")
+
+	case CallbackPeriod1h:
+		return mh.HandlePeriodChange(chatID, "1h")
+
+	case CallbackPeriod4h:
+		return mh.HandlePeriodChange(chatID, "4h")
+
+	case CallbackPeriod1d:
+		return mh.HandlePeriodChange(chatID, "1d")
+
+	case CallbackSettingsBack:
+		// Возвращаемся к основному меню настроек
+		keyboard := CreateSettingsKeyboard()
+		return mh.messageSender.SendMessageToChat(chatID,
+			"⚙️ *Настройки бота:*", keyboard)
+
+	case CallbackSettingsBackToMain:
+		mh.messageSender.SetReplyKeyboard(mh.keyboards.GetMainMenu())
+		return mh.messageSender.SendMessageToChat(chatID,
+			"🔙 Возврат в главное меню", nil)
+
+	case CallbackSettingsResetCounter:
+		// Показываем inline клавиатуру для сброса
+		keyboard := CreateResetKeyboard()
+		return mh.messageSender.SendMessageToChat(chatID,
+			"🔄 *Выберите что сбросить:*", keyboard)
+
+	case CallbackResetAll:
+		return mh.HandleResetAllCounters(chatID)
+
+	case CallbackResetBySymbol:
+		return mh.SendSymbolSelectionInline(chatID)
+
+	case "help":
+		return mh.SendHelp(chatID)
+
+	case "chart":
+		return mh.messageSender.SendMessageToChat(chatID,
+			"📊 *Графики*\n\n"+
+				"Используйте кнопки в уведомлениях для перехода к графикам.", nil)
+
+	case "test_ok":
+		return mh.messageSender.SendMessageToChat(chatID,
+			"✅ Тест пройден успешно!", nil)
+
+	case "test_cancel":
+		return mh.messageSender.SendMessageToChat(chatID,
+			"❌ Тест отменен", nil)
+
+	case "toggle_test_mode":
+		// Переключение тестового режима
+		return mh.messageSender.SendMessageToChat(chatID,
+			"🧪 Функционал тестового режима в разработке", nil)
 	}
 
 	return fmt.Errorf("unknown callback data: %s", callbackData)
@@ -240,21 +312,8 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 func (mh *MenuHandlers) SendSymbolSelectionInline(chatID string) error {
 	message := "Выберите символ для сброса счетчика:"
 
-	// Создаем inline клавиатуру
-	keyboard := &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{Text: "BTCUSDT", CallbackData: "reset_btc"},
-				{Text: "ETHUSDT", CallbackData: "reset_eth"},
-				{Text: "SOLUSDT", CallbackData: "reset_sol"},
-			},
-			{
-				{Text: "XRPUSDT", CallbackData: "reset_xrp"},
-				{Text: "BNBUSDT", CallbackData: "reset_bnb"},
-				{Text: "🔙 Назад", CallbackData: "menu_reset"},
-			},
-		},
-	}
+	// Используем централизованную клавиатуру
+	keyboard := CreateSymbolSelectionKeyboard()
 
 	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
 }
@@ -354,8 +413,6 @@ func (mh *MenuHandlers) SendResetInfo(chatID string) error {
 		"Выберите действие из меню ниже:\n\n" +
 		"• 🔄 Все счетчики - сбросить все счетчики\n" +
 		"• 📊 По символу - сбросить счетчик для символа\n" +
-		"• 📈 Счетчик роста - сбросить счетчик роста\n" +
-		"• 📉 Счетчик падения - сбросить счетчик падения\n" +
 		"• ⚙️ Настройки - перейти в настройки\n" +
 		"• 🔙 Главное меню - вернуться в главное меню"
 

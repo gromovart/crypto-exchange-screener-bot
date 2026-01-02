@@ -416,6 +416,55 @@ func (tb *TelegramBot) GetSettingsKeyboard() *InlineKeyboardMarkup {
 		return tb.buttonBuilder.UpdateSettingsKeyboard(tb)
 	}
 
-	// Fallback на статическую клавиатуру
+	// Fallback на статическую клавиатуру без статусов
 	return CreateSettingsKeyboard()
+}
+
+// GetButtonBuilder возвращает строитель кнопок (для тестирования)
+func (tb *TelegramBot) GetButtonBuilder() *ButtonURLBuilder {
+	return tb.buttonBuilder
+}
+
+// GetMenuUtils возвращает утилиты меню (для тестирования)
+func (tb *TelegramBot) GetMenuUtils() *MenuUtils {
+	return tb.menuUtils
+}
+
+// GetStats возвращает статистику бота
+func (tb *TelegramBot) GetStats() string {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+
+	uptime := time.Since(tb.startupTime).Round(time.Second)
+
+	return fmt.Sprintf(
+		"%s *Статистика бота*\n\n"+
+			"⏱️ Аптайм: %s\n"+
+			"📊 Уведомления: %v\n"+
+			"🔄 Меню: %v\n"+
+			"🧪 Тестовый режим: %v\n"+
+			"🏦 Биржа: %s",
+		ButtonTexts.Status,
+		uptime,
+		tb.config.TelegramEnabled,
+		tb.menuManager != nil && tb.menuManager.IsEnabled(),
+		tb.testMode,
+		tb.config.Exchange,
+	)
+}
+
+// GetNotificationStatus возвращает статус уведомлений в текстовом формате
+func (tb *TelegramBot) GetNotificationStatus() string {
+	if tb.IsNotifyEnabled() {
+		return "✅ Включены"
+	}
+	return "❌ Выключены"
+}
+
+// GetTestModeStatus возвращает статус тестового режима в текстовом формате
+func (tb *TelegramBot) GetTestModeStatus() string {
+	if tb.IsTestMode() {
+		return "✅ Включен"
+	}
+	return "❌ Выключен"
 }
