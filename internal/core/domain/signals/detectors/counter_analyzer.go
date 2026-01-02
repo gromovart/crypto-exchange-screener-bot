@@ -32,15 +32,22 @@ type CounterAnalyzer struct {
 
 // NewCounterAnalyzer создает новый анализатор счетчика
 func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgBot *telegram.TelegramBot) *CounterAnalyzer {
+	// Получаем провайдер графиков из конфигурации
+	chartProvider := SafeGetString(config.CustomSettings["chart_provider"], "coinglass")
+
+	// Создаем buttonBuilder с правильным провайдером
+	exchange := "bybit" // или получать из конфига
+	buttonBuilder := telegram.NewButtonURLBuilderWithProvider(exchange, chartProvider)
+
 	return &CounterAnalyzer{
 		config:              config,
 		storage:             storage,
 		telegramBot:         tgBot,
 		counters:            make(map[string]*internalCounter),
 		notificationEnabled: true,
-		chartProvider:       "coinglass",
+		chartProvider:       chartProvider,
 		lastPriceCache:      make(map[string]float64),
-		buttonBuilder:       telegram.NewButtonURLBuilder("bybit"),
+		buttonBuilder:       buttonBuilder, // <-- Используем новый строитель
 	}
 }
 
@@ -314,7 +321,7 @@ func (a *CounterAnalyzer) formatNotificationMessage(notification CounterNotifica
 
 // createNotificationKeyboard создает клавиатуру для уведомления (ОБНОВЛЕННЫЙ)
 func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotification) *telegram.InlineKeyboardMarkup {
-	// Используем строитель для создания кнопок
+	// Используем строитель который уже знает о провайдере графиков
 	periodMinutes := notification.Period.GetMinutes()
 
 	return &telegram.InlineKeyboardMarkup{

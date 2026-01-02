@@ -127,10 +127,7 @@ func (tb *TelegramBot) SendWelcomeMessage() error {
 		tb.config.AnalyzerConfigs.FallAnalyzer.MinFall,
 	)
 
-	// Всегда используем CreateWelcomeKeyboard() - она статическая и не требует buttonBuilder
-	keyboard := CreateWelcomeKeyboard()
-
-	err := tb.messageSender.SendTextMessage(message, keyboard, false)
+	err := tb.messageSender.SendTextMessage(message, nil, false)
 	if err == nil {
 		tb.welcomeSent = true
 		log.Println("✅ Приветственное сообщение отправлено (Singleton)")

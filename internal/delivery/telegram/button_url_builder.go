@@ -8,30 +8,99 @@ import (
 
 // ButtonURLBuilder - строитель URL для кнопок
 type ButtonURLBuilder struct {
-	exchange string
+	exchange      string
+	chartProvider string // coinglass или tradingview
 }
 
 // NewButtonURLBuilder создает новый строитель URL
 func NewButtonURLBuilder(exchange string) *ButtonURLBuilder {
 	return &ButtonURLBuilder{
-		exchange: strings.ToLower(exchange),
+		exchange:      strings.ToLower(exchange),
+		chartProvider: "coinglass", // значение по умолчанию
 	}
 }
 
-// GetChartURL возвращает URL графика
+// NewButtonURLBuilderWithProvider создает строитель URL с указанным провайдером графиков
+func NewButtonURLBuilderWithProvider(exchange, chartProvider string) *ButtonURLBuilder {
+	provider := strings.ToLower(chartProvider)
+	if provider != "coinglass" && provider != "tradingview" {
+		provider = "coinglass" // fallback на coinglass
+	}
+
+	return &ButtonURLBuilder{
+		exchange:      strings.ToLower(exchange),
+		chartProvider: provider,
+	}
+}
+
+// SetChartProvider устанавливает провайдера графиков
+func (b *ButtonURLBuilder) SetChartProvider(provider string) {
+	provider = strings.ToLower(provider)
+	if provider == "coinglass" || provider == "tradingview" {
+		b.chartProvider = provider
+	}
+}
+
+// GetChartURL возвращает URL графика (ЗАМЕНЕН - теперь зависит от chartProvider)
 func (b *ButtonURLBuilder) GetChartURL(symbol string) string {
 	cleanSymbol := strings.ToUpper(symbol)
 
+	switch b.chartProvider {
+	case "tradingview":
+		return b.getTradingViewURL(cleanSymbol)
+	case "coinglass":
+		fallthrough
+	default:
+		return b.GetCoinglassURL(cleanSymbol)
+	}
+}
+
+// getTradingViewURL возвращает URL TradingView
+func (b *ButtonURLBuilder) getTradingViewURL(symbol string) string {
+	// TradingView использует разные коды для бирж
+	var exchangeCode string
 	switch b.exchange {
 	case "binance":
-		return fmt.Sprintf("https://www.binance.com/en/trade/%s?layout=pro", cleanSymbol)
+		exchangeCode = "BINANCE"
 	case "kucoin":
-		return fmt.Sprintf("https://www.kucoin.com/trade/%s", cleanSymbol)
+		exchangeCode = "KUCOIN"
 	case "okx":
-		return fmt.Sprintf("https://www.okx.com/trade-spot/%s", strings.ToLower(symbol))
-	default: // bybit
-		return fmt.Sprintf("https://www.bybit.com/trade/usdt/%s", cleanSymbol)
+		exchangeCode = "OKX"
+	case "bybit":
+		exchangeCode = "BYBIT"
+	default:
+		exchangeCode = "BYBIT"
 	}
+
+	return fmt.Sprintf("https://www.tradingview.com/chart/?symbol=%s:%s",
+		exchangeCode, symbol)
+}
+
+// GetCoinglassURL возвращает URL Coinglass
+func (b *ButtonURLBuilder) GetCoinglassURL(symbol string) string {
+	cleanSymbol := strings.ToUpper(symbol)
+
+	// Coinglass использует форматы вроде BTC (без USDT)
+	baseSymbol := strings.ReplaceAll(cleanSymbol, "USDT", "")
+
+	// Для некоторых пар может потребоваться преобразование
+	symbolMap := map[string]string{
+		"BTCUSDT":  "BTC",
+		"ETHUSDT":  "ETH",
+		"BNBUSDT":  "BNB",
+		"SOLUSDT":  "SOL",
+		"XRPUSDT":  "XRP",
+		"ADAUSDT":  "ADA",
+		"DOGEUSDT": "DOGE",
+		"DOTUSDT":  "DOT",
+		"LTCUSDT":  "LTC",
+	}
+
+	if mapped, ok := symbolMap[cleanSymbol]; ok {
+		baseSymbol = mapped
+	}
+
+	return fmt.Sprintf("https://www.coinglass.com/pro/%s", baseSymbol)
 }
 
 // GetTradeURL возвращает URL для торговли
@@ -58,21 +127,18 @@ func (b *ButtonURLBuilder) GetCoinGeckoURL(symbol string) string {
 	return fmt.Sprintf("https://www.coingecko.com/en/coins/%s", baseSymbol)
 }
 
-// GetCoinglassURL возвращает URL Coinglass
-func (b *ButtonURLBuilder) GetCoinglassURL(symbol string) string {
-	return fmt.Sprintf("https://www.coinglass.com/pro/%s", symbol)
-}
-
-// GetTradingViewURL возвращает URL TradingView
-func (b *ButtonURLBuilder) GetTradingViewURL(symbol string) string {
-	return fmt.Sprintf("https://www.tradingview.com/chart/?symbol=%s:%s",
-		strings.ToUpper(b.exchange), symbol)
-}
-
-// GetChartButton создает кнопку "График"
+// GetChartButton создает кнопку "График" (ЗАМЕНЕН - теперь зависит от chartProvider)
 func (b *ButtonURLBuilder) GetChartButton(symbol string) InlineKeyboardButton {
+	// Меняем текст кнопки в зависимости от провайдера
+	buttonText := ButtonTexts.Chart
+	if b.chartProvider == "coinglass" {
+		buttonText = "🧊 Coinglass"
+	} else if b.chartProvider == "tradingview" {
+		buttonText = "📈 TradingView"
+	}
+
 	return InlineKeyboardButton{
-		Text: ButtonTexts.Chart,
+		Text: buttonText,
 		URL:  b.GetChartURL(symbol),
 	}
 }
@@ -96,7 +162,7 @@ func (b *ButtonURLBuilder) GetCoinGeckoButton(symbol string) InlineKeyboardButto
 // GetCoinglassButton создает кнопку "Coinglass"
 func (b *ButtonURLBuilder) GetCoinglassButton(symbol string) InlineKeyboardButton {
 	return InlineKeyboardButton{
-		Text: ButtonTexts.Coinglass,
+		Text: "🧊 Coinglass",
 		URL:  b.GetCoinglassURL(symbol),
 	}
 }
@@ -104,8 +170,8 @@ func (b *ButtonURLBuilder) GetCoinglassButton(symbol string) InlineKeyboardButto
 // GetTradingViewButton создает кнопку "TradingView"
 func (b *ButtonURLBuilder) GetTradingViewButton(symbol string) InlineKeyboardButton {
 	return InlineKeyboardButton{
-		Text: ButtonTexts.TradingView,
-		URL:  b.GetTradingViewURL(symbol),
+		Text: "📈 TradingView",
+		URL:  b.getTradingViewURL(symbol),
 	}
 }
 
@@ -131,9 +197,20 @@ func (b *ButtonURLBuilder) EnhancedNotificationKeyboard(symbol string, periodMin
 			},
 			{
 				b.GetCoinGeckoButton(symbol),
-				b.GetCoinglassButton(symbol),
+				// В зависимости от провайдера используем другую кнопку
+				b.getAdditionalChartButton(symbol),
 			},
 		},
+	}
+}
+
+// getAdditionalChartButton возвращает дополнительную кнопку графика
+func (b *ButtonURLBuilder) getAdditionalChartButton(symbol string) InlineKeyboardButton {
+	// Если основной провайдер coinglass, то показываем tradingview и наоборот
+	if b.chartProvider == "coinglass" {
+		return b.GetTradingViewButton(symbol)
+	} else {
+		return b.GetCoinglassButton(symbol)
 	}
 }
 
@@ -204,4 +281,9 @@ func (b *ButtonURLBuilder) getIntervalString(minutes int) string {
 // GetExchange возвращает биржу
 func (b *ButtonURLBuilder) GetExchange() string {
 	return b.exchange
+}
+
+// GetChartProvider возвращает провайдера графиков
+func (b *ButtonURLBuilder) GetChartProvider() string {
+	return b.chartProvider
 }

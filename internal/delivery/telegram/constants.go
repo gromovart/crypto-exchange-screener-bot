@@ -13,7 +13,7 @@ var ButtonTexts = struct {
 	Help        string
 	Back        string
 }{
-	Chart:       "📊 График",
+	Chart:       "📊 График", // Общий текст, меняется в buttonBuilder
 	Trade:       "💱 Торговать",
 	CoinGecko:   "📰 CoinGecko",
 	TradingView: "📈 TradingView",
