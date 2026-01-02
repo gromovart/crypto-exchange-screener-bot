@@ -115,8 +115,15 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	// 4. Создаем PriceFetcher
 	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus)
 
-	// 5. Создаем CompositeNotificationService (сначала, чтобы передать в события)
-	dm.notification = notifier.NewCompositeNotificationService()
+	// 5. Создаем CompositeNotificationService через фабрику
+	log.Println("📱 Создание CompositeNotificationService через фабрику...")
+	notifierFactory := notifier.NewNotifierFactory()
+	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)
+
+	if dm.notification == nil {
+		return fmt.Errorf("не удалось создать CompositeNotificationService")
+	}
+	log.Println("✅ CompositeNotificationService создан через фабрику")
 
 	// 6. СОЗДАЕМ/ПОЛУЧАЕМ TELEGRAM БОТА (Singleton)
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
@@ -153,15 +160,9 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	// 8. Создаем SignalPipeline
 	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
 
-	// 9. Регистрируем подписчиков с передачей бота
-	log.Println("📋 Регистрация подписчиков EventBus с переданным ботом...")
-	eventFactory := &events.Factory{}
-	eventFactory.RegisterDefaultSubscribers(
-		dm.eventBus,
-		dm.config,
-		dm.telegramBot,  // ПЕРЕДАЕМ БОТА
-		dm.notification, // И notification service
-	)
+	// 9. Регистрируем подписчиков (теперь только основные)
+	log.Println("📋 Регистрация базовых подписчиков EventBus...")
+	dm.registerBasicSubscribers()
 
 	// 10. Создаем реестр сервисов
 	dm.registry = NewServiceRegistry()
@@ -179,43 +180,37 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	}
 	dm.lifecycle = NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
 
-	// 12. Настраиваем нотификаторы с передачей бота
-	dm.setupNotifiers(dm.telegramBot) // ПЕРЕДАЕМ БОТА
+	// 12. Настраиваем пайплайн
+	dm.setupPipeline()
 
 	// 13. Регистрируем сервисы
 	if err := dm.registerServices(); err != nil {
 		return err
 	}
 
-	// 14. Настраиваем пайплайн
-	dm.setupPipeline()
+	// 14. Подписываем notification service на события
+	dm.subscribeNotificationService()
 
 	return nil
 }
 
-// setupNotifiers настраивает нотификаторы
-func (dm *DataManager) setupNotifiers(telegramBot *telegram.TelegramBot) {
+// registerBasicSubscribers регистрирует только базовых подписчиков
+func (dm *DataManager) registerBasicSubscribers() {
+	// Консольный логгер для ошибок и сигналов
+	consoleSubscriber := events.NewConsoleLoggerSubscriber()
+	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
+	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
+
+	log.Println("✅ Базовые подписчики зарегистрированы")
+}
+
+// subscribeNotificationService подписывает notification service на события сигналов
+func (dm *DataManager) subscribeNotificationService() {
 	if dm.notification == nil {
 		return
 	}
 
-	// Добавляем консольный нотификатор
-	consoleNotifier := notifier.NewConsoleNotifier(dm.config.MessageFormat == "compact")
-	dm.notification.AddNotifier(consoleNotifier)
-
-	// Добавляем Telegram нотификатор если бот передан
-	if dm.config.TelegramEnabled && telegramBot != nil {
-		log.Println("📱 Создание TelegramNotifier с переданным ботом...")
-		telegramNotifier := notifier.NewEnhancedTelegramNotifier(dm.config)
-		if telegramNotifier != nil {
-			dm.notification.AddNotifier(telegramNotifier)
-			log.Println("✅ TelegramNotifier добавлен в CompositeNotificationService")
-		}
-	} else if dm.config.TelegramEnabled && telegramBot == nil {
-		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан в setupNotifiers")
-	}
-
-	// Подписываем CompositeNotificationService на события сигналов
 	notificationSubscriber := events.NewBaseSubscriber(
 		"notification_service",
 		[]events.EventType{events.EventSignalDetected},
@@ -232,8 +227,7 @@ func (dm *DataManager) setupNotifiers(telegramBot *telegram.TelegramBot) {
 	)
 
 	dm.eventBus.Subscribe(events.EventSignalDetected, notificationSubscriber)
-
-	logger.Info("✅ Нотификаторы настроены")
+	log.Println("✅ Notification service подписан на события сигналов")
 }
 
 // setupPipeline настраивает этапы обработки сигналов
@@ -620,10 +614,10 @@ func (dm *DataManager) GetAnalysisResults(symbol string, periods []time.Duration
 
 // GetActiveAnalyzers возвращает список активных анализаторов
 func (dm *DataManager) GetActiveAnalyzers() []string {
-	if dm.analysisEngine == nil {
-		return []string{}
+	if dm.analysisEngine != nil {
+		return dm.analysisEngine.GetAnalyzers()
 	}
-	return dm.analysisEngine.GetAnalyzers()
+	return []string{}
 }
 
 // AddConsoleSubscriber добавляет подписчика для вывода в консоль

@@ -3,6 +3,7 @@ package telegram
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -41,18 +42,97 @@ func (b *ButtonURLBuilder) SetChartProvider(provider string) {
 	}
 }
 
-// GetChartURL возвращает URL графика (ЗАМЕНЕН - теперь зависит от chartProvider)
+// GetChartURL возвращает URL графика с проверкой поддерживаемых символов
 func (b *ButtonURLBuilder) GetChartURL(symbol string) string {
 	cleanSymbol := strings.ToUpper(symbol)
+	baseSymbol := b.extractBaseSymbol(cleanSymbol)
 
-	switch b.chartProvider {
-	case "tradingview":
-		return b.getTradingViewURL(cleanSymbol)
-	case "coinglass":
-		fallthrough
-	default:
+	// Определяем, использовать ли Coinglass
+	useCoinglass := b.chartProvider == "coinglass" && b.supportsCoinglass(baseSymbol)
+
+	if useCoinglass {
 		return b.GetCoinglassURL(cleanSymbol)
+	} else {
+		// Всегда TradingView для неподдерживаемых символов
+		return b.getTradingViewURL(cleanSymbol)
 	}
+}
+
+// supportsCoinglass проверяет, поддерживает ли Coinglass этот символ
+func (b *ButtonURLBuilder) supportsCoinglass(baseSymbol string) bool {
+	// Список символов, которые поддерживает Coinglass
+	supportedSymbols := map[string]bool{
+		// Основные криптовалюты (Top 100 по market cap)
+		"BTC": true, "ETH": true, "BNB": true, "SOL": true, "XRP": true,
+		"ADA": true, "DOGE": true, "DOT": true, "LTC": true, "AVAX": true,
+		"MATIC": true, "TRX": true, "LINK": true, "UNI": true, "ATOM": true,
+		"FIL": true, "ETC": true, "ALGO": true, "VET": true, "AXS": true,
+		"SAND": true, "MANA": true, "SHIB": true, "PEPE": true, "FLOKI": true,
+		"ARB": true, "OP": true, "IMX": true, "RNDR": true, "TAO": true,
+		"FET": true, "ONDO": true, "WIF": true, "BONK": true, "JUP": true,
+		"APT": true, "NEAR": true, "AAVE": true, "MKR": true, "SNX": true,
+		"CRV": true, "COMP": true, "YFI": true, "SUSHI": true, "CAKE": true,
+		"1INCH": true, "RUNE": true, "KAVA": true, "INJ": true, "SEI": true,
+		"SUI": true, "TIA": true, "DYM": true, "STRK": true, "ENA": true,
+		"BCH": true, "XLM": true, "ICP": true, "HBAR": true, "FTM": true,
+		"QNT": true, "EGLD": true, "THETA": true, "XTZ": true,
+		"EOS": true, "BSV": true, "OKB": true, "KLAY": true, "NEO": true,
+
+		// Stablecoins
+		"USDT": true, "USDC": true, "DAI": true, "TUSD": true, "BUSD": true,
+		"USDD": true, "FDUSD": true,
+
+		// Layer 1
+		"ONE": true, "FLOW": true, "MINA": true,
+
+		// Мемкоины
+		"MEME": true, "FARTCOIN": false, // пример неподдерживаемого
+
+		// AI
+		"AGIX": true, "OCEAN": true, "NMR": true,
+		"GRT": true,
+
+		// RWA
+		"CFG": true, "RIO": true, "TRU": true,
+
+		// Gaming
+		"GALA": true, "ENJ": true, "ILV": true, "YGG": true,
+
+		// NFT
+		"BLUR": true, "LOOKS": true,
+
+		// Oracles
+		"BAND": true, "API3": true, "UMA": true,
+	}
+
+	// Проверяем, есть ли символ в списке поддерживаемых
+	supported, exists := supportedSymbols[baseSymbol]
+	if !exists {
+		// Если символа нет в списке, считаем что не поддерживается
+		return false
+	}
+
+	return supported
+}
+
+// extractBaseSymbol извлекает базовый символ (без USDT и т.д.)
+func (b *ButtonURLBuilder) extractBaseSymbol(symbol string) string {
+	cleanSymbol := strings.ToUpper(symbol)
+
+	// Удаляем суффиксы в правильном порядке (самые длинные сначала)
+	suffixes := []string{
+		"USDT", "USDC", "BUSD", "FDUSD", "TUSD",
+		"BTC", "ETH", "BNB", "EUR", "GBP", "JPY",
+		"DAI", "USDD", "USTC",
+	}
+
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(cleanSymbol, suffix) {
+			return strings.TrimSuffix(cleanSymbol, suffix)
+		}
+	}
+
+	return cleanSymbol
 }
 
 // getTradingViewURL возвращает URL TradingView
@@ -79,28 +159,38 @@ func (b *ButtonURLBuilder) getTradingViewURL(symbol string) string {
 // GetCoinglassURL возвращает URL Coinglass
 func (b *ButtonURLBuilder) GetCoinglassURL(symbol string) string {
 	cleanSymbol := strings.ToUpper(symbol)
+	baseSymbol := b.extractBaseSymbol(cleanSymbol)
 
-	// Coinglass использует форматы вроде BTC (без USDT)
-	baseSymbol := strings.ReplaceAll(cleanSymbol, "USDT", "")
+	// Очищаем символ от специальных символов
+	re := regexp.MustCompile(`[^A-Z0-9-]`)
+	cleanBaseSymbol := re.ReplaceAllString(baseSymbol, "")
 
-	// Для некоторых пар может потребоваться преобразование
-	symbolMap := map[string]string{
-		"BTCUSDT":  "BTC",
-		"ETHUSDT":  "ETH",
-		"BNBUSDT":  "BNB",
-		"SOLUSDT":  "SOL",
-		"XRPUSDT":  "XRP",
-		"ADAUSDT":  "ADA",
-		"DOGEUSDT": "DOGE",
-		"DOTUSDT":  "DOT",
-		"LTCUSDT":  "LTC",
+	if cleanBaseSymbol == "" {
+		cleanBaseSymbol = "BTC" // fallback
 	}
 
-	if mapped, ok := symbolMap[cleanSymbol]; ok {
-		baseSymbol = mapped
+	return fmt.Sprintf("https://www.coinglass.com/pro/%s", cleanBaseSymbol)
+}
+
+// GetChartButton создает кнопку "График" с умным выбором провайдера
+func (b *ButtonURLBuilder) GetChartButton(symbol string) InlineKeyboardButton {
+	cleanSymbol := strings.ToUpper(symbol)
+	baseSymbol := b.extractBaseSymbol(cleanSymbol)
+
+	// Определяем, использовать ли Coinglass
+	useCoinglass := b.chartProvider == "coinglass" && b.supportsCoinglass(baseSymbol)
+
+	var buttonText string
+	if useCoinglass {
+		buttonText = "🧊 Coinglass"
+	} else {
+		buttonText = "📈 TradingView"
 	}
 
-	return fmt.Sprintf("https://www.coinglass.com/pro/%s", baseSymbol)
+	return InlineKeyboardButton{
+		Text: buttonText,
+		URL:  b.GetChartURL(symbol),
+	}
 }
 
 // GetTradeURL возвращает URL для торговли
@@ -123,24 +213,8 @@ func (b *ButtonURLBuilder) GetTradeURL(symbol string, periodMinutes int) string 
 // GetCoinGeckoURL возвращает URL CoinGecko
 func (b *ButtonURLBuilder) GetCoinGeckoURL(symbol string) string {
 	// Преобразуем символ биржи в название монеты для CoinGecko
-	baseSymbol := strings.ToLower(strings.ReplaceAll(symbol, "USDT", ""))
+	baseSymbol := strings.ToLower(b.extractBaseSymbol(symbol))
 	return fmt.Sprintf("https://www.coingecko.com/en/coins/%s", baseSymbol)
-}
-
-// GetChartButton создает кнопку "График" (ЗАМЕНЕН - теперь зависит от chartProvider)
-func (b *ButtonURLBuilder) GetChartButton(symbol string) InlineKeyboardButton {
-	// Меняем текст кнопки в зависимости от провайдера
-	buttonText := ButtonTexts.Chart
-	if b.chartProvider == "coinglass" {
-		buttonText = "🧊 Coinglass"
-	} else if b.chartProvider == "tradingview" {
-		buttonText = "📈 TradingView"
-	}
-
-	return InlineKeyboardButton{
-		Text: buttonText,
-		URL:  b.GetChartURL(symbol),
-	}
 }
 
 // GetTradeButton создает кнопку "Торговать"
@@ -206,8 +280,11 @@ func (b *ButtonURLBuilder) EnhancedNotificationKeyboard(symbol string, periodMin
 
 // getAdditionalChartButton возвращает дополнительную кнопку графика
 func (b *ButtonURLBuilder) getAdditionalChartButton(symbol string) InlineKeyboardButton {
-	// Если основной провайдер coinglass, то показываем tradingview и наоборот
-	if b.chartProvider == "coinglass" {
+	cleanSymbol := strings.ToUpper(symbol)
+	baseSymbol := b.extractBaseSymbol(cleanSymbol)
+
+	// Если основной провайдер coinglass и символ поддерживается, показываем tradingview
+	if b.chartProvider == "coinglass" && b.supportsCoinglass(baseSymbol) {
 		return b.GetTradingViewButton(symbol)
 	} else {
 		return b.GetCoinglassButton(symbol)
@@ -261,7 +338,7 @@ func (b *ButtonURLBuilder) UpdateSettingsKeyboard(bot *TelegramBot) *InlineKeybo
 // getIntervalString преобразует минуты в строку интервала
 func (b *ButtonURLBuilder) getIntervalString(minutes int) string {
 	switch minutes {
-	case 5:
+	case 1, 5:
 		return "5"
 	case 15:
 		return "15"
@@ -286,4 +363,21 @@ func (b *ButtonURLBuilder) GetExchange() string {
 // GetChartProvider возвращает провайдера графиков
 func (b *ButtonURLBuilder) GetChartProvider() string {
 	return b.chartProvider
+}
+
+// GetBaseSymbol возвращает базовый символ (без суффикса)
+func (b *ButtonURLBuilder) GetBaseSymbol(symbol string) string {
+	return b.extractBaseSymbol(symbol)
+}
+
+// IsSymbolSupported проверяет, поддерживается ли символ текущим провайдером
+func (b *ButtonURLBuilder) IsSymbolSupported(symbol string) bool {
+	baseSymbol := b.extractBaseSymbol(strings.ToUpper(symbol))
+
+	if b.chartProvider == "coinglass" {
+		return b.supportsCoinglass(baseSymbol)
+	}
+
+	// TradingView поддерживает все символы
+	return true
 }
