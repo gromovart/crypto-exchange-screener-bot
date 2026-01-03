@@ -121,17 +121,10 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 
 	builder.WriteString(fmt.Sprintf("\n⏱️  Период: %s", period))
 
-	// Добавляем рекомендации по времени
+	// Добавляем рекомендации по времени (УДАЛЕНО дублирование в конце функции)
 	f.addTimeRecommendation(&builder, period, signalCount, maxSignals)
 
-	// Добавляем общие рекомендации
-	if percentage >= 80 {
-		builder.WriteString("\n🚨 Внимание: счетчик скоро сбросится")
-	} else if percentage >= 60 {
-		builder.WriteString("\n⚠️  Повышенная активность")
-	}
-
-	return builder.String()
+	return builder.String() // УДАЛЕНО: Дублирующий код предупреждений
 }
 
 // addSymbolInfo добавляет информацию о символе
@@ -218,7 +211,7 @@ func (f *MarketMessageFormatter) addTimeRecommendation(builder *strings.Builder,
 		}
 	}
 
-	// Общие рекомендации
+	// Общие рекомендации (ЕДИНСТВЕННОЕ место для этих предупреждений)
 	if percentage >= 80 {
 		builder.WriteString("\n🚨 Внимание: счетчик скоро сбросится")
 	} else if percentage >= 60 {
