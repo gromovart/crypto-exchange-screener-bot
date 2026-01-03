@@ -39,7 +39,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 ) string {
 	// Отладочный лог
 	log.Printf("🔍 MarketMessageFormatter.FormatCounterMessage для %s:", symbol)
-	log.Printf("   openInterest параметр = %.1f", openInterest)
+	log.Printf("   openInterest = %.1f", openInterest)
 	log.Printf("   oiChange24h = %.1f%%", oiChange24h)
 	log.Printf("   currentPrice = %.5f", currentPrice)
 	log.Printf("   volume24h = %.2f", volume24h)
@@ -74,8 +74,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	builder.WriteString(fmt.Sprintf("💰 Цена: $%s\n", f.formatPrice(currentPrice)))
 
 	// Объем с проверкой правдоподобности
-	builder.WriteString(fmt.Sprintf("📊 Объем 24ч: %s\n",
-		f.formatDollarValue(volume24h)))
+	builder.WriteString(fmt.Sprintf("📊 Объем 24ч: $%s\n", f.formatDollarValue(volume24h)))
 
 	// Открытый интерес с улучшенным форматированием
 	oiText := f.formatOpenInterest(openInterest, oiChange24h)
@@ -124,6 +123,13 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 
 	// Добавляем рекомендации по времени
 	f.addTimeRecommendation(&builder, period, signalCount, maxSignals)
+
+	// Добавляем общие рекомендации
+	if percentage >= 80 {
+		builder.WriteString("\n🚨 Внимание: счетчик скоро сбросится")
+	} else if percentage >= 60 {
+		builder.WriteString("\n⚠️  Повышенная активность")
+	}
 
 	return builder.String()
 }
@@ -240,11 +246,11 @@ func (f *MarketMessageFormatter) formatPrice(price float64) string {
 // formatDollarValue форматирует долларовые значения в читаемый вид
 func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 	if num == 0 {
-		return "$0"
+		return "0"
 	}
 
 	if num < 0 {
-		return "$ошибка"
+		return "ошибка"
 	}
 
 	// Форматируем в M (миллионы) или K (тысячи)

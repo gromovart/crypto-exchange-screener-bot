@@ -230,6 +230,7 @@ func (f *BybitPriceFetcher) getOpenInterestForSymbol(symbol string) float64 {
 	f.oiCacheMu.RUnlock()
 
 	if exists && oi > 0 {
+		logger.Debug("📊 BybitFetcher: OI из кэша для %s: %.0f", symbol, oi)
 		return oi
 	}
 
@@ -238,7 +239,9 @@ func (f *BybitPriceFetcher) getOpenInterestForSymbol(symbol string) float64 {
 	if err != nil {
 		logger.Debug("⚠️ Не удалось получить OI для %s: %v", symbol, err)
 		// Используем эвристику
-		return f.calculateEstimatedOIFromStorage(symbol)
+		estimatedOI := f.calculateEstimatedOIFromStorage(symbol)
+		logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", symbol, estimatedOI)
+		return estimatedOI
 	}
 
 	// Кэшируем
@@ -246,9 +249,7 @@ func (f *BybitPriceFetcher) getOpenInterestForSymbol(symbol string) float64 {
 	f.oiCache[symbol] = oi
 	f.oiCacheMu.Unlock()
 
-	if oi > 0 {
-		logger.Debug("📊 BybitFetcher: получен OI для %s: %.0f", symbol, oi)
-	}
+	logger.Debug("📊 BybitFetcher: получен OI с API для %s: %.0f", symbol, oi)
 
 	return oi
 }
@@ -313,8 +314,13 @@ func (f *BybitPriceFetcher) useEstimatedOI(symbols []string) error {
 
 // calculateEstimatedOI рассчитывает OI на основе эвристики
 func (f *BybitPriceFetcher) calculateEstimatedOI(symbol string, snapshot *storage.PriceSnapshot) float64 {
+	logger.Debug("📊 calculateEstimatedOI для %s: VolumeUSD=%.0f, Price=%.8f",
+		symbol, snapshot.VolumeUSD, snapshot.Price)
+
 	// Базовый OI - 5% от объема
 	baseOI := snapshot.VolumeUSD * 0.05
+
+	logger.Debug("   Базовый OI (5%% от объема): %.0f", baseOI)
 
 	// Корректируем для разных типов символов
 	symbolUpper := strings.ToUpper(symbol)
@@ -323,26 +329,33 @@ func (f *BybitPriceFetcher) calculateEstimatedOI(symbol string, snapshot *storag
 	case strings.Contains(symbolUpper, "BTC"):
 		// BTC имеет высокий OI
 		baseOI *= 1.5
+		logger.Debug("   Корректировка для BTC: x1.5 = %.0f", baseOI)
 	case strings.Contains(symbolUpper, "ETH"):
 		baseOI *= 1.3
+		logger.Debug("   Корректировка для ETH: x1.3 = %.0f", baseOI)
 	case strings.Contains(symbolUpper, "SOL") || strings.Contains(symbolUpper, "BNB"):
 		baseOI *= 1.2
+		logger.Debug("   Корректировка для SOL/BNB: x1.2 = %.0f", baseOI)
 	case strings.Contains(symbolUpper, "STABLE") || strings.Contains(symbolUpper, "USDT"):
 		// Стабильные монеты имеют низкий OI
 		baseOI *= 0.3
+		logger.Debug("   Корректировка для USDT: x0.3 = %.0f", baseOI)
 	case snapshot.Price < 0.01:
 		// Очень дешевые монеты
 		baseOI *= 0.5
+		logger.Debug("   Корректировка для дешевой монеты: x0.5 = %.0f", baseOI)
 	}
 
 	// Ограничиваем разумными значениями
 	if baseOI > 10_000_000_000 { // 10B
+		logger.Warn("⚠️  OI превышает 10B, ограничиваем: %.0f -> 10B", baseOI)
 		baseOI = 10_000_000_000
 	}
 	if baseOI < 10_000 { // Минимум 10K
 		baseOI = 10_000
 	}
 
+	logger.Debug("   Итоговый OI: %.0f", baseOI)
 	return baseOI
 }
 
@@ -356,7 +369,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		return fmt.Errorf("failed to get tickers: %w", err)
 	}
 
-	logger.Debug("📊 BybitFetcher: получено %d тикеров", len(tickers.Result.List))
+	logger.Debug("📊 BybitFetcher: получено %d тикеров, категория: %s",
+		len(tickers.Result.List), f.client.Category())
 
 	now := time.Now()
 	updatedCount := 0
@@ -364,6 +378,14 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 	// Собираем все цены в массив
 	var priceDataList []types.PriceData
+
+	// Отладка: лог первых 5 тикеров
+	logger.Info("🔍 Первые 5 тикеров из ответа API:")
+	for i := 0; i < 5 && i < len(tickers.Result.List); i++ {
+		ticker := tickers.Result.List[i]
+		logger.Info("   %d. %s: цена=%s, OI=%s, FundingRate='%s'",
+			i+1, ticker.Symbol, ticker.LastPrice, ticker.OpenInterest, ticker.FundingRate)
+	}
 
 	for i, ticker := range tickers.Result.List {
 		// Парсим цену
@@ -396,9 +418,25 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		// 🔴 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Используем метод getOpenInterestForSymbol
 		openInterest := f.getOpenInterestForSymbol(ticker.Symbol)
 
-		// Логируем OI если есть
+		// Проверка на реалистичность OI
 		if openInterest > 0 {
-			logger.Debug("📊 BybitFetcher: %s OI=%.0f", ticker.Symbol, openInterest)
+			// Проверяем соотношение OI к объему
+			if volumeUSD > 0 {
+				ratio := openInterest / volumeUSD
+				if ratio > 10 { // OI не должен быть больше 10x объема
+					logger.Warn("⚠️ Подозрительное соотношение OI/Volume для %s: OI=%.0f, Volume=%.0f, соотношение=%.1fx",
+						ticker.Symbol, openInterest, volumeUSD, ratio)
+
+					// Корректируем OI до 5% от объема
+					correctedOI := volumeUSD * 0.05
+					logger.Info("📉 Скорректированный OI для %s: %.0f (было %.0f)",
+						ticker.Symbol, correctedOI, openInterest)
+					openInterest = correctedOI
+				}
+			}
+
+			logger.Debug("📊 BybitFetcher: %s OI=%.0f, Volume=%.0f",
+				ticker.Symbol, openInterest, volumeUSD)
 		}
 
 		// Также получаем фандинг для фьючерсов
@@ -416,17 +454,28 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		high24h := price
 		low24h := price
 
-		// Временная логика: если цена растет, устанавливаем high24h выше
-		if change24h > 0 {
-			high24h = price * (1 + change24h/100)
-			low24h = price * (1 - change24h/200)
-		} else if change24h < 0 {
-			high24h = price * (1 - change24h/200)
-			low24h = price * (1 + change24h/100)
+		// Парсим реальные значения если есть
+		if ticker.High24h != "" {
+			if h, err := parseFloat(ticker.High24h); err == nil {
+				high24h = h
+			}
+		}
+		if ticker.Low24h != "" {
+			if l, err := parseFloat(ticker.Low24h); err == nil {
+				low24h = l
+			}
 		}
 
-		logger.Debug("💰 BybitFetcher: сохранение %s: price=%f, volume24h=%f, OI=%f",
-			ticker.Symbol, price, volumeUSD, openInterest)
+		// Детальный лог для FUSDT
+		if ticker.Symbol == "FUSDT" {
+			logger.Info("🔍 Детальная информация для FUSDT:")
+			logger.Info("   Цена: %s -> %.8f", ticker.LastPrice, price)
+			logger.Info("   Объем24h: %s -> %.0f", ticker.Volume24h, volumeBase)
+			logger.Info("   Turnover24h: %s -> %.0f", ticker.Turnover24h, volumeUSD)
+			logger.Info("   OI строка: '%s'", ticker.OpenInterest)
+			logger.Info("   Фандинг строка: '%s' -> %.6f%%", ticker.FundingRate, fundingRate*100)
+			logger.Info("   Полученный OI: %.0f", openInterest)
+		}
 
 		// Сохраняем цену со всеми параметрами
 		if err := f.storage.StorePrice(
