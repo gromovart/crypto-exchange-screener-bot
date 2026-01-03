@@ -51,6 +51,11 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	log.Printf("   longLiqVolume = %.2f", longLiqVolume)
 	log.Printf("   shortLiqVolume = %.2f", shortLiqVolume)
 
+	// Временно используем нулевые значения для дельты
+	// TODO: Получить реальные данные из анализатора
+	volumeDelta := 0.0
+	volumeDeltaPercent := 0.0
+
 	return f.FormatMessage(
 		symbol,
 		direction,
@@ -68,6 +73,8 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 		liquidationVolume,
 		longLiqVolume,
 		shortLiqVolume,
+		volumeDelta,
+		volumeDeltaPercent,
 	)
 }
 
@@ -89,6 +96,8 @@ func (f *MarketMessageFormatter) FormatMessage(
 	liquidationVolume float64,
 	longLiqVolume float64,
 	shortLiqVolume float64,
+	volumeDelta float64, // Дельта объемов в USD
+	volumeDeltaPercent float64, // Изменение дельты в процентах
 ) string {
 	var builder strings.Builder
 
@@ -124,9 +133,17 @@ func (f *MarketMessageFormatter) FormatMessage(
 	oiStr := f.formatOIWithChange(openInterest, oiChange24h)
 	builder.WriteString(fmt.Sprintf("📈 OI: %s\n", oiStr))
 
-	// Объем
+	// Объем 24ч
 	volumeStr := f.formatDollarValue(volume24h)
-	builder.WriteString(fmt.Sprintf("📊 Объем: $%s\n\n", volumeStr))
+	builder.WriteString(fmt.Sprintf("📊 Объем 24ч: $%s\n", volumeStr))
+
+	// Дельта объемов с изменением
+	if volumeDelta != 0 || volumeDeltaPercent != 0 {
+		deltaStr := f.formatVolumeDelta(volumeDelta, volumeDeltaPercent, direction)
+		builder.WriteString(fmt.Sprintf("📈 Дельта: %s\n\n", deltaStr))
+	} else {
+		builder.WriteString("\n")
+	}
 
 	// ==================== БЛОК 4: ЛИКВИДАЦИИ ====================
 	if liquidationVolume > 0 && volume24h > 0 {
@@ -203,6 +220,55 @@ func (f *MarketMessageFormatter) FormatMessage(
 }
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+
+// formatVolumeDelta форматирует дельту объемов с процентом изменения
+func (f *MarketMessageFormatter) formatVolumeDelta(delta float64, deltaPercent float64, direction string) string {
+	if delta == 0 && deltaPercent == 0 {
+		return "─"
+	}
+
+	// Определяем знак и цвет дельты
+	var deltaIcon string
+	deltaFormatted := math.Abs(delta)
+
+	if delta > 0 {
+		// Положительная дельта - покупки преобладают
+		deltaIcon = "🟢"
+	} else if delta < 0 {
+		// Отрицательная дельта - продажи преобладают
+		deltaIcon = "🔴"
+	} else {
+		// Нулевая дельта
+		deltaIcon = "⚪"
+	}
+
+	// Форматируем значение дельты
+	deltaStr := f.formatDollarValue(deltaFormatted)
+
+	// Если есть процент изменения, добавляем его
+	if deltaPercent != 0 {
+		percentIcon := "🟢"
+		percentPrefix := "+"
+
+		if deltaPercent < 0 {
+			percentIcon = "🔴"
+			percentPrefix = "-"
+		}
+
+		// Проверяем согласованность знаков
+		if (delta > 0 && deltaPercent > 0) || (delta < 0 && deltaPercent < 0) {
+			// Согласованные знаки - покупатели/продавцы усиливают давление
+			return fmt.Sprintf("%s%s (%s%s%.1f%%)",
+				deltaIcon, deltaStr, percentIcon, percentPrefix, math.Abs(deltaPercent))
+		} else {
+			// Противоречивые знаки - возможен разворот
+			return fmt.Sprintf("%s%s (⚠️ %s%.1f%%)",
+				deltaIcon, deltaStr, percentPrefix, math.Abs(deltaPercent))
+		}
+	}
+
+	return fmt.Sprintf("%s%s", deltaIcon, deltaStr)
+}
 
 // getContractType возвращает тип контракта
 func (f *MarketMessageFormatter) getContractType(symbol string) string {
