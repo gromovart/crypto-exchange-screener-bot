@@ -1,4 +1,4 @@
-// internal/api/types.go
+// internal/infrastructure/api/types.go
 package api
 
 import (

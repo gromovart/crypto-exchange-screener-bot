@@ -403,7 +403,11 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		// Также получаем фандинг для фьючерсов
 		fundingRate := 0.0
-		// TODO: Получить реальный фандинг от API
+
+		if ticker.FundingRate != "" {
+			fundingRate, _ = parseFloat(ticker.FundingRate)
+			logger.Debug("💰 BybitFetcher: %s фандинг = %.4f%%", ticker.Symbol, fundingRate*100)
+		}
 
 		// Change24h
 		change24h, _ := parseFloat(ticker.Price24hPcnt)
