@@ -29,11 +29,20 @@ type BybitPriceFetcher struct {
 	oiCache   map[string]float64
 	oiCacheMu sync.RWMutex
 
+	// Кэш для ликвидаций
+	liqCache   map[string]*bybit.LiquidationMetrics
+	liqCacheMu sync.RWMutex
+
 	// Настройки OI
 	oiEnabled        bool
 	oiUpdateInterval time.Duration
 	lastOIUpdate     time.Time
 	oiRetryCount     int
+
+	// Настройки ликвидаций
+	liqEnabled        bool
+	liqUpdateInterval time.Duration
+	lastLiqUpdate     time.Time
 }
 
 // NewPriceFetcher создает новый PriceFetcher
@@ -45,12 +54,18 @@ func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorage,
 		stopChan: make(chan struct{}),
 		running:  false,
 		oiCache:  make(map[string]float64),
+		liqCache: make(map[string]*bybit.LiquidationMetrics),
 
 		// Настройки OI
 		oiEnabled:        true,
-		oiUpdateInterval: 5 * time.Minute, // Обновлять OI каждые 5 минут
+		oiUpdateInterval: 5 * time.Minute,
 		lastOIUpdate:     time.Now(),
 		oiRetryCount:     0,
+
+		// Настройки ликвидаций
+		liqEnabled:        true,
+		liqUpdateInterval: 1 * time.Minute, // Обновлять ликвидации чаще
+		lastLiqUpdate:     time.Now(),
 	}
 }
 
@@ -569,4 +584,116 @@ func parseFloat(s string) (float64, error) {
 	var result float64
 	_, err := fmt.Sscanf(s, "%f", &result)
 	return result, err
+}
+
+// fetchLiquidationsLoop цикл получения ликвидаций
+func (f *BybitPriceFetcher) fetchLiquidationsLoop(interval time.Duration) {
+	defer f.wg.Done()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// Первоначальный запрос
+	if err := f.fetchLiquidations(); err != nil {
+		logger.Warn("Ошибка первоначального получения ликвидаций: %v", err)
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := f.fetchLiquidations(); err != nil {
+				logger.Warn("Ошибка получения ликвидаций: %v", err)
+			}
+		case <-f.stopChan:
+			return
+		}
+	}
+}
+
+// fetchLiquidations получает данные о ликвидациях
+func (f *BybitPriceFetcher) fetchLiquidations() error {
+	if !f.liqEnabled {
+		return nil
+	}
+
+	// Проверяем, прошло ли достаточно времени с последнего обновления
+	if time.Since(f.lastLiqUpdate) < f.liqUpdateInterval {
+		return nil
+	}
+
+	logger.Info("🔄 BybitFetcher: получение данных о ликвидациях...")
+
+	// Получаем символы с наибольшим объемом
+	symbols, err := f.storage.GetTopSymbolsByVolumeUSD(10) // Топ-10 символов
+	if err != nil {
+		logger.Warn("⚠️ Не удалось получить топ-символы: %v", err)
+		return err
+	}
+
+	for _, symbolVolume := range symbols {
+		symbol := symbolVolume.Symbol
+
+		summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute) // За последние 5 минут
+		if err != nil {
+			logger.Debug("⚠️ Не удалось получить ликвидации для %s: %v", symbol, err)
+			continue
+		}
+
+		metrics := &bybit.LiquidationMetrics{
+			Symbol:         symbol,
+			TotalVolumeUSD: summary["total_volume_usd"].(float64),
+			LongLiqVolume:  summary["long_liq_volume"].(float64),
+			ShortLiqVolume: summary["short_liq_volume"].(float64),
+			LongLiqCount:   summary["long_liq_count"].(int),
+			ShortLiqCount:  summary["short_liq_count"].(int),
+			UpdateTime:     time.Now(),
+		}
+
+		f.liqCacheMu.Lock()
+		f.liqCache[symbol] = metrics
+		f.liqCacheMu.Unlock()
+
+		if metrics.TotalVolumeUSD > 0 {
+			logger.Debug("💥 Ликвидации %s: $%.0f (длинные: $%.0f, короткие: $%.0f)",
+				symbol, metrics.TotalVolumeUSD, metrics.LongLiqVolume, metrics.ShortLiqVolume)
+		}
+	}
+
+	f.lastLiqUpdate = time.Now()
+	return nil
+}
+
+// GetLiquidationMetrics получает метрики ликвидаций для символа
+func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.LiquidationMetrics, bool) {
+	f.liqCacheMu.RLock()
+	metrics, exists := f.liqCache[symbol]
+	f.liqCacheMu.RUnlock()
+
+	if !exists || time.Since(metrics.UpdateTime) > 10*time.Minute {
+		// Если данных нет или они устарели, пытаемся получить свежие
+		go func() {
+			summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute)
+			if err == nil {
+				metrics = &bybit.LiquidationMetrics{
+					Symbol:         symbol,
+					TotalVolumeUSD: summary["total_volume_usd"].(float64),
+					LongLiqVolume:  summary["long_liq_volume"].(float64),
+					ShortLiqVolume: summary["short_liq_volume"].(float64),
+					LongLiqCount:   summary["long_liq_count"].(int),
+					ShortLiqCount:  summary["short_liq_count"].(int),
+					UpdateTime:     time.Now(),
+				}
+
+				f.liqCacheMu.Lock()
+				f.liqCache[symbol] = metrics
+				f.liqCacheMu.Unlock()
+			}
+		}()
+
+		if !exists {
+			return nil, false
+		}
+	}
+
+	return metrics, true
 }

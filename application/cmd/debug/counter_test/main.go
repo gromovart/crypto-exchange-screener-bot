@@ -61,7 +61,7 @@ func runBasicCounterTest() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Тестовые данные
 	now := time.Now()
@@ -166,7 +166,7 @@ func runPeriodAndResetTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   🔄 Тест смены периодов и сброса:")
 
@@ -241,7 +241,7 @@ func runStatisticsAndMetadataTest() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   📊 Тест статистики и метаданных:")
 
@@ -322,7 +322,7 @@ func runEdgeCasesTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Только одна точка данных
 	singleData := []types.PriceData{
@@ -381,7 +381,7 @@ func runEdgeCasesTest() {
 		},
 	}
 
-	analyzer2 := analyzers.NewCounterAnalyzer(configNoGrowth, nil, nil)
+	analyzer2 := analyzers.NewCounterAnalyzer(configNoGrowth, nil, nil, nil)
 	growthData := []types.PriceData{
 		{Symbol: "BTCUSDT", Price: 100.0, Timestamp: time.Now().Add(-2 * time.Minute)},
 		{Symbol: "BTCUSDT", Price: 100.2, Timestamp: time.Now().Add(-1 * time.Minute)},
@@ -404,7 +404,7 @@ func runPerformanceTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   ⚡ Тест производительности:")
 

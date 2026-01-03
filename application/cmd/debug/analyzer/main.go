@@ -74,7 +74,7 @@ func testCounterAnalyzerExtended() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Тест 1: Многократный анализ одного символа
 	fmt.Println("   📈 Тест 1: Многократный анализ BTCUSDT")
@@ -267,7 +267,7 @@ func testAllAnalyzersIntegration() {
 	// Создаем анализаторы
 	growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
 	fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
-	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, nil, nil)
+	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, nil, nil, nil)
 	continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
 
 	// Запускаем все анализаторы
@@ -354,7 +354,7 @@ func testCounterAnalyzer(testData []types.PriceData) {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil)
+	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
 
 	logger.Debug("   Конфигурация CounterAnalyzer:")
 	fmt.Printf("      • Базовый период: %d мин\n", config.CustomSettings["base_period_minutes"])

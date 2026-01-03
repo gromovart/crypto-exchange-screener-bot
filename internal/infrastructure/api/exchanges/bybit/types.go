@@ -1,6 +1,8 @@
 // internal/infrastructure/api/exchanges/bybit/types.go
 package bybit
 
+import "time"
+
 const (
 	CategorySpot    = "spot"
 	CategoryLinear  = "linear"  // USDT-M фьючерсы
@@ -134,4 +136,59 @@ type bybitTickerResponse struct {
 		} `json:"list"`
 	} `json:"result"`
 	Time int64 `json:"time"`
+}
+
+// LiquidationData данные о ликвидации
+type LiquidationData struct {
+	Symbol        string    `json:"symbol"`
+	Side          string    `json:"side"` // "Buy" или "Sell"
+	Price         float64   `json:"price"`
+	Quantity      float64   `json:"qty"`
+	Time          time.Time `json:"time"`
+	IsLiquidation bool      `json:"is_liquidation"`
+}
+
+// LiquidationMetrics метрики ликвидаций
+type LiquidationMetrics struct {
+	Symbol         string    `json:"symbol"`
+	TotalVolumeUSD float64   `json:"total_volume_usd"`
+	LongLiqVolume  float64   `json:"long_liq_volume"`
+	ShortLiqVolume float64   `json:"short_liq_volume"`
+	LongLiqCount   int       `json:"long_liq_count"`
+	ShortLiqCount  int       `json:"short_liq_count"`
+	UpdateTime     time.Time `json:"update_time"`
+}
+
+// LiquidationResponse ответ от API ликвидаций
+type LiquidationResponse struct {
+	RetCode int    `json:"retCode"`
+	RetMsg  string `json:"retMsg"`
+	Result  struct {
+		List []struct {
+			Symbol   string `json:"symbol"`
+			Side     string `json:"side"`
+			Price    string `json:"price"`
+			Size     string `json:"size"`
+			Time     string `json:"time"`
+			ExecType string `json:"exec_type"` // "Liquidation" для ликвидаций
+		} `json:"list"`
+	} `json:"result"`
+}
+
+// RecentTradesResponse ответ последних сделок
+type RecentTradesResponse struct {
+	RetCode int    `json:"retCode"`
+	RetMsg  string `json:"retMsg"`
+	Result  struct {
+		Category string `json:"category"`
+		List     []struct {
+			ExecId   string `json:"execId"`
+			Symbol   string `json:"symbol"`
+			Price    string `json:"price"`
+			Size     string `json:"size"`
+			Side     string `json:"side"`
+			Time     string `json:"time"`
+			ExecType string `json:"execType"`
+		} `json:"list"`
+	} `json:"result"`
 }

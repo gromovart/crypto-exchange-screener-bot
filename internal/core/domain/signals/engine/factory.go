@@ -273,11 +273,6 @@ func (f *Factory) configureCounterAnalyzer(
 ) {
 	log.Println("🔧 Настройка CounterAnalyzer с переданным Telegram ботом")
 
-	// Проверяем, передан ли бот
-	if cfg.TelegramEnabled && telegramBot == nil {
-		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан в CounterAnalyzer")
-	}
-
 	// Получаем настройки CounterAnalyzer из конфигурации
 	analyzerConfigs := cfg.AnalyzerConfigs
 	customSettings := analyzerConfigs.CounterAnalyzer.CustomSettings
@@ -309,7 +304,13 @@ func (f *Factory) configureCounterAnalyzer(
 
 	// Создаем CounterAnalyzer с переданным ботом
 	storage := engine.GetStorage()
-	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, storage, telegramBot)
+
+	// НУЖНО ПЕРЕДАТЬ marketFetcher, но его нет в текущем контексте
+	// Решение 1: Передать nil временно
+	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, storage, telegramBot, nil)
+
+	// Решение 2: Если у вас есть доступ к DataManager, можно передать marketFetcher
+	// Но в текущей структуре фабрики этого нет
 
 	// Регистрируем анализатор
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {

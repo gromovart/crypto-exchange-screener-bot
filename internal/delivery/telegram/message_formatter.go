@@ -36,6 +36,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	averageFunding float64,
 	nextFundingTime time.Time,
 	period string,
+	liquidationVolume float64,
 ) string {
 	// Отладочный лог
 	log.Printf("🔍 MarketMessageFormatter.FormatCounterMessage для %s:", symbol)
@@ -44,6 +45,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	log.Printf("   currentPrice = %.5f", currentPrice)
 	log.Printf("   volume24h = %.2f", volume24h)
 	log.Printf("   fundingRate = %.6f", fundingRate)
+	log.Printf("   liquidationVolume = %.2f", liquidationVolume)
 
 	var builder strings.Builder
 
@@ -112,6 +114,26 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	// Добавляем разделитель после OI и фандинга
 	builder.WriteString("──────────────────────────────────────\n")
 
+	// ==================== БЛОК: ЛИКВИДАЦИИ ====================
+	if liquidationVolume > 0 {
+		// Убираем лишний разделитель - он уже добавлен выше
+		// builder.WriteString("──────────────────────────────────────\n")
+
+		// Форматируем объем ликвидаций
+		liqStr := f.formatDollarValue(liquidationVolume)
+		builder.WriteString(fmt.Sprintf("💥 Ликвидации 5мин: $%s\n", liqStr))
+
+		// Добавляем эмодзи в зависимости от объема
+		if liquidationVolume > 1_000_000 { // > 1M
+			builder.WriteString("🚨 Высокий объем ликвидаций!\n")
+		} else if liquidationVolume > 100_000 { // > 100K
+			builder.WriteString("⚠️  Заметные ликвидации\n")
+		}
+
+		// Добавляем разделитель после ликвидаций
+		builder.WriteString("──────────────────────────────────────\n")
+	}
+
 	// ==================== БЛОК 7: СЧЕТЧИК СИГНАЛОВ ====================
 	// Счетчик сигналов с прогресс-баром
 	percentage := float64(signalCount) / float64(maxSignals) * 100
@@ -154,12 +176,17 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 // addSymbolInfo добавляет информацию о символе
 func (f *MarketMessageFormatter) addSymbolInfo(builder *strings.Builder, symbol string, price float64) {
 	// Определяем тип контракта
-	if strings.Contains(symbol, "USDT") {
+	symbolUpper := strings.ToUpper(symbol)
+
+	if strings.Contains(symbolUpper, "USDT") {
 		builder.WriteString("💎 USDT-фьючерс\n")
-	} else if strings.Contains(symbol, "USD") {
+	} else if strings.Contains(symbolUpper, "USD") && !strings.Contains(symbolUpper, "USDT") {
 		builder.WriteString("💵 USD-фьючерс\n")
-	} else if strings.Contains(symbol, "PERP") {
+	} else if strings.Contains(symbolUpper, "PERP") {
 		builder.WriteString("📈 Бессрочный контракт\n")
+	} else {
+		// Для других символов указываем общий тип
+		builder.WriteString("📊 Фьючерс\n")
 	}
 
 	// Оцениваем волатильность
@@ -178,6 +205,10 @@ func (f *MarketMessageFormatter) addSymbolInfo(builder *strings.Builder, symbol 
 
 // estimateVolatility оценивает волатильность на основе цены
 func (f *MarketMessageFormatter) estimateVolatility(price float64) float64 {
+	if price <= 0 {
+		return 0
+	}
+
 	// Простая эвристика: чем дешевле монета, тем выше волатильность
 	if price < 0.001 {
 		return 15.0
@@ -187,8 +218,14 @@ func (f *MarketMessageFormatter) estimateVolatility(price float64) float64 {
 		return 5.0
 	} else if price < 1 {
 		return 3.0
+	} else if price < 10 {
+		return 2.0
+	} else if price < 100 {
+		return 1.5
+	} else if price < 1000 {
+		return 1.0
 	}
-	return 2.0
+	return 0.8
 }
 
 // formatProgressBar создает прогресс-бар
@@ -214,7 +251,7 @@ func (f *MarketMessageFormatter) addTimeRecommendation(builder *strings.Builder,
 
 	// Для высокого процента заполнения показываем только общее предупреждение
 	if percentage >= 80 {
-		builder.WriteString("🚨 Внимание: счетчик скоро сбросится")
+		builder.WriteString("🚨 Внимание: счетчик скоро сбросится\n")
 		return // Выходим раньше, не показываем специфичные предупреждения
 	}
 
@@ -222,43 +259,53 @@ func (f *MarketMessageFormatter) addTimeRecommendation(builder *strings.Builder,
 	switch period {
 	case "5 минут":
 		if signalCount >= 4 {
-			builder.WriteString("⏰ Ожидайте скорого сброса счетчика")
+			builder.WriteString("⏰ Ожидайте скорого сброса счетчика\n")
 		}
 	case "15 минут":
 		if signalCount >= 12 {
-			builder.WriteString("⏰ Почти достигнут лимит сигналов")
+			builder.WriteString("⏰ Почти достигнут лимит сигналов\n")
 		}
 	case "30 минут":
 		if signalCount >= 25 {
-			builder.WriteString("⏰ Высокая активность")
+			builder.WriteString("⏰ Высокая активность\n")
 		}
 	case "1 час":
 		if signalCount >= 50 {
-			builder.WriteString("⏰ Интенсивное движение")
+			builder.WriteString("⏰ Интенсивное движение\n")
 		}
 	case "4 часа":
 		if signalCount >= 200 {
-			builder.WriteString("⏰ Активная торговая сессия")
+			builder.WriteString("⏰ Активная торговая сессия\n")
 		}
 	}
 
 	// Общие рекомендации для менее высоких процентов
 	if percentage >= 60 && percentage < 80 {
-		builder.WriteString("⚠️  Повышенная активность")
+		builder.WriteString("⚠️  Повышенная активность\n")
 	}
 }
 
 // formatPrice форматирует цену с учетом ее величины
 func (f *MarketMessageFormatter) formatPrice(price float64) string {
-	if price >= 100 {
+	if price <= 0 {
+		return "0.00"
+	}
+
+	if price >= 1000 {
+		return fmt.Sprintf("%.0f", math.Round(price))
+	} else if price >= 100 {
+		return fmt.Sprintf("%.1f", price)
+	} else if price >= 10 {
 		return fmt.Sprintf("%.2f", price)
 	} else if price >= 1 {
-		return fmt.Sprintf("%.4f", price)
+		return fmt.Sprintf("%.3f", price)
 	} else if price >= 0.1 {
-		return fmt.Sprintf("%.5f", price)
+		return fmt.Sprintf("%.4f", price)
 	} else if price >= 0.01 {
-		return fmt.Sprintf("%.6f", price)
+		return fmt.Sprintf("%.5f", price)
 	} else if price >= 0.001 {
+		return fmt.Sprintf("%.6f", price)
+	} else if price >= 0.0001 {
 		return fmt.Sprintf("%.7f", price)
 	} else {
 		return fmt.Sprintf("%.8f", price)
@@ -267,30 +314,36 @@ func (f *MarketMessageFormatter) formatPrice(price float64) string {
 
 // formatDollarValue форматирует долларовые значения в читаемый вид
 func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
-	if num == 0 {
+	if num <= 0 {
 		return "0"
-	}
-
-	if num < 0 {
-		return "ошибка"
 	}
 
 	// Форматируем в M (миллионы) или K (тысячи)
 	if num >= 1_000_000_000 {
-		return fmt.Sprintf("%.1fB", num/1_000_000_000)
+		value := num / 1_000_000_000
+		if value < 10 {
+			return fmt.Sprintf("%.2fB", value)
+		} else if value < 100 {
+			return fmt.Sprintf("%.1fB", value)
+		} else {
+			return fmt.Sprintf("%.0fB", math.Round(value))
+		}
 	} else if num >= 1_000_000 {
-		// Для миллионов показываем один знак после запятой
 		value := num / 1_000_000
 		if value < 10 {
-			// Для значений меньше 10 миллионов показываем один знак после запятой
+			return fmt.Sprintf("%.2fM", value)
+		} else if value < 100 {
 			return fmt.Sprintf("%.1fM", value)
 		} else {
-			// Для значений больше 10 миллионов показываем без десятичных знаков
 			return fmt.Sprintf("%.0fM", math.Round(value))
 		}
 	} else if num >= 1_000 {
-		// Для тысяч показываем без десятичных знаков
-		return fmt.Sprintf("%.0fK", math.Round(num/1_000))
+		value := num / 1_000
+		if value < 10 {
+			return fmt.Sprintf("%.1fK", value)
+		} else {
+			return fmt.Sprintf("%.0fK", math.Round(value))
+		}
 	} else if num >= 1 {
 		return fmt.Sprintf("%.0f", math.Round(num))
 	} else {
@@ -300,12 +353,7 @@ func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 
 // formatOpenInterest форматирует открытый интерес
 func (f *MarketMessageFormatter) formatOpenInterest(oi float64, oiChange24h float64) string {
-	if oi < 0 {
-		return "ошибка"
-	}
-
-	// Если OI = 0, показываем другое сообщение
-	if oi == 0 {
+	if oi <= 0 {
 		return "⏳ обновление"
 	}
 
@@ -379,7 +427,10 @@ func (f *MarketMessageFormatter) formatTimeUntilFunding(nextFundingTime time.Tim
 	if duration.Hours() >= 2 {
 		hours := int(duration.Hours())
 		minutes := int(duration.Minutes()) % 60
-		return fmt.Sprintf("%dч %dм", hours, minutes)
+		if minutes > 0 {
+			return fmt.Sprintf("%dч %dм", hours, minutes)
+		}
+		return fmt.Sprintf("%dч", hours)
 	} else if duration.Minutes() >= 1 {
 		minutes := int(duration.Minutes())
 		return fmt.Sprintf("%dм", minutes)
@@ -390,37 +441,6 @@ func (f *MarketMessageFormatter) formatTimeUntilFunding(nextFundingTime time.Tim
 		}
 		return fmt.Sprintf("%dс", seconds)
 	}
-}
-
-// calculateNextFundingTime рассчитывает следующее время фандинга
-func (f *MarketMessageFormatter) calculateNextFundingTime() time.Time {
-	now := time.Now().UTC()
-
-	// Фандинг в 00:00, 08:00, 16:00 UTC
-	hour := now.Hour()
-
-	// Определяем следующий час фандинга
-	var nextHour int
-	switch {
-	case hour < 8:
-		nextHour = 8
-	case hour < 16:
-		nextHour = 16
-	default:
-		// Завтра в 00:00
-		nextHour = 0
-		now = now.Add(24 * time.Hour)
-	}
-
-	// Создаем время
-	return time.Date(
-		now.Year(),
-		now.Month(),
-		now.Day(),
-		nextHour,
-		0, 0, 0,
-		time.UTC,
-	)
 }
 
 // getDirectionText возвращает текст направления (сохранен для обратной совместимости)

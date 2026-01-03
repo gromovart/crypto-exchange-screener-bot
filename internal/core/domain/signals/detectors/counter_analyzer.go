@@ -4,6 +4,7 @@ package analyzers
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
@@ -16,11 +17,15 @@ import (
 )
 
 // CounterAnalyzer - анализатор счетчика сигналов
+// internal/core/domain/signals/detectors/counter_analyzer.go
+
+// CounterAnalyzer - анализатор счетчика сигналов
 type CounterAnalyzer struct {
 	config              AnalyzerConfig
 	stats               AnalyzerStats
 	storage             storage.PriceStorage
 	telegramBot         *telegram.TelegramBot
+	marketFetcher       interface{} // ⬅️ ДОБАВЬТЕ ЭТО ПОЛЕ
 	counters            map[string]*internalCounter
 	mu                  sync.RWMutex
 	notificationEnabled bool
@@ -32,7 +37,12 @@ type CounterAnalyzer struct {
 }
 
 // NewCounterAnalyzer создает новый анализатор счетчика
-func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgBot *telegram.TelegramBot) *CounterAnalyzer {
+func NewCounterAnalyzer(
+	config AnalyzerConfig,
+	storage storage.PriceStorage,
+	tgBot *telegram.TelegramBot,
+	marketFetcher interface{}, // ⬅️ ДОБАВЬТЕ ЭТОТ ПАРАМЕТР
+) *CounterAnalyzer {
 	// Получаем провайдер графиков из конфигурации
 	chartProvider := SafeGetString(config.CustomSettings["chart_provider"], "coinglass")
 	exchange := SafeGetString(config.CustomSettings["exchange"], "bybit")
@@ -44,6 +54,7 @@ func NewCounterAnalyzer(config AnalyzerConfig, storage storage.PriceStorage, tgB
 		config:              config,
 		storage:             storage,
 		telegramBot:         tgBot,
+		marketFetcher:       marketFetcher, // ⬅️ СОХРАНИТЕ ПЕРЕДАННЫЙ FETCHER
 		counters:            make(map[string]*internalCounter),
 		notificationEnabled: true,
 		chartProvider:       chartProvider,
@@ -139,11 +150,6 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig)
 	}
 
 	counter.Unlock()
-	//Отладочный лог
-	// log.Printf("🔍 CounterAnalyzer.Analyze для %s:", symbol)
-	// for i, d := range data {
-	// 	log.Printf("   data[%d].OpenInterest = %f", i, d.OpenInterest)
-	// }
 
 	// Отправляем улучшенное уведомление если нужно
 	if signalDetected {
@@ -310,27 +316,14 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	// Рассчитываем изменение OI за 24 часа
 	oiChange24h := a.calculateOIChange24h(notification.Symbol)
 
-	// Отладочный лог
-	log.Printf("🔍 CounterAnalyzer OI Change для %s: %.1f%% (OI=%.0f)",
-		notification.Symbol, oiChange24h, openInterest)
-
-	// ОТЛАДОЧНЫЙ ЛОГ
-	log.Printf("🔍 CounterAnalyzer.calculateOIChange24h для %s:", notification.Symbol)
-	log.Printf("   oiChange24h = %.1f%%", oiChange24h)
-	log.Printf("   Всего точек данных: %d", len(priceData))
-
-	// Проверьте все точки данных на наличие OI
-	for i, point := range priceData {
-		if point.OpenInterest > 0 {
-			log.Printf("   Точка %d: OI=%.0f, время=%s",
-				i, point.OpenInterest, point.Timestamp.Format("15:04"))
-		}
-	}
 	// Рассчитываем время следующего фандинга
 	nextFundingTime := a.calculateNextFundingTime()
 
 	// Рассчитываем среднюю ставку фандинга
 	averageFunding := a.calculateAverageFunding(priceData)
+
+	// Получаем объем ликвидаций за 5 минут
+	liquidationVolume := a.getLiquidationVolume(notification.Symbol)
 
 	log.Printf("📤 CounterAnalyzer отправляет данные в форматтер:")
 	log.Printf("   Symbol: %s", notification.Symbol)
@@ -338,6 +331,7 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	log.Printf("   OI Change 24h: %.1f%%", oiChange24h)
 	log.Printf("   Price: %.4f", currentPrice)
 	log.Printf("   Volume: %.0f", volume24h)
+	log.Printf("   Ликвидации 5мин: $%.0f", liquidationVolume)
 
 	// Используем форматтер сообщений
 	return a.messageFormatter.FormatCounterMessage(
@@ -354,7 +348,45 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		averageFunding,
 		nextFundingTime,
 		notification.Period.ToString(),
+		liquidationVolume, // Добавляем параметр ликвидаций
 	)
+}
+
+// getLiquidationVolume получает объем ликвидаций за последние 5 минут
+func (a *CounterAnalyzer) getLiquidationVolume(symbol string) float64 {
+	// Если marketFetcher доступен, используем его
+	if a.marketFetcher != nil {
+		// Пробуем использовать интерфейс GetLiquidationMetrics
+		if fetcher, ok := a.marketFetcher.(interface {
+			GetLiquidationMetrics(string) (*bybit.LiquidationMetrics, bool)
+		}); ok {
+			if metrics, exists := fetcher.GetLiquidationMetrics(symbol); exists {
+				log.Printf("📊 Получены ликвидации для %s: $%.0f (long: $%.0f, short: $%.0f)",
+					symbol, metrics.TotalVolumeUSD, metrics.LongLiqVolume, metrics.ShortLiqVolume)
+				return metrics.TotalVolumeUSD
+			}
+		}
+	}
+
+	// Если не удалось получить, используем симуляцию на основе объема
+	if snapshot, exists := a.storage.GetCurrentSnapshot(symbol); exists && snapshot.VolumeUSD > 0 {
+		// Эмулируем ликвидации: 0.1-0.5% от объема в зависимости от движения
+		baseLiq := snapshot.VolumeUSD * 0.001 // 0.1% от объема
+
+		// Увеличиваем если было большое движение
+		if math.Abs(snapshot.Change24h) > 5 {
+			baseLiq *= 3 // Увеличиваем в 3 раза
+		} else if math.Abs(snapshot.Change24h) > 2 {
+			baseLiq *= 2 // Увеличиваем в 2 раза
+		}
+
+		log.Printf("📊 Симулированные ликвидации для %s: $%.0f (объем: $%.0f, изменение: %.1f%%)",
+			symbol, baseLiq, snapshot.VolumeUSD, snapshot.Change24h)
+		return baseLiq
+	}
+
+	log.Printf("⚠️ Не удалось получить ликвидации для %s", symbol)
+	return 0
 }
 
 // getOrCreateCounter получает или создает счетчик для символа

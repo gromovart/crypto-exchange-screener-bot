@@ -2,7 +2,6 @@
 package bybit
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,17 +11,13 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	"crypto-exchange-screener-bot/internal/types"
 )
 
-// ============================================
 // BYBIT CLIENT
 // ============================================
 
@@ -36,24 +31,6 @@ type BybitClient struct {
 	category    string
 	lastRequest time.Time
 	rateLimit   time.Duration
-}
-
-// OIConfig настройки для получения Open Interest
-type OIConfig struct {
-	DefaultCategory string        `json:"default_category"`
-	DefaultInterval string        `json:"default_interval"`
-	CacheTTL        time.Duration `json:"cache_ttl"`
-	RetryCount      int           `json:"retry_count"`
-}
-
-// NewOIConfig создает конфигурацию по умолчанию
-func NewOIConfig() OIConfig {
-	return OIConfig{
-		DefaultCategory: CategoryLinear,
-		DefaultInterval: OIInterval5Min,
-		CacheTTL:        5 * time.Minute,
-		RetryCount:      3,
-	}
 }
 
 // NewBybitClient создает новый клиент для работы с API Bybit
@@ -165,93 +142,6 @@ func (c *BybitClient) sendPublicRequest(method, endpoint string, params url.Valu
 	return body, nil
 }
 
-// sendPrivateRequest отправляет приватный запрос
-func (c *BybitClient) sendPrivateRequest(method, endpoint string, params interface{}) ([]byte, error) {
-	c.waitForRateLimit()
-
-	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
-	recvWindow := "5000"
-
-	var paramsStr string
-	var bodyData []byte
-
-	if method == http.MethodGet || method == http.MethodDelete {
-		// Для GET/DELETE параметры в query string
-		if params != nil {
-			if p, ok := params.(url.Values); ok {
-				paramsStr = p.Encode()
-			}
-		}
-	} else {
-		// Для POST/PUT параметры в теле запроса
-		if params != nil {
-			var err error
-			bodyData, err = json.Marshal(params)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal params: %w", err)
-			}
-			paramsStr = string(bodyData)
-		}
-	}
-
-	// Генерируем подпись
-	signature := c.generateSignature(timestamp, recvWindow, paramsStr)
-
-	// Формируем URL
-	apiURL := c.baseURL + endpoint
-	if (method == http.MethodGet || method == http.MethodDelete) && paramsStr != "" {
-		apiURL = apiURL + "?" + paramsStr
-	}
-
-	// Создаем запрос
-	var req *http.Request
-	var reqErr error
-
-	if method == http.MethodGet || method == http.MethodDelete {
-		req, reqErr = http.NewRequest(method, apiURL, nil)
-	} else {
-		req, reqErr = http.NewRequest(method, apiURL, bytes.NewBuffer(bodyData))
-	}
-
-	if reqErr != nil {
-		return nil, fmt.Errorf("failed to create request: %w", reqErr)
-	}
-
-	// Добавляем заголовки аутентификации
-	req.Header.Set("X-BAPI-API-KEY", c.apiKey)
-	req.Header.Set("X-BAPI-TIMESTAMP", timestamp)
-	req.Header.Set("X-BAPI-SIGN", signature)
-	req.Header.Set("X-BAPI-RECV-WINDOW", recvWindow)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "CryptoExchangeScreenerBot/1.0")
-
-	// Отправляем запрос
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Читаем ответ
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Проверяем статус код
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Проверяем код ошибки в ответе API
-	var apiResp APIResponse
-	if err := json.Unmarshal(body, &apiResp); err == nil && apiResp.RetCode != 0 {
-		return nil, fmt.Errorf("API error %d: %s", apiResp.RetCode, apiResp.RetMsg)
-	}
-
-	return body, nil
-}
-
 // ============================================
 // ОСНОВНЫЕ API МЕТОДЫ
 // ============================================
@@ -283,7 +173,7 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 				Turnover24h  string `json:"turnover24h"`
 				High24h      string `json:"high24h"`
 				Low24h       string `json:"low24h"`
-				OpenInterest string `json:"openInterest"` // ✅ Обязательно парсим это поле
+				OpenInterest string `json:"openInterest"`
 				FundingRate  string `json:"fundingRate"`
 			} `json:"list"`
 		} `json:"result"`
@@ -304,80 +194,231 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 			Turnover24h:  t.Turnover24h,
 			High24h:      t.High24h,
 			Low24h:       t.Low24h,
-			OpenInterest: t.OpenInterest, // ✅ Сохраняем Open Interest
+			OpenInterest: t.OpenInterest,
 			FundingRate:  t.FundingRate,
 		})
-
-		// Отладочный лог для OI
-		// if t.OpenInterest != "" && t.OpenInterest != "0" {
-		// 	oi, _ := strconv.ParseFloat(t.OpenInterest, 64)
-		// 	log.Printf("📊 BybitClient.GetTickers: %s OI = %.0f", t.Symbol, oi)
-		// }
 	}
 
 	return &api.TickerResponse{
 		RetCode: tickerResp.RetCode,
 		RetMsg:  tickerResp.RetMsg,
 		Result: api.TickerList{
-			Category: tickerResp.Result.Category, // ✅ Теперь Category будет установлен
+			Category: tickerResp.Result.Category,
 			List:     tickers,
 		},
 	}, nil
 }
 
-// GetInstrumentsInfo получает информацию об инструментах
-func (c *BybitClient) GetInstrumentsInfo(category, symbol, status string) ([]InstrumentInfo, error) {
+// ============================================
+// API ЛИКВИДАЦИЙ
+// ============================================
+
+// GetRecentLiquidations получает последние ликвидации
+func (c *BybitClient) GetRecentLiquidations(symbol string, limit int) ([]LiquidationData, error) {
 	params := url.Values{}
-	params.Set("category", category)
+	params.Set("category", "linear")
 	if symbol != "" {
 		params.Set("symbol", symbol)
 	}
-	if status != "" {
-		params.Set("status", status)
-	}
-
-	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/instruments-info", params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get instruments info: %w", err)
-	}
-
-	var response struct {
-		Result struct {
-			List []InstrumentInfo `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse instruments info response: %w", err)
-	}
-
-	return response.Result.List, nil
-}
-
-// GetKlineData получает свечные данные
-func (c *BybitClient) GetKlineData(symbol, category, interval string, limit int) (*KlineResponse, error) {
-	params := url.Values{}
-	params.Set("category", category)
-	params.Set("symbol", symbol)
-	params.Set("interval", interval)
 	params.Set("limit", strconv.Itoa(limit))
 
-	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/kline", params)
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/recent-trade", params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get kline data: %w", err)
+		return nil, fmt.Errorf("failed to get recent trades: %w", err)
 	}
 
-	var klineResp KlineResponse
-	if err := json.Unmarshal(body, &klineResp); err != nil {
-		return nil, fmt.Errorf("failed to parse kline response: %w", err)
+	var response RecentTradesResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse trades response: %w", err)
 	}
 
-	return &klineResp, nil
+	var liquidations []LiquidationData
+	for _, item := range response.Result.List {
+		// Фильтруем только ликвидации (ExecType == "Liquidation" или "BustTrade")
+		if item.ExecType == "Liquidation" || item.ExecType == "BustTrade" {
+			price, err := strconv.ParseFloat(item.Price, 64)
+			if err != nil {
+				log.Printf("⚠️ Ошибка парсинга цены ликвидации %s: %v", item.Price, err)
+				continue
+			}
+
+			size, err := strconv.ParseFloat(item.Size, 64)
+			if err != nil {
+				log.Printf("⚠️ Ошибка парсинга размера ликвидации %s: %v", item.Size, err)
+				continue
+			}
+
+			// Парсим время (миллисекунды)
+			timestampMs, err := strconv.ParseInt(item.Time, 10, 64)
+			if err != nil {
+				log.Printf("⚠️ Ошибка парсинга времени ликвидации %s: %v", item.Time, err)
+				continue
+			}
+
+			timestamp := time.Unix(timestampMs/1000, 0)
+
+			liquidations = append(liquidations, LiquidationData{
+				Symbol:        item.Symbol,
+				Side:          item.Side,
+				Price:         price,
+				Quantity:      size,
+				Time:          timestamp,
+				IsLiquidation: true,
+			})
+
+			log.Printf("💥 Найдена ликвидация %s: %s %.2f @ $%.2f ($%.0f)",
+				item.Symbol, item.Side, size, price, price*size)
+		}
+	}
+
+	log.Printf("📊 Получено %d ликвидаций для %s", len(liquidations), symbol)
+	return liquidations, nil
 }
 
-// GetKlineDataWithInterval получает свечные данные с указанным интервалом
-func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string, limit int) (*KlineResponse, error) {
-	return c.GetKlineData(symbol, category, interval, limit)
+// GetLiquidationsVolume рассчитывает совокупный объем ликвидаций за период
+func (c *BybitClient) GetLiquidationsVolume(symbol string, period time.Duration) (float64, error) {
+	// Рассчитываем лимит на основе периода (примерно 1 сделка в секунду)
+	estimatedTrades := int(period.Seconds())
+	if estimatedTrades > 1000 {
+		estimatedTrades = 1000 // Максимальный лимит API
+	}
+
+	liquidations, err := c.GetRecentLiquidations(symbol, estimatedTrades)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get liquidations: %w", err)
+	}
+
+	var totalVolume float64
+	cutoffTime := time.Now().Add(-period)
+
+	log.Printf("🔍 Анализ ликвидаций для %s за период %v", symbol, period)
+
+	for _, liq := range liquidations {
+		if liq.Time.After(cutoffTime) {
+			volume := liq.Price * liq.Quantity // Объем в USD
+			totalVolume += volume
+
+			log.Printf("   + Ликвидация %s: $%.0f @ $%.2f",
+				liq.Side, volume, liq.Price)
+		}
+	}
+
+	log.Printf("💰 Общий объем ликвидаций %s за %v: $%.0f",
+		symbol, period, totalVolume)
+
+	return totalVolume, nil
+}
+
+// GetLiquidationsSummary получает сводку по ликвидациям
+func (c *BybitClient) GetLiquidationsSummary(symbol string, period time.Duration) (map[string]interface{}, error) {
+	log.Printf("📊 Получение сводки ликвидаций для %s за %v", symbol, period)
+
+	// Получаем данные
+	liquidations, err := c.GetRecentLiquidations(symbol, 200) // Максимум 200 записей
+	if err != nil {
+		return nil, fmt.Errorf("failed to get liquidations: %w", err)
+	}
+
+	cutoffTime := time.Now().Add(-period)
+	var totalVolume, longLiqVolume, shortLiqVolume float64
+	var longCount, shortCount int
+
+	log.Printf("🔍 Фильтрация %d записей ликвидаций...", len(liquidations))
+
+	for _, liq := range liquidations {
+		if liq.Time.After(cutoffTime) {
+			volume := liq.Price * liq.Quantity
+			totalVolume += volume
+
+			// Определяем тип ликвидации
+			// Buy ликвидация = ликвидация длинной позиции (продажа)
+			// Sell ликвидация = ликвидация короткой позиции (покупка)
+			if liq.Side == "Buy" { // Buy ликвидация = ликвидация длинной позиции
+				longLiqVolume += volume
+				longCount++
+				log.Printf("   📉 Long liquidation: $%.0f", volume)
+			} else if liq.Side == "Sell" { // Sell ликвидация = ликвидация короткой позиции
+				shortLiqVolume += volume
+				shortCount++
+				log.Printf("   📈 Short liquidation: $%.0f", volume)
+			}
+		}
+	}
+
+	// Рассчитываем соотношения
+	longRatio := safeDivide(longLiqVolume, totalVolume)
+	shortRatio := safeDivide(shortLiqVolume, totalVolume)
+
+	result := map[string]interface{}{
+		"symbol":           symbol,
+		"period":           period.String(),
+		"total_volume_usd": totalVolume,
+		"long_liq_volume":  longLiqVolume,
+		"short_liq_volume": shortLiqVolume,
+		"long_liq_count":   longCount,
+		"short_liq_count":  shortCount,
+		"total_liq_count":  longCount + shortCount,
+		"long_ratio":       longRatio,
+		"short_ratio":      shortRatio,
+		"update_time":      time.Now(),
+	}
+
+	log.Printf("✅ Сводка ликвидаций %s:", symbol)
+	log.Printf("   Общий объем: $%.0f", totalVolume)
+	log.Printf("   Long ликвидации: $%.0f (%.1f%%)", longLiqVolume, longRatio)
+	log.Printf("   Short ликвидации: $%.0f (%.1f%%)", shortLiqVolume, shortRatio)
+	log.Printf("   Количество: %d (long: %d, short: %d)",
+		longCount+shortCount, longCount, shortCount)
+
+	return result, nil
+}
+
+// GetLiquidationsMetrics получает метрики ликвидаций
+func (c *BybitClient) GetLiquidationsMetrics(symbol string) (*LiquidationMetrics, error) {
+	summary, err := c.GetLiquidationsSummary(symbol, 5*time.Minute) // За последние 5 минут
+	if err != nil {
+		return nil, err
+	}
+
+	metrics := &LiquidationMetrics{
+		Symbol:         symbol,
+		TotalVolumeUSD: summary["total_volume_usd"].(float64),
+		LongLiqVolume:  summary["long_liq_volume"].(float64),
+		ShortLiqVolume: summary["short_liq_volume"].(float64),
+		LongLiqCount:   summary["long_liq_count"].(int),
+		ShortLiqCount:  summary["short_liq_count"].(int),
+		UpdateTime:     time.Now(),
+	}
+
+	return metrics, nil
+}
+
+// GetMultipleLiquidationsMetrics получает метрики ликвидаций для нескольких символов
+func (c *BybitClient) GetMultipleLiquidationsMetrics(symbols []string) (map[string]*LiquidationMetrics, error) {
+	results := make(map[string]*LiquidationMetrics)
+
+	for _, symbol := range symbols {
+		metrics, err := c.GetLiquidationsMetrics(symbol)
+		if err != nil {
+			log.Printf("⚠️ Не удалось получить ликвидации для %s: %v", symbol, err)
+			continue
+		}
+		results[symbol] = metrics
+
+		// Rate limiting
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	log.Printf("✅ Получены метрики ликвидаций для %d символов", len(results))
+	return results, nil
+}
+
+// safeDivide безопасное деление
+func safeDivide(a, b float64) float64 {
+	if b == 0 {
+		return 0
+	}
+	return a / b * 100
 }
 
 // ============================================
@@ -387,118 +428,6 @@ func (c *BybitClient) GetKlineDataWithInterval(symbol, category, interval string
 // GetOpenInterest получает открытый интерес для конкретного символа
 func (c *BybitClient) GetOpenInterest(symbol string) (float64, error) {
 	return c.GetOpenInterestWithParams(symbol, "", "")
-}
-
-// GetOpenInterestForSymbolsBatch получает OI для нескольких символов (оптимизировано)
-func (c *BybitClient) GetOpenInterestForSymbolsBatch(symbols []string) (map[string]float64, error) {
-	result := make(map[string]float64)
-
-	if len(symbols) == 0 {
-		return result, nil
-	}
-
-	// Сначала пытаемся получить из тикеров
-	tickers, err := c.GetTickers(c.category)
-	if err != nil {
-		log.Printf("⚠️ Не удалось получить тикеры: %v", err)
-		// Продолжаем с индивидуальными запросами
-	} else {
-		// Создаем карту для быстрого поиска
-		tickerMap := make(map[string]api.Ticker)
-		for _, ticker := range tickers.Result.List {
-			tickerMap[ticker.Symbol] = ticker
-		}
-
-		// Ищем OI в тикерах
-		for _, symbol := range symbols {
-			if ticker, exists := tickerMap[symbol]; exists {
-				if oi, err := ticker.GetOpenInterestFloat(); err == nil && oi > 0 {
-					result[symbol] = oi
-					log.Printf("✅ Получен OI из тикеров для %s: %.0f", symbol, oi)
-					continue
-				}
-			}
-		}
-	}
-
-	// Для символов, где OI не нашли в тикерах
-	remainingSymbols := make([]string, 0)
-	for _, symbol := range symbols {
-		if _, found := result[symbol]; !found {
-			remainingSymbols = append(remainingSymbols, symbol)
-		}
-	}
-
-	// Делаем индивидуальные запросы для оставшихся символов
-	for _, symbol := range remainingSymbols {
-		c.waitForRateLimit()
-
-		oi, err := c.GetOpenInterestWithParams(symbol, c.category, "5min")
-		if err != nil {
-			log.Printf("⚠️ Ошибка получения OI для %s: %v", symbol, err)
-			continue
-		}
-
-		if oi > 0 {
-			result[symbol] = oi
-			log.Printf("✅ Получен OI через API для %s: %.0f", symbol, oi)
-		}
-
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	log.Printf("📊 Итого получено OI для %d из %d символов", len(result), len(symbols))
-	return result, nil
-}
-
-// tryGetOpenInterestWithDifferentCategories пробует получить OI с разными категориями
-func (c *BybitClient) tryGetOpenInterestWithDifferentCategories(symbol string) (float64, error) {
-	// Пробуем разные категории
-	categories := []string{"linear", "inverse", "spot"}
-
-	// ⚠️ Правильные интервалы для Bybit API
-	intervals := []string{"5min", "15min", "30min", "1h", "4h", "1d"}
-
-	for _, category := range categories {
-		for _, interval := range intervals {
-			oi, err := c.GetOpenInterestWithParams(symbol, category, interval)
-			if err == nil && oi > 0 {
-				log.Printf("🔍 BybitClient: найден OI для %s в категории %s интервал %s: %.0f",
-					symbol, category, interval, oi)
-				return oi, nil
-			}
-
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-
-	return 0, fmt.Errorf("не удалось получить OI для %s ни в одной категории/интервале", symbol)
-}
-
-// IsOIAvailable проверяет доступность Open Interest API
-func (c *BybitClient) IsOIAvailable() (bool, error) {
-	// Пробуем получить OI для BTCUSDT (самый ликвидный символ)
-	_, err := c.GetOpenInterest("BTCUSDT")
-	if err != nil {
-		// Проверяем тип ошибки
-		if strings.Contains(err.Error(), "params error") ||
-			strings.Contains(err.Error(), "10001") ||
-			strings.Contains(err.Error(), "interval") {
-			log.Println("⚠️  BybitClient: OI API требует исправления параметров")
-			return false, err
-		}
-
-		if strings.Contains(err.Error(), "rate limit") ||
-			strings.Contains(err.Error(), "10006") {
-			log.Println("⚠️  BybitClient: OI API ограничено rate limit")
-			return true, nil // API доступно, но с ограничениями
-		}
-
-		// Другие ошибки
-		return false, err
-	}
-
-	return true, nil
 }
 
 // GetOpenInterestWithParams получает открытый интерес с указанием параметров
@@ -518,7 +447,7 @@ func (c *BybitClient) GetOpenInterestWithParams(symbol, category, interval strin
 	params := url.Values{}
 	params.Set("category", category)
 	params.Set("symbol", symbol)
-	params.Set("intervalTime", interval) // ⚠️ Правильное имя параметра для Bybit V5!
+	params.Set("intervalTime", interval)
 
 	body, err := c.sendPublicRequest(http.MethodGet, endpoint, params)
 	if err != nil {
@@ -535,8 +464,6 @@ func (c *BybitClient) GetOpenInterestWithParams(symbol, category, interval strin
 				Timestamp    string `json:"timestamp"`
 			} `json:"list"`
 		} `json:"result"`
-		RetExtInfo map[string]interface{} `json:"retExtInfo"`
-		Time       int64                  `json:"time"`
 	}
 
 	// Парсим ответ
@@ -562,466 +489,35 @@ func (c *BybitClient) GetOpenInterestWithParams(symbol, category, interval strin
 	return oi, nil
 }
 
-// GetCurrentOpenInterestFromTickers получает текущий OI из данных тикеров
-func (c *BybitClient) GetCurrentOpenInterestFromTickers(symbol string) (float64, error) {
-	// Получаем все тикеры
-	tickers, err := c.GetTickers(c.category)
-	if err != nil {
-		return 0, err
-	}
-
-	// Ищем нужный символ
-	for _, ticker := range tickers.Result.List {
-		if ticker.Symbol == symbol {
-			// Парсим Open Interest из тикеров
-			if openInterestStr, ok := ticker.GetOpenInterest(); ok && openInterestStr != "" {
-				oi, err := strconv.ParseFloat(openInterestStr, 64)
-				if err != nil {
-					return 0, fmt.Errorf("failed to parse open interest from ticker: %w", err)
-				}
-				return oi, nil
-			}
-		}
-	}
-
-	return 0, fmt.Errorf("open interest not found for %s in tickers", symbol)
-}
-
-// GetOpenInterestForSymbols получает OI для нескольких символов (исправленная версия)
+// GetOpenInterestForSymbols получает OI для нескольких символов
 func (c *BybitClient) GetOpenInterestForSymbols(symbols []string) (map[string]float64, error) {
-	// Ограничиваем количество символов для одного запроса
-	maxSymbols := 10 // Bybit может иметь ограничения
-	if len(symbols) > maxSymbols {
-		// Делим на группы
-		allResults := make(map[string]float64)
+	result := make(map[string]float64)
 
-		for i := 0; i < len(symbols); i += maxSymbols {
-			end := i + maxSymbols
-			if end > len(symbols) {
-				end = len(symbols)
-			}
-
-			batch := symbols[i:end]
-			batchResults, err := c.GetOpenInterestForSymbolsBatch(batch)
-			if err != nil {
-				log.Printf("⚠️ Ошибка получения OI для batch %d-%d: %v", i, end, err)
-			}
-
-			// Объединяем результаты
-			for symbol, oi := range batchResults {
-				allResults[symbol] = oi
-			}
-
-			// Задержка между группами
-			if end < len(symbols) {
-				time.Sleep(500 * time.Millisecond)
-			}
+	for _, symbol := range symbols {
+		oi, err := c.GetOpenInterest(symbol)
+		if err != nil {
+			log.Printf("⚠️ Ошибка получения OI для %s: %v", symbol, err)
+			continue
 		}
 
-		return allResults, nil
-	}
-
-	// Для небольшого количества символов
-	return c.GetOpenInterestForSymbolsBatch(symbols)
-}
-
-// GetOpenInterestHistory получает историю OI
-func (c *BybitClient) GetOpenInterestHistory(symbol, interval string, limit int) ([]OIDataPoint, error) {
-	endpoint := "/v5/market/open-interest"
-	params := url.Values{}
-	params.Set("category", "linear")
-	params.Set("symbol", symbol)
-	params.Set("intervalTime", interval)
-
-	if limit > 0 && limit <= 200 { // Bybit максимум 200
-		params.Set("limit", strconv.Itoa(limit))
-	}
-
-	body, err := c.sendPublicRequest(http.MethodGet, endpoint, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get open interest history: %w", err)
-	}
-
-	var response struct {
-		Result struct {
-			List []struct {
-				Symbol       string `json:"symbol"`
-				OpenInterest string `json:"openInterest"`
-				Timestamp    string `json:"timestamp"`
-			} `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse open interest history: %w", err)
-	}
-
-	var dataPoints []OIDataPoint
-	for _, item := range response.Result.List {
-		oi, _ := strconv.ParseFloat(item.OpenInterest, 64)
-		timestamp, _ := strconv.ParseInt(item.Timestamp, 10, 64)
-
-		dataPoints = append(dataPoints, OIDataPoint{
-			Symbol:       item.Symbol,
-			OpenInterest: oi,
-			Timestamp:    time.Unix(timestamp/1000, 0),
-		})
-	}
-
-	return dataPoints, nil
-}
-
-// OIDataPoint структура для хранения OI с временной меткой
-type OIDataPoint struct {
-	Symbol       string    `json:"symbol"`
-	OpenInterest float64   `json:"openInterest"`
-	Timestamp    time.Time `json:"timestamp"`
-}
-
-// ============================================
-// АККАУНТ И БАЛАНС
-// ============================================
-
-// GetWalletBalance получает баланс кошелька
-func (c *BybitClient) GetWalletBalance(accountType string) ([]AccountBalance, error) {
-	params := url.Values{}
-	params.Set("accountType", accountType)
-
-	body, err := c.sendPrivateRequest(http.MethodGet, "/v5/account/wallet-balance", params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get wallet balance: %w", err)
-	}
-
-	var response struct {
-		Result struct {
-			List []struct {
-				AccountType string           `json:"accountType"`
-				Coin        []AccountBalance `json:"coin"`
-			} `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse balance response: %w", err)
-	}
-
-	if len(response.Result.List) > 0 {
-		return response.Result.List[0].Coin, nil
-	}
-
-	return []AccountBalance{}, nil
-}
-
-// ============================================
-// СИСТЕМНЫЕ МЕТОДЫ
-// ============================================
-
-// GetServerTime получает время сервера Bybit
-func (c *BybitClient) GetServerTime() (int64, error) {
-	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/time", nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get server time: %w", err)
-	}
-
-	var response struct {
-		Result struct {
-			TimeSecond string `json:"timeSecond"`
-			TimeNano   string `json:"timeNano"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return 0, fmt.Errorf("failed to parse server time response: %w", err)
-	}
-
-	timeSecond, err := strconv.ParseInt(response.Result.TimeSecond, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse timeSecond: %w", err)
-	}
-
-	return timeSecond, nil
-}
-
-// TestConnection тестирует подключение к API
-func (c *BybitClient) TestConnection() error {
-	// Проверяем публичный доступ
-	_, err := c.GetServerTime()
-	if err != nil {
-		return fmt.Errorf("public API test failed: %w", err)
-	}
-
-	// Проверяем тикеры
-	tickers, err := c.GetTickers("spot")
-	if err != nil {
-		return fmt.Errorf("tickers API test failed: %w", err)
-	}
-
-	log.Printf("✅ BybitClient: подключение успешно, получено %d тикеров", len(tickers.Result.List))
-	return nil
-}
-
-// Category возвращает текущую категорию клиента
-func (c *BybitClient) Category() string {
-	if c.category != "" {
-		return c.category
-	}
-	return CategoryLinear
-}
-
-// ============================================
-// МЕТОДЫ ДЛЯ АНАЛИЗА
-// ============================================
-
-// GetPriceChange рассчитывает изменение цены за интервал
-func (c *BybitClient) GetPriceChange(symbol string, intervalMinutes int) (float64, error) {
-	// Получаем исторические данные
-	klineResp, err := c.GetKlineData(symbol, "spot", "1", intervalMinutes+1)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(klineResp.Result.List) < 2 {
-		return 0, fmt.Errorf("insufficient data for %s", symbol)
-	}
-
-	// Первая свеча (самая старая)
-	oldestPrice, err := strconv.ParseFloat(klineResp.Result.List[0][4], 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse oldest price: %w", err)
-	}
-
-	// Последняя свеча (самая новая)
-	newestPrice, err := strconv.ParseFloat(klineResp.Result.List[len(klineResp.Result.List)-1][4], 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse newest price: %w", err)
-	}
-
-	// Рассчитываем процентное изменение
-	changePercent := ((newestPrice - oldestPrice) / oldestPrice) * 100
-
-	return changePercent, nil
-}
-
-// GetRecentKlinesForPeriod получает свечи для анализа периода роста
-func (c *BybitClient) GetRecentKlinesForPeriod(symbol string, periodMinutes int) ([][]string, error) {
-	// Определяем интервал свечей в зависимости от периода
-	var interval string
-	var limit int
-
-	switch {
-	case periodMinutes <= 5:
-		interval = "1"
-		limit = periodMinutes
-	case periodMinutes <= 30:
-		interval = "5"
-		limit = periodMinutes / 5
-	case periodMinutes <= 240:
-		interval = "15"
-		limit = periodMinutes / 15
-	case periodMinutes <= 1440:
-		interval = "60"
-		limit = periodMinutes / 60
-	default:
-		interval = "D"
-		limit = periodMinutes / 1440
-	}
-
-	// Минимальное количество свечей
-	if limit < 2 {
-		limit = 2
-	}
-
-	limit = limit + 2
-
-	resp, err := c.GetKlineDataWithInterval(symbol, "linear", interval, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.Result.List, nil
-}
-
-// AnalyzeGrowth анализирует рост/падение за период
-func (c *BybitClient) AnalyzeGrowth(symbol string, periodMinutes int, checkContinuity bool) (*types.GrowthAnalysis, error) {
-	klines, err := c.GetRecentKlinesForPeriod(symbol, periodMinutes)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(klines) < 2 {
-		return nil, fmt.Errorf("insufficient data for growth analysis")
-	}
-
-	var dataPoints []types.PriceDataPoint
-
-	// Парсим данные из свечей
-	for _, kline := range klines {
-		if len(kline) >= 5 {
-			closePrice, err := strconv.ParseFloat(kline[4], 64)
-			if err != nil {
-				continue
-			}
-
-			timestampMs, err := strconv.ParseInt(kline[0], 10, 64)
-			if err != nil {
-				continue
-			}
-
-			volume, _ := strconv.ParseFloat(kline[5], 64)
-
-			dataPoints = append(dataPoints, types.PriceDataPoint{
-				Price:     closePrice,
-				Timestamp: time.Unix(timestampMs/1000, 0),
-				Volume:    volume,
-			})
+		if oi > 0 {
+			result[symbol] = oi
+			log.Printf("✅ Получен OI для %s: %.0f", symbol, oi)
 		}
+
+		// Rate limiting
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	if len(dataPoints) < 2 {
-		return nil, fmt.Errorf("not enough valid data points")
-	}
-
-	// Анализируем рост/падение
-	return c.analyzeGrowthData(symbol, periodMinutes, dataPoints, checkContinuity)
-}
-
-// analyzeGrowthData анализирует данные на рост/падение
-func (c *BybitClient) analyzeGrowthData(symbol string, periodMinutes int, dataPoints []types.PriceDataPoint, checkContinuity bool) (*types.GrowthAnalysis, error) {
-	analysis := &types.GrowthAnalysis{
-		Symbol:     symbol,
-		Period:     periodMinutes,
-		DataPoints: dataPoints,
-	}
-
-	// Сортируем по времени
-	sort.Slice(dataPoints, func(i, j int) bool {
-		return dataPoints[i].Timestamp.Before(dataPoints[j].Timestamp)
-	})
-
-	// Рассчитываем базовые метрики
-	startPrice := dataPoints[0].Price
-	endPrice := dataPoints[len(dataPoints)-1].Price
-
-	// Процент изменения
-	analysis.GrowthPercent = ((endPrice - startPrice) / startPrice) * 100
-	analysis.FallPercent = -analysis.GrowthPercent
-
-	// Находим min/max
-	minPrice := startPrice
-	maxPrice := startPrice
-	for _, point := range dataPoints {
-		if point.Price < minPrice {
-			minPrice = point.Price
-		}
-		if point.Price > maxPrice {
-			maxPrice = point.Price
-		}
-	}
-	analysis.MinPrice = minPrice
-	analysis.MaxPrice = maxPrice
-
-	// Волатильность
-	analysis.Volatility = ((maxPrice - minPrice) / startPrice) * 100
-
-	// Проверяем непрерывный рост
-	if checkContinuity {
-		analysis.IsGrowing = c.checkContinuousGrowth(dataPoints)
-		analysis.IsFalling = c.checkContinuousFall(dataPoints)
-	} else {
-		// Просто проверяем общее изменение
-		analysis.IsGrowing = analysis.GrowthPercent > 0
-		analysis.IsFalling = analysis.GrowthPercent < 0
-	}
-
-	return analysis, nil
-}
-
-// checkContinuousGrowth проверяет непрерывный рост
-func (c *BybitClient) checkContinuousGrowth(dataPoints []types.PriceDataPoint) bool {
-	for i := 1; i < len(dataPoints); i++ {
-		if dataPoints[i].Price <= dataPoints[i-1].Price {
-			return false
-		}
-	}
-	return true
-}
-
-// checkContinuousFall проверяет непрерывное падение
-func (c *BybitClient) checkContinuousFall(dataPoints []types.PriceDataPoint) bool {
-	for i := 1; i < len(dataPoints); i++ {
-		if dataPoints[i].Price >= dataPoints[i-1].Price {
-			return false
-		}
-	}
-	return true
+	return result, nil
 }
 
 // ============================================
 // ДОПОЛНИТЕЛЬНЫЕ МЕТОДЫ
 // ============================================
 
-// Get24hVolume получает 24-часовой объем для символа
-func (c *BybitClient) Get24hVolume(symbol string) (float64, error) {
-	tickers, err := c.GetTickers(c.category)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, ticker := range tickers.Result.List {
-		if ticker.Symbol == symbol {
-			volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
-			if err != nil {
-				return 0, fmt.Errorf("failed to parse volume: %w", err)
-			}
-			return volume, nil
-		}
-	}
-
-	return 0, fmt.Errorf("symbol %s not found", symbol)
-}
-
-// GetSymbolVolume получает объем для нескольких символов
-func (c *BybitClient) GetSymbolVolume(symbols []string) (map[string]float64, error) {
-	params := url.Values{}
-	params.Set("category", c.category)
-
-	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/tickers", params)
-	if err != nil {
-		return nil, err
-	}
-
-	var response struct {
-		Result struct {
-			List []struct {
-				Symbol      string `json:"symbol"`
-				Turnover24h string `json:"turnover24h"`
-			} `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse volume response: %w", err)
-	}
-
-	volumes := make(map[string]float64)
-	for _, symbol := range symbols {
-		for _, ticker := range response.Result.List {
-			if ticker.Symbol == symbol && ticker.Turnover24h != "" {
-				volume, err := strconv.ParseFloat(ticker.Turnover24h, 64)
-				if err == nil {
-					volumes[symbol] = volume
-				}
-				break
-			}
-		}
-	}
-
-	return volumes, nil
-}
-
 // GetFundingRate получает ставку фандинга для символа
 func (c *BybitClient) GetFundingRate(symbol string) (float64, error) {
-	// Получаем тикеры, включая funding rate
 	params := url.Values{}
 	params.Set("category", c.category)
 
@@ -1056,60 +552,22 @@ func (c *BybitClient) GetFundingRate(symbol string) (float64, error) {
 	return 0, fmt.Errorf("funding rate not found for %s", symbol)
 }
 
-// GetFundingRates получает ставки фандинга для нескольких символов
-func (c *BybitClient) GetFundingRates(symbols []string) (map[string]float64, error) {
-	params := url.Values{}
-	params.Set("category", c.category)
-
-	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/tickers", params)
+// TestConnection тестирует подключение к API
+func (c *BybitClient) TestConnection() error {
+	// Проверяем публичный доступ
+	_, err := c.GetTickers("spot")
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("tickers API test failed: %w", err)
 	}
 
-	var response struct {
-		Result struct {
-			List []struct {
-				Symbol      string `json:"symbol"`
-				FundingRate string `json:"fundingRate"`
-			} `json:"list"`
-		} `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse tickers response: %w", err)
-	}
-
-	rates := make(map[string]float64)
-
-	for _, symbol := range symbols {
-		for _, ticker := range response.Result.List {
-			if ticker.Symbol == symbol && ticker.FundingRate != "" {
-				rate, err := strconv.ParseFloat(ticker.FundingRate, 64)
-				if err == nil {
-					rates[symbol] = rate
-				}
-				break
-			}
-		}
-	}
-
-	return rates, nil
+	log.Printf("✅ BybitClient: подключение успешно")
+	return nil
 }
 
-// ============================================
-// ПРОСТЫЕ КОНСТРУКТОРЫ
-// ============================================
-
-// NewBybitClientSimple создает простой клиент
-func NewBybitClientSimple(apiKey, apiSecret, baseURL, category string, timeout time.Duration) *BybitClient {
-	return &BybitClient{
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
-		apiKey:    apiKey,
-		apiSecret: apiSecret,
-		baseURL:   baseURL,
-		category:  category,
-		rateLimit: 100 * time.Millisecond,
+// Category возвращает текущую категорию клиента
+func (c *BybitClient) Category() string {
+	if c.category != "" {
+		return c.category
 	}
+	return CategoryLinear
 }
