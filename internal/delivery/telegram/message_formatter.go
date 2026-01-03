@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+// ==================== ТИПЫ И КОНСТРУКТОР ====================
+
 // MarketMessageFormatter форматирует сообщения с рыночными данными
 type MarketMessageFormatter struct {
 	exchange string
@@ -21,7 +23,10 @@ func NewMarketMessageFormatter(exchange string) *MarketMessageFormatter {
 	}
 }
 
+// ==================== ОСНОВНЫЕ МЕТОДЫ ФОРМАТИРОВАНИЯ ====================
+
 // FormatCounterMessage форматирует сообщение счетчика с полными данными
+// (совместимость со старым кодом)
 func (f *MarketMessageFormatter) FormatCounterMessage(
 	symbol string,
 	direction string,
@@ -51,10 +56,12 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	log.Printf("   longLiqVolume = %.2f", longLiqVolume)
 	log.Printf("   shortLiqVolume = %.2f", shortLiqVolume)
 
-	// Временно используем нулевые значения для дельты
+	// Временно используем нулевые значения для дельты и индикаторов
 	// TODO: Получить реальные данные из анализатора
 	volumeDelta := 0.0
 	volumeDeltaPercent := 0.0
+	rsi := 0.0
+	macdSignal := 0.0
 
 	return f.FormatMessage(
 		symbol,
@@ -75,10 +82,12 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 		shortLiqVolume,
 		volumeDelta,
 		volumeDeltaPercent,
+		rsi,
+		macdSignal,
 	)
 }
 
-// FormatCleanDashboardMessage создает сообщение в чистом формате без рамки
+// FormatMessage создает сообщение в чистом формате без рамки
 func (f *MarketMessageFormatter) FormatMessage(
 	symbol string,
 	direction string,
@@ -98,6 +107,8 @@ func (f *MarketMessageFormatter) FormatMessage(
 	shortLiqVolume float64,
 	volumeDelta float64, // Дельта объемов в USD
 	volumeDeltaPercent float64, // Изменение дельты в процентах
+	rsi float64, // Индикатор RSI (0 если недоступен)
+	macdSignal float64, // Сигнал MACD (0 если недоступен)
 ) string {
 	var builder strings.Builder
 
@@ -145,7 +156,26 @@ func (f *MarketMessageFormatter) FormatMessage(
 		builder.WriteString("\n")
 	}
 
-	// ==================== БЛОК 4: ЛИКВИДАЦИИ ====================
+	// ==================== БЛОК 4: ТЕХНИЧЕСКИЙ АНАЛИЗ ====================
+	if rsi > 0 || macdSignal != 0 {
+		builder.WriteString(fmt.Sprintf("📊 Тех. анализ:\n"))
+
+		// RSI
+		if rsi > 0 {
+			rsiStr := f.formatRSI(rsi)
+			builder.WriteString(fmt.Sprintf("%s\n", rsiStr))
+		}
+
+		// MACD
+		if macdSignal != 0 {
+			macdStr := f.formatMACD(macdSignal)
+			builder.WriteString(fmt.Sprintf("%s\n", macdStr))
+		}
+
+		builder.WriteString("\n")
+	}
+
+	// ==================== БЛОК 5: ЛИКВИДАЦИИ ====================
 	if liquidationVolume > 0 && volume24h > 0 {
 		// Рассчитываем проценты
 		var longPercent, shortPercent, volumePercent float64
@@ -195,7 +225,7 @@ func (f *MarketMessageFormatter) FormatMessage(
 		builder.WriteString(fmt.Sprintf("SHORT  %3.0f%% %s%s\n\n", shortPercent, shortBar, imbalanceEmoji))
 	}
 
-	// ==================== БЛОК 5: ПРОГРЕСС И ПЕРИОД ====================
+	// ==================== БЛОК 6: ПРОГРЕСС И ПЕРИОД ====================
 	// Прогресс сигналов
 	percentage := float64(signalCount) / float64(maxSignals) * 100
 	progressBar := f.formatCompactProgressBar(percentage)
@@ -206,7 +236,13 @@ func (f *MarketMessageFormatter) FormatMessage(
 	// Период анализа
 	builder.WriteString(fmt.Sprintf("🕐 Период: %s\n\n", period))
 
-	// ==================== БЛОК 6: ФАНДИНГ ====================
+	// ==================== БЛОК 7: РЕКОМЕНДАЦИИ ПО ТОРГОВЛЕ ====================
+	recommendation := f.getTradingRecommendation(direction, rsi, macdSignal, volumeDelta, longLiqVolume, shortLiqVolume)
+	if recommendation != "" {
+		builder.WriteString(fmt.Sprintf("🎯 Рекомендация:\n%s\n\n", recommendation))
+	}
+
+	// ==================== БЛОК 8: ФАНДИНГ ====================
 	// Форматируем фандинг
 	fundingStr := f.formatFundingWithEmoji(fundingRate)
 
@@ -219,10 +255,155 @@ func (f *MarketMessageFormatter) FormatMessage(
 	return builder.String()
 }
 
-// ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+// ==================== МЕТОДЫ ТЕХНИЧЕСКОГО АНАЛИЗА ====================
+
+// formatRSI форматирует RSI с описанием состояния
+func (f *MarketMessageFormatter) formatRSI(rsi float64) string {
+	var emoji, description string
+
+	// Определяем зону RSI
+	switch {
+	case rsi >= 70:
+		emoji = "🔴"
+		description = "сильная перекупленность"
+	case rsi >= 62:
+		emoji = "🟡"
+		description = "перекупленность"
+	case rsi >= 55:
+		emoji = "🟢"
+		description = "бычий настрой"
+	case rsi >= 45:
+		emoji = "⚪"
+		description = "нейтральный"
+	case rsi >= 38:
+		emoji = "🟠"
+		description = "медвежий настрой"
+	default:
+		emoji = "🔴"
+		description = "сильная перепроданность"
+	}
+
+	return fmt.Sprintf("RSI: %.1f %s (%s)", rsi, emoji, description)
+}
+
+// formatMACD форматирует MACD с описанием сигнала
+func (f *MarketMessageFormatter) formatMACD(macdSignal float64) string {
+	var emoji, description string
+
+	// Определяем силу MACD сигнала
+	switch {
+	case macdSignal > 0.1:
+		emoji = "🟢"
+		description = "сильный бычий"
+	case macdSignal > 0.01:
+		emoji = "🟡"
+		description = "бычий"
+	case macdSignal > -0.01:
+		emoji = "⚪"
+		description = "нейтральный"
+	case macdSignal > -0.1:
+		emoji = "🟠"
+		description = "медвежий"
+	default:
+		emoji = "🔴"
+		description = "сильный медвежий"
+	}
+
+	return fmt.Sprintf("MACD: %s %s", emoji, description)
+}
+
+// getTradingRecommendation возвращает рекомендации по торговле на основе всех индикаторов
+func (f *MarketMessageFormatter) getTradingRecommendation(
+	direction string,
+	rsi float64,
+	macdSignal float64,
+	volumeDelta float64,
+	longLiqVolume float64,
+	shortLiqVolume float64,
+) string {
+	var recommendations []string
+
+	// Анализ RSI - определяем зоны перекупленности/перепроданности
+	if rsi >= 70 {
+		recommendations = append(recommendations, "RSI в зоне перекупленности - осторожность с LONG")
+	} else if rsi <= 30 {
+		recommendations = append(recommendations, "RSI в зоне перепроданности - осторожность с SHORT")
+	}
+
+	// Анализ MACD - определяем тренд
+	if macdSignal > 0.05 {
+		recommendations = append(recommendations, "MACD бычий - рассмотреть LONG")
+	} else if macdSignal < -0.05 {
+		recommendations = append(recommendations, "MACD медвежий - рассмотреть SHORT")
+	}
+
+	// Анализ дельты объемов - определяем настроения
+	if volumeDelta > 0 {
+		if direction == "growth" {
+			recommendations = append(recommendations, "Дельта подтверждает рост - LONG приоритет")
+		} else {
+			recommendations = append(recommendations, "Дельта противоречит падению - возможен разворот")
+		}
+	} else if volumeDelta < 0 {
+		if direction == "fall" {
+			recommendations = append(recommendations, "Дельта подтверждает падение - SHORT приоритет")
+		} else {
+			recommendations = append(recommendations, "Дельта противоречит росту - возможна коррекция")
+		}
+	}
+
+	// Анализ ликвидаций - определяем давление на рынок
+	if longLiqVolume > shortLiqVolume*1.5 {
+		recommendations = append(recommendations, "Много LONG ликвидаций - возможен отскок вверх")
+	} else if shortLiqVolume > longLiqVolume*1.5 {
+		recommendations = append(recommendations, "Много SHORT ликвидаций - возможен отскок вниз")
+	}
+
+	// Если рекомендаций нет - возвращаем пустую строку
+	if len(recommendations) == 0 {
+		return ""
+	}
+
+	// Определяем общий сигнал на основе всех рекомендаций
+	var primarySignal string
+	if len(recommendations) >= 2 {
+		bullishCount := 0
+		bearishCount := 0
+
+		for _, rec := range recommendations {
+			if strings.Contains(rec, "LONG") || strings.Contains(rec, "рост") || strings.Contains(rec, "бычий") {
+				bullishCount++
+			} else if strings.Contains(rec, "SHORT") || strings.Contains(rec, "падение") || strings.Contains(rec, "медвежий") {
+				bearishCount++
+			}
+		}
+
+		switch {
+		case bullishCount > bearishCount:
+			primarySignal = "🟢 Преобладают бычьи сигналы"
+		case bearishCount > bullishCount:
+			primarySignal = "🔴 Преобладают медвежьи сигналы"
+		default:
+			primarySignal = "⚪ Смешанные сигналы"
+		}
+	} else {
+		primarySignal = "📊 Одиночный сигнал"
+	}
+
+	// Формируем итоговое сообщение с нумерованными рекомендациями
+	result := primarySignal + "\n"
+	for i, rec := range recommendations {
+		result += fmt.Sprintf("%d. %s\n", i+1, rec)
+	}
+
+	return strings.TrimSpace(result)
+}
+
+// ==================== МЕТОДЫ ФОРМАТИРОВАНИЯ ДЕЛЬТЫ ОБЪЕМОВ ====================
 
 // formatVolumeDelta форматирует дельту объемов с процентом изменения
 func (f *MarketMessageFormatter) formatVolumeDelta(delta float64, deltaPercent float64, direction string) string {
+	// Если данных нет - возвращаем прочерк
 	if delta == 0 && deltaPercent == 0 {
 		return "─"
 	}
@@ -231,21 +412,19 @@ func (f *MarketMessageFormatter) formatVolumeDelta(delta float64, deltaPercent f
 	var deltaIcon string
 	deltaFormatted := math.Abs(delta)
 
-	if delta > 0 {
-		// Положительная дельта - покупки преобладают
-		deltaIcon = "🟢"
-	} else if delta < 0 {
-		// Отрицательная дельта - продажи преобладают
-		deltaIcon = "🔴"
-	} else {
-		// Нулевая дельта
-		deltaIcon = "⚪"
+	switch {
+	case delta > 0:
+		deltaIcon = "🟢" // Положительная дельта - покупки преобладают
+	case delta < 0:
+		deltaIcon = "🔴" // Отрицательная дельта - продажи преобладают
+	default:
+		deltaIcon = "⚪" // Нулевая дельта
 	}
 
 	// Форматируем значение дельты
 	deltaStr := f.formatDollarValue(deltaFormatted)
 
-	// Если есть процент изменения, добавляем его
+	// Если есть процент изменения, добавляем его с проверкой согласованности
 	if deltaPercent != 0 {
 		percentIcon := "🟢"
 		percentPrefix := "+"
@@ -255,7 +434,7 @@ func (f *MarketMessageFormatter) formatVolumeDelta(delta float64, deltaPercent f
 			percentPrefix = "-"
 		}
 
-		// Проверяем согласованность знаков
+		// Проверяем согласованность знаков дельты и процента изменения
 		if (delta > 0 && deltaPercent > 0) || (delta < 0 && deltaPercent < 0) {
 			// Согласованные знаки - покупатели/продавцы усиливают давление
 			return fmt.Sprintf("%s%s (%s%s%.1f%%)",
@@ -270,57 +449,68 @@ func (f *MarketMessageFormatter) formatVolumeDelta(delta float64, deltaPercent f
 	return fmt.Sprintf("%s%s", deltaIcon, deltaStr)
 }
 
-// getContractType возвращает тип контракта
+// ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ФОРМАТИРОВАНИЯ ====================
+
+// getContractType возвращает тип контракта на основе символа
 func (f *MarketMessageFormatter) getContractType(symbol string) string {
 	symbolUpper := strings.ToUpper(symbol)
-	if strings.Contains(symbolUpper, "USDT") {
+
+	switch {
+	case strings.Contains(symbolUpper, "USDT"):
 		return "USDT-фьючерс"
-	} else if strings.Contains(symbolUpper, "USD") && !strings.Contains(symbolUpper, "USDT") {
+	case strings.Contains(symbolUpper, "USD") && !strings.Contains(symbolUpper, "USDT"):
 		return "USD-фьючерс"
-	} else if strings.Contains(symbolUpper, "PERP") {
+	case strings.Contains(symbolUpper, "PERP"):
 		return "Бессрочный"
+	default:
+		return "Фьючерс"
 	}
-	return "Фьючерс"
 }
 
-// extractTimeframe извлекает таймфрейм из периода
+// extractTimeframe извлекает таймфрейм из периода анализа
 func (f *MarketMessageFormatter) extractTimeframe(period string) string {
-	if strings.Contains(period, "5") {
+	switch {
+	case strings.Contains(period, "5"):
 		return "5мин"
-	} else if strings.Contains(period, "15") {
+	case strings.Contains(period, "15"):
 		return "15мин"
-	} else if strings.Contains(period, "30") {
+	case strings.Contains(period, "30"):
 		return "30мин"
-	} else if strings.Contains(period, "1 час") {
+	case strings.Contains(period, "1 час"):
 		return "1ч"
-	} else if strings.Contains(period, "4") {
+	case strings.Contains(period, "4"):
 		return "4ч"
-	} else if strings.Contains(period, "1 день") {
+	case strings.Contains(period, "1 день"):
 		return "1д"
+	default:
+		return "1мин"
 	}
-	return "1мин"
 }
 
-// getIntensityEmoji возвращает эмодзи силы движения
+// getIntensityEmoji возвращает эмодзи силы движения на основе процентного изменения
 func (f *MarketMessageFormatter) getIntensityEmoji(change float64) string {
-	if change > 5 {
-		return "🚨"
-	} else if change > 3 {
-		return "⚡"
-	} else if change > 1.5 {
-		return "📈"
+	switch {
+	case change > 5:
+		return "🚨" // Очень сильное движение
+	case change > 3:
+		return "⚡" // Сильное движение
+	case change > 1.5:
+		return "📈" // Умеренное движение
+	default:
+		return "" // Слабое движение
 	}
-	return ""
 }
 
-// formatOIWithChange форматирует OI с изменением
+// formatOIWithChange форматирует открытый интерес с процентным изменением
 func (f *MarketMessageFormatter) formatOIWithChange(oi float64, change float64) string {
+	// Если OI недоступен
 	if oi <= 0 {
 		return "─"
 	}
 
 	oiStr := f.formatDollarValue(oi)
 
+	// Если есть изменение, добавляем его с цветным индикатором
 	if change != 0 {
 		changeIcon := "🟢"
 		if change < 0 {
@@ -332,8 +522,9 @@ func (f *MarketMessageFormatter) formatOIWithChange(oi float64, change float64) 
 	return fmt.Sprintf("$%s", oiStr)
 }
 
-// formatCompactBar создает компактный бар (5 символов)
+// formatCompactBar создает компактный бар из эмодзи (5 символов)
 func (f *MarketMessageFormatter) formatCompactBar(percentage float64, emoji string) string {
+	// Рассчитываем количество заполненных баров (максимум 5)
 	bars := int(percentage / 20) // 5 баров по 20% каждый
 	if bars > 5 {
 		bars = 5
@@ -342,6 +533,7 @@ func (f *MarketMessageFormatter) formatCompactBar(percentage float64, emoji stri
 		bars = 0
 	}
 
+	// Строим строку с барами
 	var result string
 	for i := 0; i < 5; i++ {
 		if i < bars {
@@ -353,8 +545,9 @@ func (f *MarketMessageFormatter) formatCompactBar(percentage float64, emoji stri
 	return result
 }
 
-// formatCompactProgressBar создает компактный прогресс-бар (5 символов)
+// formatCompactProgressBar создает компактный прогресс-бар для счетчика сигналов
 func (f *MarketMessageFormatter) formatCompactProgressBar(percentage float64) string {
+	// Рассчитываем количество заполненных баров
 	bars := int(percentage / 20) // 5 баров по 20% каждый
 	if bars > 5 {
 		bars = 5
@@ -363,16 +556,18 @@ func (f *MarketMessageFormatter) formatCompactProgressBar(percentage float64) st
 		bars = 0
 	}
 
+	// Строим прогресс-бар с цветами в зависимости от заполнения
 	var result string
 	for i := 0; i < 5; i++ {
 		if i < bars {
-			// Цвет баров в зависимости от заполнения
-			if percentage >= 80 {
-				result += "🔴"
-			} else if percentage >= 50 {
-				result += "🟡"
-			} else {
-				result += "🟢"
+			// Цвет баров меняется в зависимости от уровня заполнения
+			switch {
+			case percentage >= 80:
+				result += "🔴" // Высокое заполнение - красный
+			case percentage >= 50:
+				result += "🟡" // Среднее заполнение - желтый
+			default:
+				result += "🟢" // Низкое заполнение - зеленый
 			}
 		} else {
 			result += "▫️"
@@ -381,49 +576,54 @@ func (f *MarketMessageFormatter) formatCompactProgressBar(percentage float64) st
 	return result
 }
 
-// formatFundingWithEmoji форматирует фандинг с эмодзи
+// formatFundingWithEmoji форматирует ставку фандинга с эмодзи
 func (f *MarketMessageFormatter) formatFundingWithEmoji(rate float64) string {
 	ratePercent := rate * 100
 
-	// Выбираем эмодзи в зависимости от величины
+	// Выбираем эмодзи в зависимости от величины ставки фандинга
 	var icon string
-	if ratePercent > 0.015 {
-		icon = "🟢"
-	} else if ratePercent > 0.005 {
-		icon = "🟡"
-	} else if ratePercent > -0.005 {
-		icon = "⚪"
-	} else if ratePercent > -0.015 {
-		icon = "🟠"
-	} else {
-		icon = "🔴"
+	switch {
+	case ratePercent > 0.015:
+		icon = "🟢" // Сильно положительный
+	case ratePercent > 0.005:
+		icon = "🟡" // Слабо положительный
+	case ratePercent > -0.005:
+		icon = "⚪" // Нейтральный
+	case ratePercent > -0.015:
+		icon = "🟠" // Слабо отрицательный
+	default:
+		icon = "🔴" // Сильно отрицательный
 	}
 
 	return fmt.Sprintf("%s %.4f%%", icon, ratePercent)
 }
 
-// formatCompactTime форматирует время в компактном виде
+// formatCompactTime форматирует время в компактном читаемом виде
 func (f *MarketMessageFormatter) formatCompactTime(nextFundingTime time.Time) string {
+	// Если время не задано
 	if nextFundingTime.IsZero() {
 		return "─"
 	}
 
 	now := time.Now()
+
+	// Если время уже прошло
 	if nextFundingTime.Before(now) {
 		return "сейчас"
 	}
 
 	duration := nextFundingTime.Sub(now)
 
-	// Компактный формат
-	if duration.Hours() >= 1 {
+	// Форматируем в зависимости от длительности
+	switch {
+	case duration.Hours() >= 1:
 		hours := int(duration.Hours())
 		minutes := int(duration.Minutes()) % 60
 		if minutes > 0 {
 			return fmt.Sprintf("%dч %dм", hours, minutes)
 		}
 		return fmt.Sprintf("%dч", hours)
-	} else {
+	default:
 		minutes := int(duration.Minutes())
 		if minutes <= 0 {
 			return "скоро!"
@@ -432,40 +632,44 @@ func (f *MarketMessageFormatter) formatCompactTime(nextFundingTime time.Time) st
 	}
 }
 
+// ==================== МЕТОДЫ ФОРМАТИРОВАНИЯ ЧИСЕЛ ====================
+
 // formatPrice форматирует цену с учетом ее величины
 func (f *MarketMessageFormatter) formatPrice(price float64) string {
 	if price <= 0 {
 		return "0.00"
 	}
 
-	if price >= 1000 {
+	// Адаптивное форматирование в зависимости от величины цены
+	switch {
+	case price >= 1000:
 		return fmt.Sprintf("%.0f", math.Round(price))
-	} else if price >= 100 {
+	case price >= 100:
 		return fmt.Sprintf("%.1f", price)
-	} else if price >= 10 {
+	case price >= 10:
 		return fmt.Sprintf("%.2f", price)
-	} else if price >= 1 {
+	case price >= 1:
 		return fmt.Sprintf("%.3f", price)
-	} else if price >= 0.1 {
+	case price >= 0.1:
 		return fmt.Sprintf("%.4f", price)
-	} else if price >= 0.01 {
+	case price >= 0.01:
 		return fmt.Sprintf("%.5f", price)
-	} else if price >= 0.001 {
+	case price >= 0.001:
 		return fmt.Sprintf("%.6f", price)
-	} else if price >= 0.0001 {
+	case price >= 0.0001:
 		return fmt.Sprintf("%.7f", price)
-	} else {
+	default:
 		return fmt.Sprintf("%.8f", price)
 	}
 }
 
-// formatDollarValue форматирует долларовые значения в читаемый вид
+// formatDollarValue форматирует долларовые значения в читаемый вид (K/M/B)
 func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 	if num <= 0 {
 		return "0"
 	}
 
-	// Форматируем в M (миллионы) или K (тысячи)
+	// Форматируем в миллиарды (B)
 	if num >= 1_000_000_000 {
 		value := num / 1_000_000_000
 		if value < 10 {
@@ -475,7 +679,10 @@ func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 		} else {
 			return fmt.Sprintf("%.0fB", math.Round(value))
 		}
-	} else if num >= 1_000_000 {
+	}
+
+	// Форматируем в миллионы (M)
+	if num >= 1_000_000 {
 		value := num / 1_000_000
 		if value < 10 {
 			return fmt.Sprintf("%.2fM", value)
@@ -484,16 +691,23 @@ func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 		} else {
 			return fmt.Sprintf("%.0fM", math.Round(value))
 		}
-	} else if num >= 1_000 {
+	}
+
+	// Форматируем в тысячи (K)
+	if num >= 1_000 {
 		value := num / 1_000
 		if value < 10 {
 			return fmt.Sprintf("%.1fK", value)
 		} else {
 			return fmt.Sprintf("%.0fK", math.Round(value))
 		}
-	} else if num >= 1 {
-		return fmt.Sprintf("%.0f", math.Round(num))
-	} else {
-		return fmt.Sprintf("%.2f", num)
 	}
+
+	// Меньше 1000 - округляем до целого
+	if num >= 1 {
+		return fmt.Sprintf("%.0f", math.Round(num))
+	}
+
+	// Меньше 1 - показываем с двумя знаками
+	return fmt.Sprintf("%.2f", num)
 }

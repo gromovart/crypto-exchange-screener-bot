@@ -403,6 +403,9 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	log.Printf("   Price: %.4f, Volume: %.0f", currentPrice, volume24h)
 	log.Printf("   Дельта: %.0f (%.1f%%), Ликвидации: $%.0f", volumeDelta, volumeDeltaPercent, liquidationVolume)
 
+	// Рассчитываем технические индикаторы
+	rsi := a.calculateRSI(notification.Symbol, priceData)
+	macdSignal := a.calculateMACD(notification.Symbol, priceData)
 	// ==================== БЛОК ФОРМАТИРОВАНИЯ СООБЩЕНИЯ ====================
 	return a.messageFormatter.FormatMessage(
 		notification.Symbol,
@@ -423,6 +426,8 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		shortLiqVolume,
 		volumeDelta,
 		volumeDeltaPercent,
+		rsi,        // Добавлено
+		macdSignal, // Добавлено
 	)
 }
 
@@ -953,4 +958,72 @@ var DefaultCounterConfig = AnalyzerConfig{
 		"include_volume":         true,
 		"include_funding":        true,
 	},
+}
+
+// Новые методы для расчета индикаторов:
+func (a *CounterAnalyzer) calculateRSI(symbol string, priceData []types.PriceData) float64 {
+	if len(priceData) < 14 {
+		return 0
+	}
+
+	// Простая эмуляция RSI
+	var gains, losses float64
+	for i := 1; i < len(priceData); i++ {
+		change := priceData[i].Price - priceData[i-1].Price
+		if change > 0 {
+			gains += change
+		} else {
+			losses += math.Abs(change)
+		}
+	}
+
+	if gains+losses == 0 {
+		return 50
+	}
+
+	// Базовая формула RSI
+	avgGain := gains / float64(len(priceData)-1)
+	avgLoss := losses / float64(len(priceData)-1)
+
+	if avgLoss == 0 {
+		return 100
+	}
+
+	rs := avgGain / avgLoss
+	rsi := 100 - (100 / (1 + rs))
+
+	return rsi
+}
+
+func (a *CounterAnalyzer) calculateMACD(symbol string, priceData []types.PriceData) float64 {
+	if len(priceData) < 26 {
+		return 0
+	}
+
+	// Простая эмуляция MACD
+	// EMA12 - EMA26
+	var sum12, sum26 float64
+	period12 := 12
+	period26 := 26
+
+	if len(priceData) < period26 {
+		return 0
+	}
+
+	// EMA12
+	for i := len(priceData) - period12; i < len(priceData); i++ {
+		sum12 += priceData[i].Price
+	}
+	ema12 := sum12 / float64(period12)
+
+	// EMA26
+	for i := len(priceData) - period26; i < len(priceData); i++ {
+		sum26 += priceData[i].Price
+	}
+	ema26 := sum26 / float64(period26)
+
+	// MACD сигнал (разница)
+	macd := ema12 - ema26
+
+	return macd
 }
