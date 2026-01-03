@@ -309,10 +309,10 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 		})
 
 		// Отладочный лог для OI
-		if t.OpenInterest != "" && t.OpenInterest != "0" {
-			oi, _ := strconv.ParseFloat(t.OpenInterest, 64)
-			log.Printf("📊 BybitClient.GetTickers: %s OI = %.0f", t.Symbol, oi)
-		}
+		// if t.OpenInterest != "" && t.OpenInterest != "0" {
+		// 	oi, _ := strconv.ParseFloat(t.OpenInterest, 64)
+		// 	log.Printf("📊 BybitClient.GetTickers: %s OI = %.0f", t.Symbol, oi)
+		// }
 	}
 
 	return &api.TickerResponse{

@@ -139,11 +139,11 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig)
 	}
 
 	counter.Unlock()
-
-	log.Printf("🔍 CounterAnalyzer.Analyze для %s:", symbol)
-	for i, d := range data {
-		log.Printf("   data[%d].OpenInterest = %f", i, d.OpenInterest)
-	}
+	//Отладочный лог
+	// log.Printf("🔍 CounterAnalyzer.Analyze для %s:", symbol)
+	// for i, d := range data {
+	// 	log.Printf("   data[%d].OpenInterest = %f", i, d.OpenInterest)
+	// }
 
 	// Отправляем улучшенное уведомление если нужно
 	if signalDetected {
@@ -163,7 +163,7 @@ func (a *CounterAnalyzer) createAnalysisSignal(symbol, direction string,
 
 	// Получаем последние данные для дополнительных метрик
 	latestData := data[len(data)-1]
-	oiChange24h := a.calculateOIChange24h(data)
+	oiChange24h := a.calculateOIChange24h(symbol)
 
 	return analysis.Signal{
 		ID:            uuid.New().String(),
@@ -270,41 +270,74 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	priceData []types.PriceData,
 ) string {
 	if len(priceData) == 0 {
-		return a.formatNotificationMessage(notification) // fallback
+		return a.formatNotificationMessage(notification)
 	}
 
 	// Получаем последние данные
 	latestData := priceData[len(priceData)-1]
 
-	// Отладочная информация
-	log.Printf("DEBUG CounterAnalyzer: Symbol=%s, OI=%f, VolumeUSD=%f, Price=%f",
-		notification.Symbol,
-		latestData.OpenInterest,
-		latestData.VolumeUSD,
-		latestData.Price)
-	// Детальный лог для отладки OI
-	log.Printf("🔍 CounterAnalyzer.formatEnhancedNotificationMessage для %s:", notification.Symbol)
-	log.Printf("   latestData.OpenInterest = %f", latestData.OpenInterest)
-	log.Printf("   latestData.VolumeUSD = %f", latestData.VolumeUSD)
-	log.Printf("   latestData.Price = %f", latestData.Price)
-	log.Printf("   latestData.FundingRate = %f", latestData.FundingRate)
-	log.Printf("   len(priceData) = %d", len(priceData))
+	// Пробуем получить REAL-TIME данные из хранилища
+	realTimePrice, realTimeOI, realTimeFunding, realTimeVolume := a.getRealTimeMetrics(notification.Symbol)
 
-	// Проверяем все точки данных
-	for i, data := range priceData {
-		if data.OpenInterest > 0 {
-			log.Printf("   priceData[%d].OpenInterest = %f", i, data.OpenInterest)
-		}
+	// Используем реальные данные если они есть
+	currentPrice := latestData.Price
+	openInterest := latestData.OpenInterest
+	fundingRate := latestData.FundingRate
+	volume24h := latestData.Volume24h
+
+	if realTimePrice > 0 {
+		currentPrice = realTimePrice
+	}
+	if realTimeOI > 0 {
+		openInterest = realTimeOI
+		log.Printf("✅ Используем реальный OI из хранилища: %.0f", realTimeOI)
+	}
+	if realTimeFunding != 0 {
+		fundingRate = realTimeFunding
+	}
+	if realTimeVolume > 0 {
+		volume24h = realTimeVolume
+	}
+
+	// Если OI все еще 0, используем эвристику
+	if openInterest <= 0 {
+		// Эвристика: OI ≈ 5% от объема
+		openInterest = volume24h * 0.05
+		log.Printf("📊 Используем расчетный OI для %s: %.0f (объем: %.0f)",
+			notification.Symbol, openInterest, volume24h)
 	}
 
 	// Рассчитываем изменение OI за 24 часа
-	oiChange24h := a.calculateOIChange24h(priceData)
+	oiChange24h := a.calculateOIChange24h(notification.Symbol)
 
+	// Отладочный лог
+	log.Printf("🔍 CounterAnalyzer OI Change для %s: %.1f%% (OI=%.0f)",
+		notification.Symbol, oiChange24h, openInterest)
+
+	// ОТЛАДОЧНЫЙ ЛОГ
+	log.Printf("🔍 CounterAnalyzer.calculateOIChange24h для %s:", notification.Symbol)
+	log.Printf("   oiChange24h = %.1f%%", oiChange24h)
+	log.Printf("   Всего точек данных: %d", len(priceData))
+
+	// Проверьте все точки данных на наличие OI
+	for i, point := range priceData {
+		if point.OpenInterest > 0 {
+			log.Printf("   Точка %d: OI=%.0f, время=%s",
+				i, point.OpenInterest, point.Timestamp.Format("15:04"))
+		}
+	}
 	// Рассчитываем время следующего фандинга
 	nextFundingTime := a.calculateNextFundingTime()
 
 	// Рассчитываем среднюю ставку фандинга
 	averageFunding := a.calculateAverageFunding(priceData)
+
+	log.Printf("📤 CounterAnalyzer отправляет данные в форматтер:")
+	log.Printf("   Symbol: %s", notification.Symbol)
+	log.Printf("   OI: %.0f", openInterest)
+	log.Printf("   OI Change 24h: %.1f%%", oiChange24h)
+	log.Printf("   Price: %.4f", currentPrice)
+	log.Printf("   Volume: %.0f", volume24h)
 
 	// Используем форматтер сообщений
 	return a.messageFormatter.FormatCounterMessage(
@@ -313,11 +346,11 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		notification.ChangePercent,
 		notification.CurrentCount,
 		notification.MaxSignals,
-		latestData.Price,
-		latestData.Volume24h,
-		latestData.OpenInterest,
+		currentPrice,
+		volume24h,
+		openInterest, // ⚠️ Теперь передаем НЕ ноль
 		oiChange24h,
-		latestData.FundingRate,
+		fundingRate,
 		averageFunding,
 		nextFundingTime,
 		notification.Period.ToString(),
@@ -406,39 +439,72 @@ func (a *CounterAnalyzer) createNotificationKeyboard(notification CounterNotific
 }
 
 // calculateOIChange24h рассчитывает изменение OI за 24 часа
-func (a *CounterAnalyzer) calculateOIChange24h(data []types.PriceData) float64 {
-	if len(data) < 2 {
+func (a *CounterAnalyzer) calculateOIChange24h(symbol string) float64 {
+	// Используем хранилище для получения исторических данных
+	log.Printf("🔍 Получение OI change для %s из хранилища", symbol)
+
+	// Получаем метрики из хранилища
+	if metrics, exists := a.storage.GetSymbolMetrics(symbol); exists {
+		log.Printf("✅ Получен OI change из хранилища для %s: %.1f%%",
+			symbol, metrics.OIChange24h)
+		return metrics.OIChange24h
+	}
+
+	// Если метрики нет, пытаемся получить историю
+	history, err := a.storage.GetPriceHistory(symbol, 200) // Больше точек
+	if err != nil {
+		log.Printf("⚠️ Не удалось получить историю для %s: %v", symbol, err)
 		return 0
 	}
 
-	now := time.Now()
-	twentyFourHoursAgo := now.Add(-24 * time.Hour)
-	latestData := data[len(data)-1]
-
-	// Если текущий OI = 0, не можем рассчитать изменение
-	if latestData.OpenInterest <= 0 {
+	if len(history) < 2 {
+		log.Printf("⚠️ Недостаточно исторических данных для %s: %d точек", symbol, len(history))
 		return 0
 	}
 
-	// Находим OI 24 часа назад (ближайшее значение)
+	// Находим последнюю точку с OI
+	var latestData *storage.PriceData
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].OpenInterest > 0 {
+			latestData = &history[i]
+			break
+		}
+	}
+
+	if latestData == nil {
+		log.Printf("⚠️ Нет OI данных для %s в истории", symbol)
+		return 0
+	}
+
+	// Ищем точку 24 часа назад
+	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
 	var oldOI float64
 	var minDiff time.Duration = 24 * time.Hour
 	var found bool
 
-	for _, point := range data {
-		diff := point.Timestamp.Sub(twentyFourHoursAgo)
-		if diff.Abs() < minDiff.Abs() && point.OpenInterest > 0 {
-			minDiff = diff
-			oldOI = point.OpenInterest
-			found = true
+	for _, point := range history {
+		if point.OpenInterest > 0 {
+			diff := point.Timestamp.Sub(twentyFourHoursAgo)
+			diffAbs := diff.Abs()
+
+			if diffAbs < minDiff {
+				minDiff = diffAbs
+				oldOI = point.OpenInterest
+				found = true
+			}
 		}
 	}
 
-	if !found || oldOI == 0 || latestData.OpenInterest == 0 {
+	if !found || oldOI == 0 {
+		log.Printf("⚠️ Не найден OI за 24 часа для %s", symbol)
 		return 0
 	}
 
-	return ((latestData.OpenInterest - oldOI) / oldOI) * 100
+	change := ((latestData.OpenInterest - oldOI) / oldOI) * 100
+	log.Printf("📊 Рассчитан OI change для %s: %.0f → %.0f = %.1f%% (разница: %v)",
+		symbol, oldOI, latestData.OpenInterest, change, minDiff)
+
+	return change
 }
 
 // calculateAverageFunding рассчитывает среднюю ставку фандинга
@@ -857,4 +923,17 @@ func (c *internalCounter) RLock() {
 // RUnlock разблокирует счетчика для чтения
 func (c *internalCounter) RUnlock() {
 	c.mu.RUnlock()
+}
+
+func (a *CounterAnalyzer) getRealTimeMetrics(symbol string) (price, oi, funding float64, volumeUSD float64) {
+	// Пробуем получить из хранилища
+	if metrics, exists := a.storage.GetSymbolMetrics(symbol); exists {
+		log.Printf("✅ CounterAnalyzer: получены реальные метрики для %s: OI=%.0f",
+			symbol, metrics.OpenInterest)
+		return metrics.Price, metrics.OpenInterest, metrics.FundingRate, metrics.VolumeUSD
+	}
+
+	// Если нет в хранилище, используем последние данные из priceData
+	// (это уже в функции formatEnhancedNotificationMessage)
+	return 0, 0, 0, 0
 }

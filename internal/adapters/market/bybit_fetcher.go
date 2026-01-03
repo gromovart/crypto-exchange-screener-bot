@@ -1,3 +1,4 @@
+// internal/adapters/market/bybit_fetcher.go
 package market
 
 import (

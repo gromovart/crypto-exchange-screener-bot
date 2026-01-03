@@ -39,11 +39,11 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 ) string {
 	// Отладочный лог
 	log.Printf("🔍 MarketMessageFormatter.FormatCounterMessage для %s:", symbol)
-	log.Printf("   openInterest параметр = %.0f", openInterest)
+	log.Printf("   openInterest параметр = %.1f", openInterest)
 	log.Printf("   oiChange24h = %.1f%%", oiChange24h)
-	log.Printf("   currentPrice = %.4f", currentPrice)
+	log.Printf("   currentPrice = %.5f", currentPrice)
 	log.Printf("   volume24h = %.2f", volume24h)
-	log.Printf("   fundingRate = %f", fundingRate)
+	log.Printf("   fundingRate = %.6f", fundingRate)
 
 	var builder strings.Builder
 
@@ -75,17 +75,10 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 
 	// Объем с проверкой правдоподобности
 	builder.WriteString(fmt.Sprintf("📊 Объем 24ч: %s\n",
-		f.formatVolumeWithVerification(volume24h, currentPrice, symbol)))
+		f.formatDollarValue(volume24h)))
 
 	// Открытый интерес с улучшенным форматированием
-	oiText := f.formatLargeNumber(openInterest)
-	if oiChange24h != 0 {
-		changeIcon := "🟢"
-		if oiChange24h < 0 {
-			changeIcon = "🔴"
-		}
-		oiText = fmt.Sprintf("%s (%s%.1f%%)", oiText, changeIcon, oiChange24h)
-	}
+	oiText := f.formatOpenInterest(openInterest, oiChange24h)
 	builder.WriteString(fmt.Sprintf("📈 Открытый интерес: %s\n", oiText))
 
 	// Фандинг с улучшенным расчетом времени
@@ -101,7 +94,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	// Время до следующего фандинга
 	timeUntilFunding := f.formatTimeUntilFunding(nextFundingTime)
 	if timeUntilFunding != "" {
-		builder.WriteString(fmt.Sprintf(" (%s)", timeUntilFunding))
+		builder.WriteString(fmt.Sprintf(" (через %s)", timeUntilFunding))
 	}
 	builder.WriteString("\n")
 
@@ -244,98 +237,76 @@ func (f *MarketMessageFormatter) formatPrice(price float64) string {
 	}
 }
 
-// formatVolumeWithVerification форматирует объем с проверкой правдоподобности
-func (f *MarketMessageFormatter) formatVolumeWithVerification(volume float64, price float64, symbol string) string {
-	// Если объем менее $1000, показываем специальный формат
-	if volume < 1000 {
-		return fmt.Sprintf("$%.0f", volume)
+// formatDollarValue форматирует долларовые значения в читаемый вид
+func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
+	if num == 0 {
+		return "$0"
 	}
 
-	// Проверяем на явно нереалистичные значения
-	// Если цена < $0.1 и объем > $10M - это подозрительно
-	if price < 0.1 && volume > 10_000_000 {
-		log.Printf("⚠️ Подозрительный объем для %s: цена=$%s, объем=$%.0f",
-			symbol, f.formatPrice(price), volume)
+	if num < 0 {
+		return "$ошибка"
+	}
 
-		// Пробуем скорректировать - возможно, это объем в монетах, а не в USD
-		volumeInUSD := volume * price
-
-		// Если результат более реалистичен, используем его
-		if volumeInUSD < 10_000_000 && volumeInUSD > 100 {
-			return fmt.Sprintf("$%s", f.formatVolume(volumeInUSD))
+	// Форматируем в M (миллионы) или K (тысячи)
+	if num >= 1_000_000_000 {
+		return fmt.Sprintf("%.1fB", num/1_000_000_000)
+	} else if num >= 1_000_000 {
+		// Для миллионов показываем один знак после запятой
+		value := num / 1_000_000
+		if value < 10 {
+			// Для значений меньше 10 миллионов показываем один знак после запятой
+			return fmt.Sprintf("%.1fM", value)
+		} else {
+			// Для значений больше 10 миллионов показываем без десятичных знаков
+			return fmt.Sprintf("%.0fM", math.Round(value))
 		}
-
-		// Если все еще подозрительно, показываем без K/M/B
-		if volumeInUSD > 10_000_000 {
-			return fmt.Sprintf("$%.0f", volumeInUSD)
-		}
-
-		// Иначе показываем "N/A"
-		return "N/A"
+	} else if num >= 1_000 {
+		// Для тысяч показываем без десятичных знаков
+		return fmt.Sprintf("%.0fK", math.Round(num/1_000))
+	} else if num >= 1 {
+		return fmt.Sprintf("%.0f", math.Round(num))
+	} else {
+		return fmt.Sprintf("%.2f", num)
 	}
-
-	return fmt.Sprintf("$%s", f.formatVolume(volume))
-}
-
-// formatVolume форматирует объем
-func (f *MarketMessageFormatter) formatVolume(volume float64) string {
-	if volume >= 1_000_000_000 {
-		return fmt.Sprintf("%.2fB", volume/1_000_000_000)
-	} else if volume >= 1_000_000 {
-		return fmt.Sprintf("%.2fM", volume/1_000_000)
-	} else if volume >= 1_000 {
-		return fmt.Sprintf("%.1fK", volume/1_000)
-	}
-	return fmt.Sprintf("%.0f", volume)
 }
 
 // formatOpenInterest форматирует открытый интерес
 func (f *MarketMessageFormatter) formatOpenInterest(oi float64, oiChange24h float64) string {
-	if oi <= 0 {
-		// Если OI недоступен, показываем причину
-		// Проверяем тип символа
-		return "🔍 не поддерживается" // Или "⏳ ожидание данных"
+	if oi < 0 {
+		return "ошибка"
 	}
 
-	oiStr := f.formatLargeNumber(oi)
+	// Если OI = 0, показываем другое сообщение
+	if oi == 0 {
+		return "⏳ обновление"
+	}
 
+	// Форматируем число в $XX.XM/K/B формат
+	oiStr := f.formatDollarValue(oi)
+
+	// Добавляем изменение если есть
 	if oiChange24h != 0 {
 		changeIcon := "🟢"
+		changePrefix := "+"
+
 		if oiChange24h < 0 {
 			changeIcon = "🔴"
+			changePrefix = "-"
 		}
-		return fmt.Sprintf("%s (%s%.1f%%)", oiStr, changeIcon, oiChange24h)
+
+		// Используем абсолютное значение для отображения
+		changeValue := math.Abs(oiChange24h)
+
+		// Форматируем с одним знаком после запятой
+		return fmt.Sprintf("$%s (%s%s%.1f%%)",
+			oiStr,
+			changeIcon,
+			changePrefix,
+			changeValue)
 	}
 
-	return oiStr
-}
-
-// formatLargeNumber форматирует большие числа в читаемый вид
-func (f *MarketMessageFormatter) formatLargeNumber(num float64) string {
-
-	// Измените условие для 0:
-	if num == 0 {
-		return "$0" // ⚠️ Изменено с "недоступно" на "$0"
-	}
-
-	if num < 0 {
-		return "ошибка" // Отрицательные значения невозможны для OI
-	}
-	
-	if num >= 1_000_000_000_000 {
-		return fmt.Sprintf("$%.2fT", num/1_000_000_000_000)
-	} else if num >= 1_000_000_000 {
-		return fmt.Sprintf("$%.2fB", num/1_000_000_000)
-	} else if num >= 1_000_000 {
-		return fmt.Sprintf("$%.1fM", num/1_000_000)
-	} else if num >= 1_000 {
-		return fmt.Sprintf("$%.1fK", num/1_000)
-	} else if num >= 1 {
-		return fmt.Sprintf("$%.0f", num)
-	} else if num > 0 {
-		return fmt.Sprintf("$%.2f", num)
-	}
-	return "недоступно"
+	// Если нет данных об изменении, просто показываем значение
+	return fmt.Sprintf("$%s", oiStr)
 }
 
 // formatFunding форматирует ставку фандинга
@@ -343,6 +314,7 @@ func (f *MarketMessageFormatter) formatFunding(rate float64, label string) strin
 	ratePercent := rate * 100
 	rateStr := fmt.Sprintf("%.4f%%", math.Abs(ratePercent))
 
+	// Улучшенная цветовая логика
 	var icon string
 	if ratePercent > 0.015 {
 		icon = "🟢" // Сильно положительный
@@ -365,31 +337,31 @@ func (f *MarketMessageFormatter) formatFunding(rate float64, label string) strin
 // formatTimeUntilFunding форматирует время до следующего фандинга
 func (f *MarketMessageFormatter) formatTimeUntilFunding(nextFundingTime time.Time) string {
 	if nextFundingTime.IsZero() {
-		// Если время не задано, рассчитываем следующее
-		nextFundingTime = f.calculateNextFundingTime()
+		return ""
 	}
 
 	now := time.Now()
 	if nextFundingTime.Before(now) {
-		// Если время в прошлом, рассчитываем следующее
-		nextFundingTime = f.calculateNextFundingTime()
+		return "сейчас"
 	}
 
 	duration := nextFundingTime.Sub(now)
-	if duration <= 0 {
-		return ""
+
+	// Более человекочитаемый формат
+	if duration.Hours() >= 2 {
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		return fmt.Sprintf("%dч %dм", hours, minutes)
+	} else if duration.Minutes() >= 1 {
+		minutes := int(duration.Minutes())
+		return fmt.Sprintf("%dм", minutes)
+	} else {
+		seconds := int(duration.Seconds())
+		if seconds <= 10 {
+			return "скоро!"
+		}
+		return fmt.Sprintf("%dс", seconds)
 	}
-
-	hours := int(duration.Hours())
-	minutes := int(duration.Minutes()) % 60
-
-	if hours > 0 {
-		return fmt.Sprintf("через %dч %dм", hours, minutes)
-	} else if minutes > 0 {
-		return fmt.Sprintf("через %dм", minutes)
-	}
-
-	return "скоро"
 }
 
 // calculateNextFundingTime рассчитывает следующее время фандинга
@@ -437,5 +409,10 @@ func (f *MarketMessageFormatter) getDirectionText(direction string) string {
 
 // formatValue форматирует числовые значения (сохранен для обратной совместимости)
 func (f *MarketMessageFormatter) formatValue(value float64) string {
-	return f.formatVolume(value)
+	return f.formatDollarValue(value)
+}
+
+// formatVolume форматирует объем (сохранен для обратной совместимости)
+func (f *MarketMessageFormatter) formatVolume(volume float64) string {
+	return f.formatDollarValue(volume)
 }

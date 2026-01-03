@@ -3,6 +3,7 @@ package storage
 
 import (
 	"container/list"
+	"log"
 	"regexp"
 	"sort"
 	"sync"
@@ -457,6 +458,10 @@ func (s *InMemoryPriceStorage) GetSymbolMetrics(symbol string) (*SymbolMetrics, 
 	if !exists {
 		return nil, false
 	}
+
+	// ОТЛАДОЧНЫЙ ЛОГ
+	log.Printf("💾 Storage.GetSymbolMetrics: %s - OI=%.0f, Funding=%.6f",
+		symbol, snapshot.OpenInterest, snapshot.FundingRate)
 
 	// Рассчитываем изменения
 	oiChange24h := s.calculateOIChange24h(symbol)
