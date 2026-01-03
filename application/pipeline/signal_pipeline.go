@@ -1,4 +1,4 @@
-// internal/pipeline/signal_pipeline.go (исправленная версия)
+// application/pipeline/signal_pipeline.go
 package pipeline
 
 import (

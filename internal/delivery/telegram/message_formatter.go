@@ -37,6 +37,8 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	nextFundingTime time.Time,
 	period string,
 	liquidationVolume float64,
+	longLiqVolume float64,
+	shortLiqVolume float64,
 ) string {
 	// Отладочный лог
 	log.Printf("🔍 MarketMessageFormatter.FormatCounterMessage для %s:", symbol)
@@ -46,242 +48,321 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 	log.Printf("   volume24h = %.2f", volume24h)
 	log.Printf("   fundingRate = %.6f", fundingRate)
 	log.Printf("   liquidationVolume = %.2f", liquidationVolume)
+	log.Printf("   longLiqVolume = %.2f", longLiqVolume)
+	log.Printf("   shortLiqVolume = %.2f", shortLiqVolume)
 
+	return f.FormatMessage(
+		symbol,
+		direction,
+		change,
+		signalCount,
+		maxSignals,
+		currentPrice,
+		volume24h,
+		openInterest,
+		oiChange24h,
+		fundingRate,
+		averageFunding,
+		nextFundingTime,
+		period,
+		liquidationVolume,
+		longLiqVolume,
+		shortLiqVolume,
+	)
+}
+
+// FormatCleanDashboardMessage создает сообщение в чистом формате без рамки
+func (f *MarketMessageFormatter) FormatMessage(
+	symbol string,
+	direction string,
+	change float64,
+	signalCount int,
+	maxSignals int,
+	currentPrice float64,
+	volume24h float64,
+	openInterest float64,
+	oiChange24h float64,
+	fundingRate float64,
+	averageFunding float64,
+	nextFundingTime time.Time,
+	period string,
+	liquidationVolume float64,
+	longLiqVolume float64,
+	shortLiqVolume float64,
+) string {
 	var builder strings.Builder
 
 	// ==================== БЛОК 1: ЗАГОЛОВОК ====================
-	builder.WriteString(fmt.Sprintf("⚫ %s - 1мин - %s\n", f.exchange, symbol))
-	builder.WriteString(fmt.Sprintf("🕐 %s\n", time.Now().Format("2006/01/02 15:04:05")))
+	timeframe := f.extractTimeframe(period)
+	contractType := f.getContractType(symbol)
 
-	// Добавляем разделитель после заголовка
-	builder.WriteString("══════════════════════════════════════\n")
+	builder.WriteString(fmt.Sprintf("🏷️  %s • %s\n", f.exchange, timeframe))
+	builder.WriteString(fmt.Sprintf("📛 %s\n", symbol))
+	builder.WriteString(fmt.Sprintf("📄 %s\n", contractType))
+	builder.WriteString(fmt.Sprintf("🕐 %s\n\n", time.Now().Format("15:04:05")))
 
-	// ==================== БЛОК 2: ИНФОРМАЦИЯ О СИМВОЛЕ ====================
-	f.addSymbolInfo(&builder, symbol, currentPrice)
-
-	// Добавляем разделитель после информации о символе
-	builder.WriteString("──────────────────────────────────────\n\n")
-
-	// ==================== БЛОК 3: НАПРАВЛЕНИЕ И ИЗМЕНЕНИЕ ====================
+	// ==================== БЛОК 2: СИГНАЛ И ЦЕНА ====================
 	directionIcon := "🟢"
-	changePrefix := "+"
 	directionText := "РОСТ"
+	changePrefix := "+"
+
 	if direction == "fall" {
 		directionIcon = "🔴"
-		changePrefix = "-"
 		directionText = "ПАДЕНИЕ"
+		changePrefix = "-"
 	}
 
-	builder.WriteString(fmt.Sprintf("%s %s: %s%.2f%%\n",
-		directionIcon,
-		directionText,
-		changePrefix,
-		change))
+	// Добавляем индикатор силы движения
+	intensityEmoji := f.getIntensityEmoji(math.Abs(change))
 
-	// ==================== БЛОК 4: ЦЕНА И ОБЪЕМ ====================
-	// Цена
-	builder.WriteString(fmt.Sprintf("💰 Цена: $%s\n", f.formatPrice(currentPrice)))
+	builder.WriteString(fmt.Sprintf("%s %s %s%.2f%% %s\n",
+		directionIcon, directionText, changePrefix, math.Abs(change), intensityEmoji))
+	builder.WriteString(fmt.Sprintf("💰 $%s\n\n", f.formatPrice(currentPrice)))
+
+	// ==================== БЛОК 3: РЫНОЧНЫЕ МЕТРИКИ ====================
+	// Открытый интерес
+	oiStr := f.formatOIWithChange(openInterest, oiChange24h)
+	builder.WriteString(fmt.Sprintf("📈 OI: %s\n", oiStr))
 
 	// Объем
-	builder.WriteString(fmt.Sprintf("📊 Объем 24ч: $%s\n", f.formatDollarValue(volume24h)))
+	volumeStr := f.formatDollarValue(volume24h)
+	builder.WriteString(fmt.Sprintf("📊 Объем: $%s\n\n", volumeStr))
 
-	// Добавляем разделитель после цены и объема
-	builder.WriteString("──────────────────────────────────────\n")
+	// ==================== БЛОК 4: ЛИКВИДАЦИИ ====================
+	if liquidationVolume > 0 && volume24h > 0 {
+		// Рассчитываем проценты
+		var longPercent, shortPercent, volumePercent float64
+		if liquidationVolume > 0 {
+			longPercent = (longLiqVolume / liquidationVolume) * 100
+			shortPercent = (shortLiqVolume / liquidationVolume) * 100
+		}
+		if volume24h > 0 {
+			volumePercent = (liquidationVolume / volume24h) * 100
+		}
 
-	// ==================== БЛОК 5: OPEN INTEREST ====================
-	// Открытый интерес с улучшенным форматированием
-	oiText := f.formatOpenInterest(openInterest, oiChange24h)
-	builder.WriteString(fmt.Sprintf("📈 Открытый интерес: %s\n", oiText))
+		// Определяем период ликвидаций из анализа
+		liqPeriod := "5мин"
+		if strings.Contains(period, "15") {
+			liqPeriod = "15мин"
+		} else if strings.Contains(period, "30") {
+			liqPeriod = "30мин"
+		} else if strings.Contains(period, "1 час") {
+			liqPeriod = "1ч"
+		}
 
-	// ==================== БЛОК 6: ФАНДИНГ ====================
-	// Фандинг с улучшенным расчетом времени
-	builder.WriteString("🎯 Фандинг: ")
-	fundingStr := f.formatFunding(fundingRate, "тек.")
-
-	// Добавляем средний фандинг если он отличается от текущего
-	if averageFunding != 0 && math.Abs(fundingRate-averageFunding) > 0.0001 {
-		fundingStr += fmt.Sprintf(" / %s", f.formatFunding(averageFunding, "ср."))
-	}
-	builder.WriteString(fundingStr)
-
-	// Время до следующего фандинга
-	timeUntilFunding := f.formatTimeUntilFunding(nextFundingTime)
-	if timeUntilFunding != "" {
-		builder.WriteString(fmt.Sprintf(" (через %s)", timeUntilFunding))
-	}
-	builder.WriteString("\n")
-
-	// Добавляем разделитель после OI и фандинга
-	builder.WriteString("──────────────────────────────────────\n")
-
-	// ==================== БЛОК: ЛИКВИДАЦИИ ====================
-	if liquidationVolume > 0 {
-		// Убираем лишний разделитель - он уже добавлен выше
-		// builder.WriteString("──────────────────────────────────────\n")
+		builder.WriteString(fmt.Sprintf("💥 ЛИКВИДАЦИИ (%s)\n", liqPeriod))
 
 		// Форматируем объем ликвидаций
 		liqStr := f.formatDollarValue(liquidationVolume)
-		builder.WriteString(fmt.Sprintf("💥 Ликвидации 5мин: $%s\n", liqStr))
 
-		// Добавляем эмодзи в зависимости от объема
-		if liquidationVolume > 1_000_000 { // > 1M
-			builder.WriteString("🚨 Высокий объем ликвидаций!\n")
-		} else if liquidationVolume > 100_000 { // > 100K
-			builder.WriteString("⚠️  Заметные ликвидации\n")
+		// Показываем процент от дневного объема
+		if volumePercent > 0 {
+			builder.WriteString(fmt.Sprintf("$%s • %.2f%% от объема\n", liqStr, volumePercent))
+		} else {
+			builder.WriteString(fmt.Sprintf("$%s\n", liqStr))
 		}
 
-		// Добавляем разделитель после ликвидаций
-		builder.WriteString("──────────────────────────────────────\n")
+		// Создаем компактные прогресс-бары (5 символов)
+		longBar := f.formatCompactBar(longPercent, "🟢")
+		shortBar := f.formatCompactBar(shortPercent, "🔴")
+
+		// Добавляем индикатор дисбаланса
+		imbalanceEmoji := ""
+		if shortPercent > 60 {
+			imbalanceEmoji = " ⚡"
+		} else if longPercent > 60 {
+			imbalanceEmoji = " ⚡"
+		}
+
+		builder.WriteString(fmt.Sprintf("LONG   %3.0f%% %s\n", longPercent, longBar))
+		builder.WriteString(fmt.Sprintf("SHORT  %3.0f%% %s%s\n\n", shortPercent, shortBar, imbalanceEmoji))
 	}
 
-	// ==================== БЛОК 7: СЧЕТЧИК СИГНАЛОВ ====================
-	// Счетчик сигналов с прогресс-баром
+	// ==================== БЛОК 5: ПРОГРЕСС И ПЕРИОД ====================
+	// Прогресс сигналов
 	percentage := float64(signalCount) / float64(maxSignals) * 100
-	builder.WriteString(fmt.Sprintf("📡 Сигналов: %d/%d", signalCount, maxSignals))
+	progressBar := f.formatCompactProgressBar(percentage)
 
-	// Прогресс-бар
-	progressBar := f.formatProgressBar(percentage)
-	if progressBar != "" {
-		builder.WriteString(fmt.Sprintf(" %s", progressBar))
-	}
+	builder.WriteString(fmt.Sprintf("📡 %d/%d %s (%.0f%%)\n",
+		signalCount, maxSignals, progressBar, percentage))
 
-	// Процент заполнения с индикаторами
-	if percentage >= 25 {
-		builder.WriteString(fmt.Sprintf(" (%.0f%% заполнено)", percentage))
+	// Период анализа
+	builder.WriteString(fmt.Sprintf("🕐 Период: %s\n\n", period))
 
-		// Добавляем эмодзи-индикаторы
-		if percentage >= 80 {
-			builder.WriteString(" 🚨")
-		} else if percentage >= 50 {
-			builder.WriteString(" ⚠️")
-		}
-	}
+	// ==================== БЛОК 6: ФАНДИНГ ====================
+	// Форматируем фандинг
+	fundingStr := f.formatFundingWithEmoji(fundingRate)
 
-	// Добавляем разделитель после счетчика
-	builder.WriteString("\n──────────────────────────────────────\n")
+	// Время до следующего фандинга
+	timeUntil := f.formatCompactTime(nextFundingTime)
 
-	// ==================== БЛОК 8: ПЕРИОД И РЕКОМЕНДАЦИИ ====================
-	// Период
-	builder.WriteString(fmt.Sprintf("⏱️  Период: %s\n", period))
-
-	// Добавляем рекомендации по времени (без дублирования)
-	f.addTimeRecommendation(&builder, period, signalCount, maxSignals)
-
-	// Добавляем финальный разделитель
-	builder.WriteString("══════════════════════════════════════")
+	builder.WriteString(fmt.Sprintf("🎯 Фандинг: %s\n", fundingStr))
+	builder.WriteString(fmt.Sprintf("⏰ Через: %s", timeUntil))
 
 	return builder.String()
 }
 
-// addSymbolInfo добавляет информацию о символе
-func (f *MarketMessageFormatter) addSymbolInfo(builder *strings.Builder, symbol string, price float64) {
-	// Определяем тип контракта
+// ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+
+// getContractType возвращает тип контракта
+func (f *MarketMessageFormatter) getContractType(symbol string) string {
 	symbolUpper := strings.ToUpper(symbol)
-
 	if strings.Contains(symbolUpper, "USDT") {
-		builder.WriteString("💎 USDT-фьючерс\n")
+		return "USDT-фьючерс"
 	} else if strings.Contains(symbolUpper, "USD") && !strings.Contains(symbolUpper, "USDT") {
-		builder.WriteString("💵 USD-фьючерс\n")
+		return "USD-фьючерс"
 	} else if strings.Contains(symbolUpper, "PERP") {
-		builder.WriteString("📈 Бессрочный контракт\n")
+		return "Бессрочный"
+	}
+	return "Фьючерс"
+}
+
+// extractTimeframe извлекает таймфрейм из периода
+func (f *MarketMessageFormatter) extractTimeframe(period string) string {
+	if strings.Contains(period, "5") {
+		return "5мин"
+	} else if strings.Contains(period, "15") {
+		return "15мин"
+	} else if strings.Contains(period, "30") {
+		return "30мин"
+	} else if strings.Contains(period, "1 час") {
+		return "1ч"
+	} else if strings.Contains(period, "4") {
+		return "4ч"
+	} else if strings.Contains(period, "1 день") {
+		return "1д"
+	}
+	return "1мин"
+}
+
+// getIntensityEmoji возвращает эмодзи силы движения
+func (f *MarketMessageFormatter) getIntensityEmoji(change float64) string {
+	if change > 5 {
+		return "🚨"
+	} else if change > 3 {
+		return "⚡"
+	} else if change > 1.5 {
+		return "📈"
+	}
+	return ""
+}
+
+// formatOIWithChange форматирует OI с изменением
+func (f *MarketMessageFormatter) formatOIWithChange(oi float64, change float64) string {
+	if oi <= 0 {
+		return "─"
+	}
+
+	oiStr := f.formatDollarValue(oi)
+
+	if change != 0 {
+		changeIcon := "🟢"
+		if change < 0 {
+			changeIcon = "🔴"
+		}
+		return fmt.Sprintf("$%s (%s%+.1f%%)", oiStr, changeIcon, math.Abs(change))
+	}
+
+	return fmt.Sprintf("$%s", oiStr)
+}
+
+// formatCompactBar создает компактный бар (5 символов)
+func (f *MarketMessageFormatter) formatCompactBar(percentage float64, emoji string) string {
+	bars := int(percentage / 20) // 5 баров по 20% каждый
+	if bars > 5 {
+		bars = 5
+	}
+	if bars < 0 {
+		bars = 0
+	}
+
+	var result string
+	for i := 0; i < 5; i++ {
+		if i < bars {
+			result += emoji
+		} else {
+			result += "▫️"
+		}
+	}
+	return result
+}
+
+// formatCompactProgressBar создает компактный прогресс-бар (5 символов)
+func (f *MarketMessageFormatter) formatCompactProgressBar(percentage float64) string {
+	bars := int(percentage / 20) // 5 баров по 20% каждый
+	if bars > 5 {
+		bars = 5
+	}
+	if bars < 0 {
+		bars = 0
+	}
+
+	var result string
+	for i := 0; i < 5; i++ {
+		if i < bars {
+			// Цвет баров в зависимости от заполнения
+			if percentage >= 80 {
+				result += "🔴"
+			} else if percentage >= 50 {
+				result += "🟡"
+			} else {
+				result += "🟢"
+			}
+		} else {
+			result += "▫️"
+		}
+	}
+	return result
+}
+
+// formatFundingWithEmoji форматирует фандинг с эмодзи
+func (f *MarketMessageFormatter) formatFundingWithEmoji(rate float64) string {
+	ratePercent := rate * 100
+
+	// Выбираем эмодзи в зависимости от величины
+	var icon string
+	if ratePercent > 0.015 {
+		icon = "🟢"
+	} else if ratePercent > 0.005 {
+		icon = "🟡"
+	} else if ratePercent > -0.005 {
+		icon = "⚪"
+	} else if ratePercent > -0.015 {
+		icon = "🟠"
 	} else {
-		// Для других символов указываем общий тип
-		builder.WriteString("📊 Фьючерс\n")
+		icon = "🔴"
 	}
 
-	// Оцениваем волатильность
-	volatility := f.estimateVolatility(price)
-	if volatility > 0 {
-		volatilityIcon := "📊"
-		if volatility > 10 {
-			volatilityIcon = "📈"
-		} else if volatility < 2 {
-			volatilityIcon = "📉"
+	return fmt.Sprintf("%s %.4f%%", icon, ratePercent)
+}
+
+// formatCompactTime форматирует время в компактном виде
+func (f *MarketMessageFormatter) formatCompactTime(nextFundingTime time.Time) string {
+	if nextFundingTime.IsZero() {
+		return "─"
+	}
+
+	now := time.Now()
+	if nextFundingTime.Before(now) {
+		return "сейчас"
+	}
+
+	duration := nextFundingTime.Sub(now)
+
+	// Компактный формат
+	if duration.Hours() >= 1 {
+		hours := int(duration.Hours())
+		minutes := int(duration.Minutes()) % 60
+		if minutes > 0 {
+			return fmt.Sprintf("%dч %dм", hours, minutes)
 		}
-		builder.WriteString(fmt.Sprintf("%s Волатильность: ~%.1f%%\n",
-			volatilityIcon, volatility))
-	}
-}
-
-// estimateVolatility оценивает волатильность на основе цены
-func (f *MarketMessageFormatter) estimateVolatility(price float64) float64 {
-	if price <= 0 {
-		return 0
-	}
-
-	// Простая эвристика: чем дешевле монета, тем выше волатильность
-	if price < 0.001 {
-		return 15.0
-	} else if price < 0.01 {
-		return 8.0
-	} else if price < 0.1 {
-		return 5.0
-	} else if price < 1 {
-		return 3.0
-	} else if price < 10 {
-		return 2.0
-	} else if price < 100 {
-		return 1.5
-	} else if price < 1000 {
-		return 1.0
-	}
-	return 0.8
-}
-
-// formatProgressBar создает прогресс-бар
-func (f *MarketMessageFormatter) formatProgressBar(percentage float64) string {
-	if percentage < 10 {
-		return "▫️▫️▫️▫️▫️"
-	} else if percentage < 30 {
-		return "🟩▫️▫️▫️▫️"
-	} else if percentage < 50 {
-		return "🟩🟩▫️▫️▫️"
-	} else if percentage < 70 {
-		return "🟩🟩🟩▫️▫️"
-	} else if percentage < 90 {
-		return "🟩🟩🟩🟩▫️"
+		return fmt.Sprintf("%dч", hours)
 	} else {
-		return "🟩🟩🟩🟩🟩"
-	}
-}
-
-// addTimeRecommendation добавляет рекомендации по времени (исправленная версия)
-func (f *MarketMessageFormatter) addTimeRecommendation(builder *strings.Builder, period string, signalCount int, maxSignals int) {
-	percentage := float64(signalCount) / float64(maxSignals) * 100
-
-	// Для высокого процента заполнения показываем только общее предупреждение
-	if percentage >= 80 {
-		builder.WriteString("🚨 Внимание: счетчик скоро сбросится\n")
-		return // Выходим раньше, не показываем специфичные предупреждения
-	}
-
-	// Специфичные предупреждения для каждого периода
-	switch period {
-	case "5 минут":
-		if signalCount >= 4 {
-			builder.WriteString("⏰ Ожидайте скорого сброса счетчика\n")
+		minutes := int(duration.Minutes())
+		if minutes <= 0 {
+			return "скоро!"
 		}
-	case "15 минут":
-		if signalCount >= 12 {
-			builder.WriteString("⏰ Почти достигнут лимит сигналов\n")
-		}
-	case "30 минут":
-		if signalCount >= 25 {
-			builder.WriteString("⏰ Высокая активность\n")
-		}
-	case "1 час":
-		if signalCount >= 50 {
-			builder.WriteString("⏰ Интенсивное движение\n")
-		}
-	case "4 часа":
-		if signalCount >= 200 {
-			builder.WriteString("⏰ Активная торговая сессия\n")
-		}
-	}
-
-	// Общие рекомендации для менее высоких процентов
-	if percentage >= 60 && percentage < 80 {
-		builder.WriteString("⚠️  Повышенная активность\n")
+		return fmt.Sprintf("%dм", minutes)
 	}
 }
 
@@ -349,118 +430,4 @@ func (f *MarketMessageFormatter) formatDollarValue(num float64) string {
 	} else {
 		return fmt.Sprintf("%.2f", num)
 	}
-}
-
-// formatOpenInterest форматирует открытый интерес
-func (f *MarketMessageFormatter) formatOpenInterest(oi float64, oiChange24h float64) string {
-	if oi <= 0 {
-		return "⏳ обновление"
-	}
-
-	// Форматируем число в $XX.XM/K/B формат
-	oiStr := f.formatDollarValue(oi)
-
-	// Добавляем изменение если есть
-	if oiChange24h != 0 {
-		changeIcon := "🟢"
-		changePrefix := "+"
-
-		if oiChange24h < 0 {
-			changeIcon = "🔴"
-			changePrefix = "-"
-		}
-
-		// Используем абсолютное значение для отображения
-		changeValue := math.Abs(oiChange24h)
-
-		// Форматируем с одним знаком после запятой
-		return fmt.Sprintf("$%s (%s%s%.1f%%)",
-			oiStr,
-			changeIcon,
-			changePrefix,
-			changeValue)
-	}
-
-	// Если нет данных об изменении, просто показываем значение
-	return fmt.Sprintf("$%s", oiStr)
-}
-
-// formatFunding форматирует ставку фандинга
-func (f *MarketMessageFormatter) formatFunding(rate float64, label string) string {
-	ratePercent := rate * 100
-	rateStr := fmt.Sprintf("%.4f%%", math.Abs(ratePercent))
-
-	// Улучшенная цветовая логика
-	var icon string
-	if ratePercent > 0.015 {
-		icon = "🟢" // Сильно положительный
-	} else if ratePercent > 0.005 {
-		icon = "🟡" // Слабо положительный
-	} else if ratePercent > -0.005 {
-		icon = "⚪" // Нейтральный
-	} else if ratePercent > -0.015 {
-		icon = "🟠" // Слабо отрицательный
-	} else {
-		icon = "🔴" // Сильно отрицательный
-	}
-
-	if label != "" {
-		return fmt.Sprintf("%s %s %s", icon, label, rateStr)
-	}
-	return fmt.Sprintf("%s %s", icon, rateStr)
-}
-
-// formatTimeUntilFunding форматирует время до следующего фандинга
-func (f *MarketMessageFormatter) formatTimeUntilFunding(nextFundingTime time.Time) string {
-	if nextFundingTime.IsZero() {
-		return ""
-	}
-
-	now := time.Now()
-	if nextFundingTime.Before(now) {
-		return "сейчас"
-	}
-
-	duration := nextFundingTime.Sub(now)
-
-	// Более человекочитаемый формат
-	if duration.Hours() >= 2 {
-		hours := int(duration.Hours())
-		minutes := int(duration.Minutes()) % 60
-		if minutes > 0 {
-			return fmt.Sprintf("%dч %dм", hours, minutes)
-		}
-		return fmt.Sprintf("%dч", hours)
-	} else if duration.Minutes() >= 1 {
-		minutes := int(duration.Minutes())
-		return fmt.Sprintf("%dм", minutes)
-	} else {
-		seconds := int(duration.Seconds())
-		if seconds <= 10 {
-			return "скоро!"
-		}
-		return fmt.Sprintf("%dс", seconds)
-	}
-}
-
-// getDirectionText возвращает текст направления (сохранен для обратной совместимости)
-func (f *MarketMessageFormatter) getDirectionText(direction string) string {
-	switch direction {
-	case "growth":
-		return "РОСТ"
-	case "fall":
-		return "ПАДЕНИЕ"
-	default:
-		return direction
-	}
-}
-
-// formatValue форматирует числовые значения (сохранен для обратной совместимости)
-func (f *MarketMessageFormatter) formatValue(value float64) string {
-	return f.formatDollarValue(value)
-}
-
-// formatVolume форматирует объем (сохранен для обратной совместимости)
-func (f *MarketMessageFormatter) formatVolume(volume float64) string {
-	return f.formatDollarValue(volume)
 }

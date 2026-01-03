@@ -323,7 +323,7 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	averageFunding := a.calculateAverageFunding(priceData)
 
 	// Получаем объем ликвидаций за 5 минут
-	liquidationVolume := a.getLiquidationVolume(notification.Symbol)
+	liquidationVolume, longLiqVolume, shortLiqVolume := a.getLiquidationData(notification.Symbol)
 
 	log.Printf("📤 CounterAnalyzer отправляет данные в форматтер:")
 	log.Printf("   Symbol: %s", notification.Symbol)
@@ -334,7 +334,7 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	log.Printf("   Ликвидации 5мин: $%.0f", liquidationVolume)
 
 	// Используем форматтер сообщений
-	return a.messageFormatter.FormatCounterMessage(
+	return a.messageFormatter.FormatMessage(
 		notification.Symbol,
 		a.getDirectionFromSignalType(notification.SignalType),
 		notification.ChangePercent,
@@ -349,11 +349,13 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		nextFundingTime,
 		notification.Period.ToString(),
 		liquidationVolume, // Добавляем параметр ликвидаций
+		longLiqVolume,     // ДОБАВЛЕНО
+		shortLiqVolume,    // ДОБАВЛЕНО
 	)
 }
 
-// getLiquidationVolume получает объем ликвидаций за последние 5 минут
-func (a *CounterAnalyzer) getLiquidationVolume(symbol string) float64 {
+// getLiquidationData получает данные ликвидаций за последние 5 минут
+func (a *CounterAnalyzer) getLiquidationData(symbol string) (totalVolume, longVolume, shortVolume float64) {
 	// Если marketFetcher доступен, используем его
 	if a.marketFetcher != nil {
 		// Пробуем использовать интерфейс GetLiquidationMetrics
@@ -363,7 +365,7 @@ func (a *CounterAnalyzer) getLiquidationVolume(symbol string) float64 {
 			if metrics, exists := fetcher.GetLiquidationMetrics(symbol); exists {
 				log.Printf("📊 Получены ликвидации для %s: $%.0f (long: $%.0f, short: $%.0f)",
 					symbol, metrics.TotalVolumeUSD, metrics.LongLiqVolume, metrics.ShortLiqVolume)
-				return metrics.TotalVolumeUSD
+				return metrics.TotalVolumeUSD, metrics.LongLiqVolume, metrics.ShortLiqVolume
 			}
 		}
 	}
@@ -380,13 +382,24 @@ func (a *CounterAnalyzer) getLiquidationVolume(symbol string) float64 {
 			baseLiq *= 2 // Увеличиваем в 2 раза
 		}
 
-		log.Printf("📊 Симулированные ликвидации для %s: $%.0f (объем: $%.0f, изменение: %.1f%%)",
-			symbol, baseLiq, snapshot.VolumeUSD, snapshot.Change24h)
-		return baseLiq
+		// Разделяем на LONG/SHORT (примерно 60/40 в зависимости от направления)
+		if snapshot.Change24h > 0 {
+			// Если цена растет, больше SHORT ликвидаций
+			longVolume = baseLiq * 0.4
+			shortVolume = baseLiq * 0.6
+		} else {
+			// Если цена падает, больше LONG ликвидаций
+			longVolume = baseLiq * 0.6
+			shortVolume = baseLiq * 0.4
+		}
+
+		log.Printf("📊 Симулированные ликвидации для %s: $%.0f (long: $%.0f, short: $%.0f, изменение: %.1f%%)",
+			symbol, baseLiq, longVolume, shortVolume, snapshot.Change24h)
+		return baseLiq, longVolume, shortVolume
 	}
 
 	log.Printf("⚠️ Не удалось получить ликвидации для %s", symbol)
-	return 0
+	return 0, 0, 0
 }
 
 // getOrCreateCounter получает или создает счетчик для символа
