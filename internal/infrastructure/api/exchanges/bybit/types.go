@@ -1,10 +1,22 @@
-// internal/api/bybit/types.go
+// internal/infrastructure/api/exchanges/bybit/types.go
 package bybit
 
 const (
 	CategorySpot    = "spot"
 	CategoryLinear  = "linear"  // USDT-M фьючерсы
 	CategoryInverse = "inverse" // COIN-M фьючерсы
+
+	OIInterval5Min  = "5min"
+	OIInterval15Min = "15min"
+	OIInterval30Min = "30min"
+	OIInterval1Hour = "1h"
+	OIInterval4Hour = "4h"
+	OIInterval1Day  = "1d"
+
+	// Ошибки API
+	ErrCodeInvalidParams  = 10001
+	ErrCodeRateLimit      = 10006
+	ErrCodeSymbolNotFound = 30001
 )
 
 // APIResponse - базовый ответ API Bybit

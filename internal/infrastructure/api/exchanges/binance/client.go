@@ -1,4 +1,4 @@
-// internal/api/binance/client.go
+// internal/infrastructure/api/exchanges/binance/client.go
 package binance
 
 import (

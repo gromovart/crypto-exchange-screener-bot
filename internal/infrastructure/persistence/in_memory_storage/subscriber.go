@@ -47,7 +47,18 @@ func NewSubscriptionManager() *SubscriptionManager {
 func (s *InMemoryPriceStorage) StorePriceLegacy(symbol string, price, volume24h float64, timestamp time.Time) error {
 	// Рассчитываем VolumeUSD на основе цены и объема
 	volumeUSD := price * volume24h
-	return s.StorePrice(symbol, price, volume24h, volumeUSD, timestamp)
+	return s.StorePrice(
+		symbol,
+		price,
+		volume24h,
+		volumeUSD,
+		timestamp,
+		0, // OpenInterest - значение по умолчанию
+		0, // FundingRate - значение по умолчанию
+		0, // Change24h - значение по умолчанию
+		0, // High24h - значение по умолчанию
+		0, // Low24h - значение по умолчанию
+	)
 }
 
 // Subscribe подписывает на обновления символа

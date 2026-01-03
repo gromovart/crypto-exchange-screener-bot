@@ -4,6 +4,7 @@ package analyzers
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"math"
 	"sync"
@@ -37,34 +38,66 @@ func (a *OpenInterestAnalyzer) Supports(symbol string) bool {
 func (a *OpenInterestAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
+	logger.Info("🔍 OpenInterestAnalyzer: начало анализа %s, точек данных: %d",
+		data[0].Symbol, len(data))
+
 	if len(data) < config.MinDataPoints {
 		a.updateStats(time.Since(startTime), false)
+		logger.Debug("⚠️  OpenInterestAnalyzer: недостаточно точек для %s (нужно %d, есть %d)",
+			data[0].Symbol, config.MinDataPoints, len(data))
 		return nil, fmt.Errorf("insufficient data points")
 	}
+
+	// Проверяем наличие данных OI
+	validOIData := 0
+	for _, point := range data {
+		if point.OpenInterest > 0 {
+			validOIData++
+		}
+	}
+
+	logger.Debug("📊 OpenInterestAnalyzer: %s - доступно %d/%d точек с OI",
+		data[0].Symbol, validOIData, len(data))
 
 	var signals []analysis.Signal
 
 	// 1. Проверка роста OI вместе с ценой
 	if signal := a.checkOIGrowthWithPrice(data); signal != nil {
 		signals = append(signals, *signal)
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружен рост OI+цена для %s", data[0].Symbol)
 	}
 
 	// 2. Проверка падения OI вместе с ценой
 	if signal := a.checkOIFallWithPrice(data); signal != nil {
 		signals = append(signals, *signal)
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружен рост OI при падении цены для %s", data[0].Symbol)
 	}
 
 	// 3. Проверка экстремальных значений OI
 	if signal := a.checkExtremeOI(data); signal != nil {
 		signals = append(signals, *signal)
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружены экстремальные значения OI для %s", data[0].Symbol)
 	}
 
 	// 4. Проверка дивергенций OI-цена
 	if signal := a.checkOIPriceDivergence(data); signal != nil {
 		signals = append(signals, *signal)
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружена дивергенция OI-цена для %s", data[0].Symbol)
 	}
 
 	a.updateStats(time.Since(startTime), len(signals) > 0)
+
+	if len(signals) > 0 {
+		logger.Info("🎯 OpenInterestAnalyzer: найдено %d сигналов OI для %s",
+			len(signals), data[0].Symbol)
+		for i, signal := range signals {
+			logger.Debug("   %d. %s: изменение=%.2f%%, уверенность=%.1f%%",
+				i+1, signal.Type, signal.ChangePercent, signal.Confidence)
+		}
+	} else {
+		logger.Debug("📭 OpenInterestAnalyzer: для %s сигналов OI не найдено", data[0].Symbol)
+	}
+
 	return signals, nil
 }
 
@@ -79,6 +112,8 @@ func (a *OpenInterestAnalyzer) checkOIGrowthWithPrice(data []types.PriceData) *a
 	endOI := data[len(data)-1].OpenInterest
 
 	if startOI <= 0 || endOI <= 0 {
+		logger.Debug("📭 OpenInterestAnalyzer: нет данных OI для анализа роста (начало=%.0f, конец=%.0f)",
+			startOI, endOI)
 		return nil
 	}
 
@@ -93,10 +128,16 @@ func (a *OpenInterestAnalyzer) checkOIGrowthWithPrice(data []types.PriceData) *a
 	minPriceChange := a.getMinPriceChange()
 	minOIChange := a.getMinOIChange()
 
+	logger.Debug("📈 OpenInterestAnalyzer: %s - цена: %.2f%%, OI: %.2f%% (пороги: цена>%.1f%%, OI>%.1f%%)",
+		data[0].Symbol, priceChange, oiChange, minPriceChange, minOIChange)
+
 	if priceChange > minPriceChange && oiChange > minOIChange {
 		confidence := a.calculateOIGrowthConfidence(priceChange, oiChange)
 
 		if confidence >= a.config.MinConfidence {
+			logger.Debug("✅ OpenInterestAnalyzer: %s - РОСТ OI+цена: цена↑%.2f%%, OI↑%.2f%%, уверенность=%.1f%%",
+				data[0].Symbol, priceChange, oiChange, confidence)
+
 			return &analysis.Signal{
 				Symbol:        data[0].Symbol,
 				Type:          "oi_growth_with_price",
@@ -120,6 +161,9 @@ func (a *OpenInterestAnalyzer) checkOIGrowthWithPrice(data []types.PriceData) *a
 					},
 				},
 			}
+		} else {
+			logger.Debug("📉 OpenInterestAnalyzer: %s - рост есть, но уверенность низкая (%.1f%% < %.1f%%)",
+				data[0].Symbol, confidence, a.config.MinConfidence)
 		}
 	}
 
@@ -149,10 +193,16 @@ func (a *OpenInterestAnalyzer) checkOIFallWithPrice(data []types.PriceData) *ana
 	minPriceFall := a.getMinPriceFall()
 	minOIChange := a.getMinOIChange()
 
+	logger.Debug("📉 OpenInterestAnalyzer: %s - цена: %.2f%%, OI: %.2f%% (пороги падения: |цена|>%.1f%%, OI>%.1f%%)",
+		data[0].Symbol, priceChange, oiChange, minPriceFall, minOIChange)
+
 	if priceChange < -minPriceFall && oiChange > minOIChange {
 		confidence := a.calculateOIFallConfidence(math.Abs(priceChange), oiChange)
 
 		if confidence >= a.config.MinConfidence {
+			logger.Debug("✅ OpenInterestAnalyzer: %s - РОСТ OI при ПАДЕНИИ цены: цена↓%.2f%%, OI↑%.2f%%, уверенность=%.1f%%",
+				data[0].Symbol, math.Abs(priceChange), oiChange, confidence)
+
 			return &analysis.Signal{
 				Symbol:        data[0].Symbol,
 				Type:          "oi_growth_with_fall",
@@ -202,6 +252,7 @@ func (a *OpenInterestAnalyzer) checkExtremeOI(data []types.PriceData) *analysis.
 	}
 
 	if validPoints < 3 {
+		logger.Debug("📭 OpenInterestAnalyzer: недостаточно точек с OI для экстремального анализа (%d < 3)", validPoints)
 		return nil
 	}
 
@@ -219,6 +270,9 @@ func (a *OpenInterestAnalyzer) checkExtremeOI(data []types.PriceData) *analysis.
 	oiRatio := lastOI / avgOI
 	extremeThreshold := a.getExtremeOIThreshold()
 
+	logger.Debug("📊 OpenInterestAnalyzer: %s - OI анализ: текущее=%.0f, среднее=%.0f, отношение=%.2f (порог=%.1f)",
+		data[0].Symbol, lastOI, avgOI, oiRatio, extremeThreshold)
+
 	// Проверяем экстремальное значение
 	if oiRatio > extremeThreshold {
 		// Высокий OI относительно среднего
@@ -232,6 +286,9 @@ func (a *OpenInterestAnalyzer) checkExtremeOI(data []types.PriceData) *analysis.
 		} else if priceChange < 0 {
 			direction = "down"
 		}
+
+		logger.Debug("⚠️  OpenInterestAnalyzer: %s - ЭКСТРЕМАЛЬНЫЙ OI! отношение=%.2f, уверенность=%.1f%%, цена=%.2f%%",
+			data[0].Symbol, oiRatio, confidence, priceChange)
 
 		return &analysis.Signal{
 			Symbol:        data[0].Symbol,
@@ -265,6 +322,7 @@ func (a *OpenInterestAnalyzer) checkExtremeOI(data []types.PriceData) *analysis.
 // checkOIPriceDivergence проверяет дивергенции между OI и ценой
 func (a *OpenInterestAnalyzer) checkOIPriceDivergence(data []types.PriceData) *analysis.Signal {
 	if len(data) < 4 {
+		logger.Debug("📭 OpenInterestAnalyzer: недостаточно точек для анализа дивергенции (%d < 4)", len(data))
 		return nil
 	}
 
@@ -294,6 +352,8 @@ func (a *OpenInterestAnalyzer) checkOIPriceDivergence(data []types.PriceData) *a
 	}
 
 	if len(priceChanges) < 3 || len(oiChanges) < 3 {
+		logger.Debug("📭 OpenInterestAnalyzer: недостаточно изменений для дивергенции (цена:%d, OI:%d)",
+			len(priceChanges), len(oiChanges))
 		return nil
 	}
 
@@ -313,6 +373,9 @@ func (a *OpenInterestAnalyzer) checkOIPriceDivergence(data []types.PriceData) *a
 				direction = "down"
 				signalType = "bearish_oi_divergence"
 			}
+
+			logger.Debug("🔀 OpenInterestAnalyzer: %s - ДИВЕРГЕНЦИЯ %s! уверенность=%.1f%%, цена=%.2f%%",
+				data[0].Symbol, divergenceType, confidence, priceChange)
 
 			// Создаем indicators map отдельно
 			indicators := make(map[string]float64)
@@ -369,15 +432,20 @@ func (a *OpenInterestAnalyzer) findDivergence(priceChanges, oiChanges []float64)
 	lastOI2 := oiChanges[len(oiChanges)-2]
 	lastOI3 := oiChanges[len(oiChanges)-1]
 
+	logger.Debug("🔍 OpenInterestAnalyzer: проверка дивергенции - цена: [%.2f, %.2f, %.2f], OI: [%.2f, %.2f, %.2f]",
+		lastPrice1, lastPrice2, lastPrice3, lastOI1, lastOI2, lastOI3)
+
 	// Бычья дивергенция
-	if lastPrice1 > lastPrice2 && lastPrice2 < lastPrice3 && // цена делает выше low
+	if lastPrice1 > lastPrice2 && lastPrice2 < lastPrice3 && // цена делает higher low
 		lastOI1 < lastOI2 && lastOI2 > lastOI3 { // OI делает lower high
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружена БЫЧЬЯ дивергенция")
 		return "bullish"
 	}
 
 	// Медвежья дивергенция
 	if lastPrice1 < lastPrice2 && lastPrice2 > lastPrice3 && // цена делает lower high
 		lastOI1 > lastOI2 && lastOI2 < lastOI3 { // OI делает higher low
+		logger.Debug("✅ OpenInterestAnalyzer: обнаружена МЕДВЕЖЬЯ дивергенция")
 		return "bearish"
 	}
 
@@ -428,7 +496,12 @@ func (a *OpenInterestAnalyzer) calculateOIGrowthConfidence(priceChange, oiChange
 	}
 
 	totalConfidence := priceConfidence + oiConfidence + syncBonus
-	return math.Min(totalConfidence, 100)
+	result := math.Min(totalConfidence, 100)
+
+	logger.Debug("📊 OpenInterestAnalyzer: уверенность роста OI+цена = %.1f%% (цена:%.1f%%, OI:%.1f%%, синхр:%.1f%%)",
+		result, priceConfidence, oiConfidence, syncBonus)
+
+	return result
 }
 
 func (a *OpenInterestAnalyzer) calculateOIFallConfidence(priceFall, oiGrowth float64) float64 {
@@ -437,7 +510,12 @@ func (a *OpenInterestAnalyzer) calculateOIFallConfidence(priceFall, oiGrowth flo
 	oiConfidence := math.Min(oiGrowth, 30)
 
 	totalConfidence := baseConfidence + oiConfidence
-	return math.Min(totalConfidence, 100)
+	result := math.Min(totalConfidence, 100)
+
+	logger.Debug("📊 OpenInterestAnalyzer: уверенность роста OI при падении = %.1f%% (падение:%.1f%%, OI:%.1f%%)",
+		result, baseConfidence, oiConfidence)
+
+	return result
 }
 
 func (a *OpenInterestAnalyzer) calculateDivergenceConfidence(divergenceType string, priceChanges, oiChanges []float64) float64 {
@@ -467,6 +545,9 @@ func (a *OpenInterestAnalyzer) calculateDivergenceConfidence(divergenceType stri
 	if len(priceChanges) >= 5 {
 		confidence += 10
 	}
+
+	logger.Debug("📊 OpenInterestAnalyzer: уверенность дивергенции %s = %.1f%% (сила=%.2f, точек=%d)",
+		divergenceType, confidence, divergenceStrength, len(priceChanges))
 
 	return math.Min(confidence, 100)
 }
@@ -533,6 +614,12 @@ func (a *OpenInterestAnalyzer) updateStats(duration time.Duration, success bool)
 		a.stats.AverageTime = time.Duration(
 			int64(a.stats.TotalTime) / int64(a.stats.TotalCalls),
 		)
+	}
+
+	// Логируем статистику каждые 100 вызовов
+	if a.stats.TotalCalls%100 == 0 {
+		logger.Info("📈 OpenInterestAnalyzer статистика: вызовов=%d, успехов=%d, ошибок=%d, среднее время=%v",
+			a.stats.TotalCalls, a.stats.SuccessCount, a.stats.ErrorCount, a.stats.AverageTime)
 	}
 }
 

@@ -21,6 +21,7 @@ type PriceData struct {
 	Symbol       string                 `json:"symbol"`
 	Price        float64                `json:"price"`
 	Volume24h    float64                `json:"volume_24h"`
+	VolumeUSD    float64                `json:"volume_usd"` // ДОБАВЬТЕ ЭТУ СТРОКУ
 	Timestamp    time.Time              `json:"timestamp"`
 	Exchange     string                 `json:"exchange,omitempty"`
 	Category     string                 `json:"category,omitempty"` // spot, futures

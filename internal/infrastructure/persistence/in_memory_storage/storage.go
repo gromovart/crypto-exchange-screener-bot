@@ -58,10 +58,31 @@ func NewInMemoryPriceStorage(config *StorageConfig) *InMemoryPriceStorage {
 	return storage
 }
 
-// StorePrice сохраняет цену
-func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) error {
+// StorePrice сохраняет цену со всеми данными
+func (s *InMemoryPriceStorage) StorePrice(
+	symbol string,
+	price, volume24h, volumeUSD float64,
+	timestamp time.Time,
+	openInterest float64,
+	fundingRate float64,
+	change24h float64,
+	high24h float64,
+	low24h float64,
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Логирование для отладки
+	// if openInterest > 0 {
+	// 	log.Printf("💾 Storage: сохранение OI для %s: %.0f", symbol, openInterest)
+	// } else {
+	// 	log.Printf("💾 Storage: OI для %s = 0", symbol)
+	// }
+	// if fundingRate > 0 {
+	// 	log.Printf("💾 Storage: сохранение фандинга для %s: %.0f", symbol, fundingRate)
+	// } else {
+	// 	log.Printf("💾 Storage: фандинг для %s = 0", symbol)
+	// }
 
 	// Проверяем лимит символов
 	if len(s.current) >= s.config.MaxSymbols && !s.SymbolExists(symbol) {
@@ -70,11 +91,16 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h, volum
 
 	// Обновляем текущую цену
 	snapshot := &PriceSnapshot{
-		Symbol:    symbol,
-		Price:     price,
-		Volume24h: volume24h,
-		VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
-		Timestamp: timestamp,
+		Symbol:       symbol,
+		Price:        price,
+		Volume24h:    volume24h,
+		VolumeUSD:    volumeUSD,
+		Timestamp:    timestamp,
+		OpenInterest: openInterest,
+		FundingRate:  fundingRate,
+		Change24h:    change24h,
+		High24h:      high24h,
+		Low24h:       low24h,
 	}
 	s.current[symbol] = snapshot
 
@@ -85,11 +111,16 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h, volum
 
 	historyList := s.history[symbol]
 	historyList.PushBack(PriceData{
-		Symbol:    symbol,
-		Price:     price,
-		Volume24h: volume24h,
-		VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
-		Timestamp: timestamp,
+		Symbol:       symbol,
+		Price:        price,
+		Volume24h:    volume24h,
+		VolumeUSD:    volumeUSD,
+		Timestamp:    timestamp,
+		OpenInterest: openInterest,
+		FundingRate:  fundingRate,
+		Change24h:    change24h,
+		High24h:      high24h,
+		Low24h:       low24h,
 	})
 
 	// Ограничиваем глубину истории
@@ -109,6 +140,22 @@ func (s *InMemoryPriceStorage) StorePrice(symbol string, price, volume24h, volum
 	go s.subscriptions.NotifyAll(symbol, price, volume24h, volumeUSD, timestamp)
 
 	return nil
+}
+
+// StorePriceData сохраняет готовый объект PriceData
+func (s *InMemoryPriceStorage) StorePriceData(priceData PriceData) error {
+	return s.StorePrice(
+		priceData.Symbol,
+		priceData.Price,
+		priceData.Volume24h,
+		priceData.VolumeUSD,
+		priceData.Timestamp,
+		priceData.OpenInterest,
+		priceData.FundingRate,
+		priceData.Change24h,
+		priceData.High24h,
+		priceData.Low24h,
+	)
 }
 
 // GetCurrentPrice возвращает текущую цену
@@ -304,6 +351,7 @@ func (s *InMemoryPriceStorage) CalculatePriceChange(symbol string, interval time
 		ChangePercent: changePercent,
 		Interval:      interval.String(),
 		Timestamp:     time.Now(),
+		VolumeUSD:     currentSnapshot.VolumeUSD,
 	}, nil
 }
 
@@ -374,6 +422,134 @@ func (s *InMemoryPriceStorage) GetMinMaxPrice(symbol string, period time.Duratio
 	}
 
 	return min, max, nil
+}
+
+// GetOpenInterest возвращает открытый интерес
+func (s *InMemoryPriceStorage) GetOpenInterest(symbol string) (float64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot, exists := s.current[symbol]
+	if !exists {
+		return 0, false
+	}
+	return snapshot.OpenInterest, true
+}
+
+// GetFundingRate возвращает ставку фандинга
+func (s *InMemoryPriceStorage) GetFundingRate(symbol string) (float64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot, exists := s.current[symbol]
+	if !exists {
+		return 0, false
+	}
+	return snapshot.FundingRate, true
+}
+
+// GetSymbolMetrics возвращает все метрики символа
+func (s *InMemoryPriceStorage) GetSymbolMetrics(symbol string) (*SymbolMetrics, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	snapshot, exists := s.current[symbol]
+	if !exists {
+		return nil, false
+	}
+
+	// Рассчитываем изменения
+	oiChange24h := s.calculateOIChange24h(symbol)
+	fundingChange := s.calculateFundingChange(symbol)
+
+	return &SymbolMetrics{
+		Symbol:        snapshot.Symbol,
+		Price:         snapshot.Price,
+		Volume24h:     snapshot.Volume24h,
+		VolumeUSD:     snapshot.VolumeUSD,
+		OpenInterest:  snapshot.OpenInterest,
+		FundingRate:   snapshot.FundingRate,
+		Change24h:     snapshot.Change24h,
+		High24h:       snapshot.High24h,
+		Low24h:        snapshot.Low24h,
+		OIChange24h:   oiChange24h,
+		FundingChange: fundingChange,
+		Timestamp:     snapshot.Timestamp,
+	}, true
+}
+
+// calculateOIChange24h рассчитывает изменение OI за 24 часа
+func (s *InMemoryPriceStorage) calculateOIChange24h(symbol string) float64 {
+	historyList, exists := s.history[symbol]
+	if !exists {
+		return 0
+	}
+
+	currentSnapshot, exists := s.current[symbol]
+	if !exists || currentSnapshot.OpenInterest == 0 {
+		return 0
+	}
+
+	// Ищем OI 24 часа назад
+	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
+	var oldOI float64
+	var minDiff time.Duration = 24 * time.Hour
+	var found bool
+
+	// Проходим по истории
+	for element := historyList.Front(); element != nil; element = element.Next() {
+		if priceData, ok := element.Value.(PriceData); ok {
+			diff := priceData.Timestamp.Sub(twentyFourHoursAgo)
+			if diff.Abs() < minDiff.Abs() && priceData.OpenInterest > 0 {
+				minDiff = diff
+				oldOI = priceData.OpenInterest
+				found = true
+			}
+		}
+	}
+
+	if !found || oldOI == 0 {
+		return 0
+	}
+
+	return ((currentSnapshot.OpenInterest - oldOI) / oldOI) * 100
+}
+
+// calculateFundingChange рассчитывает изменение фандинга
+func (s *InMemoryPriceStorage) calculateFundingChange(symbol string) float64 {
+	historyList, exists := s.history[symbol]
+	if !exists {
+		return 0
+	}
+
+	currentSnapshot, exists := s.current[symbol]
+	if !exists || currentSnapshot.FundingRate == 0 {
+		return 0
+	}
+
+	// Ищем фандинг 24 часа назад
+	twentyFourHoursAgo := time.Now().Add(-24 * time.Hour)
+	var oldFunding float64
+	var minDiff time.Duration = 24 * time.Hour
+	var found bool
+
+	// Проходим по истории
+	for element := historyList.Front(); element != nil; element = element.Next() {
+		if priceData, ok := element.Value.(PriceData); ok {
+			diff := priceData.Timestamp.Sub(twentyFourHoursAgo)
+			if diff.Abs() < minDiff.Abs() && priceData.FundingRate != 0 {
+				minDiff = diff
+				oldFunding = priceData.FundingRate
+				found = true
+			}
+		}
+	}
+
+	if !found || oldFunding == 0 {
+		return 0
+	}
+
+	return ((currentSnapshot.FundingRate - oldFunding) / oldFunding) * 100
 }
 
 // Subscribe подписывает на обновления
@@ -547,6 +723,12 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 		priceChange24h = ((lastData.Price - firstData.Price) / firstData.Price) * 100
 	}
 
+	// Рассчитываем изменение OI за 24 часа
+	oiChange24h := s.calculateOIChange24h(symbol)
+
+	// Рассчитываем изменение фандинга за 24 часа
+	fundingChange := s.calculateFundingChange(symbol)
+
 	return SymbolStats{
 		Symbol:         symbol,
 		DataPoints:     historyList.Len(),
@@ -556,6 +738,12 @@ func (s *InMemoryPriceStorage) GetSymbolStats(symbol string) (SymbolStats, error
 		AvgVolume24h:   avgVolume24h,
 		AvgVolumeUSD:   avgVolumeUSD,
 		PriceChange24h: priceChange24h,
+		OpenInterest:   snapshot.OpenInterest,
+		OIChange24h:    oiChange24h,
+		FundingRate:    snapshot.FundingRate,
+		FundingChange:  fundingChange,
+		High24h:        snapshot.High24h,
+		Low24h:         snapshot.Low24h,
 	}, nil
 }
 
@@ -631,16 +819,30 @@ func (s *InMemoryPriceStorage) GetTopSymbolsByVolume(limit int) ([]SymbolVolume,
 // Вспомогательные методы
 
 func (s *InMemoryPriceStorage) updateStats() {
+	symbolsWithOI := 0
+	symbolsWithFunding := 0
+
+	for _, snapshot := range s.current {
+		if snapshot.OpenInterest > 0 {
+			symbolsWithOI++
+		}
+		if snapshot.FundingRate != 0 {
+			symbolsWithFunding++
+		}
+	}
+
 	s.stats = StorageStats{
 		TotalSymbols:        len(s.current),
 		TotalDataPoints:     s.calculateTotalDataPoints(),
 		MemoryUsageBytes:    s.estimateMemoryUsage(),
 		OldestTimestamp:     s.findOldestTimestamp(),
 		NewestTimestamp:     s.findNewestTimestamp(),
-		UpdateRatePerSecond: 0, // Можно рассчитать позже
+		UpdateRatePerSecond: 0,
 		StorageType:         "in_memory",
 		MaxHistoryPerSymbol: s.config.MaxHistoryPerSymbol,
 		RetentionPeriod:     s.config.RetentionPeriod,
+		SymbolsWithOI:       symbolsWithOI,
+		SymbolsWithFunding:  symbolsWithFunding,
 	}
 }
 
@@ -654,11 +856,11 @@ func (s *InMemoryPriceStorage) calculateTotalDataPoints() int64 {
 
 func (s *InMemoryPriceStorage) estimateMemoryUsage() int64 {
 	// Оценка использования памяти
-	// Каждый PriceData ~ 40 байт, каждый PriceSnapshot ~ 40 байт
+	// Каждый PriceData ~ 80 байт, каждый PriceSnapshot ~ 80 байт (из-за новых полей)
 	dataPoints := s.calculateTotalDataPoints()
 	symbols := int64(len(s.current))
 
-	return dataPoints*40 + symbols*40
+	return dataPoints*80 + symbols*80
 }
 
 func (s *InMemoryPriceStorage) findOldestTimestamp() time.Time {

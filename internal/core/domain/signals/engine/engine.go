@@ -690,10 +690,20 @@ func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
 
 	for i, data := range storageData {
 		result[i] = types.PriceData{
-			Symbol:    data.Symbol,
-			Price:     data.Price,
-			Volume24h: data.Volume24h,
-			Timestamp: data.Timestamp,
+			Symbol:       data.Symbol,
+			Price:        data.Price,
+			Volume24h:    data.Volume24h,
+			Timestamp:    data.Timestamp,
+			OpenInterest: data.OpenInterest, // ✅ Добавляем Open Interest
+			FundingRate:  data.FundingRate,  // ✅ Добавляем Funding Rate
+			Change24h:    data.Change24h,    // ✅ Добавляем Change 24h
+			High24h:      data.High24h,      // ✅ Добавляем High 24h
+			Low24h:       data.Low24h,       // ✅ Добавляем Low 24h
+		}
+		// Логируем для отладки
+		if data.OpenInterest > 0 {
+			log.Printf("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
+				data.Symbol, data.OpenInterest, data.FundingRate*100, data.Change24h)
 		}
 	}
 

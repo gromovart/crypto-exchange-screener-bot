@@ -1,3 +1,4 @@
+// internal/core/domain/signals/detectors/continuous_analyzer.go
 package analyzers
 
 import (

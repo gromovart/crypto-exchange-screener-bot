@@ -28,11 +28,16 @@ type PriceFetcherConfig struct {
 
 // PriceData данные о цене с улучшенной обработкой объемов
 type PriceData struct {
-	Symbol    string    `json:"symbol"`
-	Price     float64   `json:"price"`
-	Volume24h float64   `json:"volume_24h"` // Объем в БАЗОВОЙ валюте (для отображения)
-	VolumeUSD float64   `json:"volume_usd"` // Объем в USDT (turnover) для анализа ← ДОБАВЛЕНО!
-	Timestamp time.Time `json:"timestamp"`
+	Symbol       string    `json:"symbol"`
+	Price        float64   `json:"price"`
+	Volume24h    float64   `json:"volume_24h"`
+	VolumeUSD    float64   `json:"volume_usd"`
+	Timestamp    time.Time `json:"timestamp"`
+	OpenInterest float64   `json:"open_interest,omitempty"`
+	FundingRate  float64   `json:"funding_rate,omitempty"`
+	Change24h    float64   `json:"change_24h,omitempty"`
+	High24h      float64   `json:"high_24h,omitempty"`
+	Low24h       float64   `json:"low_24h,omitempty"`
 }
 
 // Геттеры для обратной совместимости

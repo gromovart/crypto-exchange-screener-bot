@@ -6,7 +6,19 @@ import "time"
 // PriceStorage интерфейс хранилища цен
 type PriceStorage interface {
 	// Основные операции
-	StorePrice(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time) error
+	StorePrice(
+		symbol string,
+		price, volume24h, volumeUSD float64,
+		timestamp time.Time,
+		openInterest float64,
+		fundingRate float64,
+		change24h float64,
+		high24h float64,
+		low24h float64,
+	) error
+
+	StorePriceData(priceData PriceData) error // Альтернативный метод для удобства
+
 	GetCurrentPrice(symbol string) (float64, bool)
 	GetCurrentSnapshot(symbol string) (*PriceSnapshot, bool)
 	GetAllCurrentPrices() map[string]PriceSnapshot
@@ -42,6 +54,27 @@ type PriceStorage interface {
 	FindSymbolsByPattern(pattern string) ([]string, error)
 	GetTopSymbolsByVolume(limit int) ([]SymbolVolume, error)
 	GetTopSymbolsByVolumeUSD(limit int) ([]SymbolVolume, error)
+
+	// Дополнительные методы для новых данных
+	GetOpenInterest(symbol string) (float64, bool)
+	GetFundingRate(symbol string) (float64, bool)
+	GetSymbolMetrics(symbol string) (*SymbolMetrics, bool)
+}
+
+// SymbolMetrics содержит все метрики символа
+type SymbolMetrics struct {
+	Symbol        string    `json:"symbol"`
+	Price         float64   `json:"price"`
+	Volume24h     float64   `json:"volume_24h"`
+	VolumeUSD     float64   `json:"volume_usd"`
+	OpenInterest  float64   `json:"open_interest"`
+	FundingRate   float64   `json:"funding_rate"`
+	Change24h     float64   `json:"change_24h"`
+	High24h       float64   `json:"high_24h"`
+	Low24h        float64   `json:"low_24h"`
+	OIChange24h   float64   `json:"oi_change_24h"`
+	FundingChange float64   `json:"funding_change"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // SymbolStats статистика по символу
@@ -54,6 +87,12 @@ type SymbolStats struct {
 	AvgVolume24h   float64   `json:"avg_volume_24h"`
 	AvgVolumeUSD   float64   `json:"avg_volume_usd"`
 	PriceChange24h float64   `json:"price_change_24h"`
+	OpenInterest   float64   `json:"open_interest"`
+	OIChange24h    float64   `json:"oi_change_24h"`
+	FundingRate    float64   `json:"funding_rate"`
+	FundingChange  float64   `json:"funding_change"`
+	High24h        float64   `json:"high_24h"`
+	Low24h         float64   `json:"low_24h"`
 }
 
 // SymbolVolume символ с объемом

@@ -5,6 +5,7 @@ import (
 	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
 	"strconv"
@@ -99,7 +100,7 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 	updatedCount := 0
 
 	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
-	var priceDataList []PriceData
+	var priceDataList []types.PriceData
 
 	for _, ticker := range tickers.Result.List {
 		// Парсим цену
@@ -114,19 +115,41 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 		// Binance не предоставляет turnover, рассчитываем сами
 		volumeUSD := price * volumeBase
 
-		// 🔴 ОБНОВЛЕННЫЙ ВЫЗОВ: 4 параметра вместо 3
-		if err := f.storage.StorePrice(ticker.Symbol, price, volumeBase, volumeUSD, now); err != nil {
+		// Change24h - Binance может не предоставлять это значение
+		// Для спотовой торговли Binance может иметь другие поля
+		change24h := 0.0
+		// Проверяем наличие поля priceChangePercent в ответе API
+		// Если нет, оставляем 0
+
+		// 🔴 ОБНОВЛЕННЫЙ ВЫЗОВ: 10 параметров вместо 4
+		if err := f.storage.StorePrice(
+			ticker.Symbol,
+			price,
+			volumeBase,
+			volumeUSD,
+			now,
+			0,         // OpenInterest (по умолчанию, пока не получаем от Binance)
+			0,         // FundingRate (по умолчанию)
+			change24h, // Change24h
+			price,     // High24h (временно используем текущую цену)
+			price,     // Low24h (временно используем текущую цену)
+		); err != nil {
 			log.Printf("Binance: Ошибка сохранения цены для %s: %v", ticker.Symbol, err)
 			continue
 		}
 
 		// Добавляем в массив для batch события
-		priceDataList = append(priceDataList, PriceData{
-			Symbol:    ticker.Symbol,
-			Price:     price,
-			Volume24h: volumeBase,
-			VolumeUSD: volumeUSD, // ← ДОБАВЛЕНО!
-			Timestamp: now,
+		priceDataList = append(priceDataList, types.PriceData{
+			Symbol:       ticker.Symbol,
+			Price:        price,
+			Volume24h:    volumeBase,
+			VolumeUSD:    volumeUSD,
+			Timestamp:    now,
+			OpenInterest: 0,
+			FundingRate:  0,
+			Change24h:    change24h,
+			High24h:      price,
+			Low24h:       price,
 		})
 
 		updatedCount++
