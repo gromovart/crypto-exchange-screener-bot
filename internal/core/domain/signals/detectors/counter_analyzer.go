@@ -21,11 +21,9 @@ import (
 
 // volumeDeltaCache кэш для дельты объемов
 type volumeDeltaCache struct {
-	delta        float64
-	deltaPercent float64
-	expiration   time.Time
-	updateTime   time.Time
-	source       string // источник данных: "api", "storage", "emulated"
+	deltaData  *types.VolumeDeltaData
+	expiration time.Time
+	updateTime time.Time
 }
 
 // ==================== МЕТОДЫ ДЛЯ CounterPeriod ====================
@@ -162,7 +160,7 @@ func (a *CounterAnalyzer) Name() string {
 
 // Version возвращает версию
 func (a *CounterAnalyzer) Version() string {
-	return "2.4.0" // Обновили версию из-за улучшенной системы дельты
+	return "2.5.0" // Обновили версию из-за добавления информации об источниках
 }
 
 // Supports проверяет поддержку символа
@@ -261,6 +259,9 @@ func (a *CounterAnalyzer) createAnalysisSignal(
 	latestData := data[len(data)-1]
 	oiChange24h := a.calculateOIChange24h(symbol)
 
+	// Получаем данные дельты для метаданных
+	deltaData := a.calculateRealVolumeDeltaWithFallback(symbol, direction)
+
 	return analysis.Signal{
 		ID:            uuid.New().String(),
 		Symbol:        symbol,
@@ -280,25 +281,29 @@ func (a *CounterAnalyzer) createAnalysisSignal(
 				fmt.Sprintf("count_%d", count),
 				string(selectedPeriod),
 				"no_duplicate",
+				fmt.Sprintf("delta_source_%s", deltaData.Source),
 			},
 			Indicators: map[string]float64{
-				"count":            float64(count),
-				"max_signals":      float64(maxSignals),
-				"current_count":    float64(count),
-				"total_max":        float64(maxSignals),
-				"change":           change,
-				"period_minutes":   float64(selectedPeriod.GetMinutes()),
-				"base_period":      float64(a.getBasePeriodMinutes()),
-				"period_progress":  float64(count) / float64(maxSignals) * 100,
-				"percentage":       float64(count) / float64(maxSignals) * 100,
-				"volume_24h":       latestData.Volume24h,
-				"open_interest":    latestData.OpenInterest,
-				"oi_change_24h":    oiChange24h,
-				"funding_rate":     latestData.FundingRate,
-				"current_price":    latestData.Price,
-				"price_change_24h": latestData.Change24h,
-				"high_24h":         latestData.High24h,
-				"low_24h":          latestData.Low24h,
+				"count":                float64(count),
+				"max_signals":          float64(maxSignals),
+				"current_count":        float64(count),
+				"total_max":            float64(maxSignals),
+				"change":               change,
+				"period_minutes":       float64(selectedPeriod.GetMinutes()),
+				"base_period":          float64(a.getBasePeriodMinutes()),
+				"period_progress":      float64(count) / float64(maxSignals) * 100,
+				"percentage":           float64(count) / float64(maxSignals) * 100,
+				"volume_24h":           latestData.Volume24h,
+				"open_interest":        latestData.OpenInterest,
+				"oi_change_24h":        oiChange24h,
+				"funding_rate":         latestData.FundingRate,
+				"current_price":        latestData.Price,
+				"price_change_24h":     latestData.Change24h,
+				"high_24h":             latestData.High24h,
+				"low_24h":              latestData.Low24h,
+				"volume_delta":         deltaData.Delta,
+				"volume_delta_percent": deltaData.DeltaPercent,
+				"delta_source_score":   a.getDeltaSourceScore(deltaData.Source),
 			},
 		},
 	}
@@ -396,7 +401,6 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	}
 	if realTimeOI > 0 {
 		openInterest = realTimeOI
-		log.Printf("✅ Используем реальный OI из хранилища: %.0f", realTimeOI)
 	}
 	if realTimeFunding != 0 {
 		fundingRate = realTimeFunding
@@ -408,7 +412,6 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	// Эвристика если OI = 0
 	if openInterest <= 0 {
 		openInterest = volume24h * 0.05
-		log.Printf("📊 Используем расчетный OI для %s: %.0f", notification.Symbol, openInterest)
 	}
 
 	// ==================== БЛОК РАСЧЕТА МЕТРИК ====================
@@ -421,20 +424,25 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 	rsi := a.calculateRSI(notification.Symbol, priceData)
 	macdSignal := a.calculateMACD(notification.Symbol, priceData)
 
-	// Получаем дельту объемов (с многоуровневой системой fallback)
+	// Получаем данные дельты с информацией об источнике
 	direction := a.getDirectionFromSignalType(notification.SignalType)
-	volumeDelta, volumeDeltaPercent := a.calculateRealVolumeDeltaWithFallback(notification.Symbol, direction)
+	volumeDeltaData := a.calculateRealVolumeDeltaWithFallback(notification.Symbol, direction)
+
+	// 🔴 ДОБАВЛЯЕМ ИНФОРМАЦИЮ ОБ ИСТОЧНИКЕ В ЛОГИ
+	log.Printf("📊 Источник данных дельты для %s: %s (реальные: %v)",
+		notification.Symbol, volumeDeltaData.Source, volumeDeltaData.IsRealData)
+	log.Printf("📊 Дельта: $%.0f (%.1f%%)", volumeDeltaData.Delta, volumeDeltaData.DeltaPercent)
 
 	// 🔴 ОБНОВЛЕННЫЙ БЛОК: ПЫТАЕМСЯ ПОЛУЧИТЬ ПОЛНЫЕ ДАННЫЕ ДЕЛЬТЫ
 	if fetcher, ok := a.marketFetcher.(interface {
 		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
 	}); ok {
-		volumeDeltaData, err := fetcher.GetRealTimeVolumeDelta(notification.Symbol)
+		volumeDelta, err := fetcher.GetRealTimeVolumeDelta(notification.Symbol)
 
-		if err == nil && volumeDeltaData != nil {
+		if err == nil && volumeDelta != nil {
 			log.Printf("✅ Используем полные данные дельты из API для %s", notification.Symbol)
 
-			return a.messageFormatter.FormatMessageWithFullDelta(
+			return a.messageFormatter.FormatMessage(
 				notification.Symbol,
 				direction,
 				notification.ChangePercent,
@@ -451,9 +459,11 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 				liquidationVolume,
 				longLiqVolume,
 				shortLiqVolume,
-				volumeDeltaData, // 🔴 Полные данные
+				volumeDelta.Delta,        // Передаем delta
+				volumeDelta.DeltaPercent, // Передаем deltaPercent
 				rsi,
 				macdSignal,
+				"api", // Источник данных
 			)
 		} else {
 			log.Printf("⚠️ Не удалось получить полные данные дельты для %s: %v",
@@ -461,13 +471,8 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		}
 	}
 
-	// 🔴 FALLBACK: Используем обычный метод с отдельными значениями
-	log.Printf("📊 Используем обычный метод форматирования для %s", notification.Symbol)
-
-	log.Printf("📤 CounterAnalyzer отправляет данные:")
-	log.Printf("   Symbol: %s, OI: %.0f (изм: %.1f%%)", notification.Symbol, openInterest, oiChange24h)
-	log.Printf("   Price: %.4f, Volume: %.0f", currentPrice, volume24h)
-	log.Printf("   Дельта: $%.0f (%.1f%%), Ликвидации: $%.0f", volumeDelta, volumeDeltaPercent, liquidationVolume)
+	// 🔴 FALLBACK: Используем обычный метод с указанием источника
+	log.Printf("📊 Используем данные дельты из источника: %s", volumeDeltaData.Source)
 
 	return a.messageFormatter.FormatMessage(
 		notification.Symbol,
@@ -486,55 +491,95 @@ func (a *CounterAnalyzer) formatEnhancedNotificationMessage(
 		liquidationVolume,
 		longLiqVolume,
 		shortLiqVolume,
-		volumeDelta,
-		volumeDeltaPercent,
+		volumeDeltaData.Delta,        // Извлекаем delta из структуры
+		volumeDeltaData.DeltaPercent, // Извлекаем deltaPercent из структуры
 		rsi,
 		macdSignal,
+		volumeDeltaData.Source.String(), // Извлекаем source и преобразуем в строку
 	)
 }
 
 // ==================== УЛУЧШЕННАЯ СИСТЕМА ПОЛУЧЕНИЯ ДЕЛЬТЫ ====================
 
-// calculateRealVolumeDeltaWithFallback получает дельту с многоуровневым fallback
-func (a *CounterAnalyzer) calculateRealVolumeDeltaWithFallback(symbol, direction string) (float64, float64) {
+// calculateRealVolumeDeltaWithFallback получает дельту с многоуровневым fallback и указанием источника
+func (a *CounterAnalyzer) calculateRealVolumeDeltaWithFallback(symbol, direction string) *types.VolumeDeltaData {
 	// 1. Проверяем кэш
 	if cached, found := a.getVolumeDeltaFromCache(symbol); found {
 		log.Printf("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s)",
-			symbol, cached.delta, cached.deltaPercent, cached.source)
-		return cached.delta, cached.deltaPercent
+			symbol, cached.deltaData.Delta, cached.deltaData.DeltaPercent, cached.deltaData.Source)
+		return cached.deltaData
 	}
 
 	// 2. Пробуем получить реальные данные через API
-	realDelta, realPercent, apiErr := a.getRealVolumeDeltaFromAPI(symbol)
-	if apiErr == nil && (realDelta != 0 || realPercent != 0) {
+	apiDeltaData, apiErr := a.getRealVolumeDeltaFromAPI(symbol)
+	if apiErr == nil && (apiDeltaData.Delta != 0 || apiDeltaData.DeltaPercent != 0) {
 		log.Printf("✅ Получена реальная дельта из API для %s: $%.0f (%.1f%%)",
-			symbol, realDelta, realPercent)
-		a.setVolumeDeltaToCacheWithSource(symbol, realDelta, realPercent, "api")
-		return realDelta, realPercent
+			symbol, apiDeltaData.Delta, apiDeltaData.DeltaPercent)
+		a.setVolumeDeltaToCache(symbol, apiDeltaData)
+		return apiDeltaData
 	}
 
 	// 3. Fallback: Данные из хранилища
 	log.Printf("⚠️ API недоступно для %s: %v", symbol, apiErr)
 
-	storageDelta, storagePercent, storageOk := a.getVolumeDeltaFromStorage(symbol, direction)
-	if storageOk {
+	storageDeltaData := a.getVolumeDeltaFromStorage(symbol, direction)
+	if storageDeltaData != nil {
 		log.Printf("📊 Используем дельту из хранилища для %s: $%.0f (%.1f%%)",
-			symbol, storageDelta, storagePercent)
-		a.setVolumeDeltaToCacheWithSource(symbol, storageDelta, storagePercent, "storage")
-		return storageDelta, storagePercent
+			symbol, storageDeltaData.Delta, storageDeltaData.DeltaPercent)
+		a.setVolumeDeltaToCache(symbol, storageDeltaData)
+		return storageDeltaData
 	}
 
 	// 4. Final Fallback: Базовая эмуляция
-	emulatedDelta, emulatedPercent := a.calculateBasicVolumeDelta(symbol, direction)
+	emulatedDeltaData := a.calculateBasicVolumeDelta(symbol, direction)
 	log.Printf("📊 Используем базовую дельту для %s: $%.0f (%.1f%%)",
-		symbol, emulatedDelta, emulatedPercent)
+		symbol, emulatedDeltaData.Delta, emulatedDeltaData.DeltaPercent)
 
-	a.setVolumeDeltaToCacheWithSource(symbol, emulatedDelta, emulatedPercent, "emulated")
-	return emulatedDelta, emulatedPercent
+	a.setVolumeDeltaToCache(symbol, emulatedDeltaData)
+	return emulatedDeltaData
 }
 
-// getVolumeDeltaFromStorage пытается получить дельту из хранилища
-func (a *CounterAnalyzer) getVolumeDeltaFromStorage(symbol, direction string) (float64, float64, bool) {
+// getRealVolumeDeltaFromAPI получает реальную дельту через API с указанием источника
+func (a *CounterAnalyzer) getRealVolumeDeltaFromAPI(symbol string) (*types.VolumeDeltaData, error) {
+	// Проверяем, есть ли доступ к marketFetcher
+	if a.marketFetcher == nil {
+		return nil, fmt.Errorf("market fetcher not available")
+	}
+
+	// Пробуем получить дельту через интерфейс Bybit
+	if fetcher, ok := a.marketFetcher.(interface {
+		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
+	}); ok {
+		volumeDelta, err := fetcher.GetRealTimeVolumeDelta(symbol)
+		if err != nil {
+			log.Printf("❌ Ошибка API дельты для %s: %v", symbol, err)
+			return nil, fmt.Errorf("API error: %w", err)
+		}
+
+		if volumeDelta == nil {
+			return nil, fmt.Errorf("nil volume delta response")
+		}
+
+		log.Printf("✅ Получена реальная дельта для %s: $%.0f (%.1f%%)",
+			symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
+
+		return &types.VolumeDeltaData{
+			Delta:        volumeDelta.Delta,
+			DeltaPercent: volumeDelta.DeltaPercent,
+			Source:       types.VolumeDeltaSourceAPI,
+			Timestamp:    time.Now(),
+			BuyVolume:    volumeDelta.BuyVolume,
+			SellVolume:   volumeDelta.SellVolume,
+			TotalTrades:  volumeDelta.TotalTrades,
+			IsRealData:   true,
+		}, nil
+	}
+
+	return nil, fmt.Errorf("market fetcher doesn't support volume delta")
+}
+
+// getVolumeDeltaFromStorage получает дельту из хранилища
+func (a *CounterAnalyzer) getVolumeDeltaFromStorage(symbol, direction string) *types.VolumeDeltaData {
 	// Пробуем получить последние данные о сделках из хранилища
 	if snapshot, exists := a.storage.GetCurrentSnapshot(symbol); exists && snapshot.VolumeUSD > 0 {
 		volume24h := snapshot.VolumeUSD
@@ -548,11 +593,10 @@ func (a *CounterAnalyzer) getVolumeDeltaFromStorage(symbol, direction string) (f
 		} else if direction == "fall" {
 			baseDeltaPercent = -1.5 // -1.5% для падения
 		} else {
-			// Нейтральное направление - небольшая случайная дельта
-			baseDeltaPercent = 0.5
+			baseDeltaPercent = 0.5 // Нейтральное направление
 		}
 
-		// Корректируем процент на основе объема (для низких объемов % выше)
+		// Корректируем процент на основе объема
 		if volume24h < 1000000 { // < $1M
 			baseDeltaPercent *= 2
 		} else if volume24h > 10000000 { // > $10M
@@ -562,14 +606,20 @@ func (a *CounterAnalyzer) getVolumeDeltaFromStorage(symbol, direction string) (f
 		// Рассчитываем дельту
 		delta := volume24h * baseDeltaPercent / 100
 
-		return delta, baseDeltaPercent, true
+		return &types.VolumeDeltaData{
+			Delta:        delta,
+			DeltaPercent: baseDeltaPercent,
+			Source:       types.VolumeDeltaSourceStorage,
+			Timestamp:    time.Now(),
+			IsRealData:   false,
+		}
 	}
 
-	return 0, 0, false
+	return nil
 }
 
-// calculateBasicVolumeDelta базовая эмуляция дельты
-func (a *CounterAnalyzer) calculateBasicVolumeDelta(symbol, direction string) (float64, float64) {
+// calculateBasicVolumeDelta базовая эмуляция дельты с источником
+func (a *CounterAnalyzer) calculateBasicVolumeDelta(symbol, direction string) *types.VolumeDeltaData {
 	// Пытаемся получить объем 24ч из хранилища
 	var volume24h float64
 	if snapshot, exists := a.storage.GetCurrentSnapshot(symbol); exists {
@@ -618,7 +668,13 @@ func (a *CounterAnalyzer) calculateBasicVolumeDelta(symbol, direction string) (f
 	log.Printf("📊 Базовая дельта для %s: $%.0f (%.1f%%) от объема $%.0f",
 		symbol, delta, deltaPercent, volume24h)
 
-	return delta, deltaPercent
+	return &types.VolumeDeltaData{
+		Delta:        delta,
+		DeltaPercent: deltaPercent,
+		Source:       types.VolumeDeltaSourceEmulated,
+		Timestamp:    time.Now(),
+		IsRealData:   false,
+	}
 }
 
 // estimateVolumeForSymbol оценивает объем для символа
@@ -639,41 +695,20 @@ func (a *CounterAnalyzer) estimateVolumeForSymbol(symbol string) float64 {
 	return 2000000 // $2M
 }
 
-// getRealVolumeDeltaFromAPI получает реальную дельту через API
-func (a *CounterAnalyzer) getRealVolumeDeltaFromAPI(symbol string) (float64, float64, error) {
-	// Проверяем, есть ли доступ к marketFetcher
-	if a.marketFetcher == nil {
-		return 0, 0, fmt.Errorf("market fetcher not available")
+// getDeltaSourceScore возвращает оценку качества источника данных
+func (a *CounterAnalyzer) getDeltaSourceScore(source types.VolumeDeltaSource) float64 {
+	switch source {
+	case types.VolumeDeltaSourceAPI:
+		return 1.0 // Высокое качество
+	case types.VolumeDeltaSourceStorage:
+		return 0.7 // Среднее качество
+	case types.VolumeDeltaSourceEmulated:
+		return 0.3 // Низкое качество
+	case types.VolumeDeltaSourceCache:
+		return 0.5 // Качество зависит от исходного источника
+	default:
+		return 0.0
 	}
-
-	// Пробуем получить дельту через интерфейс Bybit
-	if fetcher, ok := a.marketFetcher.(interface {
-		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
-	}); ok {
-		volumeDelta, err := fetcher.GetRealTimeVolumeDelta(symbol)
-		if err != nil {
-			log.Printf("❌ Ошибка API дельты для %s: %v", symbol, err)
-			return 0, 0, fmt.Errorf("API error: %w", err)
-		}
-
-		// Проверяем данные
-		if volumeDelta == nil {
-			return 0, 0, fmt.Errorf("nil volume delta response")
-		}
-
-		log.Printf("✅ Получена реальная дельта для %s: $%.0f (%.1f%%)",
-			symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
-
-		// Валидация данных
-		if volumeDelta.DeltaPercent > 100 || volumeDelta.DeltaPercent < -100 {
-			log.Printf("⚠️ Подозрительный процент дельты для %s: %.1f%%",
-				symbol, volumeDelta.DeltaPercent)
-		}
-
-		return volumeDelta.Delta, volumeDelta.DeltaPercent, nil
-	}
-
-	return 0, 0, fmt.Errorf("market fetcher doesn't support volume delta")
 }
 
 // getVolumeDeltaFromCache получает дельту из кэша
@@ -692,28 +727,22 @@ func (a *CounterAnalyzer) getVolumeDeltaFromCache(symbol string) (*volumeDeltaCa
 }
 
 // setVolumeDeltaToCache сохраняет дельту в кэш
-func (a *CounterAnalyzer) setVolumeDeltaToCache(symbol string, delta, deltaPercent float64) {
-	a.setVolumeDeltaToCacheWithSource(symbol, delta, deltaPercent, "unknown")
-}
-
-// setVolumeDeltaToCacheWithSource сохраняет дельту в кэш с указанием источника
-func (a *CounterAnalyzer) setVolumeDeltaToCacheWithSource(symbol string, delta, deltaPercent float64, source string) {
+func (a *CounterAnalyzer) setVolumeDeltaToCache(symbol string, deltaData *types.VolumeDeltaData) {
 	a.volumeDeltaCacheMu.Lock()
 	defer a.volumeDeltaCacheMu.Unlock()
 
 	a.volumeDeltaCache[symbol] = &volumeDeltaCache{
-		delta:        delta,
-		deltaPercent: deltaPercent,
-		expiration:   time.Now().Add(a.volumeDeltaTTL),
-		updateTime:   time.Now(),
-		source:       source,
+		deltaData:  deltaData,
+		expiration: time.Now().Add(a.volumeDeltaTTL),
+		updateTime: time.Now(),
 	}
 }
 
 // Старые методы для обратной совместимости
 func (a *CounterAnalyzer) calculateRealVolumeDelta(symbol, direction string) (float64, float64) {
 	// Используем новую систему с fallback
-	return a.calculateRealVolumeDeltaWithFallback(symbol, direction)
+	deltaData := a.calculateRealVolumeDeltaWithFallback(symbol, direction)
+	return deltaData.Delta, deltaData.DeltaPercent
 }
 
 // ==================== МЕТОДЫ РАБОТЫ СО СЧЕТЧИКАМИ ====================
@@ -1207,8 +1236,7 @@ func (a *CounterAnalyzer) getDirectionFromSignalType(signalType CounterSignalTyp
 
 func (a *CounterAnalyzer) calculateRSI(symbol string, priceData []types.PriceData) float64 {
 	if len(priceData) < 14 {
-		// Возвращаем нейтральное значение вместо 0
-		return 50.0
+		return 50.0 // Возвращаем нейтральное значение вместо 0
 	}
 
 	// Простая эмуляция RSI
@@ -1223,7 +1251,7 @@ func (a *CounterAnalyzer) calculateRSI(symbol string, priceData []types.PriceDat
 	}
 
 	if gains+losses == 0 {
-		return 50.0 // Нейтральное значение
+		return 50.0
 	}
 
 	// Базовая формула RSI
@@ -1231,11 +1259,19 @@ func (a *CounterAnalyzer) calculateRSI(symbol string, priceData []types.PriceDat
 	avgLoss := losses / float64(len(priceData)-1)
 
 	if avgLoss == 0 {
-		return 100.0 // Сильный рост
+		return 100.0
 	}
 
 	rs := avgGain / avgLoss
 	rsi := 100 - (100 / (1 + rs))
+
+	// Ограничиваем RSI в пределах 0-100
+	if rsi > 100 {
+		return 100
+	}
+	if rsi < 0 {
+		return 0
+	}
 
 	return rsi
 }
@@ -1294,8 +1330,9 @@ var DefaultCounterConfig = AnalyzerConfig{
 		"include_oi":             true,
 		"include_volume":         true,
 		"include_funding":        true,
-		"volume_delta_ttl":       30,   // TTL кэша дельты в секундах
-		"delta_fallback_enabled": true, // Включить fallback для дельты
+		"volume_delta_ttl":       30, // TTL кэша дельты в секундах
+		"delta_fallback_enabled": true,
+		"show_delta_source":      true, // Показывать источник данных дельты
 	},
 }
 
@@ -1306,18 +1343,20 @@ func (a *CounterAnalyzer) TestVolumeDeltaConnection(symbol string) error {
 	log.Printf("🧪 Тестирование подключения к API дельты для %s", symbol)
 
 	// Пробуем получить реальные данные
-	delta, percent, err := a.getRealVolumeDeltaFromAPI(symbol)
+	deltaData, err := a.getRealVolumeDeltaFromAPI(symbol)
 	if err != nil {
 		log.Printf("❌ Ошибка получения реальной дельты: %v", err)
 
 		// Тестируем fallback
-		fallbackDelta, fallbackPercent := a.calculateBasicVolumeDelta(symbol, "growth")
-		log.Printf("📊 Fallback дельта: $%.0f (%.1f%%)", fallbackDelta, fallbackPercent)
+		fallbackData := a.calculateBasicVolumeDelta(symbol, "growth")
+		log.Printf("📊 Fallback дельта: $%.0f (%.1f%%, источник: %s)",
+			fallbackData.Delta, fallbackData.DeltaPercent, fallbackData.Source)
 
 		return err
 	}
 
-	log.Printf("✅ Тест пройден! Дельта для %s: $%.0f (%.1f%%)", symbol, delta, percent)
+	log.Printf("✅ Тест пройден! Дельта для %s: $%.0f (%.1f%%, источник: %s)",
+		symbol, deltaData.Delta, deltaData.DeltaPercent, deltaData.Source)
 	return nil
 }
 
@@ -1335,10 +1374,10 @@ func (a *CounterAnalyzer) GetVolumeDeltaCacheInfo() map[string]interface{} {
 	for symbol, cache := range a.volumeDeltaCache {
 		age := time.Since(cache.updateTime).Round(time.Second)
 		symbolsInfo[symbol] = map[string]interface{}{
-			"delta":         cache.delta,
-			"delta_percent": cache.deltaPercent,
+			"delta":         cache.deltaData.Delta,
+			"delta_percent": cache.deltaData.DeltaPercent,
+			"source":        cache.deltaData.Source,
 			"age":           age.String(),
-			"source":        cache.source,
 			"expires_in":    time.Until(cache.expiration).Round(time.Second).String(),
 		}
 	}
@@ -1355,30 +1394,4 @@ func (a *CounterAnalyzer) ClearVolumeDeltaCache() {
 	cleared := len(a.volumeDeltaCache)
 	a.volumeDeltaCache = make(map[string]*volumeDeltaCache)
 	log.Printf("🧹 Кэш дельты очищен: удалено %d записей", cleared)
-}
-
-// ValidateVolumeDeltaData валидирует данные дельты
-func (a *CounterAnalyzer) ValidateVolumeDeltaData(symbol string, delta, deltaPercent, volume24h float64) bool {
-	// Проверка 1: Дельта не может быть больше объема
-	if math.Abs(delta) > volume24h {
-		log.Printf("⚠️ Неверная дельта для %s: дельта ($%.0f) > объема ($%.0f)",
-			symbol, delta, volume24h)
-		return false
-	}
-
-	// Проверка 2: Реалистичный процент дельты
-	expectedPercent := (delta / volume24h) * 100
-	if math.Abs(deltaPercent-expectedPercent) > 50 { // Разница более 50%
-		log.Printf("⚠️ Подозрительный процент дельты для %s: указано %.1f%%, ожидается %.1f%%",
-			symbol, deltaPercent, expectedPercent)
-		return false
-	}
-
-	// Проверка 3: Процент в реалистичных пределах
-	if math.Abs(deltaPercent) > 100 { // Более 100% - нереально
-		log.Printf("⚠️ Нереальный процент дельты для %s: %.1f%%", symbol, deltaPercent)
-		return false
-	}
-
-	return true
 }

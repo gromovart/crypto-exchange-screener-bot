@@ -3,6 +3,7 @@ package telegram
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
+	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"log"
 	"math"
@@ -85,6 +86,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 		volumeDeltaPercent,
 		rsi,
 		macdSignal,
+		"", // 🔴 Пустая строка для обратной совместимости
 	)
 }
 
@@ -110,6 +112,7 @@ func (f *MarketMessageFormatter) FormatMessage(
 	volumeDeltaPercent float64, // Изменение дельты в процентах
 	rsi float64, // Индикатор RSI (0 если недоступен)
 	macdSignal float64, // Сигнал MACD (0 если недоступен)
+	deltaSource string, // 🔴 НОВЫЙ ПАРАМЕТР: источник данных дельты (пустая строка если нет)
 ) string {
 	var builder strings.Builder
 
@@ -152,6 +155,13 @@ func (f *MarketMessageFormatter) FormatMessage(
 	// Дельта объемов с изменением
 	if volumeDelta != 0 || volumeDeltaPercent != 0 {
 		deltaStr := f.formatVolumeDelta(volumeDelta, volumeDeltaPercent, direction)
+
+		// 🔴 ДОБАВЛЯЕМ ИСТОЧНИК ДАННЫХ
+		if deltaSource != "" {
+			sourceIndicator := getSourceIndicator(deltaSource)
+			deltaStr += sourceIndicator
+		}
+
 		builder.WriteString(fmt.Sprintf("📈 Дельта: %s\n\n", deltaStr))
 	} else {
 		builder.WriteString("\n")
@@ -254,6 +264,22 @@ func (f *MarketMessageFormatter) FormatMessage(
 	builder.WriteString(fmt.Sprintf("⏰ Через: %s", timeUntil))
 
 	return builder.String()
+}
+
+// getSourceIndicator возвращает строку с индикатором источника
+func getSourceIndicator(source string) string {
+	switch source {
+	case "api":
+		return " [API]"
+	case "storage":
+		return " [Хранилище]"
+	case "emulated":
+		return " [Эмуляция]"
+	case "cache":
+		return " [Кэш]"
+	default:
+		return ""
+	}
 }
 
 // ==================== МЕТОДЫ ТЕХНИЧЕСКОГО АНАЛИЗА ====================
@@ -1489,4 +1515,35 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendationWithFullDelta(
 	}
 
 	return strings.TrimSpace(result.String())
+}
+
+// formatVolumeDeltaWithSource форматирует дельту с указанием источника
+func (f *MarketMessageFormatter) formatVolumeDeltaWithSource(
+	deltaData *types.VolumeDeltaData,
+	direction string,
+) string {
+	// Если данных нет
+	if deltaData.Delta == 0 && deltaData.DeltaPercent == 0 {
+		return "─"
+	}
+
+	// Форматируем базовую дельту
+	baseString := f.formatVolumeDelta(deltaData.Delta, deltaData.DeltaPercent, direction)
+
+	// Добавляем индикатор источника
+	var sourceIndicator string
+	switch deltaData.Source {
+	case types.VolumeDeltaSourceAPI:
+		sourceIndicator = " [API]"
+	case types.VolumeDeltaSourceStorage:
+		sourceIndicator = " [Хранилище]"
+	case types.VolumeDeltaSourceEmulated:
+		sourceIndicator = " [Эмуляция]"
+	case types.VolumeDeltaSourceCache:
+		sourceIndicator = " [Кэш]"
+	default:
+		sourceIndicator = ""
+	}
+
+	return baseString + sourceIndicator
 }
