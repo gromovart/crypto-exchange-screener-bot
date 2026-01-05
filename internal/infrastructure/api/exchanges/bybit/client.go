@@ -571,3 +571,200 @@ func (c *BybitClient) Category() string {
 	}
 	return CategoryLinear
 }
+
+// ============================================
+// ТИПЫ ДЛЯ РЕАЛЬНЫХ СДЕЛОК
+// ============================================
+
+// TradeData представляет данные о сделке
+type TradeData struct {
+	Symbol string    `json:"symbol"`
+	Side   string    `json:"side"` // "Buy" или "Sell"
+	Price  float64   `json:"price"`
+	Size   float64   `json:"size"`
+	Time   time.Time `json:"time"`
+}
+
+// VolumeDelta представляет дельту объемов
+type VolumeDelta struct {
+	Symbol       string    `json:"symbol"`
+	Period       string    `json:"period"`
+	StartTime    time.Time `json:"start_time"`
+	EndTime      time.Time `json:"end_time"`
+	BuyVolume    float64   `json:"buy_volume"`
+	SellVolume   float64   `json:"sell_volume"`
+	Delta        float64   `json:"delta"`         // buyVolume - sellVolume
+	DeltaPercent float64   `json:"delta_percent"` // Процентное изменение
+	TotalTrades  int       `json:"total_trades"`
+	UpdateTime   time.Time `json:"update_time"`
+}
+
+// ============================================
+// МЕТОДЫ ДЛЯ РЕАЛЬНЫХ СДЕЛОК
+// ============================================
+
+// GetRecentTrades получает последние сделки
+func (c *BybitClient) GetRecentTrades(symbol string, limit int) ([]TradeData, error) {
+	params := url.Values{}
+	params.Set("category", "linear")
+	params.Set("symbol", symbol)
+	params.Set("limit", strconv.Itoa(limit))
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/recent-trade", params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent trades: %w", err)
+	}
+
+	var response struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
+			List []struct {
+				Symbol string `json:"symbol"`
+				Side   string `json:"side"` // "Buy" или "Sell"
+				Size   string `json:"size"`
+				Price  string `json:"price"`
+				Time   string `json:"time"`
+			} `json:"list"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("failed to parse trades response: %w", err)
+	}
+
+	var trades []TradeData
+	for _, item := range response.Result.List {
+		price, err := strconv.ParseFloat(item.Price, 64)
+		if err != nil {
+			log.Printf("⚠️ Ошибка парсинга цены сделки %s: %v", item.Price, err)
+			continue
+		}
+
+		size, err := strconv.ParseFloat(item.Size, 64)
+		if err != nil {
+			log.Printf("⚠️ Ошибка парсинга размера сделки %s: %v", item.Size, err)
+			continue
+		}
+
+		// Парсим время (миллисекунды)
+		timestampMs, err := strconv.ParseInt(item.Time, 10, 64)
+		if err != nil {
+			log.Printf("⚠️ Ошибка парсинга времени сделки %s: %v", item.Time, err)
+			continue
+		}
+
+		timestamp := time.Unix(timestampMs/1000, (timestampMs%1000)*int64(time.Millisecond))
+
+		trades = append(trades, TradeData{
+			Symbol: item.Symbol,
+			Side:   item.Side,
+			Price:  price,
+			Size:   size,
+			Time:   timestamp,
+		})
+	}
+
+	log.Printf("📊 Получено %d сделок для %s", len(trades), symbol)
+	return trades, nil
+}
+
+// CalculateVolumeDelta рассчитывает дельту объемов за период
+func (c *BybitClient) CalculateVolumeDelta(symbol string, period time.Duration) (*VolumeDelta, error) {
+	startTime := time.Now().Add(-period)
+	endTime := time.Now()
+
+	log.Printf("🔍 Расчет дельты объемов для %s за период %v", symbol, period)
+
+	// Оцениваем количество сделок (~60 сделок в минуту для активного символа)
+	estimatedTrades := int(period.Minutes() * 60)
+	if estimatedTrades > 200 {
+		estimatedTrades = 200 // Максимальный лимит API
+	}
+	if estimatedTrades < 10 {
+		estimatedTrades = 10 // Минимум 10 сделок
+	}
+
+	// Получаем сделки
+	trades, err := c.GetRecentTrades(symbol, estimatedTrades)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get trades for delta calculation: %w", err)
+	}
+
+	// Фильтруем сделки по периоду
+	var filteredTrades []TradeData
+	var buyVolume, sellVolume float64
+	var buyCount, sellCount int
+
+	for _, trade := range trades {
+		if trade.Time.After(startTime) && trade.Time.Before(endTime) {
+			volume := trade.Price * trade.Size
+			filteredTrades = append(filteredTrades, trade)
+
+			if trade.Side == "Buy" {
+				buyVolume += volume
+				buyCount++
+			} else if trade.Side == "Sell" {
+				sellVolume += volume
+				sellCount++
+			}
+		}
+	}
+
+	if len(filteredTrades) == 0 {
+		log.Printf("⚠️ Нет сделок для %s за период %v", symbol, period)
+		// Возвращаем нулевую дельту вместо ошибки
+		return &VolumeDelta{
+			Symbol:       symbol,
+			Period:       period.String(),
+			StartTime:    startTime,
+			EndTime:      endTime,
+			BuyVolume:    0,
+			SellVolume:   0,
+			Delta:        0,
+			DeltaPercent: 0,
+			TotalTrades:  0,
+			UpdateTime:   time.Now(),
+		}, nil
+	}
+
+	// Рассчитываем дельту
+	delta := buyVolume - sellVolume
+
+	// Рассчитываем процент дельты (процентное отношение дельты к общему объему)
+	totalVolume := buyVolume + sellVolume
+	deltaPercent := 0.0
+	if totalVolume > 0 {
+		deltaPercent = (delta / totalVolume) * 100
+	}
+
+	log.Printf("📈 Дельта объемов %s:", symbol)
+	log.Printf("   Период: %v - %v", startTime.Format("15:04:05"), endTime.Format("15:04:05"))
+	log.Printf("   Сделки: %d (Buy: %d, Sell: %d)", len(filteredTrades), buyCount, sellCount)
+	log.Printf("   Объемы: Buy $%.0f, Sell $%.0f", buyVolume, sellVolume)
+	log.Printf("   Дельта: $%.0f (%.2f%%)", delta, deltaPercent)
+
+	return &VolumeDelta{
+		Symbol:       symbol,
+		Period:       period.String(),
+		StartTime:    startTime,
+		EndTime:      endTime,
+		BuyVolume:    buyVolume,
+		SellVolume:   sellVolume,
+		Delta:        delta,
+		DeltaPercent: deltaPercent,
+		TotalTrades:  len(filteredTrades),
+		UpdateTime:   time.Now(),
+	}, nil
+}
+
+// GetVolumeDelta получает дельту объемов для символа (с кэшированием)
+func (c *BybitClient) GetVolumeDelta(symbol string, period time.Duration) (*VolumeDelta, error) {
+	// В реальной реализации можно добавить кэширование
+	return c.CalculateVolumeDelta(symbol, period)
+}
+
+// GetRealTimeVolumeDelta получает дельту объемов за последние 5 минут
+func (c *BybitClient) GetRealTimeVolumeDelta(symbol string) (*VolumeDelta, error) {
+	return c.CalculateVolumeDelta(symbol, 5*time.Minute)
+}

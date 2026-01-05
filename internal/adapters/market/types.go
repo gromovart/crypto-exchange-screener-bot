@@ -89,3 +89,26 @@ type PriceChange struct {
 	Timestamp     time.Time `json:"timestamp"`
 	VolumeUSD     float64   `json:"volume_usd,omitempty"` // ← ДОБАВЛЕНО для анализа
 }
+
+// TradeData представляет данные о сделке
+type TradeData struct {
+	Symbol string    `json:"symbol"`
+	Side   string    `json:"side"` // "Buy" или "Sell"
+	Price  float64   `json:"price"`
+	Size   float64   `json:"size"`
+	Time   time.Time `json:"time"`
+}
+
+// VolumeDelta представляет дельту объемов
+type VolumeDelta struct {
+	Symbol       string    `json:"symbol"`
+	Period       string    `json:"period"`
+	StartTime    time.Time `json:"start_time"`
+	EndTime      time.Time `json:"end_time"`
+	BuyVolume    float64   `json:"buy_volume"`
+	SellVolume   float64   `json:"sell_volume"`
+	Delta        float64   `json:"delta"`         // buyVolume - sellVolume
+	DeltaPercent float64   `json:"delta_percent"` // Процентное изменение
+	TotalTrades  int       `json:"total_trades"`
+	UpdateTime   time.Time `json:"update_time"`
+}

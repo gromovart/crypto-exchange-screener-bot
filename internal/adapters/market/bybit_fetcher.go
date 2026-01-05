@@ -43,6 +43,18 @@ type BybitPriceFetcher struct {
 	liqEnabled        bool
 	liqUpdateInterval time.Duration
 	lastLiqUpdate     time.Time
+
+	// Кэш для дельты объемов
+	volumeDeltaCache   map[string]*volumeDeltaCache
+	volumeDeltaCacheMu sync.RWMutex
+	volumeDeltaTTL     time.Duration
+}
+
+// Структура кэша дельты
+type volumeDeltaCache struct {
+	data       *bybit.VolumeDelta
+	expiration time.Time
+	updateTime time.Time
 }
 
 // NewPriceFetcher создает новый PriceFetcher
@@ -55,6 +67,10 @@ func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorage,
 		running:  false,
 		oiCache:  make(map[string]float64),
 		liqCache: make(map[string]*bybit.LiquidationMetrics),
+
+		// Инициализация кэша дельты
+		volumeDeltaCache: make(map[string]*volumeDeltaCache),
+		volumeDeltaTTL:   30 * time.Second, // Кэшируем на 30 секунд
 
 		// Настройки OI
 		oiEnabled:        true,
@@ -80,6 +96,9 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 	f.running = true
 	f.wg.Add(1)
 
+	// Запускаем фоновую очистку кэша дельты
+	f.startCacheCleanupLoop()
+
 	go func() {
 		defer f.wg.Done()
 
@@ -95,6 +114,10 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 		f.wg.Add(1)
 		go f.fetchOpenInterestLoop(interval * 3) // Получаем OI реже
 
+		// Запускаем отдельный горутин для получения ликвидаций
+		f.wg.Add(1)
+		go f.fetchLiquidationsLoop(1 * time.Minute)
+
 		for {
 			select {
 			case <-ticker.C:
@@ -107,7 +130,7 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 		}
 	}()
 
-	logger.Info("✅ PriceFetcher запущен")
+	logger.Info("✅ PriceFetcher запущен с поддержкой дельты объемов")
 	return nil
 }
 
@@ -126,6 +149,216 @@ func (f *BybitPriceFetcher) Stop() error {
 	logger.Info("🛑 PriceFetcher остановлен")
 	return nil
 }
+
+// ==================== МЕТОДЫ ДЛЯ ДЕЛЬТЫ ОБЪЕМОВ ====================
+
+// GetRealTimeVolumeDelta получает дельту объемов за последние 5 минут с кэшированием
+func (f *BybitPriceFetcher) GetRealTimeVolumeDelta(symbol string) (*bybit.VolumeDelta, error) {
+	// Проверяем кэш
+	if cached, found := f.getVolumeDeltaFromCache(symbol); found {
+		age := time.Since(cached.updateTime).Round(time.Second)
+		logger.Debug("📦 Дельта объемов из кэша для %s (возраст: %v)", symbol, age)
+		return cached.data, nil
+	}
+
+	// Получаем свежие данные через API
+	logger.Debug("🔄 Запрос реальной дельты для %s из API...", symbol)
+	volumeDelta, err := f.client.GetRealTimeVolumeDelta(symbol)
+	if err != nil {
+		logger.Debug("⚠️ Ошибка получения дельты для %s: %v", symbol, err)
+		return nil, err
+	}
+
+	// Обновляем кэш
+	f.setVolumeDeltaToCache(symbol, volumeDelta)
+
+	logger.Debug("✅ Получена свежая дельта для %s: $%.0f (%.1f%%)",
+		symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
+
+	return volumeDelta, nil
+}
+
+// GetVolumeDelta получает дельту объемов для символа за указанный период
+func (f *BybitPriceFetcher) GetVolumeDelta(symbol string, period time.Duration) (*bybit.VolumeDelta, error) {
+	// Для разных периодов используем разные ключи кэша
+	cacheKey := fmt.Sprintf("%s_%v", symbol, period)
+
+	// Проверяем кэш
+	if cached, found := f.getVolumeDeltaFromCache(cacheKey); found {
+		logger.Debug("📦 Дельта из кэша для %s за период %v", symbol, period)
+		return cached.data, nil
+	}
+
+	// Получаем свежие данные
+	volumeDelta, err := f.client.GetVolumeDelta(symbol, period)
+	if err != nil {
+		logger.Debug("⚠️ Ошибка получения дельты для %s за период %v: %v", symbol, period, err)
+		return nil, err
+	}
+
+	// Обновляем кэш
+	f.setVolumeDeltaToCache(cacheKey, volumeDelta)
+
+	return volumeDelta, nil
+}
+
+// CalculateEstimatedVolumeDelta рассчитывает эмулированную дельту (fallback)
+func (f *BybitPriceFetcher) CalculateEstimatedVolumeDelta(symbol, direction string, volume24h float64) (*bybit.VolumeDelta, error) {
+	// Эмуляция дельты (2% от объема)
+	baseDelta := volume24h * 0.02
+	basePercent := 10.0
+
+	var delta, deltaPercent float64
+	if direction == "growth" {
+		delta = baseDelta
+		deltaPercent = basePercent
+	} else {
+		delta = -baseDelta
+		deltaPercent = -basePercent
+	}
+
+	// Получаем цену из хранилища для расчета объемов
+	var price float64
+	if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists {
+		price = snapshot.Price
+	} else {
+		price = 1.0
+	}
+
+	// Рассчитываем примерные объемы покупок/продаж
+	// Предполагаем, что за 5 минут происходит ~1% от дневного объема
+	totalVolumeUSD := volume24h * 0.01
+	buyVolume := totalVolumeUSD * 0.55  // 55% покупок
+	sellVolume := totalVolumeUSD * 0.45 // 45% продаж
+
+	if direction == "fall" {
+		buyVolume = totalVolumeUSD * 0.45  // 45% покупок при падении
+		sellVolume = totalVolumeUSD * 0.55 // 55% продаж при падении
+	}
+
+	// Рассчитываем количество сделок (примерно)
+	totalTrades := int(totalVolumeUSD / (price * 100)) // Примерно по 100 монет на сделку
+	if totalTrades < 10 {
+		totalTrades = 10
+	} else if totalTrades > 1000 {
+		totalTrades = 1000
+	}
+
+	return &bybit.VolumeDelta{
+		Symbol:       symbol,
+		Period:       "5m",
+		StartTime:    time.Now().Add(-5 * time.Minute),
+		EndTime:      time.Now(),
+		BuyVolume:    buyVolume,
+		SellVolume:   sellVolume,
+		Delta:        delta,
+		DeltaPercent: deltaPercent,
+		TotalTrades:  totalTrades,
+		UpdateTime:   time.Now(),
+	}, nil
+}
+
+// getVolumeDeltaFromCache получает дельту из кэша
+func (f *BybitPriceFetcher) getVolumeDeltaFromCache(key string) (*volumeDeltaCache, bool) {
+	f.volumeDeltaCacheMu.RLock()
+	defer f.volumeDeltaCacheMu.RUnlock()
+
+	if cache, exists := f.volumeDeltaCache[key]; exists {
+		if time.Now().Before(cache.expiration) {
+			return cache, true
+		}
+		// Кэш устарел - удаляем при следующей записи
+	}
+	return nil, false
+}
+
+// setVolumeDeltaToCache сохраняет дельту в кэш
+func (f *BybitPriceFetcher) setVolumeDeltaToCache(key string, data *bybit.VolumeDelta) {
+	f.volumeDeltaCacheMu.Lock()
+	defer f.volumeDeltaCacheMu.Unlock()
+
+	f.volumeDeltaCache[key] = &volumeDeltaCache{
+		data:       data,
+		expiration: time.Now().Add(f.volumeDeltaTTL),
+		updateTime: time.Now(),
+	}
+}
+
+// cleanupVolumeDeltaCache очищает устаревший кэш
+func (f *BybitPriceFetcher) cleanupVolumeDeltaCache() {
+	f.volumeDeltaCacheMu.Lock()
+	defer f.volumeDeltaCacheMu.Unlock()
+
+	cleared := 0
+	now := time.Now()
+	for key, cache := range f.volumeDeltaCache {
+		if now.After(cache.expiration) {
+			delete(f.volumeDeltaCache, key)
+			cleared++
+		}
+	}
+
+	if cleared > 0 {
+		logger.Debug("🧹 Очищен кэш дельты: удалено %d устаревших записей", cleared)
+	}
+}
+
+// startCacheCleanupLoop запускает фоновую очистку кэша
+func (f *BybitPriceFetcher) startCacheCleanupLoop() {
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
+
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				f.cleanupVolumeDeltaCache()
+			case <-f.stopChan:
+				return
+			}
+		}
+	}()
+}
+
+// GetLiquidationMetrics получает метрики ликвидаций для символа
+func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.LiquidationMetrics, bool) {
+	f.liqCacheMu.RLock()
+	metrics, exists := f.liqCache[symbol]
+	f.liqCacheMu.RUnlock()
+
+	if !exists || time.Since(metrics.UpdateTime) > 10*time.Minute {
+		// Если данных нет или они устарели, пытаемся получить свежие
+		go func() {
+			summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute)
+			if err == nil {
+				metrics = &bybit.LiquidationMetrics{
+					Symbol:         symbol,
+					TotalVolumeUSD: summary["total_volume_usd"].(float64),
+					LongLiqVolume:  summary["long_liq_volume"].(float64),
+					ShortLiqVolume: summary["short_liq_volume"].(float64),
+					LongLiqCount:   summary["long_liq_count"].(int),
+					ShortLiqCount:  summary["short_liq_count"].(int),
+					UpdateTime:     time.Now(),
+				}
+
+				f.liqCacheMu.Lock()
+				f.liqCache[symbol] = metrics
+				f.liqCacheMu.Unlock()
+			}
+		}()
+
+		if !exists {
+			return nil, false
+		}
+	}
+
+	return metrics, true
+}
+
+// ==================== МЕТОДЫ OPEN INTEREST ====================
 
 // fetchOpenInterestLoop циклически получает Open Interest
 func (f *BybitPriceFetcher) fetchOpenInterestLoop(interval time.Duration) {
@@ -374,6 +607,8 @@ func (f *BybitPriceFetcher) calculateEstimatedOI(symbol string, snapshot *storag
 	return baseOI
 }
 
+// ==================== ОСНОВНОЙ МЕТОД ПОЛУЧЕНИЯ ЦЕН ====================
+
 func (f *BybitPriceFetcher) fetchPrices() error {
 	logger.Debug("🔄 BybitFetcher: начало получения цен...")
 
@@ -430,7 +665,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			logger.Debug("📝 BybitFetcher: расчетный VolumeUSD для %s: %f", ticker.Symbol, volumeUSD)
 		}
 
-		// 🔴 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Используем метод getOpenInterestForSymbol
+		// Используем метод getOpenInterestForSymbol
 		openInterest := f.getOpenInterestForSymbol(ticker.Symbol)
 
 		// Проверка на реалистичность OI
@@ -554,37 +789,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	return nil
 }
 
-func (f *BybitPriceFetcher) IsRunning() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.running
-}
-
-func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
-	f.oiCacheMu.RLock()
-	oiCount := len(f.oiCache)
-	oiLastUpdate := f.lastOIUpdate
-	f.oiCacheMu.RUnlock()
-
-	return map[string]interface{}{
-		"running":            f.running,
-		"type":               "bybit",
-		"oi_cache_size":      oiCount,
-		"oi_last_update":     oiLastUpdate.Format("2006-01-02 15:04:05"),
-		"oi_update_interval": f.oiUpdateInterval.String(),
-		"oi_retry_count":     f.oiRetryCount,
-	}
-}
-
-// Вспомогательная функция для парсинга
-func parseFloat(s string) (float64, error) {
-	if s == "" {
-		return 0, fmt.Errorf("empty string")
-	}
-	var result float64
-	_, err := fmt.Sscanf(s, "%f", &result)
-	return result, err
-}
+// ==================== МЕТОДЫ ЛИКВИДАЦИЙ ====================
 
 // fetchLiquidationsLoop цикл получения ликвидаций
 func (f *BybitPriceFetcher) fetchLiquidationsLoop(interval time.Duration) {
@@ -663,37 +868,48 @@ func (f *BybitPriceFetcher) fetchLiquidations() error {
 	return nil
 }
 
-// GetLiquidationMetrics получает метрики ликвидаций для символа
-func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.LiquidationMetrics, bool) {
+// ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
+
+func (f *BybitPriceFetcher) IsRunning() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.running
+}
+
+func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
+	f.oiCacheMu.RLock()
+	oiCount := len(f.oiCache)
+	oiLastUpdate := f.lastOIUpdate
+	f.oiCacheMu.RUnlock()
+
+	f.volumeDeltaCacheMu.RLock()
+	volumeDeltaCount := len(f.volumeDeltaCache)
+	f.volumeDeltaCacheMu.RUnlock()
+
 	f.liqCacheMu.RLock()
-	metrics, exists := f.liqCache[symbol]
+	liqCount := len(f.liqCache)
 	f.liqCacheMu.RUnlock()
 
-	if !exists || time.Since(metrics.UpdateTime) > 10*time.Minute {
-		// Если данных нет или они устарели, пытаемся получить свежие
-		go func() {
-			summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute)
-			if err == nil {
-				metrics = &bybit.LiquidationMetrics{
-					Symbol:         symbol,
-					TotalVolumeUSD: summary["total_volume_usd"].(float64),
-					LongLiqVolume:  summary["long_liq_volume"].(float64),
-					ShortLiqVolume: summary["short_liq_volume"].(float64),
-					LongLiqCount:   summary["long_liq_count"].(int),
-					ShortLiqCount:  summary["short_liq_count"].(int),
-					UpdateTime:     time.Now(),
-				}
-
-				f.liqCacheMu.Lock()
-				f.liqCache[symbol] = metrics
-				f.liqCacheMu.Unlock()
-			}
-		}()
-
-		if !exists {
-			return nil, false
-		}
+	return map[string]interface{}{
+		"running":                 f.running,
+		"type":                    "bybit",
+		"oi_cache_size":           oiCount,
+		"oi_last_update":          oiLastUpdate.Format("2006-01-02 15:04:05"),
+		"oi_update_interval":      f.oiUpdateInterval.String(),
+		"oi_retry_count":          f.oiRetryCount,
+		"volume_delta_cache_size": volumeDeltaCount,
+		"volume_delta_ttl":        f.volumeDeltaTTL.String(),
+		"liq_cache_size":          liqCount,
+		"liq_update_interval":     f.liqUpdateInterval.String(),
 	}
+}
 
-	return metrics, true
+// Вспомогательная функция для парсинга
+func parseFloat(s string) (float64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+	var result float64
+	_, err := fmt.Sscanf(s, "%f", &result)
+	return result, err
 }
