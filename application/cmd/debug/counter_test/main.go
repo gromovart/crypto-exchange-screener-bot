@@ -2,6 +2,7 @@ package main
 
 import (
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"strings"
@@ -61,7 +62,7 @@ func runBasicCounterTest() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Тестовые данные
 	now := time.Now()
@@ -166,7 +167,7 @@ func runPeriodAndResetTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   🔄 Тест смены периодов и сброса:")
 
@@ -194,7 +195,7 @@ func runPeriodAndResetTest() {
 
 	// Тест 2: Меняем период на 5 минут (должен сбросить счетчики)
 	fmt.Println("\n   🔄 Тест 2: Смена периода на 5 минут")
-	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
+	analyzer.SetAnalysisPeriod(counter.Period5Min.ToString())
 
 	// Проверяем сброс
 	counters5m := analyzer.GetAllCounters()
@@ -241,7 +242,7 @@ func runStatisticsAndMetadataTest() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   📊 Тест статистики и метаданных:")
 
@@ -322,7 +323,7 @@ func runEdgeCasesTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Только одна точка данных
 	singleData := []types.PriceData{
@@ -381,7 +382,7 @@ func runEdgeCasesTest() {
 		},
 	}
 
-	analyzer2 := analyzers.NewCounterAnalyzer(configNoGrowth, nil, nil, nil)
+	analyzer2 := counter.NewCounterAnalyzer(configNoGrowth, nil, nil, nil)
 	growthData := []types.PriceData{
 		{Symbol: "BTCUSDT", Price: 100.0, Timestamp: time.Now().Add(-2 * time.Minute)},
 		{Symbol: "BTCUSDT", Price: 100.2, Timestamp: time.Now().Add(-1 * time.Minute)},
@@ -404,7 +405,7 @@ func runPerformanceTest() {
 		CustomSettings: analyzers.DefaultCounterConfig.CustomSettings,
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	fmt.Println("   ⚡ Тест производительности:")
 

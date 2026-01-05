@@ -3,6 +3,7 @@ package main
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -74,7 +75,7 @@ func testCounterAnalyzerExtended() {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	// Тест 1: Многократный анализ одного символа
 	fmt.Println("   📈 Тест 1: Многократный анализ BTCUSDT")
@@ -178,7 +179,7 @@ func testCounterAnalyzerExtended() {
 	// Тест 4: Сброс периода
 	fmt.Println("\n   🔄 Тест 4: Сброс периода")
 	originalCount := len(allCounters)
-	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
+	analyzer.SetAnalysisPeriod(counter.Period5Min.ToString())
 
 	countersAfterReset := analyzer.GetAllCounters()
 	fmt.Printf("      • Счетчиков до сброса: %d\n", originalCount)
@@ -267,7 +268,7 @@ func testAllAnalyzersIntegration() {
 	// Создаем анализаторы
 	growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
 	fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
-	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, nil, nil, nil)
+	counterAnalyzer := counter.NewCounterAnalyzer(counterConfig, nil, nil, nil)
 	continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
 
 	// Запускаем все анализаторы
@@ -354,7 +355,7 @@ func testCounterAnalyzer(testData []types.PriceData) {
 		},
 	}
 
-	analyzer := analyzers.NewCounterAnalyzer(config, nil, nil, nil)
+	analyzer := counter.NewCounterAnalyzer(config, nil, nil, nil)
 
 	logger.Debug("   Конфигурация CounterAnalyzer:")
 	fmt.Printf("      • Базовый период: %d мин\n", config.CustomSettings["base_period_minutes"])
@@ -434,7 +435,7 @@ func testCounterAnalyzer(testData []types.PriceData) {
 
 	// Тест 5: Сброс периода
 	logger.Debug("\n   🔄 Тест 5: Сброс периода")
-	analyzer.SetAnalysisPeriod(analyzers.Period5Min)
+	analyzer.SetAnalysisPeriod(counter.Period5Min.ToString())
 	fmt.Printf("      ✅ Период изменен на 5 минут\n")
 
 	// Проверяем сброс счетчиков

@@ -3,6 +3,7 @@ package engine
 
 import (
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
@@ -13,7 +14,16 @@ import (
 )
 
 // Factory - фабрика для создания AnalysisEngine
-type Factory struct{}
+type Factory struct {
+	priceFetcher interface{} // 🔴 ДОБАВЛЯЕМ ПОЛЕ ДЛЯ РЫНОЧНЫХ ДАННЫХ
+}
+
+// NewFactory создает фабрику с доступом к marketFetcher
+func NewFactory(priceFetcher interface{}) *Factory {
+	return &Factory{
+		priceFetcher: priceFetcher,
+	}
+}
 
 // NewAnalysisEngineFromConfig создает AnalysisEngine из конфигурации
 func (f *Factory) NewAnalysisEngineFromConfig(
@@ -271,7 +281,7 @@ func (f *Factory) configureCounterAnalyzer(
 	cfg *config.Config,
 	telegramBot *telegram.TelegramBot,
 ) {
-	log.Println("🔧 Настройка CounterAnalyzer с переданным Telegram ботом")
+	log.Println("🔧 Настройка CounterAnalyzer с переданным Telegram ботом И marketFetcher...")
 
 	// Получаем настройки CounterAnalyzer из конфигурации
 	analyzerConfigs := cfg.AnalyzerConfigs
@@ -302,22 +312,22 @@ func (f *Factory) configureCounterAnalyzer(
 		},
 	}
 
-	// Создаем CounterAnalyzer с переданным ботом
+	// Создаем CounterAnalyzer с переданным ботом И marketFetcher
 	storage := engine.GetStorage()
 
-	// НУЖНО ПЕРЕДАТЬ marketFetcher, но его нет в текущем контексте
-	// Решение 1: Передать nil временно
-	counterAnalyzer := analyzers.NewCounterAnalyzer(counterConfig, storage, telegramBot, nil)
+	// 🔴 ИСПРАВЛЕНИЕ: Используем priceFetcher из фабрики
+	log.Printf("✅ Фабрика имеет доступ к marketFetcher: %v", f.priceFetcher != nil)
 
-	// Решение 2: Если у вас есть доступ к DataManager, можно передать marketFetcher
-	// Но в текущей структуре фабрики этого нет
+	counterAnalyzer := counter.NewCounterAnalyzer(counterConfig, storage, telegramBot, f.priceFetcher)
 
 	// Регистрируем анализатор
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
 		log.Printf("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {
-		log.Printf("✅ CounterAnalyzer успешно добавлен в AnalysisEngine (Telegram бот: %v)",
-			telegramBot != nil)
+		log.Printf("✅ CounterAnalyzer успешно добавлен в AnalysisEngine")
+		log.Printf("   Telegram бот: %v", telegramBot != nil)
+		log.Printf("   Storage: %v", storage != nil)
+		log.Printf("   MarketFetcher: %v", f.priceFetcher != nil) // 🔴 Теперь показываем статус
 	}
 }
 

@@ -148,15 +148,21 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	}
 
 	// 7. Создаем AnalysisEngine через фабрику, передавая уже созданного бота
-	log.Println("🔧 Создание AnalysisEngine с переданным Telegram ботом...")
-	analysisFactory := &engine.Factory{}
+	log.Println("🔧 Создание AnalysisEngine с передачей marketFetcher...")
+
+	// 🔴 ИСПРАВЛЕНИЕ: Создаем фабрику с priceFetcher
+	analysisFactory := engine.NewFactory(dm.priceFetcher)
+
 	dm.analysisEngine = analysisFactory.NewAnalysisEngineFromConfig(
 		dm.storage,
 		dm.eventBus,
 		dm.config,
-		dm.telegramBot, // ПЕРЕДАЕМ СОЗДАННОГО БОТА
+		dm.telegramBot,
 	)
 
+	log.Printf("✅ AnalysisEngine создан с фабрикой")
+	log.Printf("   PriceFetcher передан в фабрику: %v", dm.priceFetcher != nil)
+	log.Printf("   Telegram бот: %v", dm.telegramBot != nil)
 	// 8. Создаем SignalPipeline
 	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
 

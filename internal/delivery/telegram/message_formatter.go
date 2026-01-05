@@ -86,7 +86,7 @@ func (f *MarketMessageFormatter) FormatCounterMessage(
 		volumeDeltaPercent,
 		rsi,
 		macdSignal,
-		"", // 🔴 Пустая строка для обратной совместимости
+		"",
 	)
 }
 

@@ -266,3 +266,29 @@ func IsAnalyzerAvailable(analyzerName string) bool {
 	}
 	return false
 }
+
+// DefaultCounterConfig - конфигурация по умолчанию для CounterAnalyzer
+var DefaultCounterConfig = AnalyzerConfig{
+	Enabled:       true,
+	Weight:        0.7,
+	MinConfidence: 10.0,
+	MinDataPoints: 2,
+	CustomSettings: map[string]interface{}{
+		"base_period_minutes":    1,
+		"analysis_period":        "15m",
+		"growth_threshold":       0.1,
+		"fall_threshold":         0.1,
+		"track_growth":           true,
+		"track_fall":             true,
+		"notify_on_signal":       true,
+		"notification_threshold": 1,
+		"chart_provider":         "coinglass",
+		"exchange":               "bybit",
+		"include_oi":             true,
+		"include_volume":         true,
+		"include_funding":        true,
+		"volume_delta_ttl":       30,
+		"delta_fallback_enabled": true,
+		"show_delta_source":      true,
+	},
+}
