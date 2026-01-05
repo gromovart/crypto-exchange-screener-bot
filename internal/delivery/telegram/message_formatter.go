@@ -587,10 +587,11 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 			deltaDescription = "минимальное давление"
 		}
 
+		// 🔴 ИСПРАВЛЕНИЕ: Убираем дублирующуюся иконку, оставляем только одну
 		if volumeDelta > 0 {
 			if direction == "growth" {
 				recommendations = append(recommendations,
-					fmt.Sprintf("📈 %s дельта покупок ($%.0f) - %s покупателей",
+					fmt.Sprintf("%s дельта покупок ($%.0f) - %s покупателей",
 						strengthLevel, volumeDelta, deltaDescription))
 			} else {
 				recommendations = append(recommendations,
@@ -600,7 +601,7 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 		} else {
 			if direction == "fall" {
 				recommendations = append(recommendations,
-					fmt.Sprintf("📉 %s дельта продаж ($%.0f) - %s продавцов",
+					fmt.Sprintf("%s дельта продаж ($%.0f) - %s продавцов",
 						strengthLevel, math.Abs(volumeDelta), deltaDescription))
 			} else {
 				recommendations = append(recommendations,
@@ -687,7 +688,8 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 		// 🔴 УЛУЧШЕНИЕ: Более точная система баллов
 		if strings.Contains(lowerRec, "long") || strings.Contains(lowerRec, "рост") ||
 			strings.Contains(lowerRec, "бычий") || strings.Contains(lowerRec, "покуп") ||
-			strings.Contains(lowerRec, "📈") {
+			strings.Contains(lowerRec, "дельта покупок") ||
+			strings.Contains(lowerRec, "сильный бычий") {
 
 			// Определяем силу бычьего сигнала
 			if strings.Contains(lowerRec, "сильный") || strings.Contains(lowerRec, "значительное") {
@@ -700,7 +702,8 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 
 		} else if strings.Contains(lowerRec, "short") || strings.Contains(lowerRec, "падение") ||
 			strings.Contains(lowerRec, "медвежий") || strings.Contains(lowerRec, "продаж") ||
-			strings.Contains(lowerRec, "📉") {
+			strings.Contains(lowerRec, "дельта продаж") ||
+			strings.Contains(lowerRec, "сильный медвежий") {
 
 			// Определяем силу медвежьего сигнала
 			if strings.Contains(lowerRec, "сильный") || strings.Contains(lowerRec, "значительное") {
@@ -768,7 +771,6 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 
 	default:
 		if neutralScore > 0 {
-			// 🔴 ИСПРАВЛЕНИЕ: Правильно используем math.Abs с float64
 			scoreDiff := math.Abs(float64(bullishScore - bearishScore))
 			if scoreDiff <= 1 {
 				primarySignal = "⚪ СБАЛАНСИРОВАННЫЕ СИГНАЛЫ"
@@ -780,33 +782,82 @@ func (f *MarketMessageFormatter) getEnhancedTradingRecommendation(
 		}
 	}
 
-	// Формируем итоговое сообщение с нумерованными рекомендациями
+	// 🔴 ИСПРАВЛЕНИЕ: Формируем итоговое сообщение без дублирующихся иконок
 	result := primarySignal + "\n"
 	for i, rec := range recommendations {
-		// 🔴 УЛУЧШЕНИЕ: Добавляем иконки к рекомендациям
+		// Определяем соответствующую иконку для каждой рекомендации
 		lowerRec := strings.ToLower(rec)
 		var icon string
 
 		switch {
-		case strings.Contains(lowerRec, "long") || strings.Contains(lowerRec, "рост") ||
-			strings.Contains(lowerRec, "бычий") || strings.Contains(lowerRec, "покуп"):
+		case strings.Contains(lowerRec, "дельта покупок"):
 			icon = "📈"
-		case strings.Contains(lowerRec, "short") || strings.Contains(lowerRec, "падение") ||
-			strings.Contains(lowerRec, "медвежий") || strings.Contains(lowerRec, "продаж"):
+		case strings.Contains(lowerRec, "дельта продаж"):
 			icon = "📉"
-		case strings.Contains(lowerRec, "⚠️") || strings.Contains(lowerRec, "🔄"):
+		case strings.Contains(lowerRec, "long"):
+			icon = "📈"
+		case strings.Contains(lowerRec, "short"):
+			icon = "📉"
+		case strings.Contains(lowerRec, "рост"):
+			icon = "📈"
+		case strings.Contains(lowerRec, "падение"):
+			icon = "📉"
+		case strings.Contains(lowerRec, "бычий"):
+			icon = "📈"
+		case strings.Contains(lowerRec, "медвежий"):
+			icon = "📉"
+		case strings.Contains(lowerRec, "покуп"):
+			icon = "📈"
+		case strings.Contains(lowerRec, "продаж"):
+			icon = "📉"
+		case strings.Contains(lowerRec, "⚠️"):
 			icon = "⚠️"
+		case strings.Contains(lowerRec, "🔄"):
+			icon = "🔄"
 		case strings.Contains(lowerRec, "💥"):
 			icon = "💥"
+		case strings.Contains(lowerRec, "✅"):
+			icon = "✅"
+		case strings.Contains(lowerRec, "🟡"):
+			icon = "🟡"
 		case strings.Contains(lowerRec, "rsi"):
 			icon = "📊"
 		case strings.Contains(lowerRec, "macd"):
 			icon = "📈"
 		default:
-			icon = "•"
+			// 🔴 ИСПРАВЛЕНИЕ: Если строка уже содержит эмодзи в начале, не добавляем повторно
+			if len(rec) > 0 {
+				// Проверяем первый символ как руну
+				firstRune := []rune(rec)[0]
+				// Проверяем, является ли руна эмодзи
+				if (firstRune >= 0x1F600 && firstRune <= 0x1F64F) || // Эмодзи диапазон лиц
+					(firstRune >= 0x1F300 && firstRune <= 0x1F5FF) || // Символы и пиктограммы
+					(firstRune >= 0x1F680 && firstRune <= 0x1F6FF) { // Транспорт и карты
+					// Уже есть эмодзи в начале
+					icon = ""
+				} else {
+					icon = "•"
+				}
+			} else {
+				icon = "•"
+			}
 		}
 
-		result += fmt.Sprintf("%d. %s %s\n", i+1, icon, rec)
+		// 🔴 ИСПРАВЛЕНИЕ: Убираем дублирующиеся иконки в строке
+		cleanRec := rec
+		if icon != "" && strings.HasPrefix(cleanRec, icon+" ") {
+			// Если строка уже начинается с этой иконки, не добавляем еще раз
+			cleanRec = strings.TrimPrefix(cleanRec, icon+" ")
+		}
+
+		result += fmt.Sprintf("%d. %s%s\n", i+1,
+			func() string {
+				if icon != "" {
+					return icon + " "
+				}
+				return ""
+			}(),
+			cleanRec)
 	}
 
 	// 🔴 УЛУЧШЕНИЕ: Добавляем итоговую оценку
