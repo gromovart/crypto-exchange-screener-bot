@@ -6,6 +6,7 @@ import (
 	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	fallanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
 	"crypto-exchange-screener-bot/internal/types"
 )
@@ -25,18 +26,88 @@ func NewGrowthAnalyzer(config AnalyzerConfig) *GrowthAnalyzer {
 	}
 }
 
-// NewFallAnalyzer создает анализатор падения
-func NewFallAnalyzer(config AnalyzerConfig) *FallAnalyzer {
-	return &FallAnalyzer{
+// fallAnalyzerWrapper - враппер для адаптера нового FallAnalyzer
+type fallAnalyzerWrapper struct {
+	analyzer *fallanalyzer.FallAnalyzer
+	config   AnalyzerConfig
+}
+
+// NewFallAnalyzer создает анализатор падения (новая модульная версия)
+func NewFallAnalyzer(config AnalyzerConfig) Analyzer {
+	// Создаем враппер для новой модульной версии
+	wrapper := &fallAnalyzerWrapper{
 		config: config,
-		stats: AnalyzerStats{
-			TotalCalls:   0,
-			TotalTime:    0,
-			SuccessCount: 0,
-			ErrorCount:   0,
-			LastCallTime: time.Time{},
-			AverageTime:  0,
-		},
+	}
+
+	return wrapper
+}
+
+// Name возвращает имя анализатора
+func (w *fallAnalyzerWrapper) Name() string {
+	if w.analyzer == nil {
+		w.analyzer = fallanalyzer.NewFallAnalyzer()
+	}
+	return w.analyzer.Name()
+}
+
+// Version возвращает версию анализатора
+func (w *fallAnalyzerWrapper) Version() string {
+	if w.analyzer == nil {
+		w.analyzer = fallanalyzer.NewFallAnalyzer()
+	}
+	return w.analyzer.Version()
+}
+
+// Supports проверяет поддержку символа
+func (w *fallAnalyzerWrapper) Supports(symbol string) bool {
+	if w.analyzer == nil {
+		w.analyzer = fallanalyzer.NewFallAnalyzer()
+	}
+	return w.analyzer.Supports(symbol)
+}
+
+// Analyze анализирует данные
+func (w *fallAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+	if w.analyzer == nil {
+		w.analyzer = fallanalyzer.NewFallAnalyzer()
+	}
+
+	// Конвертируем AnalyzerConfig в map для новой версии
+	cfgMap := make(map[string]interface{})
+	cfgMap["enabled"] = config.Enabled
+	cfgMap["weight"] = config.Weight
+	cfgMap["min_confidence"] = config.MinConfidence
+	cfgMap["min_data_points"] = config.MinDataPoints
+
+	// Добавляем кастомные настройки
+	if config.CustomSettings != nil {
+		for k, v := range config.CustomSettings {
+			cfgMap[k] = v
+		}
+	}
+
+	return w.analyzer.Analyze(data, cfgMap)
+}
+
+// GetConfig возвращает конфигурацию
+func (w *fallAnalyzerWrapper) GetConfig() AnalyzerConfig {
+	return w.config
+}
+
+// GetStats возвращает статистику
+func (w *fallAnalyzerWrapper) GetStats() AnalyzerStats {
+	if w.analyzer == nil {
+		return AnalyzerStats{}
+	}
+
+	stats := w.analyzer.GetStats()
+	return AnalyzerStats{
+		TotalCalls:   stats.TotalCalls,
+		SuccessCount: stats.SuccessCount,
+		ErrorCount:   stats.ErrorCount,
+		TotalTime:    stats.TotalTime,
+		AverageTime:  stats.AverageTime,
+		LastCallTime: stats.LastCallTime,
 	}
 }
 
@@ -114,24 +185,22 @@ func NewOpenInterestAnalyzer(config AnalyzerConfig) Analyzer {
 	}
 }
 
-// Name возвращает имя анализатора
+// Реализуем интерфейс Analyzer для враппера:
+
 func (w *openInterestAnalyzerWrapper) Name() string {
 	return w.adapter.Name()
 }
 
-// Version возвращает версию анализатора
 func (w *openInterestAnalyzerWrapper) Version() string {
 	return w.adapter.Version()
 }
 
-// Supports проверяет поддержку символа
 func (w *openInterestAnalyzerWrapper) Supports(symbol string) bool {
 	return w.adapter.Supports(symbol)
 }
 
-// Analyze анализирует данные
 func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
-	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy для адаптера
+	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy
 	adapterConfig := oianalyzer.AnalyzerConfigCopy{
 		Enabled:        config.Enabled,
 		Weight:         config.Weight,
@@ -149,12 +218,10 @@ func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config Ana
 	return w.adapter.Analyze(data, adapterConfig)
 }
 
-// GetConfig возвращает конфигурацию
 func (w *openInterestAnalyzerWrapper) GetConfig() AnalyzerConfig {
 	return w.config
 }
 
-// GetStats возвращает статистику
 func (w *openInterestAnalyzerWrapper) GetStats() AnalyzerStats {
 	adapterStats := w.adapter.GetStats()
 
@@ -364,5 +431,20 @@ var DefaultOpenInterestConfig = AnalyzerConfig{
 		"volume_weight":         0.3,  // вес объема в расчетах
 		"check_all_algorithms":  true, // проверять все алгоритмы
 		"use_new_version":       true, // использовать новую модульную версию
+	},
+}
+
+// DefaultFallConfig - конфигурация по умолчанию для Fall Analyzer
+var DefaultFallConfig = AnalyzerConfig{
+	Enabled:       true,
+	Weight:        1.0,
+	MinConfidence: 60.0,
+	MinDataPoints: 3,
+	CustomSettings: map[string]interface{}{
+		"min_fall":             2.0,
+		"continuity_threshold": 0.7,
+		"volume_weight":        0.2,
+		"check_all_algorithms": true,
+		"use_new_version":      true,
 	},
 }
