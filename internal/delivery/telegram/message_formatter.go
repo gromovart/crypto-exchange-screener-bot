@@ -27,69 +27,6 @@ func NewMarketMessageFormatter(exchange string) *MarketMessageFormatter {
 
 // ==================== ОСНОВНЫЕ МЕТОДЫ ФОРМАТИРОВАНИЯ ====================
 
-// FormatCounterMessage форматирует сообщение счетчика с полными данными
-// (совместимость со старым кодом)
-func (f *MarketMessageFormatter) FormatCounterMessage(
-	symbol string,
-	direction string,
-	change float64,
-	signalCount int,
-	maxSignals int,
-	currentPrice float64,
-	volume24h float64,
-	openInterest float64,
-	oiChange24h float64,
-	fundingRate float64,
-	averageFunding float64,
-	nextFundingTime time.Time,
-	period string,
-	liquidationVolume float64,
-	longLiqVolume float64,
-	shortLiqVolume float64,
-) string {
-	// Отладочный лог
-	log.Printf("🔍 MarketMessageFormatter.FormatCounterMessage для %s:", symbol)
-	log.Printf("   openInterest = %.1f", openInterest)
-	log.Printf("   oiChange24h = %.1f%%", oiChange24h)
-	log.Printf("   currentPrice = %.5f", currentPrice)
-	log.Printf("   volume24h = %.2f", volume24h)
-	log.Printf("   fundingRate = %.6f", fundingRate)
-	log.Printf("   liquidationVolume = %.2f", liquidationVolume)
-	log.Printf("   longLiqVolume = %.2f", longLiqVolume)
-	log.Printf("   shortLiqVolume = %.2f", shortLiqVolume)
-
-	// Временно используем нулевые значения для дельты и индикаторов
-	// TODO: Получить реальные данные из анализатора
-	volumeDelta := 0.0
-	volumeDeltaPercent := 0.0
-	rsi := 0.0
-	macdSignal := 0.0
-
-	return f.FormatMessage(
-		symbol,
-		direction,
-		change,
-		signalCount,
-		maxSignals,
-		currentPrice,
-		volume24h,
-		openInterest,
-		oiChange24h,
-		fundingRate,
-		averageFunding,
-		nextFundingTime,
-		period,
-		liquidationVolume,
-		longLiqVolume,
-		shortLiqVolume,
-		volumeDelta,
-		volumeDeltaPercent,
-		rsi,
-		macdSignal,
-		"",
-	)
-}
-
 // FormatMessage создает сообщение в чистом формате без рамки
 func (f *MarketMessageFormatter) FormatMessage(
 	symbol string,
