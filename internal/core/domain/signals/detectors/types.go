@@ -1,4 +1,4 @@
-// internal/analysis/analyzers/types.go
+// internal/core/domain/signals/detectors/types.go
 package analyzers
 
 import (

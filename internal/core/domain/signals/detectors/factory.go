@@ -4,6 +4,10 @@ package analyzers
 import (
 	"fmt"
 	"time"
+
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
+	"crypto-exchange-screener-bot/internal/types"
 )
 
 // NewGrowthAnalyzer создает анализатор роста
@@ -76,39 +80,91 @@ func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
 	}
 }
 
-// NewOpenInterestAnalyzer создает анализатор открытого интереса
-func NewOpenInterestAnalyzer(config AnalyzerConfig) *OpenInterestAnalyzer {
-	// Гарантируем наличие необходимых настроек
-	if config.CustomSettings == nil {
-		config.CustomSettings = make(map[string]interface{})
+// openInterestAnalyzerWrapper - враппер для адаптера нового OI анализатора
+type openInterestAnalyzerWrapper struct {
+	adapter *oianalyzer.Adapter
+	config  AnalyzerConfig
+}
+
+// NewOpenInterestAnalyzer создает анализатор открытого интереса (новая модульная версия)
+func NewOpenInterestAnalyzer(config AnalyzerConfig) Analyzer {
+	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy для адаптера
+	adapterConfig := oianalyzer.AnalyzerConfigCopy{
+		Enabled:        config.Enabled,
+		Weight:         config.Weight,
+		MinConfidence:  config.MinConfidence,
+		MinDataPoints:  config.MinDataPoints,
+		CustomSettings: make(map[string]interface{}),
 	}
 
-	// Устанавливаем значения по умолчанию из DefaultOpenInterestConfig
-	defaults := map[string]interface{}{
-		"min_price_change":      1.0,
-		"min_price_fall":        1.0,
-		"min_oi_change":         5.0,
-		"extreme_oi_threshold":  1.5,
-		"divergence_min_points": 4,
-		"volume_weight":         0.3,
-	}
-
-	for key, defaultValue := range defaults {
-		if _, ok := config.CustomSettings[key]; !ok {
-			config.CustomSettings[key] = defaultValue
+	// Копируем кастомные настройки
+	if config.CustomSettings != nil {
+		for k, v := range config.CustomSettings {
+			adapterConfig.CustomSettings[k] = v
 		}
 	}
 
-	return &OpenInterestAnalyzer{
-		config: config,
-		stats: AnalyzerStats{
-			TotalCalls:   0,
-			TotalTime:    0,
-			SuccessCount: 0,
-			ErrorCount:   0,
-			LastCallTime: time.Time{},
-			AverageTime:  0,
-		},
+	// Создаем адаптер
+	adapter := oianalyzer.NewAdapterWithConfig(adapterConfig)
+
+	// Возвращаем враппер
+	return &openInterestAnalyzerWrapper{
+		adapter: adapter,
+		config:  config,
+	}
+}
+
+// Name возвращает имя анализатора
+func (w *openInterestAnalyzerWrapper) Name() string {
+	return w.adapter.Name()
+}
+
+// Version возвращает версию анализатора
+func (w *openInterestAnalyzerWrapper) Version() string {
+	return w.adapter.Version()
+}
+
+// Supports проверяет поддержку символа
+func (w *openInterestAnalyzerWrapper) Supports(symbol string) bool {
+	return w.adapter.Supports(symbol)
+}
+
+// Analyze анализирует данные
+func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy для адаптера
+	adapterConfig := oianalyzer.AnalyzerConfigCopy{
+		Enabled:        config.Enabled,
+		Weight:         config.Weight,
+		MinConfidence:  config.MinConfidence,
+		MinDataPoints:  config.MinDataPoints,
+		CustomSettings: make(map[string]interface{}),
+	}
+
+	if config.CustomSettings != nil {
+		for k, v := range config.CustomSettings {
+			adapterConfig.CustomSettings[k] = v
+		}
+	}
+
+	return w.adapter.Analyze(data, adapterConfig)
+}
+
+// GetConfig возвращает конфигурацию
+func (w *openInterestAnalyzerWrapper) GetConfig() AnalyzerConfig {
+	return w.config
+}
+
+// GetStats возвращает статистику
+func (w *openInterestAnalyzerWrapper) GetStats() AnalyzerStats {
+	adapterStats := w.adapter.GetStats()
+
+	return AnalyzerStats{
+		TotalCalls:   adapterStats.TotalCalls,
+		SuccessCount: adapterStats.SuccessCount,
+		ErrorCount:   adapterStats.ErrorCount,
+		TotalTime:    adapterStats.TotalTime,
+		AverageTime:  adapterStats.AverageTime,
+		LastCallTime: adapterStats.LastCallTime,
 	}
 }
 
@@ -290,5 +346,23 @@ var DefaultCounterConfig = AnalyzerConfig{
 		"volume_delta_ttl":       30,
 		"delta_fallback_enabled": true,
 		"show_delta_source":      true,
+	},
+}
+
+// DefaultOpenInterestConfig - конфигурация по умолчанию для Open Interest Analyzer
+var DefaultOpenInterestConfig = AnalyzerConfig{
+	Enabled:       true,
+	Weight:        0.6,
+	MinConfidence: 50.0,
+	MinDataPoints: 3,
+	CustomSettings: map[string]interface{}{
+		"min_price_change":      1.0,  // минимальное изменение цены для сигнала (%)
+		"min_price_fall":        1.0,  // минимальное падение цены для сигнала (%)
+		"min_oi_change":         5.0,  // минимальное изменение OI для сигнала (%)
+		"extreme_oi_threshold":  1.5,  // порог экстремального OI (1.5 = на 50% выше среднего)
+		"divergence_min_points": 4,    // минимальное количество точек для дивергенции
+		"volume_weight":         0.3,  // вес объема в расчетах
+		"check_all_algorithms":  true, // проверять все алгоритмы
+		"use_new_version":       true, // использовать новую модульную версию
 	},
 }
