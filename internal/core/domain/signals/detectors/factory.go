@@ -1,4 +1,3 @@
-// internal/core/domain/signals/detectors/factory.go
 package analyzers
 
 import (
@@ -7,22 +6,94 @@ import (
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	fallanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer"
+	growthanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
 	"crypto-exchange-screener-bot/internal/types"
 )
 
-// NewGrowthAnalyzer создает анализатор роста
-func NewGrowthAnalyzer(config AnalyzerConfig) *GrowthAnalyzer {
-	return &GrowthAnalyzer{
+// convertToGrowthConfig - преобразует analyzers.AnalyzerConfig в growth_analyzer.AnalyzerConfigCopy
+func convertToGrowthConfig(config AnalyzerConfig) growthanalyzer.AnalyzerConfigCopy {
+	return growthanalyzer.AnalyzerConfigCopy{
+		Enabled:        config.Enabled,
+		Weight:         config.Weight,
+		MinConfidence:  config.MinConfidence,
+		MinDataPoints:  config.MinDataPoints,
+		CustomSettings: config.CustomSettings,
+	}
+}
+
+// growthAnalyzerWrapper - враппер для нового модульного GrowthAnalyzer
+type growthAnalyzerWrapper struct {
+	analyzer *growthanalyzer.GrowthAnalyzer
+	config   AnalyzerConfig
+}
+
+// NewGrowthAnalyzer создает анализатор роста (новая модульная версия)
+func NewGrowthAnalyzer(config AnalyzerConfig) Analyzer {
+	// Создаем враппер
+	wrapper := &growthAnalyzerWrapper{
 		config: config,
-		stats: AnalyzerStats{
-			TotalCalls:   0,
-			TotalTime:    0,
-			SuccessCount: 0,
-			ErrorCount:   0,
-			LastCallTime: time.Time{},
-			AverageTime:  0,
-		},
+	}
+
+	return wrapper
+}
+
+// Name возвращает имя анализатора
+func (w *growthAnalyzerWrapper) Name() string {
+	if w.analyzer == nil {
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+	}
+	return w.analyzer.Name()
+}
+
+// Version возвращает версию анализатора
+func (w *growthAnalyzerWrapper) Version() string {
+	if w.analyzer == nil {
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+	}
+	return w.analyzer.Version()
+}
+
+// Supports проверяет поддержку символа
+func (w *growthAnalyzerWrapper) Supports(symbol string) bool {
+	if w.analyzer == nil {
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+	}
+	return w.analyzer.Supports(symbol)
+}
+
+// Analyze анализирует данные
+func (w *growthAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+	if w.analyzer == nil {
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+	}
+
+	// Обновляем конфигурацию если передана новая
+	w.config = config
+	w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(config))
+
+	return w.analyzer.Analyze(data, convertToGrowthConfig(config))
+}
+
+// GetConfig возвращает конфигурацию
+func (w *growthAnalyzerWrapper) GetConfig() AnalyzerConfig {
+	return w.config
+}
+
+// GetStats возвращает статистику
+func (w *growthAnalyzerWrapper) GetStats() AnalyzerStats {
+	if w.analyzer == nil {
+		return AnalyzerStats{}
+	}
+
+	stats := w.analyzer.GetStats()
+	return AnalyzerStats{
+		TotalCalls:   stats.TotalCalls,
+		SuccessCount: stats.SuccessCount,
+		ErrorCount:   stats.ErrorCount,
+		TotalTime:    stats.TotalTime,
+		AverageTime:  stats.AverageTime,
+		LastCallTime: stats.LastCallTime,
 	}
 }
 
@@ -269,13 +340,46 @@ func (f *AnalyzerFactory) CreateAnalyzer(name string, config AnalyzerConfig) Ana
 
 // GetAllAnalyzerConfigs возвращает конфигурации всех анализаторов
 func GetAllAnalyzerConfigs() map[string]AnalyzerConfig {
+	// Нужно получить конфигурации из соответствующих файлов
+	// Пока используем только те, что определены в этом файле
 	return map[string]AnalyzerConfig{
 		"growth_analyzer":        DefaultGrowthConfig,
 		"fall_analyzer":          DefaultFallConfig,
-		"continuous_analyzer":    DefaultContinuousConfig,
-		"volume_analyzer":        DefaultVolumeConfig,
+		"continuous_analyzer":    getContinuousConfig(),
+		"volume_analyzer":        getVolumeConfig(),
 		"open_interest_analyzer": DefaultOpenInterestConfig,
 		"counter_analyzer":       DefaultCounterConfig,
+	}
+}
+
+// Вспомогательные функции для получения конфигураций
+func getContinuousConfig() AnalyzerConfig {
+	// Базовая конфигурация для ContinuousAnalyzer
+	return AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.8,
+		MinConfidence: 70.0,
+		MinDataPoints: 4,
+		CustomSettings: map[string]interface{}{
+			"min_continuous_points": 3,
+			"max_gap_ratio":         0.3,
+			"require_confirmation":  true,
+		},
+	}
+}
+
+func getVolumeConfig() AnalyzerConfig {
+	// Базовая конфигурация для VolumeAnalyzer
+	return AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.5,
+		MinConfidence: 40.0,
+		MinDataPoints: 5,
+		CustomSettings: map[string]interface{}{
+			"spike_threshold": 2.0,
+			"min_volume":      10000.0,
+			"check_trend":     true,
+		},
 	}
 }
 
@@ -390,6 +494,24 @@ func IsAnalyzerAvailable(analyzerName string) bool {
 	return false
 }
 
+// DefaultGrowthConfig - конфигурация по умолчанию для Growth Analyzer
+var DefaultGrowthConfig = AnalyzerConfig{
+	Enabled:       true,
+	Weight:        1.0,
+	MinConfidence: 60.0,
+	MinDataPoints: 3,
+	CustomSettings: map[string]interface{}{
+		"min_growth_percent":     2.0,
+		"continuity_threshold":   0.7,
+		"acceleration_threshold": 0.5,
+		"volume_weight":          0.2,
+		"trend_strength_weight":  0.4,
+		"volatility_weight":      0.2,
+		"check_all_algorithms":   true,
+		"use_new_version":        true,
+	},
+}
+
 // DefaultCounterConfig - конфигурация по умолчанию для CounterAnalyzer
 var DefaultCounterConfig = AnalyzerConfig{
 	Enabled:       true,
@@ -423,14 +545,14 @@ var DefaultOpenInterestConfig = AnalyzerConfig{
 	MinConfidence: 50.0,
 	MinDataPoints: 3,
 	CustomSettings: map[string]interface{}{
-		"min_price_change":      1.0,  // минимальное изменение цены для сигнала (%)
-		"min_price_fall":        1.0,  // минимальное падение цены для сигнала (%)
-		"min_oi_change":         5.0,  // минимальное изменение OI для сигнала (%)
-		"extreme_oi_threshold":  1.5,  // порог экстремального OI (1.5 = на 50% выше среднего)
-		"divergence_min_points": 4,    // минимальное количество точек для дивергенции
-		"volume_weight":         0.3,  // вес объема в расчетах
-		"check_all_algorithms":  true, // проверять все алгоритмы
-		"use_new_version":       true, // использовать новую модульную версию
+		"min_price_change":      1.0,
+		"min_price_fall":        1.0,
+		"min_oi_change":         5.0,
+		"extreme_oi_threshold":  1.5,
+		"divergence_min_points": 4,
+		"volume_weight":         0.3,
+		"check_all_algorithms":  true,
+		"use_new_version":       true,
 	},
 }
 
