@@ -4,6 +4,7 @@ package telegram
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/utils"
 	"fmt"
 	"log"
 	"net/http"
@@ -274,7 +275,7 @@ func (tb *TelegramBot) SendCounterNotification(symbol string, signalType string,
 	// Создаем клавиатуру с использованием ButtonURLBuilder
 	var keyboard *InlineKeyboardMarkup
 	if tb.buttonBuilder != nil {
-		periodMinutes := tb.parsePeriodToMinutes(period)
+		periodMinutes := utils.ParsePeriodToMinutes(period)
 		keyboard = tb.buttonBuilder.CounterNotificationKeyboard(symbol, periodMinutes)
 	} else {
 		// Fallback на простую клавиатуру
@@ -351,26 +352,6 @@ func (tb *TelegramBot) formatCounterMessage(symbol string, signalType string, co
 		period,
 		timeStr,
 	)
-}
-
-// parsePeriodToMinutes преобразует строку периода в минуты
-func (tb *TelegramBot) parsePeriodToMinutes(period string) int {
-	switch strings.ToLower(period) {
-	case "5m", "5 минут":
-		return 5
-	case "15m", "15 минут":
-		return 15
-	case "30m", "30 минут":
-		return 30
-	case "1h", "1 час":
-		return 60
-	case "4h", "4 часа":
-		return 240
-	case "1d", "1 день":
-		return 1440
-	default:
-		return tb.getDefaultPeriod()
-	}
 }
 
 // getDefaultPeriod возвращает период по умолчанию

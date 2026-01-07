@@ -28,21 +28,23 @@ func (f *Formatter) FormatResult(
 	result.WriteString(primarySignal + "\n")
 
 	for i, rec := range recommendations {
+		// Получаем чистый текст (без иконок в начале)
+		cleanText := f.getCleanTextWithoutIcons(rec)
+
+		// Определяем правильную иконку
 		icon := f.getRecommendationIcon(rec)
-		cleanRec := rec
 
-		if icon != "" && strings.HasPrefix(cleanRec, icon+" ") {
-			cleanRec = strings.TrimPrefix(cleanRec, icon+" ")
+		// Используем ДВА таба для лучшего выравнивания
+		if icon != "" && cleanText != "" {
+			// Иконка + пробел + текст
+			result.WriteString(fmt.Sprintf("%d.\t\t%s %s\n", i+1, icon, cleanText))
+		} else if icon != "" {
+			// Только иконка
+			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, icon))
+		} else {
+			// Только текст
+			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, cleanText))
 		}
-
-		result.WriteString(fmt.Sprintf("%d. %s%s\n", i+1,
-			func() string {
-				if icon != "" {
-					return icon + " "
-				}
-				return ""
-			}(),
-			cleanRec))
 	}
 
 	// Добавляем итоговую оценку
@@ -53,56 +55,115 @@ func (f *Formatter) FormatResult(
 	return strings.TrimSpace(result.String())
 }
 
+// getCleanTextWithoutIcons возвращает текст без иконок в начале
+func (f *Formatter) getCleanTextWithoutIcons(rec string) string {
+	cleanRec := strings.TrimSpace(rec)
+
+	// Список всех возможных иконок
+	allIcons := []string{"📊", "📈", "📉", "💥", "✅", "⚠️", "🔄", "🟡", "🎯"}
+
+	// Удаляем иконки из начала строки
+	for {
+		changed := false
+		for _, possibleIcon := range allIcons {
+			// Проверяем, начинается ли строка с иконки (с пробелом или без)
+			if strings.HasPrefix(cleanRec, possibleIcon+" ") {
+				cleanRec = strings.TrimPrefix(cleanRec, possibleIcon+" ")
+				changed = true
+				break
+			}
+			if strings.HasPrefix(cleanRec, possibleIcon) {
+				cleanRec = strings.TrimPrefix(cleanRec, possibleIcon)
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	return strings.TrimSpace(cleanRec)
+}
+
 // getRecommendationIcon возвращает иконку для рекомендации
 func (f *Formatter) getRecommendationIcon(rec string) string {
 	lowerRec := strings.ToLower(rec)
 
-	switch {
-	case strings.Contains(lowerRec, "дельта покупок"):
-		return "📈"
-	case strings.Contains(lowerRec, "дельта продаж"):
-		return "📉"
-	case strings.Contains(lowerRec, "long"):
-		return "📈"
-	case strings.Contains(lowerRec, "short"):
-		return "📉"
-	case strings.Contains(lowerRec, "рост"):
-		return "📈"
-	case strings.Contains(lowerRec, "падение"):
-		return "📉"
-	case strings.Contains(lowerRec, "бычий"):
-		return "📈"
-	case strings.Contains(lowerRec, "медвежий"):
-		return "📉"
-	case strings.Contains(lowerRec, "покуп"):
-		return "📈"
-	case strings.Contains(lowerRec, "продаж"):
-		return "📉"
-	case strings.Contains(lowerRec, "⚠️"):
+	// Сначала проверяем сложные случаи с приоритетом
+
+	// 1. Дельта продаж ПРИ РОСТЕ или покупок при падении
+	if strings.Contains(lowerRec, "дельта продаж при росте") ||
+		strings.Contains(lowerRec, "дельта покупок при падении") {
 		return "⚠️"
-	case strings.Contains(lowerRec, "🔄"):
-		return "🔄"
-	case strings.Contains(lowerRec, "💥"):
-		return "💥"
-	case strings.Contains(lowerRec, "✅"):
-		return "✅"
-	case strings.Contains(lowerRec, "🟡"):
-		return "🟡"
-	case strings.Contains(lowerRec, "rsi"):
-		return "📊"
-	case strings.Contains(lowerRec, "macd"):
-		return "📈"
-	default:
-		if len(rec) > 0 {
-			firstRune := []rune(rec)[0]
-			if (firstRune >= 0x1F600 && firstRune <= 0x1F64F) ||
-				(firstRune >= 0x1F300 && firstRune <= 0x1F5FF) ||
-				(firstRune >= 0x1F680 && firstRune <= 0x1F6FF) {
-				return ""
-			}
-		}
-		return "•"
 	}
+
+	// 2. Осторожность с LONG/SHORT
+	if strings.Contains(lowerRec, "осторожность с long") ||
+		strings.Contains(lowerRec, "осторожность с short") {
+		return "⚠️"
+	}
+
+	// 3. Возможна коррекция
+	if strings.Contains(lowerRec, "возможна коррекция") {
+		return "⚠️"
+	}
+
+	// 4. Возможен разворот
+	if strings.Contains(lowerRec, "возможен разворот") {
+		return "🔄"
+	}
+
+	// 5. Возможен отскок
+	if strings.Contains(lowerRec, "возможен отскок") {
+		return "💥"
+	}
+
+	// 6. Обычные случаи
+	if strings.Contains(lowerRec, "дельта покупок") {
+		return "📈"
+	}
+
+	if strings.Contains(lowerRec, "дельта продаж") {
+		return "📉"
+	}
+
+	if strings.Contains(lowerRec, "rsi") {
+		return "📊"
+	}
+
+	if strings.Contains(lowerRec, "macd") {
+		if strings.Contains(lowerRec, "медвежий") || strings.Contains(lowerRec, "слабый медвежий") {
+			return "📉"
+		}
+		return "📈" // бычий или нейтральный
+	}
+
+	if strings.Contains(lowerRec, "объемы подтверждают") {
+		return "✅"
+	}
+
+	if strings.Contains(lowerRec, "объемы слабо подтверждают") {
+		return "🟡"
+	}
+
+	if strings.Contains(lowerRec, "объемы противоречат") {
+		return "⚠️"
+	}
+
+	if strings.Contains(lowerRec, "ликвидации") {
+		return "💥"
+	}
+
+	if strings.Contains(lowerRec, "противоречие") {
+		return "🔄"
+	}
+
+	if strings.Contains(lowerRec, "волатильность") {
+		return "💥"
+	}
+
+	return ""
 }
 
 // getDeltaStrengthDescription возвращает описание силы дельты

@@ -1,9 +1,10 @@
-// internal/delivery/telegram/notifier.go (исправленный)
+// internal/delivery/telegram/notifier.go
 package telegram
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/utils"
 	"fmt"
 	"log"
 	"sync"
@@ -136,7 +137,7 @@ func (n *Notifier) handleCounterSignalEvent(event types.Event) error {
 	}
 
 	if periodStr == "" {
-		periodStr = "1 час"
+		periodStr = "1h"
 	}
 
 	log.Printf("✅ Counter сигнал: %s %s %.2f%% (сигналов: %d/%d)",
@@ -156,7 +157,7 @@ func (n *Notifier) handleCounterSignalEvent(event types.Event) error {
 		FundingRate:        fundingRate,
 		AverageFunding:     0.0001, // default
 		NextFundingTime:    time.Now().Add(1 * time.Hour),
-		Period:             periodStr,
+		Period:             periodStr, // Используем оригинальный период
 		LiquidationVolume:  0,
 		LongLiqVolume:      0,
 		ShortLiqVolume:     0,
@@ -170,26 +171,47 @@ func (n *Notifier) handleCounterSignalEvent(event types.Event) error {
 	// Форматируем полное сообщение
 	message := n.messageFormatter.FormatMessage(params)
 
-	// Отправляем через TelegramBot
+	// ПОЛУЧАЕМ ПЕРИОД В МИНУТАХ ЧЕРЕЗ pkg/utils
+	periodMinutes := utils.ParsePeriodToMinutes(periodStr)
+	periodName := utils.PeriodToName(periodStr)
+
+	log.Printf("📊 Период: %s → %s (%d минут)", periodStr, periodName, periodMinutes)
+
+	// СОЗДАЕМ КЛАВИАТУРУ С КНОПКАМИ "ТОРГОВАТЬ" И "ГРАФИКИ"
+	var keyboard *InlineKeyboardMarkup
+
+	// Вариант 1: Через keyboardSystem из menuManager
+	if n.telegramBot != nil && n.telegramBot.menuManager != nil {
+		keyboardSystem := n.telegramBot.menuManager.GetKeyboardSystem()
+		if keyboardSystem != nil {
+			keyboard = keyboardSystem.CreateNotificationKeyboard(symbol, periodMinutes)
+			log.Printf("✅ Создана клавиатура для %s (период: %d мин)", symbol, periodMinutes)
+		}
+	}
+
+	// Вариант 2: Fallback - создаем напрямую через ButtonURLBuilder
+	if keyboard == nil && n.config != nil {
+		exchange := n.config.Exchange
+		if exchange == "" {
+			exchange = "bybit"
+		}
+		builder := NewButtonURLBuilder(exchange)
+		keyboard = builder.StandardNotificationKeyboard(symbol, periodMinutes)
+		log.Printf("✅ Создана клавиатура для %s через ButtonURLBuilder", symbol)
+	}
+
+	// Отправляем через TelegramBot С КЛАВИАТУРОЙ
 	if n.telegramBot != nil && n.messageSender != nil {
-		return n.messageSender.SendTextMessage(message, nil, false)
+		log.Printf("📨 Отправка сообщения с клавиатурой для %s", symbol)
+		return n.messageSender.SendTextMessage(message, keyboard, false)
 	}
 
 	return fmt.Errorf("telegram bot or message sender not initialized")
 }
 
-// Вспомогательная функция для получения ключей из map
-func getKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 // handleCounterNotification обрабатывает запросы уведомлений
 func (n *Notifier) handleCounterNotification(event types.Event) error {
-	log.Printf("📨 telegram.Notifier: Обработка запроса уведомления")
+	log.Printf("📨 telegram.Notifier: Обработка запроса уведомлений")
 
 	// Можно добавить специальную логику для запросов уведомлений
 	// Например, форматирование с дополнительными данными
