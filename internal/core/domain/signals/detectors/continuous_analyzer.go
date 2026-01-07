@@ -3,6 +3,7 @@ package analyzers
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"math"
@@ -12,8 +13,8 @@ import (
 
 // ContinuousAnalyzer - анализатор непрерывности
 type ContinuousAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config common.AnalyzerConfig
+	stats  common.AnalyzerStats
 	mu     sync.RWMutex
 }
 
@@ -37,7 +38,7 @@ func (a *ContinuousAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	minPoints := a.getMinContinuousPoints()
@@ -380,20 +381,20 @@ func (a *ContinuousAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-func (a *ContinuousAnalyzer) GetConfig() AnalyzerConfig {
+func (a *ContinuousAnalyzer) GetConfig() common.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
-func (a *ContinuousAnalyzer) GetStats() AnalyzerStats {
+func (a *ContinuousAnalyzer) GetStats() common.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
 }
 
 // DefaultContinuousConfig - конфигурация по умолчанию
-var DefaultContinuousConfig = AnalyzerConfig{
+var DefaultContinuousConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.8,
 	MinConfidence: 60.0,

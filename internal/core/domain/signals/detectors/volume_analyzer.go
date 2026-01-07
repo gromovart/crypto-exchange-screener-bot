@@ -3,6 +3,7 @@ package analyzers
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"math"
@@ -12,8 +13,8 @@ import (
 
 // VolumeAnalyzer - анализатор объема
 type VolumeAnalyzer struct {
-	config AnalyzerConfig
-	stats  AnalyzerStats
+	config common.AnalyzerConfig
+	stats  common.AnalyzerStats
 	mu     sync.RWMutex
 }
 
@@ -29,7 +30,7 @@ func (a *VolumeAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *VolumeAnalyzer) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *VolumeAnalyzer) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	if len(data) < config.MinDataPoints {
@@ -307,13 +308,13 @@ func (a *VolumeAnalyzer) calculateVolumePriceCorrelation(data []types.PriceData)
 	return correlation
 }
 
-func (a *VolumeAnalyzer) GetConfig() AnalyzerConfig {
+func (a *VolumeAnalyzer) GetConfig() common.AnalyzerConfig {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.config
 }
 
-func (a *VolumeAnalyzer) GetStats() AnalyzerStats {
+func (a *VolumeAnalyzer) GetStats() common.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
@@ -340,7 +341,7 @@ func (a *VolumeAnalyzer) updateStats(duration time.Duration, success bool) {
 	}
 }
 
-var DefaultVolumeConfig = AnalyzerConfig{
+var DefaultVolumeConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.5,
 	MinConfidence: 30.0,

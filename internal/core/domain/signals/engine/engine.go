@@ -4,6 +4,7 @@ package engine
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -30,7 +31,7 @@ type AnalyzerConfigs struct {
 // AnalysisEngine - основной движок анализа
 type AnalysisEngine struct {
 	mu           sync.RWMutex
-	analyzers    map[string]analyzers.Analyzer
+	analyzers    map[string]common.Analyzer
 	filters      *FilterChain
 	storage      storage.PriceStorage
 	eventBus     *events.EventBus
@@ -83,13 +84,13 @@ type AnalyzerConfig struct {
 
 // EngineStats - статистика движка
 type EngineStats struct {
-	TotalAnalyses   int64                              `json:"total_analyses"`
-	TotalSignals    int64                              `json:"total_signals"`
-	AnalysisTime    time.Duration                      `json:"analysis_time"`
-	ActiveAnalyzers int                                `json:"active_analyzers"`
-	LastRunTime     time.Time                          `json:"last_run_time"`
-	SymbolsAnalyzed map[string]int64                   `json:"symbols_analyzed"`
-	AnalyzerStats   map[string]analyzers.AnalyzerStats `json:"analyzer_stats"`
+	TotalAnalyses   int64                           `json:"total_analyses"`
+	TotalSignals    int64                           `json:"total_signals"`
+	AnalysisTime    time.Duration                   `json:"analysis_time"`
+	ActiveAnalyzers int                             `json:"active_analyzers"`
+	LastRunTime     time.Time                       `json:"last_run_time"`
+	SymbolsAnalyzed map[string]int64                `json:"symbols_analyzed"`
+	AnalyzerStats   map[string]common.AnalyzerStats `json:"analyzer_stats"`
 }
 
 // DefaultConfig - конфигурация по умолчанию
@@ -113,14 +114,14 @@ func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, 
 	}
 
 	engine := &AnalysisEngine{
-		analyzers: make(map[string]analyzers.Analyzer),
+		analyzers: make(map[string]common.Analyzer),
 		filters:   NewFilterChain(),
 		storage:   storage,
 		eventBus:  eventBus,
 		config:    cfg,
 		stats: EngineStats{
 			SymbolsAnalyzed: make(map[string]int64),
-			AnalyzerStats:   make(map[string]analyzers.AnalyzerStats),
+			AnalyzerStats:   make(map[string]common.AnalyzerStats),
 		},
 		lastAnalysis: make(map[string]time.Time),
 		stopChan:     make(chan struct{}),
@@ -173,7 +174,7 @@ func (e *AnalysisEngine) Stop() error {
 }
 
 // RegisterAnalyzer регистрирует анализатор
-func (e *AnalysisEngine) RegisterAnalyzer(analyzer analyzers.Analyzer) error {
+func (e *AnalysisEngine) RegisterAnalyzer(analyzer common.Analyzer) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -185,7 +186,7 @@ func (e *AnalysisEngine) RegisterAnalyzer(analyzer analyzers.Analyzer) error {
 	e.analyzers[name] = analyzer
 
 	// Инициализируем статистику
-	e.stats.AnalyzerStats[name] = analyzers.AnalyzerStats{}
+	e.stats.AnalyzerStats[name] = common.AnalyzerStats{}
 	e.stats.ActiveAnalyzers++
 
 	log.Printf("✅ Зарегистрирован анализатор: %s v%s", name, analyzer.Version())
@@ -299,7 +300,7 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 	var allSignals []analysis.Signal
 
 	e.mu.RLock()
-	analyzersList := make([]analyzers.Analyzer, 0, len(e.analyzers))
+	analyzersList := make([]common.Analyzer, 0, len(e.analyzers))
 	for _, analyzer := range e.analyzers {
 		if analyzer.Supports(symbol) {
 			analyzersList = append(analyzersList, analyzer)
@@ -582,14 +583,14 @@ func (e *AnalysisEngine) saveStats() {
 // registerDefaultAnalyzers регистрирует стандартные анализаторы
 func (e *AnalysisEngine) registerDefaultAnalyzers() {
 	e.mu.Lock()
-	e.analyzers = make(map[string]analyzers.Analyzer)
-	e.stats.AnalyzerStats = make(map[string]analyzers.AnalyzerStats)
+	e.analyzers = make(map[string]common.Analyzer)
+	e.stats.AnalyzerStats = make(map[string]common.AnalyzerStats)
 	e.stats.ActiveAnalyzers = 0
 	e.mu.Unlock()
 
 	// GrowthAnalyzer - анализатор роста
 	if e.config.AnalyzerConfigs.GrowthAnalyzer.Enabled {
-		growthConfig := analyzers.AnalyzerConfig{
+		growthConfig := common.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: e.config.AnalyzerConfigs.GrowthAnalyzer.MinConfidence,
@@ -606,7 +607,7 @@ func (e *AnalysisEngine) registerDefaultAnalyzers() {
 
 	// FallAnalyzer - анализатор падения
 	if e.config.AnalyzerConfigs.FallAnalyzer.Enabled {
-		fallConfig := analyzers.AnalyzerConfig{
+		fallConfig := common.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: e.config.AnalyzerConfigs.FallAnalyzer.MinConfidence,

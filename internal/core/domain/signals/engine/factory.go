@@ -3,6 +3,7 @@ package engine
 
 import (
 	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
@@ -170,7 +171,7 @@ func (f *Factory) configureAnalyzers(
 
 	// Настраиваем GrowthAnalyzer
 	if analyzerConfigs.GrowthAnalyzer.Enabled {
-		growthConfig := analyzers.AnalyzerConfig{
+		growthConfig := common.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: analyzerConfigs.GrowthAnalyzer.MinConfidence,
@@ -188,7 +189,7 @@ func (f *Factory) configureAnalyzers(
 
 	// Настраиваем FallAnalyzer
 	if analyzerConfigs.FallAnalyzer.Enabled {
-		fallConfig := analyzers.AnalyzerConfig{
+		fallConfig := common.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        1.0,
 			MinConfidence: analyzerConfigs.FallAnalyzer.MinConfidence,
@@ -222,7 +223,7 @@ func (f *Factory) configureAnalyzers(
 
 	// ContinuousAnalyzer
 	if analyzerConfigs.ContinuousAnalyzer.Enabled {
-		continuousConfig := analyzers.AnalyzerConfig{
+		continuousConfig := common.AnalyzerConfig{
 			Enabled:       true,
 			Weight:        0.8,
 			MinConfidence: analyzerConfigs.GrowthAnalyzer.MinConfidence,
@@ -288,7 +289,7 @@ func (f *Factory) configureCounterAnalyzer(
 	customSettings := analyzerConfigs.CounterAnalyzer.CustomSettings
 
 	// Настройки CounterAnalyzer из конфигурации
-	counterConfig := analyzers.AnalyzerConfig{
+	counterConfig := common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,

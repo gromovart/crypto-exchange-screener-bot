@@ -7,7 +7,7 @@ import (
 	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/manager"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/notification"
@@ -17,8 +17,8 @@ import (
 
 // CounterAnalyzer - анализатор счетчика сигналов
 type CounterAnalyzer struct {
-	config        analyzers.AnalyzerConfig
-	stats         analyzers.AnalyzerStats
+	config        common.AnalyzerConfig
+	stats         common.AnalyzerStats
 	telegramBot   interface{}
 	marketFetcher interface{}
 	storage       interface{}
@@ -39,7 +39,7 @@ type CounterAnalyzer struct {
 
 // NewCounterAnalyzer создает новый анализатор счетчика
 func NewCounterAnalyzer(
-	config analyzers.AnalyzerConfig,
+	config common.AnalyzerConfig,
 	storage interface{},
 	tgBot interface{},
 	marketFetcher interface{},
@@ -69,7 +69,7 @@ func NewCounterAnalyzer(
 		techCalculator:      techCalculator,
 		notificationEnabled: true,
 		chartProvider:       chartProvider,
-		stats:               analyzers.AnalyzerStats{},
+		stats:               common.AnalyzerStats{},
 	}
 
 	// Создаем нотификатор если есть Telegram бот
@@ -103,7 +103,7 @@ func (a *CounterAnalyzer) Name() string                { return "counter_analyze
 func (a *CounterAnalyzer) Version() string             { return "2.5.0" }
 func (a *CounterAnalyzer) Supports(symbol string) bool { return true }
 
-func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg analyzers.AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	signals, err := a.signalProcessor.Process(data, cfg)
@@ -161,9 +161,9 @@ func (a *CounterAnalyzer) sendNotification(signal analysis.Signal, priceData []t
 	}
 }
 
-func (a *CounterAnalyzer) GetConfig() analyzers.AnalyzerConfig { return a.config }
+func (a *CounterAnalyzer) GetConfig() common.AnalyzerConfig { return a.config }
 
-func (a *CounterAnalyzer) GetStats() analyzers.AnalyzerStats {
+func (a *CounterAnalyzer) GetStats() common.AnalyzerStats {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.stats
@@ -275,14 +275,14 @@ func (a *CounterAnalyzer) GetNotifierStats() map[string]interface{} {
 }
 
 // Вспомогательные методы для получения настроек
-func (a *CounterAnalyzer) getBasePeriodMinutes(cfg analyzers.AnalyzerConfig) int {
+func (a *CounterAnalyzer) getBasePeriodMinutes(cfg common.AnalyzerConfig) int {
 	if val, ok := cfg.CustomSettings["base_period_minutes"].(int); ok {
 		return val
 	}
 	return 1
 }
 
-func (a *CounterAnalyzer) getCurrentPeriod(cfg analyzers.AnalyzerConfig) string {
+func (a *CounterAnalyzer) getCurrentPeriod(cfg common.AnalyzerConfig) string {
 	if val, ok := cfg.CustomSettings["analysis_period"].(string); ok {
 		return val
 	}

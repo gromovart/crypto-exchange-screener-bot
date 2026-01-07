@@ -2,7 +2,7 @@
 package config
 
 import (
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 )
 
 // CounterConfig - конфигурация счетчика
@@ -63,8 +63,8 @@ func DefaultConfig() CounterConfig {
 }
 
 // ToAnalyzerConfig преобразует в формат анализатора
-func (c *CounterConfig) ToAnalyzerConfig() analyzers.AnalyzerConfig {
-	return analyzers.AnalyzerConfig{
+func (c *CounterConfig) ToAnalyzerConfig() common.AnalyzerConfig {
+	return common.AnalyzerConfig{
 		Enabled:       c.Enabled,
 		Weight:        c.Weight,
 		MinConfidence: c.MinConfidence,
@@ -91,7 +91,7 @@ func (c *CounterConfig) ToAnalyzerConfig() analyzers.AnalyzerConfig {
 }
 
 // FromAnalyzerConfig создает конфигурацию из формата анализатора
-func FromAnalyzerConfig(analyzerConfig analyzers.AnalyzerConfig) CounterConfig {
+func FromAnalyzerConfig(analyzerConfig common.AnalyzerConfig) CounterConfig {
 	custom := analyzerConfig.CustomSettings
 	if custom == nil {
 		custom = make(map[string]interface{})

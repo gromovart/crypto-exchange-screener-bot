@@ -2,12 +2,11 @@
 package counter
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
-
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 )
 
 // SafeGetFloat безопасно получает float64 из конфига
@@ -122,42 +121,42 @@ func SafeGetString(config map[string]interface{}, key string, defaultValue strin
 }
 
 // GetGrowthThreshold получает порог роста
-func GetGrowthThreshold(config analyzers.AnalyzerConfig) float64 {
+func GetGrowthThreshold(config common.AnalyzerConfig) float64 {
 	return SafeGetFloat(config.CustomSettings, "growth_threshold", 0.1)
 }
 
 // GetFallThreshold получает порог падения
-func GetFallThreshold(config analyzers.AnalyzerConfig) float64 {
+func GetFallThreshold(config common.AnalyzerConfig) float64 {
 	return SafeGetFloat(config.CustomSettings, "fall_threshold", 0.1)
 }
 
 // GetBasePeriodMinutes получает базовый период в минутах
-func GetBasePeriodMinutes(config analyzers.AnalyzerConfig) int {
+func GetBasePeriodMinutes(config common.AnalyzerConfig) int {
 	return SafeGetInt(config.CustomSettings, "base_period_minutes", 1)
 }
 
 // GetAnalysisPeriod получает период анализа
-func GetAnalysisPeriod(config analyzers.AnalyzerConfig) string {
+func GetAnalysisPeriod(config common.AnalyzerConfig) string {
 	return SafeGetString(config.CustomSettings, "analysis_period", "15m")
 }
 
 // ShouldTrackGrowth проверяет нужно ли отслеживать рост
-func ShouldTrackGrowth(config analyzers.AnalyzerConfig) bool {
+func ShouldTrackGrowth(config common.AnalyzerConfig) bool {
 	return SafeGetBool(config.CustomSettings, "track_growth", true)
 }
 
 // ShouldTrackFall проверяет нужно ли отслеживать падение
-func ShouldTrackFall(config analyzers.AnalyzerConfig) bool {
+func ShouldTrackFall(config common.AnalyzerConfig) bool {
 	return SafeGetBool(config.CustomSettings, "track_fall", true)
 }
 
 // ShouldNotifyOnSignal проверяет нужно ли отправлять уведомления
-func ShouldNotifyOnSignal(config analyzers.AnalyzerConfig) bool {
+func ShouldNotifyOnSignal(config common.AnalyzerConfig) bool {
 	return SafeGetBool(config.CustomSettings, "notify_on_signal", true)
 }
 
 // GetChartProvider получает провайдера графиков
-func GetChartProvider(config analyzers.AnalyzerConfig) string {
+func GetChartProvider(config common.AnalyzerConfig) string {
 	return SafeGetString(config.CustomSettings, "chart_provider", "coinglass")
 }
 

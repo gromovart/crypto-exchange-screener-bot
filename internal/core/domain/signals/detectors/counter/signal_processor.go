@@ -7,7 +7,7 @@ import (
 	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/manager"
 	"crypto-exchange-screener-bot/internal/types"
 
@@ -22,7 +22,7 @@ func NewSignalProcessor(analyzer *CounterAnalyzer) *SignalProcessor {
 	return &SignalProcessor{analyzer: analyzer}
 }
 
-func (sp *SignalProcessor) Process(data []types.PriceData, cfg analyzers.AnalyzerConfig) ([]analysis.Signal, error) {
+func (sp *SignalProcessor) Process(data []types.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if len(data) < 2 {
 		return nil, fmt.Errorf("insufficient data points")
 	}
@@ -130,28 +130,28 @@ func (sp *SignalProcessor) calculateConfidence(count, maxSignals int) float64 {
 	return float64(count) / float64(maxSignals) * 100
 }
 
-func (sp *SignalProcessor) getGrowthThreshold(cfg analyzers.AnalyzerConfig) float64 {
+func (sp *SignalProcessor) getGrowthThreshold(cfg common.AnalyzerConfig) float64 {
 	if val, ok := cfg.CustomSettings["growth_threshold"].(float64); ok {
 		return val
 	}
 	return 0.1
 }
 
-func (sp *SignalProcessor) getFallThreshold(cfg analyzers.AnalyzerConfig) float64 {
+func (sp *SignalProcessor) getFallThreshold(cfg common.AnalyzerConfig) float64 {
 	if val, ok := cfg.CustomSettings["fall_threshold"].(float64); ok {
 		return val
 	}
 	return 0.1
 }
 
-func (sp *SignalProcessor) getBasePeriodMinutes(cfg analyzers.AnalyzerConfig) int {
+func (sp *SignalProcessor) getBasePeriodMinutes(cfg common.AnalyzerConfig) int {
 	if val, ok := cfg.CustomSettings["base_period_minutes"].(int); ok {
 		return val
 	}
 	return 1
 }
 
-func (sp *SignalProcessor) getCurrentPeriod(cfg analyzers.AnalyzerConfig) string {
+func (sp *SignalProcessor) getCurrentPeriod(cfg common.AnalyzerConfig) string {
 	if val, ok := cfg.CustomSettings["analysis_period"].(string); ok {
 		return val
 	}

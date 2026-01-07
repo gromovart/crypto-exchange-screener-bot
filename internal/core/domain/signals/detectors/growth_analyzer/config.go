@@ -1,8 +1,10 @@
 // internal/core/domain/signals/detectors/growth_analyzer/config/config.go
 package growth_analyzer
 
+import "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+
 // DefaultGrowthConfig - конфигурация по умолчанию для анализатора роста
-var DefaultGrowthConfig = AnalyzerConfigCopy{
+var DefaultGrowthConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        1.0,
 	MinConfidence: 60.0,
@@ -18,7 +20,7 @@ var DefaultGrowthConfig = AnalyzerConfigCopy{
 }
 
 // NewGrowthConfig - создает новую конфигурацию с настройками по умолчанию
-func NewGrowthConfig() AnalyzerConfigCopy {
+func NewGrowthConfig() common.AnalyzerConfig {
 	// Создаем копию, чтобы избежать модификации оригинальной конфигурации
 	config := DefaultGrowthConfig
 	config.CustomSettings = make(map[string]interface{})
@@ -31,9 +33,9 @@ func NewGrowthConfig() AnalyzerConfigCopy {
 }
 
 // GetGrowthConfig - преобразует общую конфигурацию в конфигурацию роста
-func GetGrowthConfig(config AnalyzerConfigCopy) GrowthConfig {
+func GetGrowthConfig(config common.AnalyzerConfig) GrowthConfig {
 	return GrowthConfig{
-		AnalyzerConfigCopy:    config,
+		AnalyzerConfig:        config,
 		MinGrowthPercent:      getFloatSetting(config.CustomSettings, "min_growth_percent", 2.0),
 		ContinuityThreshold:   getFloatSetting(config.CustomSettings, "continuity_threshold", 0.7),
 		AccelerationThreshold: getFloatSetting(config.CustomSettings, "acceleration_threshold", 0.5),
@@ -54,7 +56,7 @@ func getFloatSetting(settings map[string]interface{}, key string, defaultValue f
 }
 
 // ValidateGrowthConfig - валидирует конфигурацию анализатора роста
-func ValidateGrowthConfig(config AnalyzerConfigCopy) error {
+func ValidateGrowthConfig(config common.AnalyzerConfig) error {
 	if config.MinDataPoints < 2 {
 		return ErrInvalidConfig("min_data_points must be at least 2")
 	}

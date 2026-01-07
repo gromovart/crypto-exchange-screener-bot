@@ -5,31 +5,21 @@ import (
 	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	fallanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer"
 	growthanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
 	"crypto-exchange-screener-bot/internal/types"
 )
 
-// convertToGrowthConfig - преобразует analyzers.AnalyzerConfig в growth_analyzer.AnalyzerConfigCopy
-func convertToGrowthConfig(config AnalyzerConfig) growthanalyzer.AnalyzerConfigCopy {
-	return growthanalyzer.AnalyzerConfigCopy{
-		Enabled:        config.Enabled,
-		Weight:         config.Weight,
-		MinConfidence:  config.MinConfidence,
-		MinDataPoints:  config.MinDataPoints,
-		CustomSettings: config.CustomSettings,
-	}
-}
-
 // growthAnalyzerWrapper - враппер для нового модульного GrowthAnalyzer
 type growthAnalyzerWrapper struct {
 	analyzer *growthanalyzer.GrowthAnalyzer
-	config   AnalyzerConfig
+	config   common.AnalyzerConfig
 }
 
 // NewGrowthAnalyzer создает анализатор роста (новая модульная версия)
-func NewGrowthAnalyzer(config AnalyzerConfig) Analyzer {
+func NewGrowthAnalyzer(config common.AnalyzerConfig) common.Analyzer {
 	// Создаем враппер
 	wrapper := &growthAnalyzerWrapper{
 		config: config,
@@ -41,7 +31,7 @@ func NewGrowthAnalyzer(config AnalyzerConfig) Analyzer {
 // Name возвращает имя анализатора
 func (w *growthAnalyzerWrapper) Name() string {
 	if w.analyzer == nil {
-		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(w.config)
 	}
 	return w.analyzer.Name()
 }
@@ -49,7 +39,7 @@ func (w *growthAnalyzerWrapper) Name() string {
 // Version возвращает версию анализатора
 func (w *growthAnalyzerWrapper) Version() string {
 	if w.analyzer == nil {
-		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(w.config)
 	}
 	return w.analyzer.Version()
 }
@@ -57,37 +47,37 @@ func (w *growthAnalyzerWrapper) Version() string {
 // Supports проверяет поддержку символа
 func (w *growthAnalyzerWrapper) Supports(symbol string) bool {
 	if w.analyzer == nil {
-		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(w.config)
 	}
 	return w.analyzer.Supports(symbol)
 }
 
 // Analyze анализирует данные
-func (w *growthAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *growthAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
-		w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(w.config))
+		w.analyzer = growthanalyzer.NewGrowthAnalyzer(w.config)
 	}
 
 	// Обновляем конфигурацию если передана новая
 	w.config = config
-	w.analyzer = growthanalyzer.NewGrowthAnalyzer(convertToGrowthConfig(config))
+	w.analyzer = growthanalyzer.NewGrowthAnalyzer(config)
 
-	return w.analyzer.Analyze(data, convertToGrowthConfig(config))
+	return w.analyzer.Analyze(data, config)
 }
 
 // GetConfig возвращает конфигурацию
-func (w *growthAnalyzerWrapper) GetConfig() AnalyzerConfig {
+func (w *growthAnalyzerWrapper) GetConfig() common.AnalyzerConfig {
 	return w.config
 }
 
 // GetStats возвращает статистику
-func (w *growthAnalyzerWrapper) GetStats() AnalyzerStats {
+func (w *growthAnalyzerWrapper) GetStats() common.AnalyzerStats {
 	if w.analyzer == nil {
-		return AnalyzerStats{}
+		return common.AnalyzerStats{}
 	}
 
 	stats := w.analyzer.GetStats()
-	return AnalyzerStats{
+	return common.AnalyzerStats{
 		TotalCalls:   stats.TotalCalls,
 		SuccessCount: stats.SuccessCount,
 		ErrorCount:   stats.ErrorCount,
@@ -100,11 +90,11 @@ func (w *growthAnalyzerWrapper) GetStats() AnalyzerStats {
 // fallAnalyzerWrapper - враппер для адаптера нового FallAnalyzer
 type fallAnalyzerWrapper struct {
 	analyzer *fallanalyzer.FallAnalyzer
-	config   AnalyzerConfig
+	config   common.AnalyzerConfig
 }
 
 // NewFallAnalyzer создает анализатор падения (новая модульная версия)
-func NewFallAnalyzer(config AnalyzerConfig) Analyzer {
+func NewFallAnalyzer(config common.AnalyzerConfig) common.Analyzer {
 	// Создаем враппер для новой модульной версии
 	wrapper := &fallAnalyzerWrapper{
 		config: config,
@@ -138,12 +128,12 @@ func (w *fallAnalyzerWrapper) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные
-func (w *fallAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *fallAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
 		w.analyzer = fallanalyzer.NewFallAnalyzer()
 	}
 
-	// Конвертируем AnalyzerConfig в map для новой версии
+	// Конвертируем common.AnalyzerConfig в map для новой версии
 	cfgMap := make(map[string]interface{})
 	cfgMap["enabled"] = config.Enabled
 	cfgMap["weight"] = config.Weight
@@ -161,18 +151,18 @@ func (w *fallAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerCon
 }
 
 // GetConfig возвращает конфигурацию
-func (w *fallAnalyzerWrapper) GetConfig() AnalyzerConfig {
+func (w *fallAnalyzerWrapper) GetConfig() common.AnalyzerConfig {
 	return w.config
 }
 
 // GetStats возвращает статистику
-func (w *fallAnalyzerWrapper) GetStats() AnalyzerStats {
+func (w *fallAnalyzerWrapper) GetStats() common.AnalyzerStats {
 	if w.analyzer == nil {
-		return AnalyzerStats{}
+		return common.AnalyzerStats{}
 	}
 
 	stats := w.analyzer.GetStats()
-	return AnalyzerStats{
+	return common.AnalyzerStats{
 		TotalCalls:   stats.TotalCalls,
 		SuccessCount: stats.SuccessCount,
 		ErrorCount:   stats.ErrorCount,
@@ -183,10 +173,10 @@ func (w *fallAnalyzerWrapper) GetStats() AnalyzerStats {
 }
 
 // NewVolumeAnalyzer создает анализатор объема
-func NewVolumeAnalyzer(config AnalyzerConfig) *VolumeAnalyzer {
+func NewVolumeAnalyzer(config common.AnalyzerConfig) *VolumeAnalyzer {
 	return &VolumeAnalyzer{
 		config: config,
-		stats: AnalyzerStats{
+		stats: common.AnalyzerStats{
 			TotalCalls:   0,
 			TotalTime:    0,
 			SuccessCount: 0,
@@ -198,7 +188,7 @@ func NewVolumeAnalyzer(config AnalyzerConfig) *VolumeAnalyzer {
 }
 
 // NewContinuousAnalyzer создает анализатор непрерывности
-func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
+func NewContinuousAnalyzer(config common.AnalyzerConfig) *ContinuousAnalyzer {
 	// Гарантируем наличие необходимых настроек
 	if config.CustomSettings == nil {
 		config.CustomSettings = make(map[string]interface{})
@@ -218,19 +208,19 @@ func NewContinuousAnalyzer(config AnalyzerConfig) *ContinuousAnalyzer {
 
 	return &ContinuousAnalyzer{
 		config: config,
-		stats:  AnalyzerStats{},
+		stats:  common.AnalyzerStats{},
 	}
 }
 
 // openInterestAnalyzerWrapper - враппер для адаптера нового OI анализатора
 type openInterestAnalyzerWrapper struct {
 	adapter *oianalyzer.Adapter
-	config  AnalyzerConfig
+	config  common.AnalyzerConfig
 }
 
 // NewOpenInterestAnalyzer создает анализатор открытого интереса (новая модульная версия)
-func NewOpenInterestAnalyzer(config AnalyzerConfig) Analyzer {
-	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy для адаптера
+func NewOpenInterestAnalyzer(config common.AnalyzerConfig) common.Analyzer {
+	// Конвертируем common.AnalyzerConfig в common.AnalyzerConfigCopy для адаптера
 	adapterConfig := oianalyzer.AnalyzerConfigCopy{
 		Enabled:        config.Enabled,
 		Weight:         config.Weight,
@@ -270,8 +260,8 @@ func (w *openInterestAnalyzerWrapper) Supports(symbol string) bool {
 	return w.adapter.Supports(symbol)
 }
 
-func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config AnalyzerConfig) ([]analysis.Signal, error) {
-	// Конвертируем AnalyzerConfig в AnalyzerConfigCopy
+func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+	// Конвертируем common.AnalyzerConfig в common.AnalyzerConfigCopy
 	adapterConfig := oianalyzer.AnalyzerConfigCopy{
 		Enabled:        config.Enabled,
 		Weight:         config.Weight,
@@ -289,14 +279,14 @@ func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config Ana
 	return w.adapter.Analyze(data, adapterConfig)
 }
 
-func (w *openInterestAnalyzerWrapper) GetConfig() AnalyzerConfig {
+func (w *openInterestAnalyzerWrapper) GetConfig() common.AnalyzerConfig {
 	return w.config
 }
 
-func (w *openInterestAnalyzerWrapper) GetStats() AnalyzerStats {
+func (w *openInterestAnalyzerWrapper) GetStats() common.AnalyzerStats {
 	adapterStats := w.adapter.GetStats()
 
-	return AnalyzerStats{
+	return common.AnalyzerStats{
 		TotalCalls:   adapterStats.TotalCalls,
 		SuccessCount: adapterStats.SuccessCount,
 		ErrorCount:   adapterStats.ErrorCount,
@@ -315,7 +305,7 @@ func NewAnalyzerFactory() *AnalyzerFactory {
 }
 
 // CreateAnalyzer создает анализатор по имени
-func (f *AnalyzerFactory) CreateAnalyzer(name string, config AnalyzerConfig) Analyzer {
+func (f *AnalyzerFactory) CreateAnalyzer(name string, config common.AnalyzerConfig) common.Analyzer {
 	switch name {
 	case "growth_analyzer":
 		return NewGrowthAnalyzer(config)
@@ -338,11 +328,11 @@ func (f *AnalyzerFactory) CreateAnalyzer(name string, config AnalyzerConfig) Ana
 	}
 }
 
-// GetAllAnalyzerConfigs возвращает конфигурации всех анализаторов
-func GetAllAnalyzerConfigs() map[string]AnalyzerConfig {
+// GetAllcommon.AnalyzerConfigs возвращает конфигурации всех анализаторов
+func GetAllAnalyzerConfigs() map[string]common.AnalyzerConfig {
 	// Нужно получить конфигурации из соответствующих файлов
 	// Пока используем только те, что определены в этом файле
-	return map[string]AnalyzerConfig{
+	return map[string]common.AnalyzerConfig{
 		"growth_analyzer":        DefaultGrowthConfig,
 		"fall_analyzer":          DefaultFallConfig,
 		"continuous_analyzer":    getContinuousConfig(),
@@ -353,9 +343,9 @@ func GetAllAnalyzerConfigs() map[string]AnalyzerConfig {
 }
 
 // Вспомогательные функции для получения конфигураций
-func getContinuousConfig() AnalyzerConfig {
+func getContinuousConfig() common.AnalyzerConfig {
 	// Базовая конфигурация для ContinuousAnalyzer
-	return AnalyzerConfig{
+	return common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
 		MinConfidence: 70.0,
@@ -368,9 +358,9 @@ func getContinuousConfig() AnalyzerConfig {
 	}
 }
 
-func getVolumeConfig() AnalyzerConfig {
+func getVolumeConfig() common.AnalyzerConfig {
 	// Базовая конфигурация для VolumeAnalyzer
-	return AnalyzerConfig{
+	return common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.5,
 		MinConfidence: 40.0,
@@ -396,7 +386,7 @@ func GetAnalyzerNames() []string {
 }
 
 // GetEnabledAnalyzers возвращает список включенных анализаторов на основе конфигурации
-func GetEnabledAnalyzers(configs map[string]AnalyzerConfig) []string {
+func GetEnabledAnalyzers(configs map[string]common.AnalyzerConfig) []string {
 	var enabled []string
 	for name, config := range configs {
 		if config.Enabled {
@@ -407,8 +397,8 @@ func GetEnabledAnalyzers(configs map[string]AnalyzerConfig) []string {
 }
 
 // CreateAllEnabledAnalyzers создает все включенные анализаторы
-func (f *AnalyzerFactory) CreateAllEnabledAnalyzers(configs map[string]AnalyzerConfig) map[string]Analyzer {
-	analyzers := make(map[string]Analyzer)
+func (f *AnalyzerFactory) CreateAllEnabledAnalyzers(configs map[string]common.AnalyzerConfig) map[string]common.Analyzer {
+	analyzers := make(map[string]common.Analyzer)
 
 	for name, config := range configs {
 		if config.Enabled {
@@ -423,9 +413,9 @@ func (f *AnalyzerFactory) CreateAllEnabledAnalyzers(configs map[string]AnalyzerC
 }
 
 // MergeConfigs объединяет пользовательские настройки с настройками по умолчанию
-func MergeConfigs(customConfigs map[string]AnalyzerConfig) map[string]AnalyzerConfig {
+func MergeConfigs(customConfigs map[string]common.AnalyzerConfig) map[string]common.AnalyzerConfig {
 	defaultConfigs := GetAllAnalyzerConfigs()
-	result := make(map[string]AnalyzerConfig)
+	result := make(map[string]common.AnalyzerConfig)
 
 	for name, defaultConfig := range defaultConfigs {
 		if customConfig, exists := customConfigs[name]; exists {
@@ -456,7 +446,7 @@ func MergeConfigs(customConfigs map[string]AnalyzerConfig) map[string]AnalyzerCo
 }
 
 // ValidateConfig проверяет корректность конфигурации анализатора
-func ValidateConfig(config AnalyzerConfig) error {
+func ValidateConfig(config common.AnalyzerConfig) error {
 	if config.Weight < 0 || config.Weight > 1 {
 		return fmt.Errorf("weight must be between 0 and 1")
 	}
@@ -473,7 +463,7 @@ func ValidateConfig(config AnalyzerConfig) error {
 }
 
 // GetDefaultConfig возвращает конфигурацию по умолчанию для анализатора
-func GetDefaultConfig(analyzerName string) AnalyzerConfig {
+func GetDefaultConfig(analyzerName string) common.AnalyzerConfig {
 	configs := GetAllAnalyzerConfigs()
 	if config, exists := configs[analyzerName]; exists {
 		return config
@@ -495,7 +485,7 @@ func IsAnalyzerAvailable(analyzerName string) bool {
 }
 
 // DefaultGrowthConfig - конфигурация по умолчанию для Growth Analyzer
-var DefaultGrowthConfig = AnalyzerConfig{
+var DefaultGrowthConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        1.0,
 	MinConfidence: 60.0,
@@ -513,7 +503,7 @@ var DefaultGrowthConfig = AnalyzerConfig{
 }
 
 // DefaultCounterConfig - конфигурация по умолчанию для CounterAnalyzer
-var DefaultCounterConfig = AnalyzerConfig{
+var DefaultCounterConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.7,
 	MinConfidence: 10.0,
@@ -539,7 +529,7 @@ var DefaultCounterConfig = AnalyzerConfig{
 }
 
 // DefaultOpenInterestConfig - конфигурация по умолчанию для Open Interest Analyzer
-var DefaultOpenInterestConfig = AnalyzerConfig{
+var DefaultOpenInterestConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        0.6,
 	MinConfidence: 50.0,
@@ -557,7 +547,7 @@ var DefaultOpenInterestConfig = AnalyzerConfig{
 }
 
 // DefaultFallConfig - конфигурация по умолчанию для Fall Analyzer
-var DefaultFallConfig = AnalyzerConfig{
+var DefaultFallConfig = common.AnalyzerConfig{
 	Enabled:       true,
 	Weight:        1.0,
 	MinConfidence: 60.0,

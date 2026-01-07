@@ -3,6 +3,7 @@ package growth_analyzer
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/types"
 	"time"
 )
@@ -18,7 +19,7 @@ const (
 
 // GrowthConfig - конфигурация анализатора роста
 type GrowthConfig struct {
-	AnalyzerConfigCopy
+	common.AnalyzerConfig
 	MinGrowthPercent      float64 `json:"min_growth_percent"`
 	ContinuityThreshold   float64 `json:"continuity_threshold"`
 	AccelerationThreshold float64 `json:"acceleration_threshold"`
@@ -29,7 +30,7 @@ type GrowthConfig struct {
 
 // GrowthStats - статистика анализатора роста
 type GrowthStats struct {
-	AnalyzerStatsCopy
+	common.AnalyzerStats
 	TotalGrowthSignals    int     `json:"total_growth_signals"`
 	AverageGrowthPercent  float64 `json:"average_growth_percent"`
 	MaxGrowthPercent      float64 `json:"max_growth_percent"`
@@ -117,35 +118,4 @@ type GrowthCalculatorOutput struct {
 	SignalType      GrowthSignalType `json:"signal_type"`
 	ConfidenceScore float64          `json:"confidence_score"`
 	Recommendation  string           `json:"recommendation"`
-}
-
-// AnalyzerConfigCopy - копия AnalyzerConfig для избежания циклического импорта
-type AnalyzerConfigCopy struct {
-	Enabled        bool                   `json:"enabled"`
-	Weight         float64                `json:"weight"`
-	MinConfidence  float64                `json:"min_confidence"`
-	MinDataPoints  int                    `json:"min_data_points"`
-	CustomSettings map[string]interface{} `json:"custom_settings"`
-}
-
-// ConvertToAnalyzerConfigCopy - преобразует analyzers.AnalyzerConfig в AnalyzerConfigCopy
-func ConvertToAnalyzerConfigCopy(config interface{}) AnalyzerConfigCopy {
-	// Используем reflection или конкретную реализацию
-	// Для простоты создаем базовую реализацию
-	return AnalyzerConfigCopy{
-		Enabled:        true,
-		Weight:         1.0,
-		MinConfidence:  60.0,
-		MinDataPoints:  3,
-		CustomSettings: make(map[string]interface{}),
-	}
-}
-
-type AnalyzerStatsCopy struct {
-	TotalCalls   int           `json:"total_calls"`
-	SuccessCount int           `json:"success_count"`
-	ErrorCount   int           `json:"error_count"`
-	TotalTime    time.Duration `json:"total_time"`
-	AverageTime  time.Duration `json:"average_time"`
-	LastCallTime time.Time     `json:"last_call_time"`
 }

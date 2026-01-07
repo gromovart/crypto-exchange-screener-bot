@@ -3,6 +3,7 @@ package oianalyzer
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/types"
 	"time"
 )
@@ -11,7 +12,7 @@ import (
 type Adapter struct {
 	analyzer *OpenInterestAnalyzer
 	config   AnalyzerConfigCopy
-	stats    AnalyzerStatsCopy
+	stats    common.AnalyzerStats
 }
 
 // NewAdapter создает новый адаптер с конфигурацией по умолчанию
@@ -25,7 +26,7 @@ func NewAdapter() *Adapter {
 			MinDataPoints:  3,
 			CustomSettings: make(map[string]interface{}),
 		},
-		stats: AnalyzerStatsCopy{
+		stats: common.AnalyzerStats{
 			TotalCalls:   0,
 			SuccessCount: 0,
 			ErrorCount:   0,
@@ -39,7 +40,7 @@ func NewAdapterWithConfig(config AnalyzerConfigCopy) *Adapter {
 	return &Adapter{
 		analyzer: NewOpenInterestAnalyzer(),
 		config:   config,
-		stats: AnalyzerStatsCopy{
+		stats: common.AnalyzerStats{
 			TotalCalls:   0,
 			SuccessCount: 0,
 			ErrorCount:   0,
@@ -98,7 +99,7 @@ func (a *Adapter) GetConfig() AnalyzerConfigCopy {
 }
 
 // GetStats возвращает статистику
-func (a *Adapter) GetStats() AnalyzerStatsCopy {
+func (a *Adapter) GetStats() common.AnalyzerStats {
 	return a.stats
 }
 

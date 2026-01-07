@@ -2,7 +2,7 @@
 package counter
 
 import (
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"fmt"
 )
 
@@ -26,7 +26,7 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
 func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
-	config analyzers.AnalyzerConfig,
+	config common.AnalyzerConfig,
 	storage interface{},
 	tgBot interface{},
 	marketFetcher interface{},
@@ -41,7 +41,7 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 	tgBot interface{},
 	marketFetcher interface{},
 ) *CounterAnalyzer {
-	config := analyzers.AnalyzerConfig{
+	config := common.AnalyzerConfig{
 		Enabled:        true,
 		Weight:         0.7,
 		MinConfidence:  10.0,
@@ -52,8 +52,8 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию
-func (f *CounterAnalyzerFactory) DefaultConfig() analyzers.AnalyzerConfig {
-	return analyzers.AnalyzerConfig{
+func (f *CounterAnalyzerFactory) DefaultConfig() common.AnalyzerConfig {
+	return common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,
@@ -117,7 +117,7 @@ func (f *CounterAnalyzerFactory) mergeWithDefaults(customSettings map[string]int
 
 // CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
 func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
-	config := analyzers.AnalyzerConfig{
+	config := common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,
@@ -139,7 +139,7 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 
 // CreateMinimalAnalyzer создает минимальный анализатор
 func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage interface{}) *CounterAnalyzer {
-	config := analyzers.AnalyzerConfig{
+	config := common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,
 		MinConfidence: 10.0,
@@ -159,7 +159,7 @@ func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage interface{}) *Cou
 }
 
 // ValidateConfig проверяет корректность конфигурации
-func (f *CounterAnalyzerFactory) ValidateConfig(config analyzers.AnalyzerConfig) error {
+func (f *CounterAnalyzerFactory) ValidateConfig(config common.AnalyzerConfig) error {
 	if config.Weight < 0 || config.Weight > 1 {
 		return fmt.Errorf("weight must be between 0 and 1")
 	}

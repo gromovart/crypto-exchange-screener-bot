@@ -3,6 +3,7 @@ package growth_analyzer
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer/manager"
 	"crypto-exchange-screener-bot/internal/types"
@@ -12,11 +13,11 @@ import (
 
 // GrowthAnalyzer - анализатор роста (рефакторинг по модульной структуре)
 type GrowthAnalyzer struct {
-	config       AnalyzerConfigCopy
+	config       common.AnalyzerConfig
 	stateManager *manager.StateManager
 }
 
-func convertToManagerConfig(cfg AnalyzerConfigCopy) manager.AnalyzerConfigWrapper {
+func convertToManagerConfig(cfg common.AnalyzerConfig) manager.AnalyzerConfigWrapper {
 	return manager.AnalyzerConfigWrapper{
 		Enabled:        cfg.Enabled,
 		Weight:         cfg.Weight,
@@ -27,7 +28,7 @@ func convertToManagerConfig(cfg AnalyzerConfigCopy) manager.AnalyzerConfigWrappe
 }
 
 // NewGrowthAnalyzer - создает новый анализатор роста
-func NewGrowthAnalyzer(cfg AnalyzerConfigCopy) *GrowthAnalyzer {
+func NewGrowthAnalyzer(cfg common.AnalyzerConfig) *GrowthAnalyzer {
 	if err := ValidateGrowthConfig(cfg); err != nil {
 		// Используем конфигурацию по умолчанию при ошибке валидации
 		cfg = NewGrowthConfig()
@@ -56,7 +57,7 @@ func (a *GrowthAnalyzer) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные на рост
-func (a *GrowthAnalyzer) Analyze(data []types.PriceData, cfg AnalyzerConfigCopy) ([]analysis.Signal, error) {
+func (a *GrowthAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 	success := false
 	var growthPercent float64
@@ -166,16 +167,16 @@ func (a *GrowthAnalyzer) Analyze(data []types.PriceData, cfg AnalyzerConfigCopy)
 }
 
 // GetConfig возвращает конфигурацию
-func (a *GrowthAnalyzer) GetConfig() AnalyzerConfigCopy {
+func (a *GrowthAnalyzer) GetConfig() common.AnalyzerConfig {
 	return a.config
 }
 
 // GetStats возвращает статистику
-func (a *GrowthAnalyzer) GetStats() AnalyzerStatsCopy {
+func (a *GrowthAnalyzer) GetStats() common.AnalyzerStats {
 	managerStats := a.stateManager.GetAnalyzerStats()
 
-	// Преобразуем manager.AnalyzerStatsWrapper в AnalyzerStatsCopy
-	return AnalyzerStatsCopy{
+	// Преобразуем manager.AnalyzerStatsWrapper в common.AnalyzerStats
+	return common.AnalyzerStats{
 		TotalCalls:   managerStats.TotalCalls,
 		SuccessCount: managerStats.SuccessCount,
 		ErrorCount:   managerStats.ErrorCount,
@@ -193,7 +194,7 @@ func (a *GrowthAnalyzer) GetGrowthStats() GrowthStats {
 	baseStats := a.GetStats()
 
 	return GrowthStats{
-		AnalyzerStatsCopy:     baseStats, // Используем AnalyzerStatsCopy
+		AnalyzerStats:         baseStats, // Используем AnalyzerStatsCopy
 		TotalGrowthSignals:    managerStats.TotalGrowthSignals,
 		AverageGrowthPercent:  managerStats.AverageGrowthPercent,
 		MaxGrowthPercent:      managerStats.MaxGrowthPercent,
