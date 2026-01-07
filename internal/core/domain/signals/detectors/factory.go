@@ -6,6 +6,7 @@ import (
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+	continuousanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/continuous_analyzer"
 	fallanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer"
 	growthanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
@@ -612,27 +613,77 @@ var DefaultContinuousConfig = common.AnalyzerConfig{
 	},
 }
 
-// NewContinuousAnalyzer создает анализатор непрерывности
-func NewContinuousAnalyzer(config common.AnalyzerConfig) *ContinuousAnalyzer {
-	// Гарантируем наличие необходимых настроек
-	if config.CustomSettings == nil {
-		config.CustomSettings = make(map[string]interface{})
-	}
+// continuousAnalyzerWrapper - враппер для нового модульного ContinuousAnalyzer
+type continuousAnalyzerWrapper struct {
+	analyzer *continuousanalyzer.ContinuousAnalyzer
+	config   common.AnalyzerConfig
+}
 
-	// Устанавливаем значения по умолчанию
-	defaults := map[string]interface{}{
-		"min_continuous_points": 3,
-		"max_gap_ratio":         0.3,
-	}
-
-	for key, defaultValue := range defaults {
-		if _, ok := config.CustomSettings[key]; !ok {
-			config.CustomSettings[key] = defaultValue
-		}
-	}
-
-	return &ContinuousAnalyzer{
+// NewContinuousAnalyzer создает анализатор непрерывности (новая модульная версия)
+func NewContinuousAnalyzer(config common.AnalyzerConfig) common.Analyzer {
+	// Создаем враппер для новой модульной версии
+	wrapper := &continuousAnalyzerWrapper{
 		config: config,
-		stats:  common.AnalyzerStats{},
+	}
+
+	return wrapper
+}
+
+// Name возвращает имя анализатора
+func (w *continuousAnalyzerWrapper) Name() string {
+	if w.analyzer == nil {
+		w.analyzer = continuousanalyzer.NewContinuousAnalyzer(w.config)
+	}
+	return w.analyzer.Name()
+}
+
+// Version возвращает версию анализатора
+func (w *continuousAnalyzerWrapper) Version() string {
+	if w.analyzer == nil {
+		w.analyzer = continuousanalyzer.NewContinuousAnalyzer(w.config)
+	}
+	return w.analyzer.Version()
+}
+
+// Supports проверяет поддержку символа
+func (w *continuousAnalyzerWrapper) Supports(symbol string) bool {
+	if w.analyzer == nil {
+		w.analyzer = continuousanalyzer.NewContinuousAnalyzer(w.config)
+	}
+	return w.analyzer.Supports(symbol)
+}
+
+// Analyze анализирует данные
+func (w *continuousAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+	if w.analyzer == nil {
+		w.analyzer = continuousanalyzer.NewContinuousAnalyzer(w.config)
+	}
+
+	// Обновляем конфигурацию если передана новая
+	w.config = config
+	w.analyzer = continuousanalyzer.NewContinuousAnalyzer(config)
+
+	return w.analyzer.Analyze(data, config)
+}
+
+// GetConfig возвращает конфигурацию
+func (w *continuousAnalyzerWrapper) GetConfig() common.AnalyzerConfig {
+	return w.config
+}
+
+// GetStats возвращает статистику
+func (w *continuousAnalyzerWrapper) GetStats() common.AnalyzerStats {
+	if w.analyzer == nil {
+		return common.AnalyzerStats{}
+	}
+
+	stats := w.analyzer.GetStats()
+	return common.AnalyzerStats{
+		TotalCalls:   stats.TotalCalls,
+		SuccessCount: stats.SuccessCount,
+		ErrorCount:   stats.ErrorCount,
+		TotalTime:    stats.TotalTime,
+		AverageTime:  stats.AverageTime,
+		LastCallTime: stats.LastCallTime,
 	}
 }
