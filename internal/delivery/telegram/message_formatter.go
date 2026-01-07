@@ -86,7 +86,7 @@ func (f *MarketMessageFormatter) FormatMessage(params *MessageParams) string {
 		params.VolumeDelta, params.VolumeDeltaPercent,
 		params.LongLiqVolume, params.ShortLiqVolume,
 	); rec != "" {
-		builder.WriteString(fmt.Sprintf("🎯 Рекомендация:\n%s\n\n", rec))
+		builder.WriteString(fmt.Sprintf("🎯 РЕКОМЕНДАЦИЯ:\n%s\n\n", rec))
 	}
 
 	// Фандинг
