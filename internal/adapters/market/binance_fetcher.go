@@ -157,8 +157,8 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 
 	// 🔴 ПУБЛИКУЕМ ОДНО СОБЫТИЕ СО ВСЕМИ ЦЕНАМИ (как в Bybit)
 	if updatedCount > 0 && f.eventBus != nil {
-		event := events.Event{
-			Type:      events.EventPriceUpdated,
+		event := types.Event{
+			Type:      types.EventPriceUpdated,
 			Source:    "binance_price_fetcher",
 			Data:      priceDataList,
 			Timestamp: now,

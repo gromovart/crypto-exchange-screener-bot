@@ -3,16 +3,21 @@ package notification
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	events "crypto-exchange-screener-bot/internal/types"
 	"log"
 	"time"
 )
 
 // NotifierFactory фабрика для создания нотификаторов
-type NotifierFactory struct{}
+type NotifierFactory struct {
+	eventBus events.EventBus // Добавить EventBus
+}
 
 // NewNotifierFactory создает новую фабрику нотификаторов
-func NewNotifierFactory() *NotifierFactory {
-	return &NotifierFactory{}
+func NewNotifierFactory(eventBus events.EventBus) *NotifierFactory {
+	return &NotifierFactory{
+		eventBus: eventBus,
+	}
 }
 
 // CreateNotifier создает нотификатор на основе конфигурации
@@ -21,11 +26,11 @@ func (nf *NotifierFactory) CreateNotifier(cfg *config.Config) Notifier {
 		return nil
 	}
 
-	// Если включен Telegram, создаем TelegramNotifierV2
+	// Если включен Telegram, создаем TelegramNotifier
 	if cfg.Telegram.Enabled {
-		notifier := NewTelegramNotifierV2(cfg)
+		notifier := NewTelegramNotifier(cfg, nf.eventBus)
 		if notifier != nil {
-			log.Println("✅ Создан TelegramNotifierV2")
+			log.Println("✅ Создан TelegramNotifier с EventBus")
 			return notifier
 		}
 	}
@@ -45,7 +50,7 @@ func (nf *NotifierFactory) CreateCompositeNotifier(cfg *config.Config) *Composit
 
 	// Добавляем Telegram нотификатор если включен
 	if cfg.Telegram.Enabled {
-		telegramNotifier := NewTelegramNotifierV2(cfg)
+		telegramNotifier := NewTelegramNotifier(cfg, nf.eventBus)
 		if telegramNotifier != nil {
 			service.AddNotifier(telegramNotifier)
 

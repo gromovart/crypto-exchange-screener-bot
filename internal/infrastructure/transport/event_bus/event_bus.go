@@ -1,7 +1,8 @@
-// internal/events/event_bus.go
+// internal/infrastructure/transport/event_bus/event_bus.go
 package events
 
 import (
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
@@ -16,10 +17,10 @@ import (
 // EventBus - центральная шина событий
 type EventBus struct {
 	mu          sync.RWMutex
-	subscribers map[EventType][]Subscriber
+	subscribers map[types.EventType][]types.EventSubscriber
 	middlewares []Middleware
-	eventBuffer chan Event
-	metrics     *EventMetrics
+	eventBuffer chan types.Event
+	metrics     *types.EventBusMetrics
 	config      EventBusConfig
 	running     bool
 	stopChan    chan struct{}
@@ -35,16 +36,6 @@ type EventBusConfig struct {
 	EnableMetrics   bool          `json:"enable_metrics"`
 	EnableLogging   bool          `json:"enable_logging"`
 	DeadLetterQueue bool          `json:"dead_letter_queue"`
-}
-
-// EventMetrics - метрики EventBus
-type EventMetrics struct {
-	mu               sync.RWMutex
-	EventsPublished  int64             `json:"events_published"`
-	EventsProcessed  int64             `json:"events_processed"`
-	EventsFailed     int64             `json:"events_failed"`
-	SubscribersCount map[EventType]int `json:"subscribers_count"`
-	ProcessingTime   time.Duration     `json:"processing_time"`
 }
 
 // DefaultConfig - конфигурация по умолчанию
@@ -66,11 +57,11 @@ func NewEventBus(config ...EventBusConfig) *EventBus {
 	}
 
 	bus := &EventBus{
-		subscribers: make(map[EventType][]Subscriber),
+		subscribers: make(map[types.EventType][]types.EventSubscriber),
 		middlewares: make([]Middleware, 0),
-		eventBuffer: make(chan Event, cfg.BufferSize),
-		metrics: &EventMetrics{
-			SubscribersCount: make(map[EventType]int),
+		eventBuffer: make(chan types.Event, cfg.BufferSize),
+		metrics: &types.EventBusMetrics{
+			SubscribersCount: make(map[types.EventType]int),
 		},
 		config:   cfg,
 		stopChan: make(chan struct{}),
@@ -124,7 +115,7 @@ func (b *EventBus) Stop() {
 }
 
 // Subscribe подписывает обработчик на тип события
-func (b *EventBus) Subscribe(eventType EventType, subscriber Subscriber) {
+func (b *EventBus) Subscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -157,7 +148,7 @@ func (b *EventBus) Subscribe(eventType EventType, subscriber Subscriber) {
 }
 
 // Unsubscribe отписывает обработчик от типа события
-func (b *EventBus) Unsubscribe(eventType EventType, subscriber Subscriber) {
+func (b *EventBus) Unsubscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -183,7 +174,7 @@ func (b *EventBus) Unsubscribe(eventType EventType, subscriber Subscriber) {
 }
 
 // Publish публикует событие
-func (b *EventBus) Publish(event Event) error {
+func (b *EventBus) Publish(event types.Event) error {
 	if !b.running {
 		return fmt.Errorf("event bus is not running")
 	}
@@ -202,11 +193,11 @@ func (b *EventBus) Publish(event Event) error {
 	select {
 	case b.eventBuffer <- event:
 		// Обновляем метрики
-		b.metrics.mu.Lock()
+		b.metrics.Mu.Lock()
 		b.metrics.EventsPublished++
-		b.metrics.mu.Unlock()
+		b.metrics.Mu.Unlock()
 
-		if b.config.EnableLogging && event.Type != EventPriceUpdated {
+		if b.config.EnableLogging && event.Type != types.EventPriceUpdated {
 			logger.Info("📤 Опубликовано событие: %s от %s",
 				event.Type, event.Source)
 		}
@@ -222,7 +213,7 @@ func (b *EventBus) Publish(event Event) error {
 }
 
 // PublishSync публикует событие синхронно
-func (b *EventBus) PublishSync(event Event) error {
+func (b *EventBus) PublishSync(event types.Event) error {
 	return b.processEvent(event)
 }
 
@@ -257,7 +248,7 @@ func (b *EventBus) eventWorker(id int) {
 }
 
 // processEvent обрабатывает одно событие
-func (b *EventBus) processEvent(event Event) error {
+func (b *EventBus) processEvent(event types.Event) error {
 	startTime := time.Now()
 
 	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
@@ -265,10 +256,10 @@ func (b *EventBus) processEvent(event Event) error {
 
 	defer func() {
 		// Обновляем метрики времени обработки
-		b.metrics.mu.Lock()
+		b.metrics.Mu.Lock()
 		b.metrics.ProcessingTime += time.Since(startTime)
 		b.metrics.EventsProcessed++
-		b.metrics.mu.Unlock()
+		b.metrics.Mu.Unlock()
 
 		// 🔴 ДОБАВЬТЕ:
 		logger.Info("✅ EventBus.processEvent: %s обработано за %v\n",
@@ -297,8 +288,8 @@ func (b *EventBus) processEvent(event Event) error {
 }
 
 // createHandlerChain создает цепочку обработчиков
-func (b *EventBus) createHandlerChain(subscribers []Subscriber) HandlerFunc {
-	return func(event Event) error {
+func (b *EventBus) createHandlerChain(subscribers []types.EventSubscriber) HandlerFunc {
+	return func(event types.Event) error {
 		logger.Info("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков\n",
 			event.Type, len(subscribers))
 
@@ -327,7 +318,7 @@ func (b *EventBus) createHandlerChain(subscribers []Subscriber) HandlerFunc {
 }
 
 // handleEventWithRetry обрабатывает событие с повторными попытками
-func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) error {
+func (b *EventBus) handleEventWithRetry(event types.Event, subscriber types.EventSubscriber) error {
 	logger.Info("🔍 [handleEventWithRetry] Вызов %s для события %s\n",
 		subscriber.GetName(), event.Type)
 
@@ -337,9 +328,9 @@ func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) erro
 	if err != nil {
 		logger.Info("❌ [handleEventWithRetry] Ошибка от %s: %v\n",
 			subscriber.GetName(), err)
-		b.metrics.mu.Lock()
+		b.metrics.Mu.Lock()
 		b.metrics.EventsFailed++
-		b.metrics.mu.Unlock()
+		b.metrics.Mu.Unlock()
 		return err
 	}
 
@@ -349,13 +340,13 @@ func (b *EventBus) handleEventWithRetry(event Event, subscriber Subscriber) erro
 }
 
 // executeWithMiddleware выполняет обработку через цепочку middleware
-func (b *EventBus) executeWithMiddleware(event Event, handler HandlerFunc) error {
+func (b *EventBus) executeWithMiddleware(event types.Event, handler HandlerFunc) error {
 	// Создаем цепочку middleware
 	chain := handler
 	for i := len(b.middlewares) - 1; i >= 0; i-- {
 		mw := b.middlewares[i]
 		next := chain
-		chain = func(event Event) error {
+		chain = func(event types.Event) error {
 			logger.Info("🔍 [executeWithMiddleware] Вызов middleware %T\n", mw)
 			return mw.Process(event, next)
 		}
@@ -368,15 +359,15 @@ func (b *EventBus) executeWithMiddleware(event Event, handler HandlerFunc) error
 }
 
 // GetMetrics возвращает метрики
-func (b *EventBus) GetMetrics() EventMetrics {
-	b.metrics.mu.RLock()
-	defer b.metrics.mu.RUnlock()
+func (b *EventBus) GetMetrics() types.EventBusMetrics {
+	b.metrics.Mu.RLock()
+	defer b.metrics.Mu.RUnlock()
 
 	return *b.metrics
 }
 
 // GetSubscriberCount возвращает количество подписчиков
-func (b *EventBus) GetSubscriberCount(eventType EventType) int {
+func (b *EventBus) GetSubscriberCount(eventType types.EventType) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -384,11 +375,11 @@ func (b *EventBus) GetSubscriberCount(eventType EventType) int {
 }
 
 // GetEventTypes возвращает все типы событий с подписчиками
-func (b *EventBus) GetEventTypes() []EventType {
+func (b *EventBus) GetEventTypes() []types.EventType {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	var types []EventType
+	var types []types.EventType
 	for eventType := range b.subscribers {
 		types = append(types, eventType)
 	}
@@ -440,8 +431,8 @@ func (b *EventBus) safeExecute(fn func()) {
 			log.Printf("⚠️ Паника восстановлена: %v\n%s", r, debug.Stack())
 
 			// Публикуем событие об ошибке
-			b.Publish(Event{
-				Type:   EventError,
+			b.Publish(types.Event{
+				Type:   types.EventError,
 				Source: "event_bus",
 				Data:   fmt.Sprintf("Panic recovered: %v", r),
 			})

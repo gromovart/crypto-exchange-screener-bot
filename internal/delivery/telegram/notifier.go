@@ -1,22 +1,22 @@
-// internal/delivery/telegram/notifier.go
+// internal/delivery/telegram/notifier.go (исправленный)
 package telegram
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
+	"fmt"
 	"log"
 	"sync"
 	"time"
 )
 
-// Notifier - нотификатор
+// Notifier - нотификатор Telegram (слушает EventBus)
 type Notifier struct {
 	config           *config.Config
 	messageSender    *MessageSender
 	messageFormatter *MarketMessageFormatter
+	telegramBot      *TelegramBot // Добавляем TelegramBot
 	rateLimiter      *RateLimiter
-	lastSendTime     time.Time
-	minInterval      time.Duration
 	enabled          bool
 	mu               sync.RWMutex
 }
@@ -33,8 +33,15 @@ func NewNotifier(cfg *config.Config) *Notifier {
 		config:           cfg,
 		messageFormatter: NewMarketMessageFormatter(exchange),
 		rateLimiter:      NewRateLimiter(2 * time.Second),
-		minInterval:      2 * time.Second,
 		enabled:          cfg.TelegramEnabled,
+	}
+}
+
+// SetTelegramBot устанавливает TelegramBot
+func (n *Notifier) SetTelegramBot(bot *TelegramBot) {
+	n.telegramBot = bot
+	if bot != nil {
+		n.messageSender = bot.messageSender
 	}
 }
 
@@ -43,19 +50,165 @@ func (n *Notifier) SetMessageSender(sender *MessageSender) {
 	n.messageSender = sender
 }
 
-// SendNotification отправляет уведомление
-func (n *Notifier) SendNotification(signal types.GrowthSignal, menuEnabled bool) error {
-	// 🔴 ОТКЛЮЧАЕМ - торговые сигналы отправляет только CounterAnalyzer через CounterNotifier
-
-	if !n.IsEnabled() {
+// HandleEvent обрабатывает события из EventBus
+func (n *Notifier) HandleEvent(event types.Event) error {
+	if !n.IsEnabled() || n.telegramBot == nil {
 		return nil
 	}
 
-	log.Printf("⚠️ Notifier: Торговые сигналы ОТКЛЮЧЕНЫ. Используйте CounterAnalyzer для %s %.2f%% (%s)",
-		signal.Symbol, signal.GrowthPercent+signal.FallPercent, signal.Direction)
+	log.Printf("🤖 telegram.Notifier: Событие %s от %s", event.Type, event.Source)
 
-	// Возвращаем успех, но не отправляем сообщение
+	switch event.Type {
+	case types.EventSignalDetected:
+		return n.handleSignalEvent(event)
+	case types.EventCounterSignalDetected:
+		return n.handleCounterSignalEvent(event)
+	case types.EventCounterNotificationRequest:
+		return n.handleCounterNotification(event)
+	}
+
 	return nil
+}
+
+// handleSignalEvent обрабатывает обычные сигналы
+func (n *Notifier) handleSignalEvent(event types.Event) error {
+	// Пропускаем сигналы от counter_analyzer - они обрабатываются отдельно
+	if event.Source == "counter_analyzer" {
+		log.Printf("⚠️ Пропуск сигнала counter_analyzer в telegram.Notifier")
+		return nil
+	}
+
+	// Обработка обычных сигналов
+	signal, ok := event.Data.(types.TrendSignal)
+	if !ok {
+		return nil
+	}
+
+	log.Printf("🤖 telegram.Notifier: Отправка сигнала %s %.2f%%",
+		signal.Symbol, signal.ChangePercent)
+
+	// Используем TelegramBot для отправки
+	return n.telegramBot.SendNotification(types.GrowthSignal{
+		Symbol:        signal.Symbol,
+		Direction:     signal.Direction,
+		GrowthPercent: signal.ChangePercent,
+		FallPercent:   0,
+		Confidence:    signal.Confidence,
+		DataPoints:    signal.DataPoints,
+		StartPrice:    0,
+		EndPrice:      0,
+		Timestamp:     signal.Timestamp,
+	})
+}
+
+// handleCounterSignalEvent обрабатывает Counter сигналы
+func (n *Notifier) handleCounterSignalEvent(event types.Event) error {
+	log.Printf("🤖 telegram.Notifier: Обработка Counter сигнала от %s", event.Source)
+
+	// Извлекаем данные Counter сигнала
+	data, ok := event.Data.(map[string]interface{})
+	if !ok {
+		log.Printf("❌ Неверный формат данных Counter сигнала")
+		return nil
+	}
+
+	// Извлекаем данные для форматирования
+	symbol, _ := data["symbol"].(string)
+	direction, _ := data["direction"].(string)
+	change, _ := data["change"].(float64)
+	signalCount, _ := data["signal_count"].(int)
+	maxSignals, _ := data["max_signals"].(int)
+	periodStr, _ := data["period"].(string)
+	currentPrice, _ := data["current_price"].(float64)
+	volume24h, _ := data["volume_24h"].(float64)
+	openInterest, _ := data["open_interest"].(float64)
+	oiChange24h, _ := data["oi_change_24h"].(float64)
+	fundingRate, _ := data["funding_rate"].(float64)
+	volumeDelta, _ := data["volume_delta"].(float64)
+	volumeDeltaPercent, _ := data["volume_delta_percent"].(float64)
+	rsi, _ := data["rsi"].(float64)
+	macdSignal, _ := data["macd_signal"].(float64)
+	deltaSource, _ := data["delta_source"].(string)
+
+	if symbol == "" {
+		log.Printf("❌ Не указан символ")
+		return nil
+	}
+
+	if periodStr == "" {
+		periodStr = "1 час"
+	}
+
+	log.Printf("✅ Counter сигнал: %s %s %.2f%% (сигналов: %d/%d)",
+		symbol, direction, change, signalCount, maxSignals)
+
+	// Создаем MessageParams для полного форматирования
+	params := &MessageParams{
+		Symbol:             symbol,
+		Direction:          direction,
+		Change:             change,
+		SignalCount:        signalCount,
+		MaxSignals:         maxSignals,
+		CurrentPrice:       currentPrice,
+		Volume24h:          volume24h,
+		OpenInterest:       openInterest,
+		OIChange24h:        oiChange24h,
+		FundingRate:        fundingRate,
+		AverageFunding:     0.0001, // default
+		NextFundingTime:    time.Now().Add(1 * time.Hour),
+		Period:             periodStr,
+		LiquidationVolume:  0,
+		LongLiqVolume:      0,
+		ShortLiqVolume:     0,
+		VolumeDelta:        volumeDelta,
+		VolumeDeltaPercent: volumeDeltaPercent,
+		RSI:                rsi,
+		MACDSignal:         macdSignal,
+		DeltaSource:        deltaSource,
+	}
+
+	// Форматируем полное сообщение
+	message := n.messageFormatter.FormatMessage(params)
+
+	// Отправляем через TelegramBot
+	if n.telegramBot != nil && n.messageSender != nil {
+		return n.messageSender.SendTextMessage(message, nil, false)
+	}
+
+	return fmt.Errorf("telegram bot or message sender not initialized")
+}
+
+// Вспомогательная функция для получения ключей из map
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// handleCounterNotification обрабатывает запросы уведомлений
+func (n *Notifier) handleCounterNotification(event types.Event) error {
+	log.Printf("📨 telegram.Notifier: Обработка запроса уведомления")
+
+	// Можно добавить специальную логику для запросов уведомлений
+	// Например, форматирование с дополнительными данными
+
+	return nil
+}
+
+// GetName возвращает имя нотификатора (для интерфейса EventSubscriber)
+func (n *Notifier) GetName() string {
+	return "telegram_notifier"
+}
+
+// GetSubscribedEvents возвращает типы событий
+func (n *Notifier) GetSubscribedEvents() []types.EventType {
+	return []types.EventType{
+		types.EventSignalDetected,
+		types.EventCounterSignalDetected,
+		types.EventCounterNotificationRequest,
+	}
 }
 
 // SetEnabled включает/выключает уведомления

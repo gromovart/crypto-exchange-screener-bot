@@ -3,6 +3,7 @@ package orchestrator
 
 import (
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"sync"
 	"time"
@@ -70,8 +71,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 	})
 
 	// Публикуем событие через eventBus если он есть
-	lm.publishEvent(events.Event{
-		Type:   events.EventServiceStarted,
+	lm.publishEvent(types.Event{
+		Type:   types.EventServiceStarted,
 		Source: name,
 		Data: map[string]interface{}{
 			"service": name,
@@ -88,8 +89,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 			Error: err.Error(),
 		})
 
-		lm.publishEvent(events.Event{
-			Type:   events.EventError,
+		lm.publishEvent(types.Event{
+			Type:   types.EventError,
 			Source: name,
 			Data: map[string]interface{}{
 				"service": name,
@@ -116,8 +117,8 @@ func (lm *LifecycleManager) StartService(name string) error {
 	// Сбрасываем счетчик перезапусков
 	delete(lm.restartAttempts, name)
 
-	lm.publishEvent(events.Event{
-		Type:   events.EventServiceStarted,
+	lm.publishEvent(types.Event{
+		Type:   types.EventServiceStarted,
 		Source: name,
 		Data: map[string]interface{}{
 			"service": name,
@@ -146,8 +147,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 		StoppedAt: time.Now(),
 	})
 
-	lm.publishEvent(events.Event{
-		Type:   events.EventServiceStopped,
+	lm.publishEvent(types.Event{
+		Type:   types.EventServiceStopped,
 		Source: name,
 		Data: map[string]interface{}{
 			"service": name,
@@ -164,8 +165,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 			Error: err.Error(),
 		})
 
-		lm.publishEvent(events.Event{
-			Type:   events.EventServiceError,
+		lm.publishEvent(types.Event{
+			Type:   types.EventServiceError,
 			Source: name,
 			Data: map[string]interface{}{
 				"service": name,
@@ -184,8 +185,8 @@ func (lm *LifecycleManager) StopService(name string) error {
 		StoppedAt: time.Now(),
 	})
 
-	lm.publishEvent(events.Event{
-		Type:   events.EventServiceStopped,
+	lm.publishEvent(types.Event{
+		Type:   types.EventServiceStopped,
 		Source: name,
 		Data: map[string]interface{}{
 			"service":   name,
@@ -267,8 +268,8 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 				Error: err.Error(),
 			})
 
-			lm.publishEvent(events.Event{
-				Type:   events.EventServiceError,
+			lm.publishEvent(types.Event{
+				Type:   types.EventServiceError,
 				Source: serviceName,
 				Data: map[string]interface{}{
 					"service": serviceName,
@@ -288,8 +289,8 @@ func (lm *LifecycleManager) StartAll() map[string]error {
 				StartedAt: time.Now(),
 			})
 
-			lm.publishEvent(events.Event{
-				Type:   events.EventServiceStarted,
+			lm.publishEvent(types.Event{
+				Type:   types.EventServiceStarted,
 				Source: serviceName,
 				Data: map[string]interface{}{
 					"service": serviceName,
@@ -327,8 +328,8 @@ func (lm *LifecycleManager) StopAll() map[string]error {
 				Error: err.Error(),
 			})
 
-			lm.publishEvent(events.Event{
-				Type:   events.EventServiceError,
+			lm.publishEvent(types.Event{
+				Type:   types.EventServiceError,
 				Source: serviceName,
 				Data: map[string]interface{}{
 					"service": serviceName,
@@ -343,8 +344,8 @@ func (lm *LifecycleManager) StopAll() map[string]error {
 				StoppedAt: time.Now(),
 			})
 
-			lm.publishEvent(events.Event{
-				Type:   events.EventServiceStopped,
+			lm.publishEvent(types.Event{
+				Type:   types.EventServiceStopped,
 				Source: serviceName,
 				Data: map[string]interface{}{
 					"service": serviceName,
@@ -420,8 +421,8 @@ func (lm *LifecycleManager) scheduleRestart(name string) {
 
 	// Проверяем максимальное количество попыток
 	if attempts > lm.config.MaxRestartAttempts && lm.config.MaxRestartAttempts > 0 {
-		lm.publishEvent(events.Event{
-			Type:   events.EventServiceError,
+		lm.publishEvent(types.Event{
+			Type:   types.EventServiceError,
 			Source: "LifecycleManager",
 			Data: map[string]interface{}{
 				"service":   name,
@@ -438,8 +439,8 @@ func (lm *LifecycleManager) scheduleRestart(name string) {
 	go func() {
 		time.Sleep(lm.config.RestartDelay)
 
-		lm.publishEvent(events.Event{
-			Type:   events.EventServiceStarted,
+		lm.publishEvent(types.Event{
+			Type:   types.EventServiceStarted,
 			Source: "LifecycleManager",
 			Data: map[string]interface{}{
 				"service":   name,
@@ -451,8 +452,8 @@ func (lm *LifecycleManager) scheduleRestart(name string) {
 		})
 
 		if err := lm.StartService(name); err != nil {
-			lm.publishEvent(events.Event{
-				Type:   events.EventServiceError,
+			lm.publishEvent(types.Event{
+				Type:   types.EventServiceError,
 				Source: "LifecycleManager",
 				Data: map[string]interface{}{
 					"service":   name,
@@ -489,8 +490,8 @@ func (lm *LifecycleManager) performHealthCheck() {
 	health := lm.registry.CheckHealth()
 
 	// Публикуем событие проверки здоровья
-	lm.publishEvent(events.Event{
-		Type:   events.EventHealthCheck,
+	lm.publishEvent(types.Event{
+		Type:   types.EventHealthCheck,
 		Source: "LifecycleManager",
 		Data: map[string]interface{}{
 			"message":   "Health check performed",
@@ -512,7 +513,7 @@ func (lm *LifecycleManager) performHealthCheck() {
 }
 
 // publishEvent публикует событие через eventBus или логирует
-func (lm *LifecycleManager) publishEvent(event events.Event) {
+func (lm *LifecycleManager) publishEvent(event types.Event) {
 	if lm.eventBus != nil {
 		lm.eventBus.Publish(event)
 	} else {

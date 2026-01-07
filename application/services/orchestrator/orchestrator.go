@@ -5,6 +5,7 @@ import (
 	"crypto-exchange-screener-bot/application/pipeline"
 	"crypto-exchange-screener-bot/internal/adapters"
 	fetcher "crypto-exchange-screener-bot/internal/adapters/market"
+	"crypto-exchange-screener-bot/internal/adapters/notification"
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
@@ -13,6 +14,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
@@ -117,7 +119,7 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 
 	// 5. Создаем CompositeNotificationService через фабрику
 	log.Println("📱 Создание CompositeNotificationService через фабрику...")
-	notifierFactory := notifier.NewNotifierFactory()
+	notifierFactory := notifier.NewNotifierFactory(dm.eventBus)
 	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)
 
 	if dm.notification == nil {
@@ -153,16 +155,28 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	// 🔴 ИСПРАВЛЕНИЕ: Создаем фабрику с priceFetcher
 	analysisFactory := engine.NewFactory(dm.priceFetcher)
 
+	// Получаем TelegramNotifier из CompositeNotificationService
+	var telegramNotifier *notification.TelegramNotifier // Изменен тип
+	if dm.notification != nil {
+		for _, notifier := range dm.notification.GetNotifiers() {
+			if tn, ok := notifier.(*notification.TelegramNotifier); ok {
+				telegramNotifier = tn // Теперь типы совместимы
+				break
+			}
+		}
+	}
+
 	dm.analysisEngine = analysisFactory.NewAnalysisEngineFromConfig(
 		dm.storage,
 		dm.eventBus,
 		dm.config,
-		dm.telegramBot,
+		telegramNotifier,
 	)
 
 	log.Printf("✅ AnalysisEngine создан с фабрикой")
 	log.Printf("   PriceFetcher передан в фабрику: %v", dm.priceFetcher != nil)
-	log.Printf("   Telegram бот: %v", dm.telegramBot != nil)
+	log.Printf("   TelegramNotifier: %v", telegramNotifier != nil)
+
 	// 8. Создаем SignalPipeline
 	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
 
@@ -204,9 +218,21 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 func (dm *DataManager) registerBasicSubscribers() {
 	// Консольный логгер для ошибок и сигналов
 	consoleSubscriber := events.NewConsoleLoggerSubscriber()
-	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventSignalDetected, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventPriceUpdated, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventError, consoleSubscriber)
+
+	// Регистрируем telegram.Notifier если Telegram бот доступен
+	if dm.telegramBot != nil {
+		telegramNotifier := telegram.NewNotifier(dm.config)
+		telegramNotifier.SetTelegramBot(dm.telegramBot)
+
+		dm.eventBus.Subscribe(types.EventSignalDetected, telegramNotifier)
+		dm.eventBus.Subscribe(types.EventCounterSignalDetected, telegramNotifier)
+		dm.eventBus.Subscribe(types.EventCounterNotificationRequest, telegramNotifier)
+
+		log.Println("✅ Telegram Notifier зарегистрирован как подписчик EventBus")
+	}
 
 	log.Println("✅ Базовые подписчики зарегистрированы")
 }
@@ -219,8 +245,8 @@ func (dm *DataManager) subscribeNotificationService() {
 
 	notificationSubscriber := events.NewBaseSubscriber(
 		"notification_service",
-		[]events.EventType{events.EventSignalDetected},
-		func(event events.Event) error {
+		[]types.EventType{types.EventSignalDetected},
+		func(event types.Event) error {
 			if dm.notification != nil && dm.notification.IsEnabled() {
 				// Преобразуем сигнал для нотификации
 				if signal, ok := event.Data.(analysis.Signal); ok {
@@ -232,7 +258,7 @@ func (dm *DataManager) subscribeNotificationService() {
 		},
 	)
 
-	dm.eventBus.Subscribe(events.EventSignalDetected, notificationSubscriber)
+	dm.eventBus.Subscribe(types.EventSignalDetected, notificationSubscriber)
 	log.Println("✅ Notification service подписан на события сигналов")
 }
 
@@ -402,8 +428,8 @@ func (dm *DataManager) checkHealth() {
 
 	if health.Status != "healthy" {
 		// Публикуем событие в EventBus
-		dm.eventBus.Publish(events.Event{
-			Type:   events.EventError,
+		dm.eventBus.Publish(types.Event{
+			Type:   types.EventError,
 			Source: "DataManager",
 			Data: map[string]interface{}{
 				"status":  health.Status,
@@ -499,17 +525,17 @@ func (dm *DataManager) GetService(name string) (interface{}, bool) {
 }
 
 // PublishEvent публикует событие
-func (dm *DataManager) PublishEvent(event events.Event) {
+func (dm *DataManager) PublishEvent(event types.Event) {
 	dm.eventBus.Publish(event)
 }
 
 // Subscribe подписывает на события
-func (dm *DataManager) Subscribe(eventType events.EventType, subscriber events.Subscriber) {
+func (dm *DataManager) Subscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	dm.eventBus.Subscribe(eventType, subscriber)
 }
 
 // Unsubscribe отписывает от событий
-func (dm *DataManager) Unsubscribe(eventType events.EventType, subscriber events.Subscriber) {
+func (dm *DataManager) Unsubscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	dm.eventBus.Unsubscribe(eventType, subscriber)
 }
 
@@ -629,9 +655,9 @@ func (dm *DataManager) GetActiveAnalyzers() []string {
 // AddConsoleSubscriber добавляет подписчика для вывода в консоль
 func (dm *DataManager) AddConsoleSubscriber() {
 	consoleSubscriber := events.NewConsoleLoggerSubscriber()
-	dm.eventBus.Subscribe(events.EventSignalDetected, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventPriceUpdated, consoleSubscriber)
-	dm.eventBus.Subscribe(events.EventError, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventSignalDetected, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventPriceUpdated, consoleSubscriber)
+	dm.eventBus.Subscribe(types.EventError, consoleSubscriber)
 }
 
 // AddTelegramSubscriber добавляет подписчика Telegram
@@ -642,7 +668,7 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 
 	// Создаем подписчика для Telegram
 	telegramSubscriber := events.NewTelegramNotifierSubscriber(dm.telegramBot)
-	dm.eventBus.Subscribe(events.EventSignalDetected, telegramSubscriber)
+	dm.eventBus.Subscribe(types.EventSignalDetected, telegramSubscriber)
 
 	return nil
 }

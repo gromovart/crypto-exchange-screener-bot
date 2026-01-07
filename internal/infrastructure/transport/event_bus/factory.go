@@ -50,59 +50,59 @@ func (f *Factory) RegisterDefaultSubscribers(
 ) {
 	// Консольный логгер (всегда включен)
 	consoleLogger := f.createConsoleLoggerSubscriber()
-	bus.Subscribe(EventPriceUpdated, consoleLogger)
-	bus.Subscribe(EventSignalDetected, consoleLogger)
-	bus.Subscribe(EventError, consoleLogger)
+	bus.Subscribe(types.EventPriceUpdated, consoleLogger)
+	bus.Subscribe(types.EventSignalDetected, consoleLogger)
+	bus.Subscribe(types.EventError, consoleLogger)
 
 	// Telegram нотификатор если включен
 	if cfg.TelegramEnabled && telegramBot != nil {
-		log.Println("📱 Регистрация TelegramNotifierV2 подписчика...")
+		log.Println("📱 Регистрация TelegramNotifier подписчика...")
 
-		// Ищем существующий TelegramNotifierV2 в CompositeNotificationService
-		var telegramNotifierV2 *notifier.TelegramNotifierV2
+		// Ищем существующий TelegramNotifier в CompositeNotificationService
+		var telegramNotifier *notifier.TelegramNotifier // ИЗМЕНИЛ ТИП
 
 		if notificationService != nil {
-			// Пробуем получить существующий TelegramNotifierV2
+			// Пробуем получить существующий TelegramNotifier
 			for _, n := range notificationService.GetNotifiers() {
-				if tn, ok := n.(*notifier.TelegramNotifierV2); ok {
-					telegramNotifierV2 = tn
+				if tn, ok := n.(*notifier.TelegramNotifier); ok { // ИЗМЕНИЛ ТИП
+					telegramNotifier = tn
 					break
 				}
 			}
 		}
 
-		// Если не нашли существующий, создаем новый
-		if telegramNotifierV2 == nil {
-			telegramNotifierV2 = notifier.NewTelegramNotifierV2(cfg)
-			if telegramNotifierV2 != nil && notificationService != nil {
-				notificationService.AddNotifier(telegramNotifierV2)
-				log.Println("✅ TelegramNotifierV2 создан и добавлен")
+		// Если не нашли существующий, создаем новый с EventBus
+		if telegramNotifier == nil {
+			telegramNotifier = notifier.NewTelegramNotifier(cfg, bus) // ПЕРЕДАЕМ bus
+			if telegramNotifier != nil && notificationService != nil {
+				notificationService.AddNotifier(telegramNotifier)
+				log.Println("✅ TelegramNotifier создан и добавлен")
 			}
 		}
 
-		if telegramNotifierV2 != nil {
+		if telegramNotifier != nil {
 			// Обертка в BaseSubscriber
 			telegramSubscriber := NewBaseSubscriber(
-				"telegram_notifier_v2",
-				[]EventType{EventSignalDetected},
-				func(event Event) error {
+				"telegram_notifier",
+				[]types.EventType{types.EventSignalDetected},
+				func(event types.Event) error {
 					// Получаем сигнал из события
 					if signal, ok := event.Data.(types.TrendSignal); ok {
-						return telegramNotifierV2.Send(signal)
+						return telegramNotifier.Send(signal)
 					}
 					// Если это другой тип сигнала (например, analysis.Signal), конвертируем
 					if analysisSignal, ok := event.Data.(analysis.Signal); ok {
 						// Конвертируем analysis.Signal в types.TrendSignal
 						trendSignal := convertAnalysisSignalToTrendSignal(analysisSignal)
-						return telegramNotifierV2.Send(trendSignal)
+						return telegramNotifier.Send(trendSignal)
 					}
 					return nil
 				},
 			)
-			bus.Subscribe(EventSignalDetected, telegramSubscriber)
-			log.Println("✅ TelegramNotifierV2 подписчик зарегистрирован")
+			bus.Subscribe(types.EventSignalDetected, telegramSubscriber)
+			log.Println("✅ TelegramNotifier подписчик зарегистрирован")
 		} else {
-			log.Println("⚠️ Не удалось создать TelegramNotifierV2")
+			log.Println("⚠️ Не удалось создать TelegramNotifier")
 		}
 	} else if cfg.TelegramEnabled && telegramBot == nil {
 		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан")
@@ -113,8 +113,8 @@ func (f *Factory) RegisterDefaultSubscribers(
 func (f *Factory) createConsoleLoggerSubscriber() *BaseSubscriber {
 	return NewBaseSubscriber(
 		"console_logger",
-		[]EventType{EventPriceUpdated, EventSignalDetected, EventError},
-		func(event Event) error {
+		[]types.EventType{types.EventPriceUpdated, types.EventSignalDetected, types.EventError},
+		func(event types.Event) error {
 			// Реализация консольного логирования
 			fmt.Printf("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
 			return nil

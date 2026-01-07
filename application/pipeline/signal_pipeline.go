@@ -5,6 +5,7 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	errors "crypto-exchange-screener-bot/internal/core/errors"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"log"
 	"sync"
 	"time"
@@ -42,16 +43,16 @@ func (p *SignalPipeline) Start() {
 	// Подписываемся на события сигналов
 	subscriber := events.NewBaseSubscriber(
 		"signal_pipeline",
-		[]events.EventType{events.EventSignalDetected},
+		[]types.EventType{types.EventSignalDetected},
 		p.handleSignal,
 	)
-	p.eventBus.Subscribe(events.EventSignalDetected, subscriber)
+	p.eventBus.Subscribe(types.EventSignalDetected, subscriber)
 
 	log.Println("🚀 SignalPipeline запущен")
 }
 
 // handleSignal обрабатывает сигнал
-func (p *SignalPipeline) handleSignal(event events.Event) error {
+func (p *SignalPipeline) handleSignal(event types.Event) error {
 	startTime := time.Now()
 
 	p.mu.Lock()
@@ -97,11 +98,11 @@ func (p *SignalPipeline) handleSignal(event events.Event) error {
 	p.mu.Unlock()
 
 	// Публикуем обработанный сигнал
-	p.eventBus.Publish(events.Event{
+	p.eventBus.Publish(types.Event{
 		Type:   "signal_processed",
 		Source: "signal_pipeline",
 		Data:   processedSignal,
-		Metadata: events.Metadata{
+		Metadata: types.Metadata{
 			CorrelationID: processedSignal.ID,
 			Priority:      int(processedSignal.Confidence / 10),
 			Tags:          processedSignal.Metadata.Tags,

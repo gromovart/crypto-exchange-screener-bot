@@ -459,11 +459,11 @@ func (e *AnalysisEngine) updateStats(symbol string, totalSignals, filteredSignal
 // publishSignals публикует сигналы в EventBus
 func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
 	for _, signal := range signals {
-		e.eventBus.Publish(events.Event{
-			Type:   events.EventSignalDetected,
+		e.eventBus.Publish(types.Event{
+			Type:   types.EventSignalDetected,
 			Source: "analysis_engine",
 			Data:   signal,
-			Metadata: events.Metadata{
+			Metadata: types.Metadata{
 				CorrelationID: signal.ID,
 				Priority:      int(signal.Confidence / 10),
 				Tags:          signal.Metadata.Tags,
@@ -483,7 +483,7 @@ func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.An
 		totalSignals += len(result.Signals)
 	}
 
-	e.eventBus.Publish(events.Event{
+	e.eventBus.Publish(types.Event{
 		Type:   "analysis_complete",
 		Source: "analysis_engine",
 		Data: map[string]interface{}{
@@ -519,21 +519,21 @@ func (e *AnalysisEngine) analysisLoop() {
 func (e *AnalysisEngine) subscribeToEvents() {
 	subscriber := events.NewBaseSubscriber(
 		"analysis_engine",
-		[]events.EventType{
-			events.EventPriceUpdated,
+		[]types.EventType{
+			types.EventPriceUpdated,
 			"analysis_request",
 		},
 		e.handleEvent,
 	)
 
-	e.eventBus.Subscribe(events.EventPriceUpdated, subscriber)
+	e.eventBus.Subscribe(types.EventPriceUpdated, subscriber)
 	e.eventBus.Subscribe("analysis_request", subscriber)
 }
 
 // handleEvent обрабатывает события EventBus
-func (e *AnalysisEngine) handleEvent(event events.Event) error {
+func (e *AnalysisEngine) handleEvent(event types.Event) error {
 	switch event.Type {
-	case events.EventPriceUpdated:
+	case types.EventPriceUpdated:
 		// Можно добавить реактивный анализ при обновлении цен
 		// Например, анализировать только обновленный символ
 		if data, ok := event.Data.(map[string]interface{}); ok {

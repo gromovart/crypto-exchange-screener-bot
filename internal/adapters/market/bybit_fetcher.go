@@ -771,8 +771,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 	// Публикуем одно событие со всеми ценами
 	if updatedCount > 0 && f.eventBus != nil {
-		event := events.Event{
-			Type:      events.EventPriceUpdated,
+		event := types.Event{
+			Type:      types.EventPriceUpdated,
 			Source:    "bybit_price_fetcher",
 			Data:      priceDataList,
 			Timestamp: now,

@@ -1,19 +1,20 @@
-// internal/events/subscribers.go
+// internal/infrastructure/transport/event_bus/subscribers.go
 package events
 
 import (
+	"crypto-exchange-screener-bot/internal/types"
 	"log"
 )
 
 // BaseSubscriber - базовая реализация подписчика
 type BaseSubscriber struct {
 	name             string
-	subscribedEvents []EventType
-	handler          func(Event) error
+	subscribedEvents []types.EventType
+	handler          func(types.Event) error
 }
 
 // NewBaseSubscriber создает нового подписчика
-func NewBaseSubscriber(name string, events []EventType, handler func(Event) error) *BaseSubscriber {
+func NewBaseSubscriber(name string, events []types.EventType, handler func(types.Event) error) *BaseSubscriber {
 	return &BaseSubscriber{
 		name:             name,
 		subscribedEvents: events,
@@ -22,7 +23,7 @@ func NewBaseSubscriber(name string, events []EventType, handler func(Event) erro
 }
 
 // HandleEvent обрабатывает событие
-func (s *BaseSubscriber) HandleEvent(event Event) error {
+func (s *BaseSubscriber) HandleEvent(event types.Event) error {
 	return s.handler(event)
 }
 
@@ -32,7 +33,7 @@ func (s *BaseSubscriber) GetName() string {
 }
 
 // GetSubscribedEvents возвращает типы событий
-func (s *BaseSubscriber) GetSubscribedEvents() []EventType {
+func (s *BaseSubscriber) GetSubscribedEvents() []types.EventType {
 	return s.subscribedEvents
 }
 
@@ -45,21 +46,21 @@ func NewConsoleLoggerSubscriber() *ConsoleLoggerSubscriber {
 	return &ConsoleLoggerSubscriber{
 		BaseSubscriber: *NewBaseSubscriber(
 			"console_logger",
-			[]EventType{
-				EventPriceUpdated,
-				EventSignalDetected,
-				EventError,
+			[]types.EventType{
+				types.EventPriceUpdated,
+				types.EventSignalDetected,
+				types.EventError,
 			},
-			func(event Event) error {
+			func(event types.Event) error {
 				switch event.Type {
-				case EventPriceUpdated:
+				case types.EventPriceUpdated:
 					data, ok := event.Data.(map[string]interface{})
 					if ok {
 						log.Printf("💰 Цена обновлена: %v", data)
 					}
-				case EventSignalDetected:
+				case types.EventSignalDetected:
 					log.Printf("📈 Обнаружен сигнал: %v", event.Data)
-				case EventError:
+				case types.EventError:
 					log.Printf("❌ Ошибка: %v", event.Data)
 				}
 				return nil
@@ -78,8 +79,8 @@ func NewTelegramNotifierSubscriber(bot interface{}) *TelegramNotifierSubscriber 
 	return &TelegramNotifierSubscriber{
 		BaseSubscriber: *NewBaseSubscriber(
 			"telegram_notifier",
-			[]EventType{EventSignalDetected},
-			func(event Event) error {
+			[]types.EventType{types.EventSignalDetected},
+			func(event types.Event) error {
 				// Логика отправки в Telegram
 				log.Printf("🤖 Отправка в Telegram: %v", event.Data)
 				return nil
@@ -99,8 +100,8 @@ func NewStorageSubscriber(storage interface{}) *StorageSubscriber {
 	return &StorageSubscriber{
 		BaseSubscriber: *NewBaseSubscriber(
 			"storage_saver",
-			[]EventType{EventPriceUpdated},
-			func(event Event) error {
+			[]types.EventType{types.EventPriceUpdated},
+			func(event types.Event) error {
 				// Логика сохранения в хранилище
 				log.Printf("💾 Сохранение в хранилище: %v", event.Data)
 				return nil

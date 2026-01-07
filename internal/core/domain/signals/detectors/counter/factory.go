@@ -3,6 +3,7 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 )
 
@@ -17,28 +18,28 @@ func NewCounterAnalyzerFactory() *CounterAnalyzerFactory {
 // CreateAnalyzer создает CounterAnalyzer с настройками по умолчанию
 func (f *CounterAnalyzerFactory) CreateAnalyzer(
 	storage interface{},
-	tgBot interface{},
+	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
 	marketFetcher interface{},
 ) *CounterAnalyzer {
 	config := f.DefaultConfig()
-	return NewCounterAnalyzer(config, storage, tgBot, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
 }
 
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
 func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	config common.AnalyzerConfig,
 	storage interface{},
-	tgBot interface{},
+	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
 	marketFetcher interface{},
 ) *CounterAnalyzer {
-	return NewCounterAnalyzer(config, storage, tgBot, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
 }
 
 // CreateFromCustomSettings создает CounterAnalyzer из пользовательских настроек
 func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 	customSettings map[string]interface{},
 	storage interface{},
-	tgBot interface{},
+	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
 	marketFetcher interface{},
 ) *CounterAnalyzer {
 	config := common.AnalyzerConfig{
@@ -48,7 +49,7 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 		MinDataPoints:  2,
 		CustomSettings: f.mergeWithDefaults(customSettings),
 	}
-	return NewCounterAnalyzer(config, storage, tgBot, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию
@@ -101,17 +102,12 @@ func (f *CounterAnalyzerFactory) mergeWithDefaults(customSettings map[string]int
 	}
 
 	result := make(map[string]interface{})
-
-	// Копируем значения по умолчанию
 	for k, v := range defaults {
 		result[k] = v
 	}
-
-	// Перезаписываем пользовательскими значениями
 	for k, v := range customSettings {
 		result[k] = v
 	}
-
 	return result
 }
 
@@ -129,11 +125,10 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 			"fall_threshold":      0.1,
 			"track_growth":        true,
 			"track_fall":          true,
-			"notify_on_signal":    false, // Отключаем уведомления для тестов
+			"notify_on_signal":    false,
 			"chart_provider":      "coinglass",
 		},
 	}
-
 	return NewCounterAnalyzer(config, nil, nil, nil)
 }
 
@@ -154,7 +149,6 @@ func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage interface{}) *Cou
 			"notify_on_signal":    false,
 		},
 	}
-
 	return NewCounterAnalyzer(config, storage, nil, nil)
 }
 
@@ -163,29 +157,23 @@ func (f *CounterAnalyzerFactory) ValidateConfig(config common.AnalyzerConfig) er
 	if config.Weight < 0 || config.Weight > 1 {
 		return fmt.Errorf("weight must be between 0 and 1")
 	}
-
 	if config.MinConfidence < 0 || config.MinConfidence > 100 {
 		return fmt.Errorf("min_confidence must be between 0 and 100")
 	}
-
 	if config.MinDataPoints < 1 {
 		return fmt.Errorf("min_data_points must be at least 1")
 	}
-
-	// Проверяем обязательные настройки
 	requiredSettings := []string{
 		"base_period_minutes",
 		"analysis_period",
 		"growth_threshold",
 		"fall_threshold",
 	}
-
 	for _, setting := range requiredSettings {
 		if _, exists := config.CustomSettings[setting]; !exists {
 			return fmt.Errorf("required setting %s is missing", setting)
 		}
 	}
-
 	return nil
 }
 
@@ -231,10 +219,8 @@ func (f *CounterAnalyzerFactory) GetSettingDescription(setting string) string {
 		"delta_fallback_enabled": "Включить fallback для дельты (true/false)",
 		"show_delta_source":      "Показывать источник данных дельты (true/false)",
 	}
-
 	if desc, exists := descriptions[setting]; exists {
 		return desc
 	}
-
 	return "Неизвестная настройка"
 }
