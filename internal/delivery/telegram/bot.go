@@ -151,33 +151,13 @@ func (tb *TelegramBot) SendNotification(signal types.GrowthSignal) error {
 		return nil
 	}
 
-	// Используем notifier, если он есть
-	if tb.notifier != nil {
-		return tb.notifier.SendNotification(signal, tb.menuManager.IsEnabled())
-	}
+	// 🔴 ОТКЛЮЧАЕМ отправку торговых сигналов через бота
+	// Только CounterAnalyzer должен отправлять торговые сигналы через CounterNotifier
 
-	// Если notifier не работает, отправляем напрямую
-	message := tb.formatSignalMessage(signal)
+	log.Printf("⚠️ TelegramBot.SendNotification: Торговые сигналы ОТКЛЮЧЕНЫ. Используйте CounterAnalyzer для %s %.2f%% (%s)",
+		signal.Symbol, signal.GrowthPercent+signal.FallPercent, signal.Direction)
 
-	var keyboard *InlineKeyboardMarkup
-	if tb.buttonBuilder != nil && signal.Symbol != "" {
-		periodMinutes := signal.PeriodMinutes
-		if periodMinutes == 0 {
-			periodMinutes = tb.getDefaultPeriod()
-		}
-
-		// Определяем, нужна ли расширенная клавиатура
-		changePercent := tb.getSignalChangePercent(signal)
-		volume := signal.Volume24h
-
-		if changePercent >= 5.0 || volume >= 1000000 {
-			keyboard = tb.buttonBuilder.EnhancedNotificationKeyboard(signal.Symbol, periodMinutes)
-		} else {
-			keyboard = tb.buttonBuilder.StandardNotificationKeyboard(signal.Symbol, periodMinutes)
-		}
-	}
-
-	return tb.messageSender.SendTextMessage(message, keyboard, true)
+	return nil
 }
 
 // createSimpleKeyboard создает простую клавиатуру (fallback)

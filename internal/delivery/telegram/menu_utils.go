@@ -93,58 +93,6 @@ func (mu *MenuUtils) FormatCounterNotificationKeyboard(symbol string, periodMinu
 	return mu.buttonBuilder.CounterNotificationKeyboard(symbol, periodMinutes)
 }
 
-// FormatSignalMessage форматирует сообщение сигнала для компактного отображения
-func (mu *MenuUtils) FormatSignalMessage(signal types.GrowthSignal, format string) string {
-	var icon, directionStr, changeStr string
-	changePercent := signal.GrowthPercent + signal.FallPercent
-
-	if signal.Direction == "growth" {
-		icon = "🟢"
-		directionStr = "📈 РОСТ"
-		changeStr = fmt.Sprintf("+%.2f%%", changePercent)
-	} else {
-		icon = "🔴"
-		directionStr = "📉 ПАДЕНИЕ"
-		changeStr = fmt.Sprintf("-%.2f%%", -changePercent)
-	}
-
-	timeStr := signal.Timestamp.Format("2006/01/02 15:04:05")
-
-	switch format {
-	case "compact":
-		return fmt.Sprintf(
-			"⚫ %s - %dмин - %s\n"+
-				"🕐 %s\n"+
-				"%s %s: %s",
-			strings.ToUpper(mu.exchange), signal.PeriodMinutes, signal.Symbol,
-			timeStr,
-			icon, directionStr, changeStr,
-		)
-	case "full":
-		return fmt.Sprintf(
-			"%s *%s*\n"+
-				"%s %s\n"+
-				"🕐 %s\n"+
-				"⏱️ %d мин\n"+
-				"📊 Объем: $%.0f",
-			icon, signal.Symbol,
-			directionStr, changeStr,
-			timeStr,
-			signal.PeriodMinutes,
-			signal.Volume24h,
-		)
-	default:
-		return fmt.Sprintf(
-			"%s *%s*\n"+
-				"%s: %s\n"+
-				"🕐 %s",
-			icon, signal.Symbol,
-			directionStr, changeStr,
-			timeStr,
-		)
-	}
-}
-
 // FormatCounterMessage форматирует сообщение счетчика в компактном формате
 func (mu *MenuUtils) FormatCounterMessage(symbol string, signalType string, count int, maxSignals int, period string) string {
 	icon := "🟢"

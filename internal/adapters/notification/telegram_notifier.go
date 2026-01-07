@@ -1,8 +1,7 @@
-// internal/adapters/notification/telegram_notifier_v2.go
+// internal/adapters/notification/telegram_notifier.go
 package notification
 
 import (
-	"crypto-exchange-screener-bot/internal/adapters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
@@ -55,26 +54,38 @@ func NewTelegramNotifierV2(cfg *config.Config) *TelegramNotifierV2 {
 
 // Send отправляет торговый сигнал ТОЛЬКО в основной чат
 func (tn *TelegramNotifierV2) Send(signal types.TrendSignal) error {
+	// 🔴 ОТКЛЮЧАЕМ отправку торговых сигналов через этот путь
+	// Только CounterAnalyzer должен отправлять торговые сигналы через CounterNotifier
+
 	if !tn.enabled || tn.mainBot == nil {
 		return nil
 	}
 
-	// Конвертируем в GrowthSignal
-	growthSignal := adapters.TrendSignalToGrowthSignal(signal)
-
-	// Отправляем ТОЛЬКО в основной чат
-	err := tn.mainBot.SendNotification(growthSignal)
-	if err != nil {
-		tn.stats["errors"] = tn.stats["errors"].(int) + 1
-		log.Printf("❌ TelegramNotifierV2: Ошибка отправки торгового сигнала: %v", err)
-		return err
-	}
-
-	tn.stats["trading_signals_sent"] = tn.stats["trading_signals_sent"].(int) + 1
-	log.Printf("✅ TelegramNotifierV2: Торговый сигнал отправлен в основной чат: %s %.2f%%",
+	log.Printf("⚠️ TelegramNotifierV2: Торговые сигналы ОТКЛЮЧЕНЫ. Используйте CounterAnalyzer для %s %.2f%%",
 		signal.Symbol, signal.ChangePercent)
 
+	// Возвращаем успех, но не отправляем сообщение
 	return nil
+
+	/*
+		// СТАРЫЙ КОД (КОММЕНТИРУЕМ):
+		// Конвертируем в GrowthSignal
+		growthSignal := adapters.TrendSignalToGrowthSignal(signal)
+
+		// Отправляем ТОЛЬКО в основной чат
+		err := tn.mainBot.SendNotification(growthSignal)
+		if err != nil {
+			tn.stats["errors"] = tn.stats["errors"].(int) + 1
+			log.Printf("❌ TelegramNotifierV2: Ошибка отправки торгового сигнала: %v", err)
+			return err
+		}
+
+		tn.stats["trading_signals_sent"] = tn.stats["trading_signals_sent"].(int) + 1
+		log.Printf("✅ TelegramNotifierV2: Торговый сигнал отправлен в основной чат: %s %.2f%%",
+			signal.Symbol, signal.ChangePercent)
+
+		return nil
+	*/
 }
 
 // SendSystemStatus отправляет системный статус в мониторинг
