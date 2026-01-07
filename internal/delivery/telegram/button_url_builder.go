@@ -296,7 +296,7 @@ func (b *ButtonURLBuilder) CounterNotificationKeyboard(symbol string, periodMinu
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
+				b.GetChartButton(symbol),
 				b.GetTradeButton(symbol, periodMinutes),
 			},
 		},

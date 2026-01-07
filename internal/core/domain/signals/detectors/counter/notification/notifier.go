@@ -3,6 +3,7 @@ package notification
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -120,15 +121,20 @@ func (n *CounterNotifier) SendNotification(
 		deltaSource,
 	)
 
-	// Отправляем сообщение
-	if err := n.telegramBot.SendMessage(message); err != nil {
+	// Создаем клавиатуру с кнопками
+	periodMinutes := n.extractMinutesFromPeriod(period)
+	mu := telegram.NewDefaultMenuUtils()
+	keyboard := mu.FormatCounterNotificationKeyboard(symbol, periodMinutes)
+
+	// Отправляем сообщение с клавиатурой
+	if err := n.telegramBot.SendMessageWithKeyboard(message, keyboard); err != nil {
 		log.Printf("❌ Ошибка отправки уведомления для %s: %v", symbol, err)
 		return err
 	}
 
 	// Обновляем время последнего уведомления
 	n.updateLastNotificationTime(symbol, direction)
-	log.Printf("✅ Отправлено уведомление для %s", symbol)
+	log.Printf("✅ Отправлено уведомление для %s с клавиатурой", symbol)
 	return nil
 }
 
@@ -173,29 +179,31 @@ func (n *CounterNotifier) formatMessage(
 	// Используем существующий MarketMessageFormatter
 	formatter := telegram.NewMarketMessageFormatter("bybit")
 
-	return formatter.FormatMessage(
-		symbol,
-		direction,
-		change,
-		signalCount,
-		maxSignals,
-		currentPrice,
-		volume24h,
-		openInterest,
-		oiChange24h,
-		fundingRate,
-		averageFunding,
-		nextFundingTime,
-		period,
-		liquidationVolume,
-		longLiqVolume,
-		shortLiqVolume,
-		volumeDelta,
-		volumeDeltaPercent,
-		rsi,
-		macdSignal,
-		deltaSource,
-	)
+	params := &telegram.MessageParams{
+		Symbol:             symbol,
+		Direction:          direction,
+		Change:             change,
+		SignalCount:        signalCount,
+		MaxSignals:         maxSignals,
+		CurrentPrice:       currentPrice,
+		Volume24h:          volume24h,
+		OpenInterest:       openInterest,
+		OIChange24h:        oiChange24h,
+		FundingRate:        fundingRate,
+		AverageFunding:     averageFunding,
+		NextFundingTime:    nextFundingTime,
+		Period:             period,
+		LiquidationVolume:  liquidationVolume,
+		LongLiqVolume:      longLiqVolume,
+		ShortLiqVolume:     shortLiqVolume,
+		VolumeDelta:        volumeDelta,
+		VolumeDeltaPercent: volumeDeltaPercent,
+		RSI:                rsi,
+		MACDSignal:         macdSignal,
+		DeltaSource:        deltaSource,
+	}
+
+	return formatter.FormatMessage(params)
 }
 
 // getPeriodFromSignalCount определяет период на основе количества сигналов
@@ -213,6 +221,26 @@ func (n *CounterNotifier) getPeriodFromSignalCount(signalCount, maxSignals int) 
 		return "1 час"
 	default:
 		return "4 часа"
+	}
+}
+
+// extractMinutesFromPeriod извлекает минуты из периода
+func (n *CounterNotifier) extractMinutesFromPeriod(period string) int {
+	switch {
+	case strings.Contains(period, "5"):
+		return 5
+	case strings.Contains(period, "15"):
+		return 15
+	case strings.Contains(period, "30"):
+		return 30
+	case strings.Contains(period, "1 час"):
+		return 60
+	case strings.Contains(period, "4"):
+		return 240
+	case strings.Contains(period, "1 день"):
+		return 1440
+	default:
+		return 15
 	}
 }
 

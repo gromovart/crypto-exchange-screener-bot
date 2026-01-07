@@ -50,29 +50,31 @@ type CounterNotificationData struct {
 func (f *NotificationFormatter) FormatCounterNotification(data CounterNotificationData) string {
 	formatter := telegram.NewMarketMessageFormatter(f.exchange)
 
-	return formatter.FormatMessage(
-		data.Symbol,
-		data.Direction,
-		data.Change,
-		data.SignalCount,
-		data.MaxSignals,
-		data.CurrentPrice,
-		data.Volume24h,
-		data.OpenInterest,
-		data.OIChange24h,
-		data.FundingRate,
-		data.AverageFunding,
-		data.NextFundingTime,
-		data.Period,
-		data.LiquidationVolume,
-		data.LongLiqVolume,
-		data.ShortLiqVolume,
-		data.VolumeDelta,
-		data.VolumeDeltaPercent,
-		data.RSI,
-		data.MACDSignal,
-		data.DeltaSource,
-	)
+	params := &telegram.MessageParams{
+		Symbol:             data.Symbol,
+		Direction:          data.Direction,
+		Change:             data.Change,
+		SignalCount:        data.SignalCount,
+		MaxSignals:         data.MaxSignals,
+		CurrentPrice:       data.CurrentPrice,
+		Volume24h:          data.Volume24h,
+		OpenInterest:       data.OpenInterest,
+		OIChange24h:        data.OIChange24h,
+		FundingRate:        data.FundingRate,
+		AverageFunding:     data.AverageFunding,
+		NextFundingTime:    data.NextFundingTime,
+		Period:             data.Period,
+		LiquidationVolume:  data.LiquidationVolume,
+		LongLiqVolume:      data.LongLiqVolume,
+		ShortLiqVolume:     data.ShortLiqVolume,
+		VolumeDelta:        data.VolumeDelta,
+		VolumeDeltaPercent: data.VolumeDeltaPercent,
+		RSI:                data.RSI,
+		MACDSignal:         data.MACDSignal,
+		DeltaSource:        data.DeltaSource,
+	}
+
+	return formatter.FormatMessage(params)
 }
 
 // FormatCompactNotification форматирует компактное уведомление
