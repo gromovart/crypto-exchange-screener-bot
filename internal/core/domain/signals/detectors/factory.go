@@ -1,14 +1,15 @@
+// internal/core/domain/signals/detectors/factory.go
 package analyzers
 
 import (
 	"fmt"
-	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	fallanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer"
 	growthanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
+	volumeanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/volume_analyzer"
 	"crypto-exchange-screener-bot/internal/types"
 )
 
@@ -172,43 +173,78 @@ func (w *fallAnalyzerWrapper) GetStats() common.AnalyzerStats {
 	}
 }
 
-// NewVolumeAnalyzer создает анализатор объема
-func NewVolumeAnalyzer(config common.AnalyzerConfig) *VolumeAnalyzer {
-	return &VolumeAnalyzer{
-		config: config,
-		stats: common.AnalyzerStats{
-			TotalCalls:   0,
-			TotalTime:    0,
-			SuccessCount: 0,
-			ErrorCount:   0,
-			LastCallTime: time.Time{},
-			AverageTime:  0,
-		},
-	}
+// volumeAnalyzerWrapper - враппер для нового модульного VolumeAnalyzer
+type volumeAnalyzerWrapper struct {
+	analyzer *volumeanalyzer.VolumeAnalyzer
+	config   common.AnalyzerConfig
 }
 
-// NewContinuousAnalyzer создает анализатор непрерывности
-func NewContinuousAnalyzer(config common.AnalyzerConfig) *ContinuousAnalyzer {
-	// Гарантируем наличие необходимых настроек
-	if config.CustomSettings == nil {
-		config.CustomSettings = make(map[string]interface{})
-	}
-
-	// Устанавливаем значения по умолчанию
-	defaults := map[string]interface{}{
-		"min_continuous_points": 3,
-		"max_gap_ratio":         0.3,
-	}
-
-	for key, defaultValue := range defaults {
-		if _, ok := config.CustomSettings[key]; !ok {
-			config.CustomSettings[key] = defaultValue
-		}
-	}
-
-	return &ContinuousAnalyzer{
+// NewVolumeAnalyzer создает анализатор объема (новая модульная версия)
+func NewVolumeAnalyzer(config common.AnalyzerConfig) common.Analyzer {
+	// Создаем враппер для новой модульной версии
+	wrapper := &volumeAnalyzerWrapper{
 		config: config,
-		stats:  common.AnalyzerStats{},
+	}
+
+	return wrapper
+}
+
+// Name возвращает имя анализатора
+func (w *volumeAnalyzerWrapper) Name() string {
+	if w.analyzer == nil {
+		w.analyzer = volumeanalyzer.NewVolumeAnalyzer(w.config)
+	}
+	return w.analyzer.Name()
+}
+
+// Version возвращает версию анализатора
+func (w *volumeAnalyzerWrapper) Version() string {
+	if w.analyzer == nil {
+		w.analyzer = volumeanalyzer.NewVolumeAnalyzer(w.config)
+	}
+	return w.analyzer.Version()
+}
+
+// Supports проверяет поддержку символа
+func (w *volumeAnalyzerWrapper) Supports(symbol string) bool {
+	if w.analyzer == nil {
+		w.analyzer = volumeanalyzer.NewVolumeAnalyzer(w.config)
+	}
+	return w.analyzer.Supports(symbol)
+}
+
+// Analyze анализирует данные
+func (w *volumeAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+	if w.analyzer == nil {
+		w.analyzer = volumeanalyzer.NewVolumeAnalyzer(w.config)
+	}
+
+	// Обновляем конфигурацию если передана новая
+	w.config = config
+	w.analyzer = volumeanalyzer.NewVolumeAnalyzer(config)
+
+	return w.analyzer.Analyze(data, config)
+}
+
+// GetConfig возвращает конфигурацию
+func (w *volumeAnalyzerWrapper) GetConfig() common.AnalyzerConfig {
+	return w.config
+}
+
+// GetStats возвращает статистику
+func (w *volumeAnalyzerWrapper) GetStats() common.AnalyzerStats {
+	if w.analyzer == nil {
+		return common.AnalyzerStats{}
+	}
+
+	stats := w.analyzer.GetStats()
+	return common.AnalyzerStats{
+		TotalCalls:   stats.TotalCalls,
+		SuccessCount: stats.SuccessCount,
+		ErrorCount:   stats.ErrorCount,
+		TotalTime:    stats.TotalTime,
+		AverageTime:  stats.AverageTime,
+		LastCallTime: stats.LastCallTime,
 	}
 }
 
@@ -330,8 +366,6 @@ func (f *AnalyzerFactory) CreateAnalyzer(name string, config common.AnalyzerConf
 
 // GetAllcommon.AnalyzerConfigs возвращает конфигурации всех анализаторов
 func GetAllAnalyzerConfigs() map[string]common.AnalyzerConfig {
-	// Нужно получить конфигурации из соответствующих файлов
-	// Пока используем только те, что определены в этом файле
 	return map[string]common.AnalyzerConfig{
 		"growth_analyzer":        DefaultGrowthConfig,
 		"fall_analyzer":          DefaultFallConfig,
@@ -344,7 +378,6 @@ func GetAllAnalyzerConfigs() map[string]common.AnalyzerConfig {
 
 // Вспомогательные функции для получения конфигураций
 func getContinuousConfig() common.AnalyzerConfig {
-	// Базовая конфигурация для ContinuousAnalyzer
 	return common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.8,
@@ -359,18 +392,8 @@ func getContinuousConfig() common.AnalyzerConfig {
 }
 
 func getVolumeConfig() common.AnalyzerConfig {
-	// Базовая конфигурация для VolumeAnalyzer
-	return common.AnalyzerConfig{
-		Enabled:       true,
-		Weight:        0.5,
-		MinConfidence: 40.0,
-		MinDataPoints: 5,
-		CustomSettings: map[string]interface{}{
-			"spike_threshold": 2.0,
-			"min_volume":      10000.0,
-			"check_trend":     true,
-		},
-	}
+	// Используем конфигурацию по умолчанию из нового volume_analyzer
+	return volumeanalyzer.DefaultVolumeConfig()
 }
 
 // GetAnalyzerNames возвращает список всех доступных анализаторов
@@ -559,4 +582,57 @@ var DefaultFallConfig = common.AnalyzerConfig{
 		"check_all_algorithms": true,
 		"use_new_version":      true,
 	},
+}
+
+// DefaultVolumeConfig - конфигурация по умолчанию для Volume Analyzer
+var DefaultVolumeConfig = common.AnalyzerConfig{
+	Enabled:       true,
+	Weight:        0.5,
+	MinConfidence: 30.0,
+	MinDataPoints: 3,
+	CustomSettings: map[string]interface{}{
+		"min_volume":              100000.0,
+		"volume_change_threshold": 50.0,
+		"spike_multiplier":        3.0,
+		"confirmation_threshold":  10.0,
+		"check_all_algorithms":    true,
+		"use_new_version":         true,
+	},
+}
+
+// DefaultContinuousConfig - конфигурация по умолчанию
+var DefaultContinuousConfig = common.AnalyzerConfig{
+	Enabled:       true,
+	Weight:        0.8,
+	MinConfidence: 60.0,
+	MinDataPoints: 3,
+	CustomSettings: map[string]interface{}{
+		"min_continuous_points": 3,
+		"max_gap_ratio":         0.3,
+	},
+}
+
+// NewContinuousAnalyzer создает анализатор непрерывности
+func NewContinuousAnalyzer(config common.AnalyzerConfig) *ContinuousAnalyzer {
+	// Гарантируем наличие необходимых настроек
+	if config.CustomSettings == nil {
+		config.CustomSettings = make(map[string]interface{})
+	}
+
+	// Устанавливаем значения по умолчанию
+	defaults := map[string]interface{}{
+		"min_continuous_points": 3,
+		"max_gap_ratio":         0.3,
+	}
+
+	for key, defaultValue := range defaults {
+		if _, ok := config.CustomSettings[key]; !ok {
+			config.CustomSettings[key] = defaultValue
+		}
+	}
+
+	return &ContinuousAnalyzer{
+		config: config,
+		stats:  common.AnalyzerStats{},
+	}
 }

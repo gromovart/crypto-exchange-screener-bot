@@ -392,15 +392,3 @@ func (a *ContinuousAnalyzer) GetStats() common.AnalyzerStats {
 	defer a.mu.RUnlock()
 	return a.stats
 }
-
-// DefaultContinuousConfig - конфигурация по умолчанию
-var DefaultContinuousConfig = common.AnalyzerConfig{
-	Enabled:       true,
-	Weight:        0.8,
-	MinConfidence: 60.0,
-	MinDataPoints: 3,
-	CustomSettings: map[string]interface{}{
-		"min_continuous_points": 3,
-		"max_gap_ratio":         0.3,
-	},
-}
