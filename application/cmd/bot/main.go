@@ -1,4 +1,4 @@
-// application/main.go
+// cmd/bot/main.go
 package main
 
 import (
@@ -511,8 +511,8 @@ func printHelp() {
 	fmt.Println("  Counter: COUNTER_ANALYZER_ENABLED=true, COUNTER_ANALYSIS_PERIOD=15m")
 	fmt.Println()
 	fmt.Println("Examples:")
-	fmt.Println("  go run application/main.go --env=dev --log-level=info")
-	fmt.Println("  go run application/main.go --mode=full --test")
-	fmt.Println("  go run application/main.go --config=configs/dev/.env --mode=full")
-	fmt.Println("  go run application/main.go --help")
+	fmt.Println("  go run cmd/bot/main.go --env=dev --log-level=info")
+	fmt.Println("  go run cmd/bot/main.go --mode=full --test")
+	fmt.Println("  go run cmd/bot/main.go --config=configs/dev/.env --mode=full")
+	fmt.Println("  go run cmd/bot/main.go --help")
 }

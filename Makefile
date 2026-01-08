@@ -12,7 +12,7 @@
 ENV ?= dev
 CONFIG_DIR = configs/$(ENV)
 ENV_FILE = $(CONFIG_DIR)/.env
-MAIN_FILE = ./application/main.go
+MAIN_FILE = ./application/cmd/bot/main.go
 
 # ============================================
 # УПРАВЛЕНИЕ ОКРУЖЕНИЯМИ
