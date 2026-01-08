@@ -1,4 +1,4 @@
-// persistence/redis/cache.go
+// internal/infrastructure/cache/redis/cache.go
 package redis
 
 import (

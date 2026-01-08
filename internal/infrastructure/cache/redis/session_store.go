@@ -1,4 +1,4 @@
-// persistence/redis/session_store.go
+// internal/infrastructure/cache/redis/session_store.go
 package redis
 
 // import (

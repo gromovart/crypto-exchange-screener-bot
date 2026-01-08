@@ -11,6 +11,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
+	redis "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	database "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/database"
@@ -46,6 +47,7 @@ type DataManager struct {
 
 	// НОВОЕ: Сервис базы данных
 	databaseService *database.DatabaseService
+	redisService    *redis.RedisService
 
 	// Управление
 	mu       sync.RWMutex
@@ -108,6 +110,28 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		// Не возвращаем ошибку, чтобы приложение могло работать без БД
 	} else {
 		log.Println("✅ Database service started successfully")
+	}
+
+	// 0.1 СОЗДАЕМ REDIS СЕРВИС (вторым)
+	log.Println("🔴 Creating Redis service...")
+	dm.redisService = redis.NewRedisService(dm.config)
+
+	// Пытаемся подключиться к базе данных
+	if err := dm.databaseService.Start(); err != nil {
+		log.Printf("⚠️  Failed to start database service: %v", err)
+		log.Println("⚠️  Application will continue without database connection")
+		// Не возвращаем ошибку, чтобы приложение могло работать без БД
+	} else {
+		log.Println("✅ Database service started successfully")
+	}
+
+	// Пытаемся подключиться к Redis
+	if err := dm.redisService.Start(); err != nil {
+		log.Printf("⚠️  Failed to start Redis service: %v", err)
+		log.Println("⚠️  Application will continue without Redis connection")
+		// Не возвращаем ошибку, чтобы приложение могло работать без Redis
+	} else {
+		log.Println("✅ Redis service started successfully")
 	}
 
 	// 1. Создаем EventBus
@@ -301,6 +325,11 @@ func (dm *DataManager) registerServices() error {
 	// Регистрируем DatabaseService если он создан
 	if dm.databaseService != nil {
 		services["DatabaseService"] = dm.newServiceAdapter("DatabaseService", dm.databaseService)
+	}
+
+	// Регистрируем RedisService если он создан
+	if dm.redisService != nil {
+		services["RedisService"] = dm.newServiceAdapter("RedisService", dm.redisService)
 	}
 
 	if dm.telegramBot != nil {
@@ -533,6 +562,11 @@ func (dm *DataManager) GetDatabaseService() *database.DatabaseService {
 	return dm.databaseService
 }
 
+// GetRedisService возвращает Redis сервис
+func (dm *DataManager) GetRedisService() *redis.RedisService {
+	return dm.redisService
+}
+
 // GetService возвращает сервис по имени
 func (dm *DataManager) GetService(name string) (interface{}, bool) {
 	switch name {
@@ -548,6 +582,8 @@ func (dm *DataManager) GetService(name string) (interface{}, bool) {
 		return dm.telegramBot, dm.telegramBot != nil
 	case "DatabaseService":
 		return dm.databaseService, dm.databaseService != nil
+	case "RedisService":
+		return dm.redisService, dm.redisService != nil // НОВОЕ
 	default:
 		return nil, false
 	}
@@ -755,6 +791,22 @@ func (sa *serviceAdapter) Start() error {
 			sa.state = StateRunning
 		}
 
+	case *redis.RedisService:
+		// RedisService уже запущен при инициализации
+		if s.State() == redis.StateRunning {
+			sa.state = StateRunning
+		} else if s.State() == redis.StateError {
+			sa.state = StateError
+			return fmt.Errorf("Redis service in error state")
+		} else {
+			// Пытаемся запустить
+			if err := s.Start(); err != nil {
+				sa.state = StateError
+				return err
+			}
+			sa.state = StateRunning
+		}
+
 	case *engine.AnalysisEngine:
 		if err := s.Start(); err != nil {
 			sa.state = StateError
@@ -803,6 +855,11 @@ func (sa *serviceAdapter) Stop() error {
 			return err
 		}
 
+	case *redis.RedisService:
+		if err := s.Stop(); err != nil {
+			return err
+		}
+
 	case *telegram.TelegramBot:
 		// Telegram бот не требует явной остановки
 	}
@@ -823,6 +880,8 @@ func (sa *serviceAdapter) HealthCheck() bool {
 
 	switch s := sa.service.(type) {
 	case *database.DatabaseService:
+		return s.HealthCheck()
+	case *redis.RedisService:
 		return s.HealthCheck()
 	case *engine.AnalysisEngine:
 		// Для анализатора считаем, что он здоров если состояние Running

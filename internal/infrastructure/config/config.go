@@ -1,6 +1,8 @@
+// /internal/infrastructure/config/config.go
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -42,6 +44,34 @@ type DatabaseConfig struct {
 	RedisDB       int    `mapstructure:"REDIS_DB"`
 }
 
+// RedisConfig конфигурация Redis
+type RedisConfig struct {
+	// Основные настройки подключения
+	Host     string `mapstructure:"REDIS_HOST"`     // localhost
+	Port     int    `mapstructure:"REDIS_PORT"`     // 6379
+	Password string `mapstructure:"REDIS_PASSWORD"` // пустой или пароль
+	DB       int    `mapstructure:"REDIS_DB"`       // 0
+
+	// Настройки пула соединений
+	PoolSize        int           `mapstructure:"REDIS_POOL_SIZE"`         // 10
+	MinIdleConns    int           `mapstructure:"REDIS_MIN_IDLE_CONNS"`    // 5
+	MaxRetries      int           `mapstructure:"REDIS_MAX_RETRIES"`       // 3
+	MinRetryBackoff time.Duration `mapstructure:"REDIS_MIN_RETRY_BACKOFF"` // 8ms
+	MaxRetryBackoff time.Duration `mapstructure:"REDIS_MAX_RETRY_BACKOFF"` // 512ms
+	DialTimeout     time.Duration `mapstructure:"REDIS_DIAL_TIMEOUT"`      // 5s
+	ReadTimeout     time.Duration `mapstructure:"REDIS_READ_TIMEOUT"`      // 3s
+	WriteTimeout    time.Duration `mapstructure:"REDIS_WRITE_TIMEOUT"`     // 3s
+	PoolTimeout     time.Duration `mapstructure:"REDIS_POOL_TIMEOUT"`      // 4s
+	IdleTimeout     time.Duration `mapstructure:"REDIS_IDLE_TIMEOUT"`      // 5m
+	MaxConnAge      time.Duration `mapstructure:"REDIS_MAX_CONN_AGE"`      // 0 (без ограничения)
+
+	// Настройки кэширования
+	DefaultTTL time.Duration `mapstructure:"REDIS_DEFAULT_TTL"` // 1h
+
+	// Флаги
+	UseTLS bool `mapstructure:"REDIS_USE_TLS"` // false
+}
+
 // ============================================
 // КОНФИГУРАЦИЯ АНАЛИЗАТОРОВ
 // ============================================
@@ -81,6 +111,9 @@ type Config struct {
 	// БАЗА ДАННЫХ
 	// ======================
 	Database DatabaseConfig `mapstructure:"DATABASE"`
+
+	// Redis конфигурация Redis
+	Redis RedisConfig `mapstructure:",squash"`
 
 	// ======================
 	// БИРЖА И API КЛЮЧИ
@@ -292,11 +325,26 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Database.MigrationsPath = getEnv("DB_MIGRATIONS_PATH", "./persistence/postgres/migrations")
 	cfg.Database.EnableAutoMigrate = getEnvBool("DB_ENABLE_AUTO_MIGRATE", true)
 
-	// Redis
-	cfg.Database.RedisHost = getEnv("REDIS_HOST", "localhost")
-	cfg.Database.RedisPort = getEnvInt("REDIS_PORT", 6379)
-	cfg.Database.RedisPassword = getEnv("REDIS_PASSWORD", "redis123")
-	cfg.Database.RedisDB = getEnvInt("REDIS_DB", 0)
+	// ======================
+	// REDIS
+	// ======================
+	cfg.Redis.Host = getEnv("REDIS_HOST", "localhost")
+	cfg.Redis.Port = getEnvInt("REDIS_PORT", 6379)
+	cfg.Redis.Password = getEnv("REDIS_PASSWORD", "")
+	cfg.Redis.DB = getEnvInt("REDIS_DB", 0)
+	cfg.Redis.PoolSize = getEnvInt("REDIS_POOL_SIZE", 10)
+	cfg.Redis.MinIdleConns = getEnvInt("REDIS_MIN_IDLE_CONNS", 5)
+	cfg.Redis.MaxRetries = getEnvInt("REDIS_MAX_RETRIES", 3)
+	cfg.Redis.MinRetryBackoff = getEnvDuration("REDIS_MIN_RETRY_BACKOFF", 8*time.Millisecond)
+	cfg.Redis.MaxRetryBackoff = getEnvDuration("REDIS_MAX_RETRY_BACKOFF", 512*time.Millisecond)
+	cfg.Redis.DialTimeout = getEnvDuration("REDIS_DIAL_TIMEOUT", 5*time.Second)
+	cfg.Redis.ReadTimeout = getEnvDuration("REDIS_READ_TIMEOUT", 3*time.Second)
+	cfg.Redis.WriteTimeout = getEnvDuration("REDIS_WRITE_TIMEOUT", 3*time.Second)
+	cfg.Redis.PoolTimeout = getEnvDuration("REDIS_POOL_TIMEOUT", 4*time.Second)
+	cfg.Redis.IdleTimeout = getEnvDuration("REDIS_IDLE_TIMEOUT", 5*time.Minute)
+	cfg.Redis.MaxConnAge = getEnvDuration("REDIS_MAX_CONN_AGE", 0)
+	cfg.Redis.DefaultTTL = getEnvDuration("REDIS_DEFAULT_TTL", 1*time.Hour)
+	cfg.Redis.UseTLS = getEnvBool("REDIS_USE_TLS", false)
 
 	// ======================
 	// БИРЖА И API КЛЮЧИ
@@ -643,11 +691,6 @@ func (c *Config) GetPostgresDSN() string {
 	)
 }
 
-// GetRedisAddress возвращает адрес Redis
-func (c *Config) GetRedisAddress() string {
-	return fmt.Sprintf("%s:%d", c.Database.RedisHost, c.Database.RedisPort)
-}
-
 // PrintSummary обновлен для отображения настроек БД
 func (c *Config) PrintSummary() {
 	log.Printf("📋 Конфигурация приложения:")
@@ -657,8 +700,9 @@ func (c *Config) PrintSummary() {
 	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
 
 	// База данных
-	log.Printf("   • База данных: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)
-	log.Printf("   • Redis: %s:%d", c.Database.RedisHost, c.Database.RedisPort)
+	log.Printf("   • PostgreSQL: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)
+	log.Printf("   • Redis: %s:%d (DB: %d, Pool: %d)",
+		c.Redis.Host, c.Redis.Port, c.Redis.DB, c.Redis.PoolSize)
 
 	if c.Telegram.Enabled {
 		token := c.Telegram.BotToken
@@ -965,4 +1009,53 @@ func (c *Config) GetEnabledAnalyzers() []string {
 	}
 
 	return enabled
+}
+
+// Validate проверяет конфигурацию
+func (c *Config) Validate() error {
+	// ... существующая валидация ...
+
+	// Валидация Redis
+	if c.Redis.Host == "" {
+		return errors.New("REDIS_HOST не может быть пустым")
+	}
+	if c.Redis.Port <= 0 || c.Redis.Port > 65535 {
+		return errors.New("REDIS_PORT должен быть в диапазоне 1-65535")
+	}
+	if c.Redis.DB < 0 || c.Redis.DB > 15 {
+		return errors.New("REDIS_DB должен быть в диапазоне 0-15")
+	}
+	if c.Redis.PoolSize <= 0 {
+		return errors.New("REDIS_POOL_SIZE должен быть положительным числом")
+	}
+	if c.Redis.MinIdleConns < 0 {
+		return errors.New("REDIS_MIN_IDLE_CONNS не может быть отрицательным")
+	}
+
+	return nil
+}
+
+// GetRedisAddress возвращает адрес Redis
+func (c *Config) GetRedisAddress() string {
+	return fmt.Sprintf("%s:%d", c.Redis.Host, c.Redis.Port)
+}
+
+// GetRedisPassword возвращает пароль Redis
+func (c *Config) GetRedisPassword() string {
+	return c.Redis.Password
+}
+
+// GetRedisDB возвращает номер базы данных Redis
+func (c *Config) GetRedisDB() int {
+	return c.Redis.DB
+}
+
+// GetRedisPoolSize возвращает размер пула соединений Redis
+func (c *Config) GetRedisPoolSize() int {
+	return c.Redis.PoolSize
+}
+
+// GetRedisMinIdleConns возвращает минимальное количество idle соединений Redis
+func (c *Config) GetRedisMinIdleConns() int {
+	return c.Redis.MinIdleConns
 }
