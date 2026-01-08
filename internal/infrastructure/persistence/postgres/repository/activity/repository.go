@@ -85,6 +85,17 @@ func (r *ActivityRepositoryImpl) Create(activity *models.UserActivity) error {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
+	// Преобразуем строки в указатели для совместимости с БД
+	var ipAddrPtr *string
+	if activity.IPAddress != nil && *activity.IPAddress != "" {
+		ipAddrPtr = activity.IPAddress
+	}
+
+	var userAgentPtr *string
+	if activity.UserAgent != nil && *activity.UserAgent != "" {
+		userAgentPtr = activity.UserAgent
+	}
+
 	return r.db.QueryRow(
 		query,
 		activity.UserID,
@@ -92,8 +103,8 @@ func (r *ActivityRepositoryImpl) Create(activity *models.UserActivity) error {
 		activity.Category,
 		activity.Severity,
 		detailsJSON,
-		activity.IPAddress,
-		activity.UserAgent,
+		ipAddrPtr,
+		userAgentPtr,
 		metadataJSON,
 	).Scan(&activity.ID, &activity.CreatedAt)
 }
@@ -366,7 +377,6 @@ func (r *ActivityRepositoryImpl) GetRecentActivities(limit int) ([]*models.UserA
 	cacheKey := fmt.Sprintf("activities:recent:%d", limit)
 	var activities []*models.UserActivity
 	if err := r.cache.Get(context.Background(), cacheKey, &activities); err == nil {
-
 		return activities, nil
 	}
 
@@ -451,8 +461,15 @@ func (r *ActivityRepositoryImpl) LogUserLogin(user *models.User, ip, userAgent s
 	activity.TelegramID = user.TelegramID
 	activity.Username = user.Username
 	activity.FirstName = user.FirstName
-	activity.IPAddress = ip
-	activity.UserAgent = userAgent
+
+	// Исправлено: создаем указатели на строки
+	if ip != "" {
+		activity.IPAddress = &ip
+	}
+	if userAgent != "" {
+		activity.UserAgent = &userAgent
+	}
+
 	activity.Metadata = models.JSONMap{
 		"user_role":   user.Role,
 		"user_status": user.IsActive,
@@ -474,8 +491,14 @@ func (r *ActivityRepositoryImpl) LogUserLogout(user *models.User, ip, userAgent,
 	activity.TelegramID = user.TelegramID
 	activity.Username = user.Username
 	activity.FirstName = user.FirstName
-	activity.IPAddress = ip
-	activity.UserAgent = userAgent
+
+	// Исправлено: создаем указатели на строки
+	if ip != "" {
+		activity.IPAddress = &ip
+	}
+	if userAgent != "" {
+		activity.UserAgent = &userAgent
+	}
 
 	return r.Create(activity)
 }
@@ -494,18 +517,12 @@ func (r *ActivityRepositoryImpl) LogSignalReceived(user *models.User, signalType
 			"period_minutes": period,
 			"filtered":       filtered,
 			"filter_reason":  filterReason,
-			"user_threshold": user.MinGrowthThreshold, // Исправлено: user.MinGrowthThreshold
 		},
 	)
 
 	activity.TelegramID = user.TelegramID
 	activity.Username = user.Username
 	activity.FirstName = user.FirstName
-	activity.Metadata = models.JSONMap{
-		"signals_today":         user.SignalsToday,
-		"max_signals":           user.MaxSignalsPerDay,
-		"notifications_enabled": user.NotificationsEnabled, // Исправлено: user.NotificationsEnabled
-	}
 
 	return r.Create(activity)
 }
@@ -528,8 +545,14 @@ func (r *ActivityRepositoryImpl) LogSettingsUpdate(user *models.User, settingTyp
 	activity.TelegramID = user.TelegramID
 	activity.Username = user.Username
 	activity.FirstName = user.FirstName
-	activity.IPAddress = ip
-	activity.UserAgent = userAgent
+
+	// Исправлено: создаем указатели на строки
+	if ip != "" {
+		activity.IPAddress = &ip
+	}
+	if userAgent != "" {
+		activity.UserAgent = &userAgent
+	}
 
 	return r.Create(activity)
 }
@@ -550,8 +573,14 @@ func (r *ActivityRepositoryImpl) LogSecurityEvent(user *models.User, eventType, 
 	activity.TelegramID = user.TelegramID
 	activity.Username = user.Username
 	activity.FirstName = user.FirstName
-	activity.IPAddress = ip
-	activity.UserAgent = userAgent
+
+	// Исправлено: создаем указатели на строки
+	if ip != "" {
+		activity.IPAddress = &ip
+	}
+	if userAgent != "" {
+		activity.UserAgent = &userAgent
+	}
 	activity.Metadata = metadata
 
 	return r.Create(activity)
@@ -642,6 +671,7 @@ func (r *ActivityRepositoryImpl) GetUserActivityStats(userID int, days int) (map
 		return nil, err
 	}
 
+	stats = make(map[string]interface{})
 	stats["total_activities"] = totalActivities
 	stats["active_days"] = activeDays
 	stats["error_count"] = errorCount

@@ -29,6 +29,14 @@ type UserRepository interface {
 	GetTotalCount(ctx context.Context) (int, error)
 	IncrementSignalsCount(userID int) error
 	ResetDailyCounters(ctx context.Context) error
+
+	// Дополнительные методы, используемые в service.go
+	Search(query string, limit, offset int) ([]*models.User, error) // alias для SearchUsers
+	GetAll(limit, offset int) ([]*models.User, error)               // Получить всех пользователей
+	GetActiveUsersCount(ctx context.Context) (int, error)           // Количество активных пользователей
+	UpdateStatus(userID int, isActive bool) error                   // Обновить статус пользователя
+	UpdateRole(userID int, role string) error                       // Обновить роль пользователя
+	ResetDailySignals(ctx context.Context) error                    // Alias для ResetDailyCounters
 }
 
 // UserRepositoryImpl реализация репозитория пользователей
@@ -78,6 +86,140 @@ func (r *UserRepositoryImpl) GetAllActive() ([]*models.User, error) {
 	}
 
 	return userList, nil
+}
+
+// Search - псевдоним для SearchUsers (используется в service.go)
+func (r *UserRepositoryImpl) Search(query string, limit, offset int) ([]*models.User, error) {
+	return r.SearchUsers(query, limit, offset)
+}
+
+// GetAll получает всех пользователей с пагинацией
+func (r *UserRepositoryImpl) GetAll(limit, offset int) ([]*models.User, error) {
+	sqlQuery := `
+		SELECT
+			id, telegram_id, username, first_name, last_name, chat_id,
+			email, phone,
+			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			quiet_hours_start, quiet_hours_end,
+			min_growth_threshold, min_fall_threshold,
+			preferred_periods, min_volume_filter, exclude_patterns,
+			language, timezone, display_mode,
+			role, is_active, is_verified, subscription_tier,
+			signals_today, max_signals_per_day,
+			created_at, updated_at, last_login_at, last_signal_at
+		FROM users
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`
+
+	rows, err := r.db.Query(sqlQuery, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var userList []*models.User
+	for rows.Next() {
+		user, err := r.scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		userList = append(userList, user)
+	}
+
+	return userList, nil
+}
+
+// GetActiveUsersCount возвращает количество активных пользователей
+func (r *UserRepositoryImpl) GetActiveUsersCount(ctx context.Context) (int, error) {
+	query := `SELECT COUNT(*) FROM users WHERE is_active = TRUE`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// UpdateStatus обновляет статус активности пользователя
+func (r *UserRepositoryImpl) UpdateStatus(userID int, isActive bool) error {
+	// Начинаем транзакцию
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		UPDATE users
+		SET is_active = $1,
+			updated_at = $2
+		WHERE id = $3
+	`
+
+	result, err := tx.Exec(query, isActive, time.Now(), userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user status: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	// Фиксируем транзакцию
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Инвалидируем кэш
+	r.invalidateUserCache(userID, 0, "")
+
+	return nil
+}
+
+// UpdateRole обновляет роль пользователя
+func (r *UserRepositoryImpl) UpdateRole(userID int, role string) error {
+	// Начинаем транзакцию
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	query := `
+		UPDATE users
+		SET role = $1,
+			updated_at = $2
+		WHERE id = $3
+	`
+
+	result, err := tx.Exec(query, role, time.Now(), userID)
+	if err != nil {
+		return fmt.Errorf("failed to update user role: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	// Фиксируем транзакцию
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Инвалидируем кэш
+	r.invalidateUserCache(userID, 0, "")
+
+	return nil
+}
+
+// ResetDailySignals - псевдоним для ResetDailyCounters (используется в service.go)
+func (r *UserRepositoryImpl) ResetDailySignals(ctx context.Context) error {
+	return r.ResetDailyCounters(ctx)
 }
 
 // Create создает нового пользователя

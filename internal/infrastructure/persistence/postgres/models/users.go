@@ -60,9 +60,11 @@ type User struct {
 
 // Константы ролей пользователей
 const (
-	RoleUser    = "user"
-	RolePremium = "premium"
-	RoleAdmin   = "admin"
+	RoleUser      = "user"
+	RolePremium   = "premium"
+	RoleModerator = "moderator"
+	RoleAdmin     = "admin"
+	RoleSystem    = "system"
 )
 
 // Константы тарифных планов

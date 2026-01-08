@@ -1,4 +1,3 @@
-// internal/infrastructure/persistence/postgres/models/api_key.go
 package models
 
 import (
@@ -7,19 +6,21 @@ import (
 
 // APIKey модель для хранения API ключа
 type APIKey struct {
-	ID          int                    `db:"id" json:"id"`
-	UserID      int                    `db:"user_id" json:"user_id"`
-	Exchange    string                 `db:"exchange" json:"exchange"`
-	Label       string                 `db:"label" json:"label"`
-	Permissions map[string]interface{} `db:"permissions" json:"permissions"`
-	IsActive    bool                   `db:"is_active" json:"is_active"`
-	LastUsedAt  time.Time              `db:"last_used_at" json:"last_used_at"`
-	ExpiresAt   time.Time              `db:"expires_at" json:"expires_at"`
-	CreatedAt   time.Time              `db:"created_at" json:"created_at"`
-	UpdatedAt   time.Time              `db:"updated_at" json:"updated_at"`
+	ID                 int                    `db:"id" json:"id"`
+	UserID             int                    `db:"user_id" json:"user_id"`
+	Exchange           string                 `db:"exchange" json:"exchange"`
+	APIKeyEncrypted    string                 `db:"api_key_encrypted" json:"api_key_encrypted"`
+	APISecretEncrypted string                 `db:"api_secret_encrypted" json:"api_secret_encrypted"`
+	Label              string                 `db:"label" json:"label"`
+	Permissions        map[string]interface{} `db:"permissions" json:"permissions"`
+	IsActive           bool                   `db:"is_active" json:"is_active"`
+	LastUsedAt         time.Time              `db:"last_used_at" json:"last_used_at"`
+	ExpiresAt          time.Time              `db:"expires_at" json:"expires_at"`
+	CreatedAt          time.Time              `db:"created_at" json:"created_at"`
+	UpdatedAt          time.Time              `db:"updated_at" json:"updated_at"`
 }
 
-// APIKeyWithSecrets структура с расшифрованными ключами
+// APIKeyWithSecrets структура с расшифрованными ключами (для обработки в памяти)
 type APIKeyWithSecrets struct {
 	APIKey
 	APIKeyPlain    string `json:"api_key" db:"-"`

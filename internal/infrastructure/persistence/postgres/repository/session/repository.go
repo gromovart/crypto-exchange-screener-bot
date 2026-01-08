@@ -3,78 +3,44 @@ package session
 
 import (
 	"context"
-	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
+	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+
 	"github.com/jmoiron/sqlx"
 )
 
 // SessionRepository интерфейс для работы с сессиями
 type SessionRepository interface {
-	// Основные методы
+	// Базовые CRUD операции
 	Create(session *models.Session) error
-	FindByID(sessionID string) (*models.Session, error)
+	FindByID(id string) (*models.Session, error)
 	FindByToken(token string) (*models.Session, error)
-	FindByUserID(userID int) ([]*models.Session, error)
-	UpdateActivity(sessionID string) error
-	Revoke(sessionID, reason string) error
-	RevokeByToken(token, reason string) error
-	RevokeAllUserSessions(userID int, reason string) (int, error)
-	Extend(sessionID string, newExpiry time.Time) error
-	Delete(sessionID string) error
+	Update(session *models.Session) error
+	Delete(id string) error
+	Revoke(id, reason string) error
+	RevokeAllUserSessions(userID int, reason string) error
+	CleanupExpiredSessions() (int64, error)
 
-	// Дополнительные методы
-	CreateWithDetails(session *SessionRecord) error
-	FindByTokenWithDetails(token string) (*SessionRecord, error)
-	CleanupExpired(ctx context.Context) (int, error)
-	GetActiveSessionsCount() (int, error)
-	GetUserActiveSessionsCount(userID int) (int, error)
-	GetSessionStats(ctx context.Context) (*SessionStats, error)
-	UpdateSessionData(sessionID string, data map[string]interface{}) error
-	GetRecentlyActiveSessions(hours int) ([]*SessionRecord, error)
-	GetSessionActivityLog(sessionID string, limit int) ([]map[string]interface{}, error)
-	LogSessionActivity(sessionID, activityType string, details map[string]interface{}) error
-	GenerateNewToken(sessionID string) (string, error)
-	GetSessionsByIP(ipAddress string) ([]*SessionRecord, error)
-	BulkRevokeInactive(ctx context.Context, inactiveFor time.Duration) (int, error)
-	CreateSessionForUser(userID int, userAgent, ipAddress string) (*models.Session, error)
-	CreateSessionForUserWithDetails(userID int, userAgent, ipAddress string, deviceInfo, data map[string]interface{}) (*SessionRecord, error)
-	ConvertToUserSession(record *SessionRecord) *models.Session
-}
+	// Поиск и фильтрация
+	FindByUserID(userID int, limit, offset int) ([]*models.Session, error)
+	FindByFilter(filter models.SessionFilter) ([]*models.Session, int64, error)
+	GetActiveSessions(userID int) ([]*models.Session, error)
+	GetAll(limit, offset int) ([]*models.Session, error)
 
-// JSONMap для работы с JSON полями
-type JSONMap map[string]interface{}
+	// Управление активностью
+	UpdateLastActivity(id string) error
+	LogActivity(activity *models.SessionActivity) error
+	GetSessionActivities(sessionID string, limit, offset int) ([]*models.SessionActivity, error)
 
-// SessionRecord структура для работы с базой данных
-type SessionRecord struct {
-	ID            string                 `db:"id"`
-	UserID        int                    `db:"user_id"`
-	Token         string                 `db:"token"`
-	DeviceInfo    map[string]interface{} `db:"device_info"`
-	IPAddress     string                 `db:"ip_address"`
-	UserAgent     string                 `db:"user_agent"`
-	Data          map[string]interface{} `db:"data"`
-	ExpiresAt     time.Time              `db:"expires_at"`
-	CreatedAt     time.Time              `db:"created_at"`
-	UpdatedAt     time.Time              `db:"updated_at"`
-	LastActivity  time.Time              `db:"last_activity"`
-	IsActive      bool                   `db:"is_active"`
-	RevokedAt     *time.Time             `db:"revoked_at"`
-	RevokedReason string                 `db:"revoked_reason"`
-}
-
-// SessionStats статистика сессий
-type SessionStats struct {
-	TotalSessions      int           `json:"total_sessions"`
-	ActiveSessions     int           `json:"active_sessions"`
-	AvgSessionDuration time.Duration `json:"avg_session_duration"`
-	MaxConcurrent      int           `json:"max_concurrent"`
-	MostActiveHour     int           `json:"most_active_hour"`
+	// Статистика
+	GetUserSessionStats(userID int) (map[string]interface{}, error)
+	GetSystemSessionStats() (*models.SessionStats, error)
+	GetSessionCount(userID int) (int, error)
 }
 
 // SessionRepositoryImpl реализация репозитория сессий
@@ -90,55 +56,13 @@ func NewSessionRepository(db *sqlx.DB, cache *redis.Cache) *SessionRepositoryImp
 
 // Create создает новую сессию
 func (r *SessionRepositoryImpl) Create(session *models.Session) error {
-	// Начинаем транзакцию
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
 	query := `
-    INSERT INTO user_sessions (
-        id, user_id, token, ip_address,
-        user_agent, expires_at, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING created_at
-    `
-
-	err = tx.QueryRow(
-		query,
-		session.ID,
-		session.UserID,
-		session.Token,
-		session.IP,
-		session.UserAgent,
-		session.ExpiresAt,
-		time.Now(),
-	).Scan(&session.CreatedAt)
-
-	if err != nil {
-		return fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(session.ID, session.UserID)
-
-	return nil
-}
-
-// CreateWithDetails создает сессию с дополнительными данными
-func (r *SessionRepositoryImpl) CreateWithDetails(session *SessionRecord) error {
-	// Начинаем транзакцию
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
+	INSERT INTO user_sessions (
+		id, user_id, token, device_info, ip_address, user_agent,
+		data, expires_at, is_active, revoked_at, revoked_reason
+	) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	RETURNING created_at, updated_at, last_activity
+	`
 
 	deviceInfoJSON, err := json.Marshal(session.DeviceInfo)
 	if err != nil {
@@ -150,143 +74,147 @@ func (r *SessionRepositoryImpl) CreateWithDetails(session *SessionRecord) error 
 		return fmt.Errorf("failed to marshal session data: %w", err)
 	}
 
-	query := `
-    INSERT INTO user_sessions (
-        id, user_id, token, device_info, ip_address,
-        user_agent, expires_at, data, created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-    RETURNING created_at
-    `
-
-	err = tx.QueryRow(
+	return r.db.QueryRow(
 		query,
 		session.ID,
 		session.UserID,
 		session.Token,
 		deviceInfoJSON,
-		session.IPAddress,
+		session.IPAddress, // Исправлено: IPAddress вместо IP
 		session.UserAgent,
-		session.ExpiresAt,
 		dataJSON,
-		time.Now(),
-	).Scan(&session.CreatedAt)
+		session.ExpiresAt,
+		session.IsActive,
+		session.RevokedAt,
+		session.RevokedReason,
+	).Scan(&session.CreatedAt, &session.UpdatedAt, &session.LastActivity)
+}
+
+// FindByID находит сессию по ID
+func (r *SessionRepositoryImpl) FindByID(id string) (*models.Session, error) {
+	cacheKey := fmt.Sprintf("session:%s", id)
+
+	// Попытка получить из кэша
+	var session models.Session
+	if err := r.cache.Get(context.Background(), cacheKey, &session); err == nil {
+		return &session, nil
+	}
+
+	query := `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	WHERE s.id = $1
+	`
+
+	var deviceInfoJSON, dataJSON []byte
+	var telegramID sql.NullInt64
+	var username, firstName, role sql.NullString
+
+	err := r.db.QueryRow(query, id).Scan(
+		&session.ID,
+		&session.UserID,
+		&session.Token,
+		&deviceInfoJSON,
+		&session.IPAddress, // Исправлено: IPAddress вместо IP
+		&session.UserAgent,
+		&dataJSON,
+		&session.ExpiresAt,
+		&session.CreatedAt,
+		&session.UpdatedAt,
+		&session.LastActivity,
+		&session.IsActive,
+		&session.RevokedAt,
+		&session.RevokedReason,
+		&telegramID,
+		&username,
+		&firstName,
+		&role,
+	)
 
 	if err != nil {
-		return fmt.Errorf("failed to create session with details: %w", err)
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
 	}
 
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	// Декодируем JSON
+	if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
 	}
 
-	// Инвалидируем кэш
-	r.invalidateSessionCache(session.ID, session.UserID)
+	if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+	}
 
-	return nil
+	// Заполняем информацию о пользователе если есть
+	if telegramID.Valid || username.Valid || firstName.Valid {
+		session.User = &models.User{
+			ID:         session.UserID,
+			TelegramID: telegramID.Int64,
+			Username:   username.String,
+			FirstName:  firstName.String,
+			Role:       role.String,
+		}
+	}
+
+	// Сохраняем в кэш
+	if data, err := json.Marshal(session); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 10*time.Minute)
+	}
+
+	return &session, nil
 }
 
 // FindByToken находит сессию по токену
 func (r *SessionRepositoryImpl) FindByToken(token string) (*models.Session, error) {
-	// Попробуем получить из кэша
 	cacheKey := fmt.Sprintf("session:token:%s", token)
-	var cachedSession models.Session
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedSession); err == nil {
-		// Проверяем не истекла ли сессия
-		if cachedSession.ExpiresAt.After(time.Now()) {
-			return &cachedSession, nil
-		}
-	}
 
-	query := `
-    SELECT
-        s.id, s.user_id, s.token, s.ip_address,
-        s.user_agent, s.expires_at, s.created_at,
-        u.telegram_id, u.username, u.first_name, u.last_name, u.chat_id,
-        u.role, u.is_active as user_active
-    FROM user_sessions s
-    JOIN users u ON s.user_id = u.id
-    WHERE s.token = $1
-      AND s.is_active = TRUE
-      AND s.expires_at > NOW()
-      AND s.revoked_at IS NULL
-      AND u.is_active = TRUE
-    `
-
+	// Попытка получить из кэша
 	var session models.Session
-	var user models.User
-	var ipAddress string
-
-	err := r.db.QueryRow(query, token).Scan(
-		&session.ID,
-		&session.UserID,
-		&session.Token,
-		&ipAddress,
-		&session.UserAgent,
-		&session.ExpiresAt,
-		&session.CreatedAt,
-		&user.TelegramID,
-		&user.Username,
-		&user.FirstName,
-		&user.LastName,
-		&user.ChatID,
-		&user.Role,
-		&user.IsActive,
-	)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	// Присваиваем IP
-	session.IP = ipAddress
-	session.User = &user
-
-	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, session, 5*time.Minute)
-
-	return &session, nil
-}
-
-// FindByTokenWithDetails находит сессию с деталями
-func (r *SessionRepositoryImpl) FindByTokenWithDetails(token string) (*SessionRecord, error) {
-	// Попробуем получить из кэша
-	cacheKey := fmt.Sprintf("session:details:token:%s", token)
-	var cachedSession SessionRecord
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedSession); err == nil {
-		return &cachedSession, nil
+	if err := r.cache.Get(context.Background(), cacheKey, &session); err == nil {
+		return &session, nil
 	}
 
 	query := `
-    SELECT
-        id, user_id, token, device_info, ip_address,
-        user_agent, expires_at, data, created_at, updated_at,
-        last_activity, is_active, revoked_at, revoked_reason
-    FROM user_sessions
-    WHERE token = $1
-    `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	WHERE s.token = $1
+	`
 
-	var session SessionRecord
 	var deviceInfoJSON, dataJSON []byte
+	var telegramID sql.NullInt64
+	var username, firstName, role sql.NullString
 
 	err := r.db.QueryRow(query, token).Scan(
 		&session.ID,
 		&session.UserID,
 		&session.Token,
 		&deviceInfoJSON,
-		&session.IPAddress,
+		&session.IPAddress, // Исправлено: IPAddress вместо IP
 		&session.UserAgent,
-		&session.ExpiresAt,
 		&dataJSON,
+		&session.ExpiresAt,
 		&session.CreatedAt,
 		&session.UpdatedAt,
 		&session.LastActivity,
 		&session.IsActive,
 		&session.RevokedAt,
 		&session.RevokedReason,
+		&telegramID,
+		&username,
+		&firstName,
+		&role,
 	)
 
 	if err != nil {
@@ -296,111 +224,598 @@ func (r *SessionRepositoryImpl) FindByTokenWithDetails(token string) (*SessionRe
 		return nil, err
 	}
 
-	// Декодируем JSON данные
-	if len(deviceInfoJSON) > 0 {
-		if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
-		}
+	// Декодируем JSON
+	if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
 	}
 
-	if len(dataJSON) > 0 {
-		if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+	if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+	}
+
+	// Заполняем информацию о пользователе если есть
+	if telegramID.Valid || username.Valid || firstName.Valid {
+		session.User = &models.User{
+			ID:         session.UserID,
+			TelegramID: telegramID.Int64,
+			Username:   username.String,
+			FirstName:  firstName.String,
+			Role:       role.String,
 		}
 	}
 
 	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, session, 5*time.Minute)
+	if data, err := json.Marshal(session); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 10*time.Minute)
+	}
 
 	return &session, nil
 }
 
-// FindByID находит сессию по ID
-func (r *SessionRepositoryImpl) FindByID(sessionID string) (*SessionRecord, error) {
-	// Попробуем получить из кэша
-	cacheKey := fmt.Sprintf("session:id:%s", sessionID)
-	var cachedSession SessionRecord
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedSession); err == nil {
-		return &cachedSession, nil
+// Update обновляет сессию
+func (r *SessionRepositoryImpl) Update(session *models.Session) error {
+	query := `
+	UPDATE user_sessions SET
+		token = $1,
+		device_info = $2,
+		ip_address = $3,
+		user_agent = $4,
+		data = $5,
+		expires_at = $6,
+		is_active = $7,
+		revoked_at = $8,
+		revoked_reason = $9,
+		last_activity = $10
+	WHERE id = $11
+	RETURNING updated_at
+	`
+
+	deviceInfoJSON, err := json.Marshal(session.DeviceInfo)
+	if err != nil {
+		return fmt.Errorf("failed to marshal device info: %w", err)
+	}
+
+	dataJSON, err := json.Marshal(session.Data)
+	if err != nil {
+		return fmt.Errorf("failed to marshal session data: %w", err)
+	}
+
+	err = r.db.QueryRow(
+		query,
+		session.Token,
+		deviceInfoJSON,
+		session.IPAddress, // Исправлено: IPAddress вместо IP
+		session.UserAgent,
+		dataJSON,
+		session.ExpiresAt,
+		session.IsActive,
+		session.RevokedAt,
+		session.RevokedReason,
+		session.LastActivity,
+		session.ID,
+	).Scan(&session.UpdatedAt)
+
+	if err != nil {
+		return fmt.Errorf("failed to update session: %w", err)
+	}
+
+	// Инвалидируем кэш
+	r.invalidateSessionCache(session.ID, session.Token)
+	return nil
+}
+
+// Delete удаляет сессию
+func (r *SessionRepositoryImpl) Delete(id string) error {
+	// Сначала получаем сессию для инвалидации кэша
+	session, err := r.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return sql.ErrNoRows
+	}
+
+	query := `DELETE FROM user_sessions WHERE id = $1`
+	result, err := r.db.Exec(query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+
+	// Инвалидируем кэш
+	r.invalidateSessionCache(id, session.Token)
+	return nil
+}
+
+// Revoke отзывает сессию
+func (r *SessionRepositoryImpl) Revoke(id, reason string) error {
+	now := time.Now()
+	reasonPtr := &reason
+
+	query := `
+	UPDATE user_sessions SET
+		is_active = false,
+		revoked_at = $1,
+		revoked_reason = $2,
+		updated_at = NOW()
+	WHERE id = $3
+	RETURNING token
+	`
+
+	var token string
+	err := r.db.QueryRow(query, now, reasonPtr, id).Scan(&token)
+	if err != nil {
+		return fmt.Errorf("failed to revoke session: %w", err)
+	}
+
+	// Инвалидируем кэш
+	r.invalidateSessionCache(id, token)
+	return nil
+}
+
+// RevokeAllUserSessions отзывает все сессии пользователя
+func (r *SessionRepositoryImpl) RevokeAllUserSessions(userID int, reason string) error {
+	now := time.Now()
+	reasonPtr := &reason
+
+	query := `
+	UPDATE user_sessions SET
+		is_active = false,
+		revoked_at = $1,
+		revoked_reason = $2,
+		updated_at = NOW()
+	WHERE user_id = $3 AND is_active = true
+	RETURNING id, token
+	`
+
+	rows, err := r.db.Query(query, now, reasonPtr, userID)
+	if err != nil {
+		return fmt.Errorf("failed to revoke user sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessionIDs []string
+	var tokens []string
+
+	for rows.Next() {
+		var id, token string
+		if err := rows.Scan(&id, &token); err != nil {
+			return err
+		}
+		sessionIDs = append(sessionIDs, id)
+		tokens = append(tokens, token)
+	}
+
+	// Инвалидируем кэш для всех отозванных сессий
+	for i, id := range sessionIDs {
+		r.invalidateSessionCache(id, tokens[i])
+	}
+
+	return nil
+}
+
+// CleanupExpiredSessions очищает истекшие сессии
+func (r *SessionRepositoryImpl) CleanupExpiredSessions() (int64, error) {
+	query := `
+	DELETE FROM user_sessions
+	WHERE expires_at < NOW() OR (is_active = false AND revoked_at < NOW() - INTERVAL '30 days')
+	RETURNING id, token
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return 0, fmt.Errorf("failed to cleanup expired sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var count int64
+	var sessionIDs []string
+	var tokens []string
+
+	for rows.Next() {
+		var id, token string
+		if err := rows.Scan(&id, &token); err != nil {
+			return 0, err
+		}
+		sessionIDs = append(sessionIDs, id)
+		tokens = append(tokens, token)
+		count++
+	}
+
+	// Инвалидируем кэш
+	for i, id := range sessionIDs {
+		r.invalidateSessionCache(id, tokens[i])
+	}
+
+	return count, nil
+}
+
+// FindByUserID находит сессии пользователя
+func (r *SessionRepositoryImpl) FindByUserID(userID int, limit, offset int) ([]*models.Session, error) {
+	cacheKey := fmt.Sprintf("sessions:user:%d:%d:%d", userID, limit, offset)
+
+	// Попытка получить из кэша
+	var sessions []*models.Session
+	if err := r.cache.Get(context.Background(), cacheKey, &sessions); err == nil {
+		return sessions, nil
 	}
 
 	query := `
-    SELECT
-        id, user_id, token, device_info, ip_address,
-        user_agent, expires_at, data, created_at, updated_at,
-        last_activity, is_active, revoked_at, revoked_reason
-    FROM user_sessions
-    WHERE id = $1
-    `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	WHERE s.user_id = $1
+	ORDER BY s.last_activity DESC
+	LIMIT $2 OFFSET $3
+	`
 
-	var session SessionRecord
-	var deviceInfoJSON, dataJSON []byte
-
-	err := r.db.QueryRow(query, sessionID).Scan(
-		&session.ID,
-		&session.UserID,
-		&session.Token,
-		&deviceInfoJSON,
-		&session.IPAddress,
-		&session.UserAgent,
-		&session.ExpiresAt,
-		&dataJSON,
-		&session.CreatedAt,
-		&session.UpdatedAt,
-		&session.LastActivity,
-		&session.IsActive,
-		&session.RevokedAt,
-		&session.RevokedReason,
-	)
-
+	sessions, err := r.querySessions(query, userID, limit, offset)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
 		return nil, err
 	}
 
-	// Декодируем JSON данные
-	if len(deviceInfoJSON) > 0 {
-		if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
-		}
+	// Сохраняем в кэш
+	if data, err := json.Marshal(sessions); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 5*time.Minute)
 	}
 
-	if len(dataJSON) > 0 {
-		if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+	return sessions, nil
+}
+
+// FindByFilter находит сессии по фильтру
+func (r *SessionRepositoryImpl) FindByFilter(filter models.SessionFilter) ([]*models.Session, int64, error) {
+	query, args, err := r.buildFilterQuery(filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	sessions, err := r.querySessions(query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	countQuery, countArgs := r.buildCountQuery(filter)
+	var total int64
+	err = r.db.QueryRow(countQuery, countArgs...).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return sessions, total, nil
+}
+
+// GetActiveSessions возвращает активные сессии пользователя
+func (r *SessionRepositoryImpl) GetActiveSessions(userID int) ([]*models.Session, error) {
+	cacheKey := fmt.Sprintf("sessions:active:user:%d", userID)
+
+	// Попытка получить из кэша
+	var sessions []*models.Session
+	if err := r.cache.Get(context.Background(), cacheKey, &sessions); err == nil {
+		return sessions, nil
+	}
+
+	query := `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	WHERE s.user_id = $1 AND s.is_active = true AND s.expires_at > NOW()
+	ORDER BY s.last_activity DESC
+	`
+
+	sessions, err := r.querySessions(query, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохраняем в кэш
+	if data, err := json.Marshal(sessions); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 2*time.Minute)
+	}
+
+	return sessions, nil
+}
+
+// GetAll возвращает все сессии с пагинацией
+func (r *SessionRepositoryImpl) GetAll(limit, offset int) ([]*models.Session, error) {
+	query := `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	ORDER BY s.last_activity DESC
+	LIMIT $1 OFFSET $2
+	`
+
+	return r.querySessions(query, limit, offset)
+}
+
+// UpdateLastActivity обновляет время последней активности
+func (r *SessionRepositoryImpl) UpdateLastActivity(id string) error {
+	query := `
+	UPDATE user_sessions SET
+		last_activity = NOW(),
+		updated_at = NOW()
+	WHERE id = $1
+	RETURNING token
+	`
+
+	var token string
+	err := r.db.QueryRow(query, id).Scan(&token)
+	if err != nil {
+		return fmt.Errorf("failed to update last activity: %w", err)
+	}
+
+	// Инвалидируем кэш
+	r.invalidateSessionCache(id, token)
+	return nil
+}
+
+// LogActivity логирует активность сессии
+func (r *SessionRepositoryImpl) LogActivity(activity *models.SessionActivity) error {
+	query := `
+	INSERT INTO session_activities (
+		session_id, activity_type, details, ip_address
+	) VALUES ($1, $2, $3, $4)
+	RETURNING id, created_at
+	`
+
+	detailsJSON, err := json.Marshal(activity.Details)
+	if err != nil {
+		return fmt.Errorf("failed to marshal details: %w", err)
+	}
+
+	return r.db.QueryRow(
+		query,
+		activity.SessionID,
+		activity.ActivityType,
+		detailsJSON,
+		activity.IPAddress,
+	).Scan(&activity.ID, &activity.CreatedAt)
+}
+
+// GetSessionActivities возвращает активность сессии
+func (r *SessionRepositoryImpl) GetSessionActivities(sessionID string, limit, offset int) ([]*models.SessionActivity, error) {
+	query := `
+	SELECT id, session_id, activity_type, details, ip_address, created_at
+	FROM session_activities
+	WHERE session_id = $1
+	ORDER BY created_at DESC
+	LIMIT $2 OFFSET $3
+	`
+
+	rows, err := r.db.Query(query, sessionID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var activities []*models.SessionActivity
+
+	for rows.Next() {
+		var activity models.SessionActivity
+		var detailsJSON []byte
+
+		err := rows.Scan(
+			&activity.ID,
+			&activity.SessionID,
+			&activity.ActivityType,
+			&detailsJSON,
+			&activity.IPAddress,
+			&activity.CreatedAt,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		// Декодируем JSON
+		if err := json.Unmarshal(detailsJSON, &activity.Details); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal details: %w", err)
+		}
+
+		activities = append(activities, &activity)
+	}
+
+	return activities, nil
+}
+
+// GetUserSessionStats возвращает статистику сессий пользователя
+func (r *SessionRepositoryImpl) GetUserSessionStats(userID int) (map[string]interface{}, error) {
+	cacheKey := fmt.Sprintf("session:stats:user:%d", userID)
+	var stats map[string]interface{}
+
+	if err := r.cache.Get(context.Background(), cacheKey, &stats); err == nil {
+		return stats, nil
+	}
+
+	query := `
+	SELECT
+		COUNT(*) as total_sessions,
+		COUNT(CASE WHEN is_active = true AND expires_at > NOW() THEN 1 END) as active_sessions,
+		COUNT(CASE WHEN is_active = false THEN 1 END) as revoked_sessions,
+		COUNT(CASE WHEN expires_at < NOW() THEN 1 END) as expired_sessions,
+		MIN(created_at) as first_session,
+		MAX(last_activity) as last_activity,
+		COUNT(DISTINCT ip_address) as unique_ips
+	FROM user_sessions
+	WHERE user_id = $1
+	`
+
+	var (
+		totalSessions   int
+		activeSessions  int
+		revokedSessions int
+		expiredSessions int
+		firstSession    sql.NullTime
+		lastActivity    sql.NullTime
+		uniqueIPs       int
+	)
+
+	err := r.db.QueryRow(query, userID).Scan(
+		&totalSessions,
+		&activeSessions,
+		&revokedSessions,
+		&expiredSessions,
+		&firstSession,
+		&lastActivity,
+		&uniqueIPs,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	stats = make(map[string]interface{})
+	stats["total_sessions"] = totalSessions
+	stats["active_sessions"] = activeSessions
+	stats["revoked_sessions"] = revokedSessions
+	stats["expired_sessions"] = expiredSessions
+	stats["unique_ips"] = uniqueIPs
+
+	if firstSession.Valid {
+		stats["first_session"] = firstSession.Time
+	}
+	if lastActivity.Valid {
+		stats["last_activity"] = lastActivity.Time
+	}
+
+	// Сохраняем в кэш
+	if data, err := json.Marshal(stats); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 5*time.Minute)
+	}
+
+	return stats, nil
+}
+
+// GetSystemSessionStats возвращает системную статистику сессий
+func (r *SessionRepositoryImpl) GetSystemSessionStats() (*models.SessionStats, error) {
+	cacheKey := "session:stats:system"
+
+	// Попытка получить из кэша
+	var cachedStats models.SessionStats
+	if err := r.cache.Get(context.Background(), cacheKey, &cachedStats); err == nil {
+		return &cachedStats, nil
+	}
+
+	stats := &models.SessionStats{}
+
+	// Основная статистика
+	query := `
+	SELECT
+		COUNT(*) as total_sessions,
+		COUNT(CASE WHEN is_active = true AND expires_at > NOW() THEN 1 END) as active_sessions,
+		COUNT(DISTINCT user_id) as unique_users,
+		COUNT(CASE WHEN expires_at < NOW() THEN 1 END) as expired_sessions,
+		AVG(EXTRACT(EPOCH FROM (last_activity - created_at))) as avg_session_duration
+	FROM user_sessions
+	`
+
+	var (
+		totalSessions      int64
+		activeSessions     int64
+		uniqueUsers        int64
+		expiredSessions    int64
+		avgDurationSeconds sql.NullFloat64
+	)
+
+	err := r.db.QueryRow(query).Scan(
+		&totalSessions,
+		&activeSessions,
+		&uniqueUsers,
+		&expiredSessions,
+		&avgDurationSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	stats.TotalSessions = totalSessions
+	stats.ActiveSessions = activeSessions
+	stats.UniqueUsers = uniqueUsers
+	stats.ExpiredSessions = expiredSessions
+
+	if avgDurationSeconds.Valid {
+		stats.AvgSessionDuration = time.Duration(avgDurationSeconds.Float64) * time.Second
+	}
+
+	// Сессии за последние 24 часа
+	last24hQuery := `SELECT COUNT(*) FROM user_sessions WHERE created_at >= NOW() - INTERVAL '24 hours'`
+	err = r.db.QueryRow(last24hQuery).Scan(&stats.SessionsLast24h)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	// Наиболее активные пользователи
+	mostActiveQuery := `
+	SELECT user_id, COUNT(*) as session_count
+	FROM user_sessions
+	GROUP BY user_id
+	ORDER BY session_count DESC
+	LIMIT 5
+	`
+
+	rows, err := r.db.Query(mostActiveQuery)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var userID int
+			var count int64
+			rows.Scan(&userID, &count)
+			stats.MostActiveUsers = append(stats.MostActiveUsers, models.SessionUserStats{
+				UserID:       userID,
+				SessionCount: count,
+			})
 		}
 	}
 
 	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, session, 10*time.Minute)
-
-	return &session, nil
-}
-
-// FindByUserID находит все активные сессии пользователя
-func (r *SessionRepositoryImpl) FindByUserID(userID int) ([]*models.Session, error) {
-	// Попробуем получить из кэша
-	cacheKey := fmt.Sprintf("sessions:user:%d", userID)
-	var cachedSessions []*models.Session
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedSessions); err == nil {
-		return cachedSessions, nil
+	if data, err := json.Marshal(stats); err == nil {
+		_ = r.cache.Set(context.Background(), cacheKey, string(data), 5*time.Minute)
 	}
 
-	query := `
-    SELECT
-        id, user_id, token, ip_address,
-        user_agent, expires_at, created_at, last_activity
-    FROM user_sessions
-    WHERE user_id = $1
-      AND is_active = TRUE
-      AND expires_at > NOW()
-      AND revoked_at IS NULL
-    ORDER BY created_at DESC
-    `
+	return stats, nil
+}
 
-	rows, err := r.db.Query(query, userID)
+// GetSessionCount возвращает количество сессий пользователя
+func (r *SessionRepositoryImpl) GetSessionCount(userID int) (int, error) {
+	cacheKey := fmt.Sprintf("session:count:user:%d", userID)
+
+	// Попытка получить из кэша
+	var count int
+	if err := r.cache.Get(context.Background(), cacheKey, &count); err == nil {
+		return count, nil
+	}
+
+	query := `SELECT COUNT(*) FROM user_sessions WHERE user_id = $1`
+	err := r.db.QueryRow(query, userID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+
+	// Сохраняем в кэш
+	_ = r.cache.Set(context.Background(), cacheKey, count, 5*time.Minute)
+
+	return count, nil
+}
+
+// Вспомогательные методы
+
+func (r *SessionRepositoryImpl) querySessions(query string, args ...interface{}) ([]*models.Session, error) {
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -410,445 +825,52 @@ func (r *SessionRepositoryImpl) FindByUserID(userID int) ([]*models.Session, err
 
 	for rows.Next() {
 		var session models.Session
-		var lastActivity sql.NullTime
-
-		err := rows.Scan(
-			&session.ID,
-			&session.UserID,
-			&session.Token,
-			&session.IP,
-			&session.UserAgent,
-			&session.ExpiresAt,
-			&session.CreatedAt,
-			&lastActivity,
-		)
-
-		if err != nil {
-			return nil, err
-		}
-
-		if lastActivity.Valid {
-			session.LastActivity = lastActivity.Time
-		}
-
-		sessions = append(sessions, &session)
-	}
-
-	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, sessions, 2*time.Minute)
-
-	return sessions, nil
-}
-
-// UpdateActivity обновляет время последней активности сессии
-func (r *SessionRepositoryImpl) UpdateActivity(sessionID string) error {
-	query := `
-    UPDATE user_sessions
-    SET last_activity = NOW(),
-        updated_at = NOW()
-    WHERE id = $1 AND is_active = TRUE
-    `
-
-	result, err := r.db.Exec(query, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, 0)
-
-	return nil
-}
-
-// Revoke отзывает сессию
-func (r *SessionRepositoryImpl) Revoke(sessionID, reason string) error {
-	// Начинаем транзакцию
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	query := `
-    UPDATE user_sessions
-    SET is_active = FALSE,
-        revoked_at = NOW(),
-        revoked_reason = $1,
-        updated_at = NOW()
-    WHERE id = $2 AND is_active = TRUE
-    `
-
-	result, err := tx.Exec(query, reason, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, 0)
-
-	return nil
-}
-
-// RevokeAllUserSessions отзывает все сессии пользователя
-func (r *SessionRepositoryImpl) RevokeAllUserSessions(userID int, reason string) (int, error) {
-	// Начинаем транзакцию
-	tx, err := r.db.Begin()
-	if err != nil {
-		return 0, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	query := `
-    UPDATE user_sessions
-    SET is_active = FALSE,
-        revoked_at = NOW(),
-        revoked_reason = $1,
-        updated_at = NOW()
-    WHERE user_id = $2
-      AND is_active = TRUE
-      AND revoked_at IS NULL
-    `
-
-	result, err := tx.Exec(query, reason, userID)
-	if err != nil {
-		return 0, err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Инвалидируем кэш
-	r.invalidateUserSessionsCache(userID)
-
-	return int(rowsAffected), nil
-}
-
-// RevokeByToken отзывает сессию по токену
-func (r *SessionRepositoryImpl) RevokeByToken(token, reason string) error {
-	// Сначала найдем сессию по токену
-	session, err := r.FindByTokenWithDetails(token)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return sql.ErrNoRows
-	}
-
-	// Отзываем сессию
-	return r.Revoke(session.ID, reason)
-}
-
-// Extend продлевает срок действия сессии
-func (r *SessionRepositoryImpl) Extend(sessionID string, newExpiry time.Time) error {
-	query := `
-    UPDATE user_sessions
-    SET expires_at = $1,
-        updated_at = NOW()
-    WHERE id = $2 AND is_active = TRUE
-    `
-
-	result, err := r.db.Exec(query, newExpiry, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, 0)
-
-	return nil
-}
-
-// Delete удаляет сессию
-func (r *SessionRepositoryImpl) Delete(sessionID string) error {
-	// Сначала получим информацию о сессии для инвалидации кэша
-	session, err := r.FindByID(sessionID)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return sql.ErrNoRows
-	}
-
-	// Удаляем сессию
-	query := `DELETE FROM user_sessions WHERE id = $1`
-	result, err := r.db.Exec(query, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, session.UserID)
-
-	return nil
-}
-
-// CleanupExpired очищает истекшие сессии
-func (r *SessionRepositoryImpl) CleanupExpired(ctx context.Context) (int, error) {
-	query := `
-    DELETE FROM user_sessions
-    WHERE expires_at < NOW() - INTERVAL '7 days'
-      AND is_active = FALSE
-    `
-
-	result, err := r.db.ExecContext(ctx, query)
-	if err != nil {
-		return 0, err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	return int(rowsAffected), nil
-}
-
-// GetActiveSessionsCount возвращает количество активных сессий
-func (r *SessionRepositoryImpl) GetActiveSessionsCount() (int, error) {
-	// Попробуем получить из кэша
-	cacheKey := "sessions:active:count"
-	var cachedCount int
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedCount); err == nil {
-		return cachedCount, nil
-	}
-
-	query := `
-    SELECT COUNT(*)
-    FROM user_sessions
-    WHERE is_active = TRUE
-      AND expires_at > NOW()
-      AND revoked_at IS NULL
-    `
-
-	var count int
-	err := r.db.QueryRow(query).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-
-	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, count, 1*time.Minute)
-
-	return count, nil
-}
-
-// GetUserActiveSessionsCount возвращает количество активных сессий пользователя
-func (r *SessionRepositoryImpl) GetUserActiveSessionsCount(userID int) (int, error) {
-	// Попробуем получить из кэша
-	cacheKey := fmt.Sprintf("sessions:active:user:%d:count", userID)
-	var cachedCount int
-	if err := r.cache.Get(context.Background(), cacheKey, &cachedCount); err == nil {
-		return cachedCount, nil
-	}
-
-	query := `
-    SELECT COUNT(*)
-    FROM user_sessions
-    WHERE user_id = $1
-      AND is_active = TRUE
-      AND expires_at > NOW()
-      AND revoked_at IS NULL
-    `
-
-	var count int
-	err := r.db.QueryRow(query, userID).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-
-	// Сохраняем в кэш
-	r.cache.Set(context.Background(), cacheKey, count, 2*time.Minute)
-
-	return count, nil
-}
-
-// GetSessionStats возвращает статистику сессий
-func (r *SessionRepositoryImpl) GetSessionStats(ctx context.Context) (*SessionStats, error) {
-	// Попробуем получить из кэша
-	cacheKey := "sessions:stats"
-	var cachedStats SessionStats
-	if err := r.cache.Get(ctx, cacheKey, &cachedStats); err == nil {
-		return &cachedStats, nil
-	}
-
-	stats := &SessionStats{}
-
-	// Общее количество сессий
-	err := r.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM user_sessions").Scan(&stats.TotalSessions)
-	if err != nil {
-		return nil, err
-	}
-
-	// Активные сессии
-	err = r.db.QueryRowContext(ctx, `
-        SELECT COUNT(*)
-        FROM user_sessions
-        WHERE is_active = TRUE
-          AND expires_at > NOW()
-          AND revoked_at IS NULL
-    `).Scan(&stats.ActiveSessions)
-	if err != nil {
-		return nil, err
-	}
-
-	// Средняя продолжительность сессии
-	var avgSeconds float64
-	err = r.db.QueryRowContext(ctx, `
-        SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (last_activity - created_at))), 0)
-        FROM user_sessions
-        WHERE is_active = FALSE
-          AND last_activity IS NOT NULL
-    `).Scan(&avgSeconds)
-	if err != nil {
-		return nil, err
-	}
-	stats.AvgSessionDuration = time.Duration(avgSeconds * float64(time.Second))
-
-	// Максимальное количество одновременных сессий за последние 24 часа
-	err = r.db.QueryRowContext(ctx, `
-        SELECT COALESCE(MAX(concurrent_count), 0)
-        FROM (
-            SELECT COUNT(*) as concurrent_count
-            FROM user_sessions
-            WHERE created_at >= NOW() - INTERVAL '24 hours'
-            GROUP BY DATE_TRUNC('hour', created_at)
-        ) as hourly_counts
-    `).Scan(&stats.MaxConcurrent)
-	if err != nil {
-		return nil, err
-	}
-
-	// Самый активный час
-	err = r.db.QueryRowContext(ctx, `
-        SELECT EXTRACT(HOUR FROM created_at) as hour
-        FROM user_sessions
-        WHERE created_at >= NOW() - INTERVAL '7 days'
-        GROUP BY EXTRACT(HOUR FROM created_at)
-        ORDER BY COUNT(*) DESC
-        LIMIT 1
-    `).Scan(&stats.MostActiveHour)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-
-	// Сохраняем в кэш
-	r.cache.Set(ctx, cacheKey, stats, 5*time.Minute)
-
-	return stats, nil
-}
-
-// UpdateSessionData обновляет дополнительные данные сессии
-func (r *SessionRepositoryImpl) UpdateSessionData(sessionID string, data map[string]interface{}) error {
-	dataJSON, err := json.Marshal(data)
-	if err != nil {
-		return fmt.Errorf("failed to marshal session data: %w", err)
-	}
-
-	query := `
-    UPDATE user_sessions
-    SET data = $1,
-        updated_at = NOW()
-    WHERE id = $2
-    `
-
-	result, err := r.db.Exec(query, dataJSON, sessionID)
-	if err != nil {
-		return err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, 0)
-
-	return nil
-}
-
-// GetRecentlyActiveSessions возвращает недавно активные сессии
-func (r *SessionRepositoryImpl) GetRecentlyActiveSessions(hours int) ([]*SessionRecord, error) {
-	query := `
-    SELECT
-        id, user_id, token, device_info, ip_address,
-        user_agent, expires_at, data, created_at, updated_at,
-        last_activity, is_active, revoked_at, revoked_reason
-    FROM user_sessions
-    WHERE last_activity >= NOW() - INTERVAL '1 hour' * $1
-      AND is_active = TRUE
-    ORDER BY last_activity DESC
-    `
-
-	rows, err := r.db.Query(query, hours)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sessions []*SessionRecord
-
-	for rows.Next() {
-		var session SessionRecord
 		var deviceInfoJSON, dataJSON []byte
+		var telegramID sql.NullInt64
+		var username, firstName, role sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
 			&session.UserID,
 			&session.Token,
 			&deviceInfoJSON,
-			&session.IPAddress,
+			&session.IPAddress, // Исправлено: IPAddress вместо IP
 			&session.UserAgent,
-			&session.ExpiresAt,
 			&dataJSON,
+			&session.ExpiresAt,
 			&session.CreatedAt,
 			&session.UpdatedAt,
 			&session.LastActivity,
 			&session.IsActive,
 			&session.RevokedAt,
 			&session.RevokedReason,
+			&telegramID,
+			&username,
+			&firstName,
+			&role,
 		)
 
 		if err != nil {
 			return nil, err
 		}
 
-		// Декодируем JSON данные
-		if len(deviceInfoJSON) > 0 {
-			if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
-			}
+		// Декодируем JSON
+		if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
 		}
 
-		if len(dataJSON) > 0 {
-			if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+		if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
+		}
+
+		// Заполняем информацию о пользователе если есть
+		if telegramID.Valid || username.Valid || firstName.Valid {
+			session.User = &models.User{
+				ID:         session.UserID,
+				TelegramID: telegramID.Int64,
+				Username:   username.String,
+				FirstName:  firstName.String,
+				Role:       role.String,
 			}
 		}
 
@@ -858,305 +880,160 @@ func (r *SessionRepositoryImpl) GetRecentlyActiveSessions(hours int) ([]*Session
 	return sessions, nil
 }
 
-// GetSessionActivityLog возвращает лог активности сессии
-func (r *SessionRepositoryImpl) GetSessionActivityLog(sessionID string, limit int) ([]map[string]interface{}, error) {
-	query := `
-    SELECT
-        activity_type, details, ip_address, created_at
-    FROM session_activities
-    WHERE session_id = $1
-    ORDER BY created_at DESC
-    LIMIT $2
-    `
+func (r *SessionRepositoryImpl) buildFilterQuery(filter models.SessionFilter) (string, []interface{}, error) {
+	baseQuery := `
+	SELECT
+		s.id, s.user_id, s.token, s.device_info, s.ip_address, s.user_agent,
+		s.data, s.expires_at, s.created_at, s.updated_at, s.last_activity,
+		s.is_active, s.revoked_at, s.revoked_reason,
+		u.telegram_id, u.username, u.first_name, u.role
+	FROM user_sessions s
+	LEFT JOIN users u ON s.user_id = u.id
+	`
 
-	rows, err := r.db.Query(query, sessionID, limit)
-	if err != nil {
-		return nil, err
+	whereClauses := []string{"1=1"}
+	args := []interface{}{}
+	argIndex := 1
+
+	if filter.UserID != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("s.user_id = $%d", argIndex))
+		args = append(args, *filter.UserID)
+		argIndex++
 	}
-	defer rows.Close()
 
-	var activities []map[string]interface{}
+	if filter.IsActive != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("s.is_active = $%d", argIndex))
+		args = append(args, *filter.IsActive)
+		argIndex++
+	}
 
-	for rows.Next() {
-		var activityType, ipAddress string
-		var createdAt time.Time
-		var detailsJSON []byte
+	if filter.Token != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("s.token = $%d", argIndex))
+		args = append(args, *filter.Token)
+		argIndex++
+	}
 
-		err := rows.Scan(&activityType, &detailsJSON, &ipAddress, &createdAt)
-		if err != nil {
-			return nil, err
+	if filter.StartDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("s.created_at >= $%d", argIndex))
+		args = append(args, *filter.StartDate)
+		argIndex++
+	}
+
+	if filter.EndDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("s.created_at <= $%d", argIndex))
+		args = append(args, *filter.EndDate)
+		argIndex++
+	}
+
+	// Собираем запрос
+	query := baseQuery + " WHERE " + joinStrings(whereClauses, " AND ")
+
+	// Сортировка
+	orderBy := "s.last_activity"
+	orderDir := "DESC"
+
+	if filter.OrderBy != "" {
+		validOrderFields := map[string]bool{
+			"created_at":    true,
+			"last_activity": true,
+			"expires_at":    true,
+			"user_id":       true,
 		}
-
-		var detailsMap map[string]interface{}
-		if len(detailsJSON) > 0 {
-			if err := json.Unmarshal(detailsJSON, &detailsMap); err != nil {
-				detailsMap = map[string]interface{}{"raw": string(detailsJSON)}
-			}
-		} else {
-			detailsMap = make(map[string]interface{})
+		if validOrderFields[filter.OrderBy] {
+			orderBy = "s." + filter.OrderBy
 		}
-
-		activities = append(activities, map[string]interface{}{
-			"activity_type": activityType,
-			"details":       detailsMap,
-			"ip_address":    ipAddress,
-			"created_at":    createdAt,
-		})
 	}
 
-	return activities, nil
-}
-
-// LogSessionActivity записывает активность сессии
-func (r *SessionRepositoryImpl) LogSessionActivity(sessionID, activityType string, details map[string]interface{}) error {
-	detailsJSON, err := json.Marshal(details)
-	if err != nil {
-		return fmt.Errorf("failed to marshal activity details: %w", err)
+	if filter.OrderDir != "" && (filter.OrderDir == "ASC" || filter.OrderDir == "DESC") {
+		orderDir = filter.OrderDir
 	}
 
-	query := `
-    INSERT INTO session_activities (session_id, activity_type, details)
-    VALUES ($1, $2, $3)
-    `
+	query += fmt.Sprintf(" ORDER BY %s %s", orderBy, orderDir)
 
-	_, err = r.db.Exec(query, sessionID, activityType, detailsJSON)
-	return err
-}
+	// Лимит и оффсет
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIndex)
+		args = append(args, filter.Limit)
+		argIndex++
 
-// GenerateNewToken генерирует новый токен для сессии
-func (r *SessionRepositoryImpl) GenerateNewToken(sessionID string) (string, error) {
-	newToken := uuid.New().String()
-
-	// Начинаем транзакцию
-	tx, err := r.db.Begin()
-	if err != nil {
-		return "", fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	query := `
-    UPDATE user_sessions
-    SET token = $1,
-        updated_at = NOW()
-    WHERE id = $2 AND is_active = TRUE
-    `
-
-	result, err := tx.Exec(query, newToken, sessionID)
-	if err != nil {
-		return "", err
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return "", sql.ErrNoRows
-	}
-
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Инвалидируем кэш
-	r.invalidateSessionCache(sessionID, 0)
-
-	return newToken, nil
-}
-
-// GetSessionsByIP возвращает сессии по IP адресу
-func (r *SessionRepositoryImpl) GetSessionsByIP(ipAddress string) ([]*SessionRecord, error) {
-	query := `
-    SELECT
-        id, user_id, token, device_info, ip_address,
-        user_agent, expires_at, data, created_at, updated_at,
-        last_activity, is_active, revoked_at, revoked_reason
-    FROM user_sessions
-    WHERE ip_address = $1
-      AND created_at >= NOW() - INTERVAL '30 days'
-    ORDER BY created_at DESC
-    `
-
-	rows, err := r.db.Query(query, ipAddress)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sessions []*SessionRecord
-
-	for rows.Next() {
-		var session SessionRecord
-		var deviceInfoJSON, dataJSON []byte
-
-		err := rows.Scan(
-			&session.ID,
-			&session.UserID,
-			&session.Token,
-			&deviceInfoJSON,
-			&session.IPAddress,
-			&session.UserAgent,
-			&session.ExpiresAt,
-			&dataJSON,
-			&session.CreatedAt,
-			&session.UpdatedAt,
-			&session.LastActivity,
-			&session.IsActive,
-			&session.RevokedAt,
-			&session.RevokedReason,
-		)
-
-		if err != nil {
-			return nil, err
+		if filter.Offset > 0 {
+			query += fmt.Sprintf(" OFFSET $%d", argIndex)
+			args = append(args, filter.Offset)
 		}
-
-		// Декодируем JSON данные
-		if len(deviceInfoJSON) > 0 {
-			if err := json.Unmarshal(deviceInfoJSON, &session.DeviceInfo); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal device info: %w", err)
-			}
-		}
-
-		if len(dataJSON) > 0 {
-			if err := json.Unmarshal(dataJSON, &session.Data); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal session data: %w", err)
-			}
-		}
-
-		sessions = append(sessions, &session)
 	}
 
-	return sessions, nil
+	return query, args, nil
 }
 
-// BulkRevokeInactive массово отзывает неактивные сессии
-func (r *SessionRepositoryImpl) BulkRevokeInactive(ctx context.Context, inactiveFor time.Duration) (int, error) {
-	query := `
-    UPDATE user_sessions
-    SET is_active = FALSE,
-        revoked_at = NOW(),
-        revoked_reason = 'inactive',
-        updated_at = NOW()
-    WHERE is_active = TRUE
-      AND last_activity < NOW() - $1
-      AND revoked_at IS NULL
-    `
+func (r *SessionRepositoryImpl) buildCountQuery(filter models.SessionFilter) (string, []interface{}) {
+	baseQuery := "SELECT COUNT(*) FROM user_sessions s WHERE 1=1"
 
-	result, err := r.db.ExecContext(ctx, query, inactiveFor)
-	if err != nil {
-		return 0, err
+	whereClauses := []string{}
+	args := []interface{}{}
+	argIndex := 1
+
+	if filter.UserID != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("user_id = $%d", argIndex))
+		args = append(args, *filter.UserID)
+		argIndex++
 	}
 
-	rowsAffected, _ := result.RowsAffected()
+	if filter.IsActive != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("is_active = $%d", argIndex))
+		args = append(args, *filter.IsActive)
+		argIndex++
+	}
 
-	// Инвалидируем общий кэш сессий
-	r.invalidateSessionsCache()
+	if filter.Token != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("token = $%d", argIndex))
+		args = append(args, *filter.Token)
+		argIndex++
+	}
 
-	return int(rowsAffected), nil
+	if filter.StartDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("created_at >= $%d", argIndex))
+		args = append(args, *filter.StartDate)
+		argIndex++
+	}
+
+	if filter.EndDate != nil {
+		whereClauses = append(whereClauses, fmt.Sprintf("created_at <= $%d", argIndex))
+		args = append(args, *filter.EndDate)
+		argIndex++
+	}
+
+	query := baseQuery
+	if len(whereClauses) > 0 {
+		query += " AND " + joinStrings(whereClauses, " AND ")
+	}
+
+	return query, args
 }
 
-// CreateSessionForUser создает новую сессию для пользователя
-func (r *SessionRepositoryImpl) CreateSessionForUser(userID int, userAgent, ipAddress string) (*models.Session, error) {
-	session := &models.Session{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		Token:     uuid.New().String(),
-		IP:        ipAddress,
-		UserAgent: userAgent,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 дней
-		CreatedAt: time.Now(),
-	}
-
-	if err := r.Create(session); err != nil {
-		return nil, err
-	}
-
-	return session, nil
-}
-
-// CreateSessionForUserWithDetails создает сессию с деталями
-func (r *SessionRepositoryImpl) CreateSessionForUserWithDetails(userID int, userAgent, ipAddress string, deviceInfo, data map[string]interface{}) (*SessionRecord, error) {
-	session := &SessionRecord{
-		ID:         uuid.New().String(),
-		UserID:     userID,
-		Token:      uuid.New().String(),
-		DeviceInfo: deviceInfo,
-		IPAddress:  ipAddress,
-		UserAgent:  userAgent,
-		Data:       data,
-		ExpiresAt:  time.Now().Add(30 * 24 * time.Hour), // 30 дней
-		IsActive:   true,
-	}
-
-	if err := r.CreateWithDetails(session); err != nil {
-		return nil, err
-	}
-
-	return session, nil
-}
-
-// ConvertToUserSession конвертирует SessionRecord в users.Session
-func (r *SessionRepositoryImpl) ConvertToUserSession(record *SessionRecord) *models.Session {
-	return &models.Session{
-		ID:        record.ID,
-		UserID:    record.UserID,
-		Token:     record.Token,
-		IP:        record.IPAddress,
-		UserAgent: record.UserAgent,
-		ExpiresAt: record.ExpiresAt,
-		CreatedAt: record.CreatedAt,
-	}
-}
-
-// Вспомогательные методы для инвалидации кэша
-
-// invalidateSessionCache инвалидирует кэш сессии
-func (r *SessionRepositoryImpl) invalidateSessionCache(sessionID string, userID int) {
+func (r *SessionRepositoryImpl) invalidateSessionCache(sessionID, token string) {
 	ctx := context.Background()
 	keys := []string{
-		"sessions:active:count",
-		"sessions:stats",
-	}
-
-	if sessionID != "" {
-		keys = append(keys, fmt.Sprintf("session:id:%s", sessionID))
-		keys = append(keys, fmt.Sprintf("session:details:id:%s", sessionID))
-	}
-	if userID > 0 {
-		keys = append(keys, fmt.Sprintf("sessions:user:%d", userID))
-		keys = append(keys, fmt.Sprintf("sessions:active:user:%d:count", userID))
+		fmt.Sprintf("session:%s", sessionID),
+		fmt.Sprintf("session:token:%s", token),
+		"sessions:user:*",
+		"sessions:active:*",
+		"session:stats:*",
+		"session:count:*",
 	}
 
 	_ = r.cache.DeleteMulti(ctx, keys...)
 }
 
-// invalidateUserSessionsCache инвалидирует кэш сессий пользователя
-func (r *SessionRepositoryImpl) invalidateUserSessionsCache(userID int) {
-	ctx := context.Background()
-	keys := []string{
-		fmt.Sprintf("sessions:user:%d", userID),
-		fmt.Sprintf("sessions:active:user:%d:count", userID),
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
 	}
-
-	_ = r.cache.DeleteMulti(ctx, keys...)
-}
-
-// invalidateSessionsCache инвалидирует общий кэш сессий
-func (r *SessionRepositoryImpl) invalidateSessionsCache() {
-	ctx := context.Background()
-	keys := []string{
-		"sessions:active:count",
-		"sessions:stats",
+	if len(strs) == 1 {
+		return strs[0]
 	}
-
-	_ = r.cache.DeleteMulti(ctx, keys...)
-}
-
-// Вспомогательная функция для преобразования времени в NullTime
-func getNullTime(t time.Time) sql.NullTime {
-	if t.IsZero() {
-		return sql.NullTime{Valid: false}
+	result := strs[0]
+	for _, s := range strs[1:] {
+		result += sep + s
 	}
-	return sql.NullTime{
-		Time:  t,
-		Valid: true,
-	}
+	return result
 }

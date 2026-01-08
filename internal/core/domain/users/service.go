@@ -3,166 +3,326 @@ package users
 
 import (
 	"context"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
-	activity_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/activity"
-	api_key_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/api_key"
-	session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
-	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
-	user_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	activity_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/activity"
+	session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
+	users_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
+
+	"github.com/jmoiron/sqlx"
 )
 
-// UserService предоставляет бизнес-логику для работы с пользователями
-type UserService struct {
-	userRepo         user_repo.UserRepository
-	sessionRepo      session_repo.SessionRepository
-	activityRepo     activity_repo.ActivityRepository
-	subscriptionRepo subscription_repo.SubscriptionRepository
-	apiKeyRepo       api_key_repo.APIKeyRepository
+// Config конфигурация сервиса
+type Config struct {
+	DefaultMinGrowthThreshold float64
+	DefaultMaxSignalsPerDay   int
+	SessionTTL                time.Duration
+	MaxSessionsPerUser        int
 }
 
-// NewUserService создает новый сервис пользователей
-func NewUserService(
-	userRepo user_repo.UserRepository,
-	sessionRepo session_repo.SessionRepository,
-	activityRepo activity_repo.ActivityRepository,
-	subscriptionRepo subscription_repo.SubscriptionRepository,
-	apiKeyRepo api_key_repo.APIKeyRepository,
-) *UserService {
-	return &UserService{
-		userRepo:         userRepo,
-		sessionRepo:      sessionRepo,
-		activityRepo:     activityRepo,
-		subscriptionRepo: subscriptionRepo,
-		apiKeyRepo:       apiKeyRepo,
-	}
+// NotificationService интерфейс для уведомлений
+type NotificationService interface {
+	SendTelegramNotification(chatID, message string) error
 }
 
-// RegisterTelegramUser регистрирует пользователя через Telegram
-func (s *UserService) RegisterTelegramUser(
-	telegramID int64,
-	username string,
-	firstName string,
-	lastName string,
-	chatID string,
-	email string,
-	phone string,
-	ipAddress string,
-	userAgent string,
-) (*models.User, *models.Session, error) {
-
-	// Проверяем, не зарегистрирован ли уже пользователь
-	existingUser, err := s.userRepo.FindByTelegramID(telegramID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to check existing user: %w", err)
-	}
-
-	if existingUser != nil {
-		return nil, nil, fmt.Errorf("user with telegram ID %d already exists", telegramID)
-	}
-
-	// Проверяем по chat ID (на всякий случай)
-	existingByChatID, err := s.userRepo.FindByChatID(chatID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to check existing user by chat ID: %w", err)
-	}
-
-	if existingByChatID != nil {
-		return nil, nil, fmt.Errorf("user with chat ID %s already exists", chatID)
-	}
-
-	// Создаем нового пользователя с настройками по умолчанию
-	user := models.NewUser(telegramID, username, firstName, lastName, chatID)
-	user.Email = email
-	user.Phone = phone
-
-	// Сохраняем пользователя в базу данных
-	if err := s.userRepo.Create(user); err != nil {
-		return nil, nil, fmt.Errorf("failed to create user: %w", err)
-	}
-
-	// Создаем сессию
-	session, err := s.CreateSession(user.ID, ipAddress, userAgent)
-	if err != nil {
-		// Если не удалось создать сессию, все равно возвращаем пользователя
-		// но без сессии
-		return user, nil, fmt.Errorf("user created but session creation failed: %w", err)
-	}
-
-	// Логируем регистрацию
-	s.logUserRegistration(user, ipAddress, userAgent)
-
-	return user, session, nil
+// Service сервис управления пользователями
+type Service struct {
+	repo         users_repo.UserRepository
+	sessionRepo  session_repo.SessionRepository
+	activityRepo activity_repo.ActivityRepository
+	cache        *redis.Cache
+	cachePrefix  string
+	cacheTTL     time.Duration
+	mu           sync.RWMutex
+	notifier     NotificationService
+	config       Config
 }
 
-// LoginTelegramUser выполняет вход пользователя через Telegram
-func (s *UserService) LoginTelegramUser(
-	telegramID int64,
-	chatID string,
-	ipAddress string,
-	userAgent string,
-) (*models.User, *models.Session, error) {
+// NewService создает новый сервис пользователей
+func NewService(
+	db *sqlx.DB,
+	cache *redis.Cache,
+	notifier NotificationService,
+	config Config,
+) (*Service, error) {
 
-	// Находим пользователя по telegramID
-	user, err := s.userRepo.FindByTelegramID(telegramID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to find user: %w", err)
+	userRepo := users_repo.NewUserRepository(db, cache)
+	sessionRepo := session_repo.NewSessionRepository(db, cache)
+	activityRepo := activity_repo.NewActivityRepository(db, cache)
+
+	service := &Service{
+		repo:         userRepo,
+		sessionRepo:  sessionRepo,
+		activityRepo: activityRepo,
+		cache:        cache,
+		cachePrefix:  "users:",
+		cacheTTL:     30 * time.Minute,
+		notifier:     notifier,
+		config:       config,
 	}
 
+	log.Println("✅ User service initialized")
+	return service, nil
+}
+
+// CreateUser создает нового пользователя
+func (s *Service) CreateUser(telegramID int64, username, firstName, lastName string) (*models.User, error) {
+	// Проверяем существование пользователя
+	existing, err := s.repo.FindByTelegramID(telegramID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("failed to check existing user: %w", err)
+	}
+
+	if existing != nil {
+		return existing, nil
+	}
+
+	// Создаем нового пользователя
+	user := &models.User{
+		TelegramID:           telegramID,
+		Username:             username,
+		FirstName:            firstName,
+		LastName:             lastName,
+		IsActive:             true,
+		Role:                 models.RoleUser,
+		MinGrowthThreshold:   s.config.DefaultMinGrowthThreshold,
+		MaxSignalsPerDay:     s.config.DefaultMaxSignalsPerDay,
+		NotificationsEnabled: true,
+		CreatedAt:            time.Now(),
+		UpdatedAt:            time.Now(),
+	}
+
+	if err := s.repo.Create(user); err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	// Логируем создание пользователя
+	s.logUserActivity(user, "user_created", "Пользователь создан", nil)
+
+	log.Printf("✅ Created new user: %s (ID: %d)", username, user.ID)
+
+	return user, nil
+}
+
+// GetOrCreateUser получает или создает пользователя
+func (s *Service) GetOrCreateUser(telegramID int64, username, firstName, lastName string) (*models.User, error) {
+	// Пробуем получить из кэша
+	cacheKey := s.cachePrefix + fmt.Sprintf("telegram:%d", telegramID)
+	var cachedUser models.User
+	if err := s.cache.Get(context.Background(), cacheKey, &cachedUser); err == nil {
+		return &cachedUser, nil
+	}
+
+	// Ищем в базе
+	user, err := s.repo.FindByTelegramID(telegramID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+
+	// Если не нашли, создаем
 	if user == nil {
-		return nil, nil, errors.New("user not found")
+		user, err = s.CreateUser(telegramID, username, firstName, lastName)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	// Проверяем активность пользователя
-	if !user.IsActive {
-		return nil, nil, errors.New("user account is deactivated")
+	// Кэшируем
+	s.cacheUser(user)
+
+	return user, nil
+}
+
+// GetUserByID возвращает пользователя по ID
+func (s *Service) GetUserByID(id int) (*models.User, error) {
+	// Пробуем получить из кэша
+	cacheKey := s.cachePrefix + fmt.Sprintf("id:%d", id)
+	var cachedUser models.User
+	if err := s.cache.Get(context.Background(), cacheKey, &cachedUser); err == nil {
+		return &cachedUser, nil
 	}
 
-	// Обновляем время последнего входа
-	if err := s.userRepo.UpdateLastLogin(user.ID); err != nil {
-		return nil, nil, fmt.Errorf("failed to update last login: %w", err)
+	// Ищем в базе
+	user, err := s.repo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	// Кэшируем
+	if user != nil {
+		s.cacheUser(user)
+	}
+
+	return user, nil
+}
+
+// GetUserByTelegramID возвращает пользователя по Telegram ID
+func (s *Service) GetUserByTelegramID(telegramID int64) (*models.User, error) {
+	// Пробуем получить из кэша
+	cacheKey := s.cachePrefix + fmt.Sprintf("telegram:%d", telegramID)
+	var cachedUser models.User
+	if err := s.cache.Get(context.Background(), cacheKey, &cachedUser); err == nil {
+		return &cachedUser, nil
+	}
+
+	// Ищем в базе
+	user, err := s.repo.FindByTelegramID(telegramID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Кэшируем
+	if user != nil {
+		s.cacheUser(user)
+	}
+
+	return user, nil
+}
+
+// UpdateUser обновляет данные пользователя
+func (s *Service) UpdateUser(user *models.User) error {
+	user.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(user); err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	// Инвалидируем кэш
+	s.invalidateUserCache(user)
+
+	// Логируем обновление
+	s.logUserActivity(user, "user_updated", "Данные пользователя обновлены", nil)
+
+	return nil
+}
+
+// UpdateSettings обновляет настройки пользователя
+func (s *Service) UpdateSettings(userID int, settings map[string]interface{}) error {
+	// Получаем пользователя
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return errors.New("user not found")
+	}
+
+	// Обновляем настройки
+	oldSettings := map[string]interface{}{
+		"min_growth_threshold":  user.MinGrowthThreshold,
+		"max_signals_per_day":   user.MaxSignalsPerDay,
+		"notifications_enabled": user.NotificationsEnabled,
+	}
+
+	// Применяем новые настройки
+	for key, value := range settings {
+		switch key {
+		case "min_growth_threshold":
+			if val, ok := value.(float64); ok {
+				user.MinGrowthThreshold = val
+			}
+		case "max_signals_per_day":
+			if val, ok := value.(int); ok {
+				user.MaxSignalsPerDay = val
+			}
+		case "notifications_enabled":
+			if val, ok := value.(bool); ok {
+				user.NotificationsEnabled = val
+			}
+		}
+	}
+
+	// Сохраняем изменения
+	if err := s.UpdateUser(user); err != nil {
+		return err
+	}
+
+	// Логируем изменение настроек
+	s.logSettingsUpdate(user, settings, oldSettings)
+
+	return nil
+}
+
+// CreateSession создает сессию для пользователя
+func (s *Service) CreateSession(userID int, token, ip, userAgent string, deviceInfo map[string]interface{}) (*models.Session, error) {
+	// Проверяем лимит сессий
+	sessionCount, err := s.sessionRepo.GetSessionCount(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session count: %w", err)
+	}
+
+	if sessionCount >= s.config.MaxSessionsPerUser {
+		// Отзываем старые сессии
+		if err := s.sessionRepo.RevokeAllUserSessions(userID, "session_limit_exceeded"); err != nil {
+			return nil, fmt.Errorf("failed to revoke old sessions: %w", err)
+		}
 	}
 
 	// Создаем новую сессию
-	session, err := s.CreateSession(user.ID, ipAddress, userAgent)
-	if err != nil {
-		return user, nil, fmt.Errorf("failed to create session: %w", err)
-	}
-
-	// Логируем вход
-	s.logUserLogin(user, ipAddress, userAgent, true, "")
-
-	return user, session, nil
-}
-
-// CreateSession создает новую сессию для пользователя
-func (s *UserService) CreateSession(userID int, ipAddress, userAgent string) (*models.Session, error) {
+	now := time.Now()
 	session := &models.Session{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		Token:     uuid.New().String(),
-		IP:        ipAddress,
-		UserAgent: userAgent,
-		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 дней
-		CreatedAt: time.Now(),
-		IsActive:  true,
+		ID:           generateUUID(),
+		UserID:       userID,
+		Token:        token,
+		DeviceInfo:   deviceInfo,
+		ExpiresAt:    now.Add(s.config.SessionTTL),
+		IsActive:     true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+		LastActivity: now,
 	}
 
-	// Используем метод Create из SessionRepository
-	err := s.sessionRepo.Create(session)
-	if err != nil {
+	// Создаем указатели на строки для IP и UserAgent
+	if ip != "" {
+		session.IPAddress = &ip
+	}
+	if userAgent != "" {
+		session.UserAgent = &userAgent
+	}
+
+	// Сохраняем сессию
+	if err := s.sessionRepo.Create(session); err != nil {
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
+
+	// Логируем создание сессии
+	s.logSessionActivity(session, "session_created", "Сессия создана")
 
 	return session, nil
 }
 
-// ValidateSession проверяет валидность сессии и возвращает пользователя
-func (s *UserService) ValidateSession(token string) (*models.User, error) {
+// UpdateSessionActivity обновляет время последней активности сессии
+func (s *Service) UpdateSessionActivity(sessionID string) error {
+	if err := s.sessionRepo.UpdateLastActivity(sessionID); err != nil {
+		return fmt.Errorf("failed to update session activity: %w", err)
+	}
+
+	// Логируем активность
+	activity := &models.SessionActivity{
+		SessionID:    sessionID,
+		ActivityType: "activity_updated",
+		Details: map[string]interface{}{
+			"timestamp": time.Now().Format(time.RFC3339),
+		},
+	}
+
+	if err := s.sessionRepo.LogActivity(activity); err != nil {
+		log.Printf("Failed to log session activity: %v", err)
+	}
+
+	return nil
+}
+
+// ValidateSession проверяет валидность сессии
+func (s *Service) ValidateSession(token string) (*models.Session, error) {
 	// Находим сессию по токену
 	session, err := s.sessionRepo.FindByToken(token)
 	if err != nil {
@@ -173,319 +333,407 @@ func (s *UserService) ValidateSession(token string) (*models.User, error) {
 		return nil, errors.New("session not found")
 	}
 
-	// Проверяем, активна ли сессия
+	// Проверяем активность
 	if !session.IsActive {
 		return nil, errors.New("session is not active")
 	}
 
-	// Проверяем, не истекла ли сессия
+	// Проверяем срок действия
 	if time.Now().After(session.ExpiresAt) {
+		// Автоматически отзываем истекшую сессию
+		s.sessionRepo.Revoke(session.ID, "session_expired")
 		return nil, errors.New("session has expired")
 	}
 
 	// Обновляем время последней активности
-	if err := s.sessionRepo.UpdateActivity(session.ID); err != nil {
-		// Не прерываем из-за ошибки обновления активности
-		fmt.Printf("Failed to update session activity: %v\n", err)
-	}
+	go s.UpdateSessionActivity(session.ID)
 
-	// Возвращаем пользователя
-	return session.User, nil
+	return session, nil
 }
 
-// GetUserProfile возвращает профиль пользователя
-func (s *UserService) GetUserProfile(userID int) (*models.UserProfile, error) {
-	user, err := s.userRepo.FindByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
-	}
-
-	if user == nil {
-		return nil, errors.New("user not found")
-	}
-
-	return user.ToProfile(), nil
+// GetUserSessions возвращает сессии пользователя
+func (s *Service) GetUserSessions(userID int, limit, offset int) ([]*models.Session, error) {
+	return s.sessionRepo.FindByUserID(userID, limit, offset)
 }
 
-// UpdateUserProfile обновляет профиль пользователя
-func (s *UserService) UpdateUserProfile(userID int, req models.UpdateProfileRequest) (*models.User, error) {
-	user, err := s.userRepo.FindByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
-	}
-
-	if user == nil {
-		return nil, errors.New("user not found")
-	}
-
-	// Обновляем поля пользователя
-	if req.Username != "" {
-		user.Username = req.Username
-	}
-	if req.FirstName != "" {
-		user.FirstName = req.FirstName
-	}
-	if req.LastName != "" {
-		user.LastName = req.LastName
-	}
-	if req.Email != "" {
-		user.Email = req.Email
-	}
-	if req.Phone != "" {
-		user.Phone = req.Phone
-	}
-	if req.Language != "" {
-		user.Language = req.Language // Исправлено: user.Language
-	}
-	if req.Timezone != "" {
-		user.Timezone = req.Timezone // Исправлено: user.Timezone
-	}
-	if req.DisplayMode != "" {
-		user.DisplayMode = req.DisplayMode // Исправлено: user.DisplayMode
-	}
-
-	user.UpdatedAt = time.Now()
-
-	// Сохраняем изменения
-	if err := s.userRepo.Update(user); err != nil {
-		return nil, fmt.Errorf("failed to update user: %w", err)
-	}
-
-	return user, nil
-}
-
-// UpdateNotificationSettings обновляет настройки уведомлений
-func (s *UserService) UpdateNotificationSettings(
-	userID int,
-	notificationsEnabled bool,
-	notifyGrowth bool,
-	notifyFall bool,
-	notifyContinuous bool,
-	quietHoursStart int,
-	quietHoursEnd int,
-) (*models.User, error) {
-	user, err := s.userRepo.FindByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
-	}
-
-	if user == nil {
-		return nil, errors.New("user not found")
-	}
-
-	// Обновляем настройки (плоские поля)
-	user.NotificationsEnabled = notificationsEnabled
-	user.NotifyGrowth = notifyGrowth
-	user.NotifyFall = notifyFall
-	user.NotifyContinuous = notifyContinuous
-	user.QuietHoursStart = quietHoursStart
-	user.QuietHoursEnd = quietHoursEnd
-	user.UpdatedAt = time.Now()
-
-	// Сохраняем изменения
-	if err := s.userRepo.Update(user); err != nil {
-		return nil, fmt.Errorf("failed to update notification settings: %w", err)
-	}
-
-	return user, nil
-}
-
-// UpdateUserSettings обновляет настройки пользователя
-func (s *UserService) UpdateUserSettings(
-	userID int,
-	minGrowthThreshold float64,
-	minFallThreshold float64,
-	preferredPeriods []int,
-	minVolumeFilter float64,
-	excludePatterns []string,
-	language string,
-	timezone string,
-	displayMode string,
-) (*models.User, error) {
-	user, err := s.userRepo.FindByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
-	}
-
-	if user == nil {
-		return nil, errors.New("user not found")
-	}
-
-	// Обновляем настройки (плоские поля)
-	user.MinGrowthThreshold = minGrowthThreshold
-	user.MinFallThreshold = minFallThreshold
-	user.PreferredPeriods = preferredPeriods
-	user.MinVolumeFilter = minVolumeFilter
-	user.ExcludePatterns = excludePatterns
-	if language != "" {
-		user.Language = language
-	}
-	if timezone != "" {
-		user.Timezone = timezone
-	}
-	if displayMode != "" {
-		user.DisplayMode = displayMode
-	}
-	user.UpdatedAt = time.Now()
-
-	// Сохраняем изменения
-	if err := s.userRepo.Update(user); err != nil {
-		return nil, fmt.Errorf("failed to update user settings: %w", err)
-	}
-
-	return user, nil
-}
-
-// Logout завершает сессию пользователя
-func (s *UserService) Logout(sessionToken, reason string) error {
-	// Находим сессию
-	session, err := s.sessionRepo.FindByToken(sessionToken)
-	if err != nil {
-		return fmt.Errorf("failed to find session: %w", err)
-	}
-
-	if session == nil {
-		return errors.New("session not found")
-	}
-
-	// Отзываем сессию
-	if err := s.sessionRepo.Revoke(session.ID, reason); err != nil {
+// RevokeSession отзывает сессию
+func (s *Service) RevokeSession(sessionID, reason string) error {
+	if err := s.sessionRepo.Revoke(sessionID, reason); err != nil {
 		return fmt.Errorf("failed to revoke session: %w", err)
 	}
 
-	// Логируем выход
-	if session.User != nil {
-		s.logUserLogout(session.User, session.IP, session.UserAgent, reason)
+	// Логируем отзыв сессии
+	session, err := s.sessionRepo.FindByID(sessionID)
+	if err == nil && session != nil {
+		s.logSessionActivity(session, "session_revoked", fmt.Sprintf("Сессия отозвана: %s", reason))
 	}
 
 	return nil
 }
 
-// LogoutAll завершает все сессии пользователя
-func (s *UserService) LogoutAll(userID int, reason string) (int, error) {
-	count, err := s.sessionRepo.RevokeAllUserSessions(userID, reason)
+// LogoutUser выполняет выход пользователя
+func (s *Service) LogoutUser(userID int, sessionID, ip, userAgent string) error {
+	// Отзываем конкретную сессию если указана
+	if sessionID != "" {
+		if err := s.RevokeSession(sessionID, "user_logout"); err != nil {
+			return fmt.Errorf("failed to revoke session: %w", err)
+		}
+	} else {
+		// Отзываем все сессии пользователя
+		if err := s.sessionRepo.RevokeAllUserSessions(userID, "user_logout"); err != nil {
+			return fmt.Errorf("failed to revoke all sessions: %w", err)
+		}
+	}
+
+	// Получаем пользователя для логирования
+	user, err := s.GetUserByID(userID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to revoke all sessions: %w", err)
+		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	// Логируем массовый выход
-	if user, err := s.userRepo.FindByID(userID); err == nil && user != nil {
-		s.activityRepo.LogUserLogout(user, "", "", fmt.Sprintf("all_sessions_%s", reason))
-	}
+	// Логируем выход
+	s.logUserLogout(user, ip, userAgent, "user_logout")
 
-	return count, nil
+	return nil
 }
 
-// CheckSignalPermission проверяет, может ли пользователь получить сигнал
-func (s *UserService) CheckSignalPermission(userID int, signalType string, changePercent float64) (bool, error) {
-	user, err := s.userRepo.FindByID(userID)
+// LogoutSession выполняет выход из конкретной сессии
+func (s *Service) LogoutSession(session *models.Session, ip, userAgent string) error {
+	// Исправлено: получаем строки из указателей
+	var ipStr, userAgentStr string
+	if session.IPAddress != nil {
+		ipStr = *session.IPAddress
+	}
+	if session.UserAgent != nil {
+		userAgentStr = *session.UserAgent
+	}
+
+	// Отзываем сессию
+	if err := s.RevokeSession(session.ID, "session_logout"); err != nil {
+		return fmt.Errorf("failed to revoke session: %w", err)
+	}
+
+	// Получаем пользователя для логирования
+	user, err := s.GetUserByID(session.UserID)
 	if err != nil {
-		return false, fmt.Errorf("failed to find user: %w", err)
+		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	if user == nil {
-		return false, errors.New("user not found")
-	}
+	// Логируем выход
+	s.logUserLogout(user, ipStr, userAgentStr, "session_logout")
 
-	// Проверяем все условия
-	if !user.ShouldReceiveSignal(signalType, changePercent) {
-		return false, nil
-	}
-
-	return true, nil
+	return nil
 }
 
-// IncrementSignalsCount увеличивает счетчик сигналов пользователя
-func (s *UserService) IncrementSignalsCount(userID int) error {
-	return s.userRepo.IncrementSignalsCount(userID)
+// ResetDailyCounters сбрасывает дневные счетчики
+func (s *Service) ResetDailyCounters() error {
+	// Исправлено: передаем контекст
+	ctx := context.Background()
+	if err := s.repo.ResetDailySignals(ctx); err != nil {
+		return fmt.Errorf("failed to reset daily signals: %w", err)
+	}
+
+	// Логируем сброс счетчиков
+	s.logSystemEvent("counters_reset", "Дневные счетчики сброшены", nil)
+
+	return nil
 }
 
 // GetUserStats возвращает статистику пользователя
-func (s *UserService) GetUserStats(userID int) (map[string]interface{}, error) {
-	user, err := s.userRepo.FindByID(userID)
+func (s *Service) GetUserStats(userID int) (map[string]interface{}, error) {
+	// Получаем базовую статистику
+	stats := make(map[string]interface{})
+
+	// Статистика пользователя
+	user, err := s.GetUserByID(userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find user: %w", err)
+		return nil, err
 	}
 
-	if user == nil {
-		return nil, errors.New("user not found")
+	stats["user_id"] = user.ID
+	stats["telegram_id"] = user.TelegramID
+	stats["username"] = user.Username
+	stats["first_name"] = user.FirstName
+	stats["role"] = user.Role
+	stats["created_at"] = user.CreatedAt
+	stats["signals_today"] = user.SignalsToday
+	stats["max_signals_per_day"] = user.MaxSignalsPerDay
+	stats["min_growth_threshold"] = user.MinGrowthThreshold
+	stats["notifications_enabled"] = user.NotificationsEnabled
+
+	// Статистика сессий
+	sessionStats, err := s.sessionRepo.GetUserSessionStats(userID)
+	if err == nil {
+		stats["sessions"] = sessionStats
 	}
 
-	stats := map[string]interface{}{
-		"user_id":               user.ID,
-		"signals_today":         user.SignalsToday,
-		"max_signals_per_day":   user.MaxSignalsPerDay,
-		"signals_remaining":     user.MaxSignalsPerDay - user.SignalsToday,
-		"subscription_tier":     user.SubscriptionTier,
-		"notifications_enabled": user.NotificationsEnabled, // Исправлено: user.NotificationsEnabled
-		"in_quiet_hours":        user.IsInQuietHours(),
-		"last_login":            user.LastLoginAt,
-		"created_at":            user.CreatedAt,
-	}
-
-	// Получаем статистику активности
-	if activityStats, err := s.activityRepo.GetUserActivityStats(userID, 7); err == nil {
-		stats["activity_stats"] = activityStats
+	// Статистика активности
+	activityStats, err := s.activityRepo.GetUserActivityStats(userID, 30)
+	if err == nil {
+		stats["activity"] = activityStats
 	}
 
 	return stats, nil
 }
 
-// GetActiveSubscription возвращает активную подписку пользователя
-func (s *UserService) GetActiveSubscription(userID int) (*models.UserSubscription, error) {
-	return s.subscriptionRepo.GetActiveSubscription(userID)
+// SearchUsers ищет пользователей
+func (s *Service) SearchUsers(query string, limit, offset int) ([]*models.User, error) {
+	// Исправлено: вызываем Search
+	return s.repo.Search(query, limit, offset)
 }
 
-// Проверяем, является ли пользователь администратором
-func (s *UserService) IsAdmin(userID int) (bool, error) {
-	user, err := s.userRepo.FindByID(userID)
+// GetAllUsers возвращает всех пользователей с пагинацией
+func (s *Service) GetAllUsers(limit, offset int) ([]*models.User, error) {
+	// Исправлено: вызываем GetAll
+	return s.repo.GetAll(limit, offset)
+}
+
+// GetTotalUsersCount возвращает общее количество пользователей
+func (s *Service) GetTotalUsersCount() (int, error) {
+	// Исправлено: передаем контекст
+	ctx := context.Background()
+	return s.repo.GetTotalCount(ctx)
+}
+
+// GetActiveUsersCount возвращает количество активных пользователей
+func (s *Service) GetActiveUsersCount() (int, error) {
+	// Исправлено: передаем контекст
+	ctx := context.Background()
+	return s.repo.GetActiveUsersCount(ctx)
+}
+
+// BanUser блокирует пользователя
+func (s *Service) BanUser(userID int, reason string) error {
+	// Исправлено: вызываем UpdateStatus
+	if err := s.repo.UpdateStatus(userID, false); err != nil {
+		return fmt.Errorf("failed to ban user: %w", err)
+	}
+
+	// Получаем пользователя для логирования
+	user, err := s.GetUserByID(userID)
 	if err != nil {
-		return false, fmt.Errorf("failed to find user: %w", err)
+		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	if user == nil {
-		return false, errors.New("user not found")
+	// Отзываем все сессии
+	if err := s.sessionRepo.RevokeAllUserSessions(userID, fmt.Sprintf("user_banned: %s", reason)); err != nil {
+		log.Printf("Failed to revoke sessions for banned user %d: %v", userID, err)
 	}
 
-	return user.IsAdmin(), nil
+	// Логируем блокировку
+	s.logSecurityEvent(user, "user_banned", fmt.Sprintf("Пользователь заблокирован: %s", reason),
+		models.SeverityWarning, "", "", nil)
+
+	// Отправляем уведомление если возможно
+	if user.TelegramID > 0 {
+		message := fmt.Sprintf(
+			"🚫 Ваш аккаунт был заблокирован.\nПричина: %s\n\nДля разблокировки обратитесь в поддержку.",
+			reason,
+		)
+		go s.notifier.SendTelegramNotification(fmt.Sprintf("%d", user.TelegramID), message)
+	}
+
+	return nil
 }
 
-// Проверяем, имеет ли пользователь премиум-статус
-func (s *UserService) IsPremium(userID int) (bool, error) {
-	user, err := s.userRepo.FindByID(userID)
+// UnbanUser разблокирует пользователя
+func (s *Service) UnbanUser(userID int) error {
+	// Исправлено: вызываем UpdateStatus
+	if err := s.repo.UpdateStatus(userID, true); err != nil {
+		return fmt.Errorf("failed to unban user: %w", err)
+	}
+
+	// Получаем пользователя для логирования
+	user, err := s.GetUserByID(userID)
 	if err != nil {
-		return false, fmt.Errorf("failed to find user: %w", err)
+		return fmt.Errorf("failed to get user: %w", err)
 	}
 
-	if user == nil {
-		return false, errors.New("user not found")
+	// Логируем разблокировку
+	s.logSecurityEvent(user, "user_unbanned", "Пользователь разблокирован",
+		models.SeverityInfo, "", "", nil)
+
+	// Отправляем уведомление если возможно
+	if user.TelegramID > 0 {
+		message := "✅ Ваш аккаунт был разблокирован.\nТеперь вы можете снова пользоваться сервисом."
+		go s.notifier.SendTelegramNotification(fmt.Sprintf("%d", user.TelegramID), message)
 	}
 
-	return user.IsPremium(), nil
+	return nil
 }
 
-// Вспомогательные методы для логирования
-
-func (s *UserService) logUserRegistration(user *models.User, ip, userAgent string) {
-	if s.activityRepo != nil {
-		// Используем готовый метод
-		s.activityRepo.LogUserLogin(user, ip, userAgent, true, "registration")
+// ChangeUserRole изменяет роль пользователя
+func (s *Service) ChangeUserRole(userID int, newRole string) error {
+	// Валидация роли
+	validRoles := map[string]bool{
+		models.RoleUser:      true,
+		models.RoleAdmin:     true,
+		models.RoleModerator: true, // Теперь RoleModerator определена
 	}
+
+	if !validRoles[newRole] {
+		return fmt.Errorf("invalid role: %s", newRole)
+	}
+
+	// Исправлено: вызываем UpdateRole
+	if err := s.repo.UpdateRole(userID, newRole); err != nil {
+		return fmt.Errorf("failed to update user role: %w", err)
+	}
+
+	// Получаем пользователя для логирования
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get user: %w", err)
+	}
+
+	// Логируем изменение роли
+	oldRole := user.Role
+	s.logUserActivity(user, "role_changed", fmt.Sprintf("Роль изменена с %s на %s", oldRole, newRole), nil)
+
+	// Отправляем уведомление если возможно
+	if user.TelegramID > 0 {
+		message := fmt.Sprintf(
+			"👑 Ваша роль изменена.\n\nСтарая роль: %s\nНовая роль: %s",
+			oldRole, newRole,
+		)
+		go s.notifier.SendTelegramNotification(fmt.Sprintf("%d", user.TelegramID), message)
+	}
+
+	// Инвалидируем кэш
+	s.invalidateUserCache(user)
+
+	return nil
 }
 
-func (s *UserService) logUserLogin(user *models.User, ip, userAgent string, success bool, failureReason string) {
-	if s.activityRepo != nil {
-		s.activityRepo.LogUserLogin(user, ip, userAgent, success, failureReason)
+// Вспомогательные методы
+
+func (s *Service) cacheUser(user *models.User) error {
+	data, err := json.Marshal(user)
+	if err != nil {
+		return err
 	}
+
+	ctx := context.Background()
+	keys := []string{
+		s.cachePrefix + fmt.Sprintf("id:%d", user.ID),
+		s.cachePrefix + fmt.Sprintf("telegram:%d", user.TelegramID),
+	}
+
+	for _, key := range keys {
+		s.cache.Set(ctx, key, string(data), s.cacheTTL)
+	}
+
+	return nil
 }
 
-func (s *UserService) logUserLogout(user *models.User, ip, userAgent, reason string) {
-	if s.activityRepo != nil {
-		s.activityRepo.LogUserLogout(user, ip, userAgent, reason)
+func (s *Service) invalidateUserCache(user *models.User) {
+	ctx := context.Background()
+	keys := []string{
+		s.cachePrefix + fmt.Sprintf("id:%d", user.ID),
+		s.cachePrefix + fmt.Sprintf("telegram:%d", user.TelegramID),
+		"users:stats:*",
 	}
+
+	s.cache.DeleteMulti(ctx, keys...)
 }
 
-// ResetDailyCounters сбрасывает дневные счетчики всех пользователей
-func (s *UserService) ResetDailyCounters(ctx context.Context) error {
-	return s.userRepo.ResetDailyCounters(ctx)
+func (s *Service) logUserActivity(user *models.User, activityType, description string, metadata map[string]interface{}) {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["description"] = description
+
+	activity := models.NewUserActivity(
+		user.ID,
+		models.ActivityType(activityType),
+		models.CategoryUser,
+		models.SeverityInfo,
+		metadata,
+	)
+
+	activity.TelegramID = user.TelegramID
+	activity.Username = user.Username
+	activity.FirstName = user.FirstName
+
+	go func() {
+		if err := s.activityRepo.Create(activity); err != nil {
+			log.Printf("Failed to log user activity: %v", err)
+		}
+	}()
+}
+
+func (s *Service) logSettingsUpdate(user *models.User, newSettings, oldSettings map[string]interface{}) {
+	metadata := map[string]interface{}{
+		"old_settings": oldSettings,
+		"new_settings": newSettings,
+	}
+
+	activity := models.NewUserActivity(
+		user.ID,
+		models.ActivityTypeSettingsUpdate,
+		models.CategoryUser,
+		models.SeverityInfo,
+		metadata,
+	)
+
+	activity.TelegramID = user.TelegramID
+	activity.Username = user.Username
+	activity.FirstName = user.FirstName
+
+	go func() {
+		if err := s.activityRepo.Create(activity); err != nil {
+			log.Printf("Failed to log settings update: %v", err)
+		}
+	}()
+}
+
+func (s *Service) logUserLogout(user *models.User, ip, userAgent, reason string) {
+	go func() {
+		if err := s.activityRepo.LogUserLogout(user, ip, userAgent, reason); err != nil {
+			log.Printf("Failed to log user logout: %v", err)
+		}
+	}()
+}
+
+func (s *Service) logSecurityEvent(user *models.User, eventType, description string, severity models.ActivitySeverity, ip, userAgent string, metadata map[string]interface{}) {
+	go func() {
+		if err := s.activityRepo.LogSecurityEvent(user, eventType, description, severity, ip, userAgent, metadata); err != nil {
+			log.Printf("Failed to log security event: %v", err)
+		}
+	}()
+}
+
+func (s *Service) logSystemEvent(eventType, description string, metadata map[string]interface{}) {
+	go func() {
+		if err := s.activityRepo.LogSystemEvent(eventType, description, models.SeverityInfo, metadata); err != nil {
+			log.Printf("Failed to log system event: %v", err)
+		}
+	}()
+}
+
+func (s *Service) logSessionActivity(session *models.Session, activityType, description string) {
+	activity := &models.SessionActivity{
+		SessionID:    session.ID,
+		ActivityType: activityType,
+		Details: map[string]interface{}{
+			"description": description,
+			"user_id":     session.UserID,
+		},
+	}
+
+	if session.IPAddress != nil {
+		activity.IPAddress = session.IPAddress
+	}
+
+	go func() {
+		if err := s.sessionRepo.LogActivity(activity); err != nil {
+			log.Printf("Failed to log session activity: %v", err)
+		}
+	}()
+}
+
+// generateUUID генерирует UUID (заглушка, в реальном коде нужно использовать github.com/google/uuid)
+func generateUUID() string {
+	// Временная реализация, в production использовать github.com/google/uuid
+	return fmt.Sprintf("session_%d", time.Now().UnixNano())
 }

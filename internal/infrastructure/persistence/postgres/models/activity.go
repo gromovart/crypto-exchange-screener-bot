@@ -54,17 +54,22 @@ type JSONMap map[string]interface{}
 type UserActivity struct {
 	ID           int64            `db:"id" json:"id"`
 	UserID       int              `db:"user_id" json:"user_id"`
-	TelegramID   int64            `db:"telegram_id" json:"telegram_id,omitempty"`
-	Username     string           `db:"username" json:"username,omitempty"`
-	FirstName    string           `db:"first_name" json:"first_name,omitempty"`
 	ActivityType ActivityType     `db:"activity_type" json:"activity_type"`
-	Category     ActivityCategory `db:"category" json:"category"`
-	Severity     ActivitySeverity `db:"severity" json:"severity"`
+	Category     ActivityCategory `db:"category" json:"category"` // Добавлено в БД
+	EntityType   *string          `db:"entity_type" json:"entity_type,omitempty"`
+	EntityID     *int             `db:"entity_id" json:"entity_id,omitempty"`
 	Details      JSONMap          `db:"details" json:"details"`
-	IPAddress    string           `db:"ip_address" json:"ip_address,omitempty"`
-	UserAgent    string           `db:"user_agent" json:"user_agent,omitempty"`
+	IPAddress    *string          `db:"ip_address" json:"ip_address,omitempty"`
+	UserAgent    *string          `db:"user_agent" json:"user_agent,omitempty"`
+	Location     *string          `db:"location" json:"location,omitempty"`
+	Severity     ActivitySeverity `db:"severity" json:"severity"`
 	Metadata     JSONMap          `db:"metadata" json:"metadata,omitempty"`
 	CreatedAt    time.Time        `db:"created_at" json:"created_at"`
+
+	// Дополнительные поля (не из БД)
+	TelegramID int64  `db:"-" json:"telegram_id,omitempty"`
+	Username   string `db:"-" json:"username,omitempty"`
+	FirstName  string `db:"-" json:"first_name,omitempty"`
 }
 
 // ActivityStats статистика активности
@@ -123,7 +128,7 @@ func NewUserActivity(userID int, activityType ActivityType, category ActivityCat
 	return &UserActivity{
 		UserID:       userID,
 		ActivityType: activityType,
-		Category:     category,
+		Category:     category, // Теперь поле есть в структуре
 		Severity:     severity,
 		Details:      details,
 		Metadata:     make(JSONMap),

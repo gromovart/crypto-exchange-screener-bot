@@ -7,8 +7,10 @@ import (
 
 // Типы подписок
 const (
-	PlanFree = "free"
-	PlanPro  = "pro"
+	PlanFree       = "free"
+	PlanBasic      = "basic"
+	PlanPro        = "pro"
+	PlanEnterprise = "enterprise"
 )
 
 // Состояния подписки
@@ -24,39 +26,39 @@ const (
 
 // План подписки
 type Plan struct {
-	ID               int                    `json:"id"`
-	Name             string                 `json:"name"`
-	Code             string                 `json:"code"`
-	Description      string                 `json:"description"`
-	PriceMonthly     float64                `json:"price_monthly"`
-	PriceYearly      float64                `json:"price_yearly"`
-	MaxSymbols       int                    `json:"max_symbols"`         // -1 = неограниченно
-	MaxSignalsPerDay int                    `json:"max_signals_per_day"` // -1 = неограниченно
-	MaxAPIRequests   int                    `json:"max_api_requests"`    // -1 = неограниченно
-	Features         map[string]interface{} `json:"features"`
-	IsActive         bool                   `json:"is_active"`
-	CreatedAt        time.Time              `json:"created_at"`
+	ID               int                    `db:"id" json:"id"`
+	Name             string                 `db:"name" json:"name"`
+	Code             string                 `db:"code" json:"code"`
+	Description      string                 `db:"description" json:"description"`
+	PriceMonthly     float64                `db:"price_monthly" json:"price_monthly"`
+	PriceYearly      float64                `db:"price_yearly" json:"price_yearly"`
+	MaxSymbols       int                    `db:"max_symbols" json:"max_symbols"`                 // -1 = неограниченно
+	MaxSignalsPerDay int                    `db:"max_signals_per_day" json:"max_signals_per_day"` // -1 = неограниченно
+	Features         map[string]interface{} `db:"features" json:"features"`
+	IsActive         bool                   `db:"is_active" json:"is_active"`
+	CreatedAt        time.Time              `db:"created_at" json:"created_at"`
 }
 
 // Подписка пользователя
 type UserSubscription struct {
-	ID                   int                    `json:"id"`
-	UserID               int                    `json:"user_id"`
-	PlanID               int                    `json:"plan_id"`
-	PlanName             string                 `json:"plan_name"`
-	PlanCode             string                 `json:"plan_code"`
-	StripeSubscriptionID string                 `json:"stripe_subscription_id"`
-	Status               string                 `json:"status"`
-	CurrentPeriodStart   time.Time              `json:"current_period_start"`
-	CurrentPeriodEnd     time.Time              `json:"current_period_end"`
-	CancelAtPeriodEnd    bool                   `json:"cancel_at_period_end"`
-	Metadata             map[string]interface{} `json:"metadata"`
-	CreatedAt            time.Time              `json:"created_at"`
+	ID                   int                    `db:"id" json:"id"`
+	UserID               int                    `db:"user_id" json:"user_id"`
+	PlanID               int                    `db:"plan_id" json:"plan_id"`
+	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id,omitempty"` // NULLable
+	Status               string                 `db:"status" json:"status"`
+	CurrentPeriodStart   *time.Time             `db:"current_period_start" json:"current_period_start,omitempty"` // NULLable
+	CurrentPeriodEnd     *time.Time             `db:"current_period_end" json:"current_period_end,omitempty"`     // NULLable
+	CancelAtPeriodEnd    bool                   `db:"cancel_at_period_end" json:"cancel_at_period_end"`
+	Metadata             map[string]interface{} `db:"metadata" json:"metadata"`
+	CreatedAt            time.Time              `db:"created_at" json:"created_at"`
+	UpdatedAt            time.Time              `db:"updated_at" json:"updated_at"`
 
-	// Информация о пользователе (для нотификаций)
-	TelegramID    int64  `json:"telegram_id,omitempty"`
-	ChatID        string `json:"chat_id,omitempty"`
-	UserFirstName string `json:"user_first_name,omitempty"`
+	// Дополнительные поля (join или вычисляемые)
+	PlanName      string `db:"-" json:"plan_name,omitempty"`
+	PlanCode      string `db:"-" json:"plan_code,omitempty"`
+	TelegramID    int64  `db:"-" json:"telegram_id,omitempty"`
+	ChatID        string `db:"-" json:"chat_id,omitempty"`
+	UserFirstName string `db:"-" json:"user_first_name,omitempty"`
 }
 
 // RevenueReport отчет по доходам
@@ -96,5 +98,3 @@ type SubscriptionEvent struct {
 	Timestamp      time.Time              `json:"timestamp"`
 	Metadata       map[string]interface{} `json:"metadata"`
 }
-
-

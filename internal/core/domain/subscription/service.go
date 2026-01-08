@@ -172,15 +172,16 @@ func (s *Service) SubscribeUser(userID int, planCode string, trial bool) (*model
 		periodEnd = now.AddDate(0, 0, 7) // 7 дней пробного периода
 	}
 
+	stripeSubscriptionID := fmt.Sprintf("local_%d_%s", userID, planCode)
 	subscription := &models.UserSubscription{
 		UserID:               userID,
 		PlanID:               plan.ID,
 		PlanName:             plan.Name,
 		PlanCode:             plan.Code,
-		StripeSubscriptionID: fmt.Sprintf("local_%d_%s", userID, planCode),
+		StripeSubscriptionID: &stripeSubscriptionID,
 		Status:               models.StatusActive,
-		CurrentPeriodStart:   now,
-		CurrentPeriodEnd:     periodEnd,
+		CurrentPeriodStart:   &now,
+		CurrentPeriodEnd:     &periodEnd,
 		CancelAtPeriodEnd:    false,
 		Metadata: map[string]interface{}{
 			"trial":          trial,
@@ -236,19 +237,21 @@ func (s *Service) upgradeSubscription(userID int, newPlanCode string, existing *
 
 	// Обновляем подписку
 	now := time.Now()
+	periodEnd := now.AddDate(0, 1, 0) // Новый период на 1 месяц
+
 	existing.PlanID = newPlan.ID
 	existing.PlanName = newPlan.Name
 	existing.PlanCode = newPlan.Code
 	existing.Status = models.StatusActive
-	existing.CurrentPeriodStart = now
-	existing.CurrentPeriodEnd = now.AddDate(0, 1, 0) // Новый период на 1 месяц
+	existing.CurrentPeriodStart = &now
+	existing.CurrentPeriodEnd = &periodEnd
 
 	// Обновляем в БД
 	err = s.repo.UpdateSubscriptionStatus(
 		fmt.Sprintf("%d", existing.ID),
-		fmt.Sprintf("upgraded_%d_%s", userID, newPlanCode),
+		"",
 		models.StatusActive,
-		existing.CurrentPeriodEnd,
+		periodEnd,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update subscription: %w", err)
@@ -303,12 +306,17 @@ func (s *Service) CancelSubscription(userID int, cancelAtPeriodEnd bool) error {
 		newStatus = models.StatusActive // Остается активной до конца периода
 	}
 
+	// Проверяем, что CurrentPeriodEnd не nil
+	if sub.CurrentPeriodEnd == nil {
+		return errors.New("subscription has no end date")
+	}
+
 	// Обновляем в БД
 	err = s.repo.UpdateSubscriptionStatus(
 		fmt.Sprintf("%d", sub.ID),
 		"",
 		newStatus,
-		sub.CurrentPeriodEnd,
+		*sub.CurrentPeriodEnd,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update subscription status: %w", err)
@@ -322,7 +330,7 @@ func (s *Service) CancelSubscription(userID int, cancelAtPeriodEnd bool) error {
 	}
 
 	// Отправляем уведомление
-	s.sendCancellationNotification(userID, cancelAtPeriodEnd, sub.CurrentPeriodEnd)
+	s.sendCancellationNotification(userID, cancelAtPeriodEnd, *sub.CurrentPeriodEnd)
 
 	// Трекаем событие
 	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
@@ -399,7 +407,6 @@ func (s *Service) GetUserLimits(userID int) (*models.PlanLimits, error) {
 	limits = models.PlanLimits{
 		MaxSymbols:       plan.MaxSymbols,
 		MaxSignalsPerDay: plan.MaxSignalsPerDay,
-		MaxAPIRequests:   plan.MaxAPIRequests,
 		Features:         plan.Features,
 	}
 
@@ -425,7 +432,9 @@ func (s *Service) CheckUserLimit(userID int, limitType string, currentUsage int)
 	case "signals":
 		maxLimit = limits.MaxSignalsPerDay
 	case "api_requests":
-		maxLimit = limits.MaxAPIRequests
+		// Исправлено: MaxAPIRequests не существует в PlanLimits, используем фиксированное значение
+		// В будущем можно добавить это поле в модель
+		maxLimit = 1000 // Фиксированное значение для API запросов
 	default:
 		return false, 0, fmt.Errorf("unknown limit type: %s", limitType)
 	}
@@ -458,11 +467,11 @@ func (s *Service) GetSubscriptionEndDate(userID int) (*time.Time, error) {
 		return nil, err
 	}
 
-	if subscription == nil {
+	if subscription == nil || subscription.CurrentPeriodEnd == nil {
 		return nil, nil
 	}
 
-	return &subscription.CurrentPeriodEnd, nil
+	return subscription.CurrentPeriodEnd, nil
 }
 
 // GetExpiringSubscriptions возвращает подписки, срок действия которых истекает
@@ -584,6 +593,20 @@ func (s *Service) invalidateSubscriptionCache(userID int) {
 
 func (s *Service) sendSubscriptionNotification(userID int, plan *models.Plan, trial bool) {
 	var message string
+
+	// Фиксированные значения для API запросов по тарифам
+	var apiRequestsStr string
+	switch plan.Code {
+	case models.PlanFree:
+		apiRequestsStr = "100" // Бесплатный тариф
+	case models.PlanBasic:
+		apiRequestsStr = "1000" // Базовый тариф
+	case models.PlanPro:
+		apiRequestsStr = "5000" // Про тариф
+	default:
+		apiRequestsStr = "1000" // По умолчанию
+	}
+
 	if trial {
 		message = fmt.Sprintf(
 			"🎉 Вы успешно подписались на тариф %s!\n\n"+
@@ -591,12 +614,12 @@ func (s *Service) sendSubscriptionNotification(userID int, plan *models.Plan, tr
 				"Лимиты:\n"+
 				"• Символов: %d\n"+
 				"• Сигналов в день: %d\n"+
-				"• API запросов: %d\n\n"+
+				"• API запросов: %s\n\n"+
 				"После окончания пробного периода подписка будет продлена автоматически.",
 			plan.Name,
 			plan.MaxSymbols,
 			plan.MaxSignalsPerDay,
-			plan.MaxAPIRequests,
+			apiRequestsStr,
 		)
 	} else {
 		message = fmt.Sprintf(
@@ -605,12 +628,12 @@ func (s *Service) sendSubscriptionNotification(userID int, plan *models.Plan, tr
 				"Лимиты:\n"+
 				"• Символов: %d\n"+
 				"• Сигналов в день: %d\n"+
-				"• API запросов: %d\n\n"+
+				"• API запросов: %s\n\n"+
 				"Следующее списание: через 30 дней",
 			plan.Name,
 			plan.MaxSymbols,
 			plan.MaxSignalsPerDay,
-			plan.MaxAPIRequests,
+			apiRequestsStr,
 		)
 	}
 
