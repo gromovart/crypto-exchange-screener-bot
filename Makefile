@@ -763,6 +763,30 @@ docker-run:
 docker-run-prod:
 	@$(MAKE) docker-run ENV=prod
 
+
+# Дополнение к существующему Makefile
+
+# Миграции базы данных
+migrate-status:
+	@echo "📊 Checking migration status..."
+	@go run cmd/migrate/main.go --status
+
+migrate-up:
+	@echo "🚀 Applying migrations..."
+	@go run cmd/migrate/main.go --up
+
+migrate-down:
+	@echo "↩️ Rolling back last migration..."
+	@go run cmd/migrate/main.go --down
+
+migrate-create:
+	@echo "📝 Creating new migration..."
+	@go run cmd/migrate/main.go --create --name="$(name)" --desc="$(desc)"
+
+migrate-validate:
+	@echo "🔍 Validating migrations..."
+	@go run cmd/migrate/main.go --validate
+
 # ============================================
 # ПОЛНЫЙ HELP
 # ============================================
@@ -838,3 +862,5 @@ help:
 	@echo "  make run-local ENV=dev"
 	@echo ""
 	@echo "✅ Этот Makefile должен работать!"
+
+

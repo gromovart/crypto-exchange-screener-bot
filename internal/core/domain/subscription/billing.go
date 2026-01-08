@@ -1,3 +1,4 @@
+// internal/core/domain/subscription/billing.go
 package subscription
 
 import (

@@ -1,10 +1,10 @@
-// persistence/postgres/connection.go
 package postgres
 
 import (
 	"database/sql"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -12,26 +12,28 @@ import (
 )
 
 type Config struct {
-	Host     string `mapstructure:"DB_HOST"`
-	Port     int    `mapstructure:"DB_PORT"`
-	User     string `mapstructure:"DB_USER"`
-	Password string `mapstructure:"DB_PASSWORD"`
-	Database string `mapstructure:"DB_NAME"`
-	SSLMode  string `mapstructure:"DB_SSLMODE"`
-	MaxConns int    `mapstructure:"DB_MAX_CONNS"`
-	MaxIdle  int    `mapstructure:"DB_MAX_IDLE"`
+	Host           string `mapstructure:"DB_HOST"`
+	Port           int    `mapstructure:"DB_PORT"`
+	User           string `mapstructure:"DB_USER"`
+	Password       string `mapstructure:"DB_PASSWORD"`
+	Database       string `mapstructure:"DB_NAME"`
+	SSLMode        string `mapstructure:"DB_SSLMODE"`
+	MaxConns       int    `mapstructure:"DB_MAX_CONNS"`
+	MaxIdle        int    `mapstructure:"DB_MAX_IDLE"`
+	MigrationsPath string `mapstructure:"DB_MIGRATIONS_PATH"`
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Host:     "localhost",
-		Port:     5432,
-		User:     "cryptobot",
-		Password: "password",
-		Database: "cryptobot_db",
-		SSLMode:  "disable",
-		MaxConns: 25,
-		MaxIdle:  10,
+		Host:           "localhost",
+		Port:           5432,
+		User:           "cryptobot",
+		Password:       "password",
+		Database:       "cryptobot_db",
+		SSLMode:        "disable",
+		MaxConns:       25,
+		MaxIdle:        10,
+		MigrationsPath: "internal/infrastructure/persistence/postgres/migrations",
 	}
 }
 
@@ -58,11 +60,51 @@ func Connect(cfg *Config) (*sqlx.DB, error) {
 	}
 
 	log.Println("✅ Connected to PostgreSQL")
+
+	// Выполняем миграции
+	if cfg.MigrationsPath != "" {
+		if err := RunMigrations(db.DB, cfg.MigrationsPath); err != nil {
+			log.Printf("⚠️ Failed to run migrations: %v", err)
+			// Не падаем, если миграции не удались, но логируем ошибку
+		}
+	}
+
 	return db, nil
 }
 
 func RunMigrations(db *sql.DB, migrationsPath string) error {
-	// Используем golang-migrate для миграций
-	// Для простоты можно использовать встроенные миграции
+	// Создаем абсолютный путь
+	absPath, err := filepath.Abs(migrationsPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	log.Printf("📂 Running migrations from: %s", absPath)
+
+	// Создаем мигратор
+	sqlxDB := sqlx.NewDb(db, "postgres")
+	migrator := NewMigrator(sqlxDB)
+
+	// Инициализируем таблицу миграций
+	if err := migrator.Init(); err != nil {
+		return fmt.Errorf("failed to init migrations table: %w", err)
+	}
+
+	// Загружаем миграции из директории
+	if err := migrator.LoadMigrations(absPath); err != nil {
+		return fmt.Errorf("failed to load migrations: %w", err)
+	}
+
+	// Применяем миграции
+	if err := migrator.Migrate(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	// Валидируем миграции
+	if err := migrator.Validate(); err != nil {
+		return fmt.Errorf("migration validation failed: %w", err)
+	}
+
+	log.Println("✅ Database migrations completed successfully")
 	return nil
 }

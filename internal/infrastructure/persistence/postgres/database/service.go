@@ -1,9 +1,10 @@
-// internal/infrastructure/persistence/postgres/database/database_service.go
+// internal/infrastructure/persistence/postgres/database/service.go
 package database
 
 import (
 	"context"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	postgres_migrations "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"sync"
@@ -15,10 +16,11 @@ import (
 
 // DatabaseService сервис для работы с базой данных
 type DatabaseService struct {
-	config *config.Config
-	db     *sqlx.DB
-	mu     sync.RWMutex
-	state  ServiceState
+	config   *config.Config
+	db       *sqlx.DB
+	mu       sync.RWMutex
+	state    ServiceState
+	migrator *postgres_migrations.Migrator
 }
 
 // ServiceState состояние сервиса
@@ -103,9 +105,16 @@ func (ds *DatabaseService) Start() error {
 	logger.Info("   • Pool: %d/%d connections",
 		dbConfig.MaxIdleConns, dbConfig.MaxOpenConns)
 
+	// Создаем и запускаем мигратор
+	ds.migrator = postgres_migrations.NewMigrator(db)
+
 	// Запускаем миграции если включено
 	if dbConfig.EnableAutoMigrate {
-		go ds.runMigrations(dbConfig.MigrationsPath)
+		if err := ds.runMigrations(dbConfig.MigrationsPath); err != nil {
+			logger.Warn("⚠️ Database migrations failed: %v", err)
+			// Не останавливаем приложение при ошибке миграций
+			// Можно добавить опцию для критичности миграций
+		}
 	}
 
 	return nil
@@ -131,10 +140,106 @@ func (ds *DatabaseService) Stop() error {
 	}
 
 	ds.db = nil
+	ds.migrator = nil
 	ds.state = StateStopped
 	logger.Info("✅ Database service stopped")
 
 	return nil
+}
+
+// runMigrations запускает миграции базы данных
+func (ds *DatabaseService) runMigrations(migrationsPath string) error {
+	if ds.migrator == nil {
+		return fmt.Errorf("migrator not initialized")
+	}
+
+	logger.Info("🔄 Running database migrations from: %s", migrationsPath)
+
+	// Загружаем миграции
+	if err := ds.migrator.LoadMigrations(migrationsPath); err != nil {
+		return fmt.Errorf("failed to load migrations: %w", err)
+	}
+
+	// Сначала применяем миграции (это создаст таблицу migrations при первом запуске)
+	if err := ds.migrator.Migrate(); err != nil {
+		return fmt.Errorf("failed to apply migrations: %w", err)
+	}
+
+	// Теперь получаем статус (таблица migrations уже должна существовать)
+	statuses, err := ds.migrator.Status()
+	if err != nil {
+		// Даже после Migrate() возможны проблемы, логируем, но не падаем
+		logger.Warn("⚠️ Failed to get migration status: %v", err)
+		statuses = []postgres_migrations.MigrationStatus{} // Пустой статус
+	}
+
+	// Логируем текущий статус
+	if len(statuses) > 0 {
+		logger.Info("📊 Migration status:")
+		for _, status := range statuses {
+			statusIcon := "⏳"
+			if status.Applied {
+				statusIcon = "✅"
+			}
+			logger.Info("   %s %03d: %s", statusIcon, status.ID, status.Name)
+		}
+	}
+
+	// Проверяем валидность (теперь таблица должна существовать)
+	if err := ds.migrator.Validate(); err != nil {
+		logger.Warn("⚠️ Migration validation warning: %v", err)
+	}
+
+	logger.Info("✅ Database migrations completed successfully")
+	return nil
+}
+
+// Migrate выполняет миграции базы данных
+func (ds *DatabaseService) Migrate() error {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	if ds.state != StateRunning || ds.migrator == nil {
+		return fmt.Errorf("database service is not running or migrator not initialized")
+	}
+
+	return ds.migrator.Migrate()
+}
+
+// Rollback откатывает последнюю миграцию
+func (ds *DatabaseService) Rollback() error {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	if ds.state != StateRunning || ds.migrator == nil {
+		return fmt.Errorf("database service is not running or migrator not initialized")
+	}
+
+	return ds.migrator.Rollback()
+}
+
+// GetMigrationStatus возвращает статус миграций
+func (ds *DatabaseService) GetMigrationStatus() ([]postgres_migrations.MigrationStatus, error) {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	if ds.state != StateRunning || ds.migrator == nil {
+		return nil, fmt.Errorf("database service is not running or migrator not initialized")
+	}
+
+	return ds.migrator.Status()
+}
+
+// ValidateMigrations проверяет валидность миграций
+func (ds *DatabaseService) ValidateMigrations() error {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	if ds.state != StateRunning || ds.migrator == nil {
+		return fmt.Errorf("database service is not running or migrator not initialized")
+	}
+
+	return ds.migrator.Validate()
 }
 
 // GetDB возвращает соединение с базой данных
@@ -171,18 +276,6 @@ func (ds *DatabaseService) HealthCheck() bool {
 	return true
 }
 
-// runMigrations запускает миграции базы данных
-func (ds *DatabaseService) runMigrations(migrationsPath string) {
-	logger.Info("🔄 Running database migrations...")
-
-	// Реализация миграций будет добавлена позже
-	// Временный заглушка
-	logger.Info("⚠️ Database migrations not implemented yet")
-
-	// Здесь можно добавить использование golang-migrate или другого инструмента
-	// Например: m, err := migrate.New(migrationsPath, ds.config.GetPostgresDSN())
-}
-
 // GetStats возвращает статистику базы данных
 func (ds *DatabaseService) GetStats() map[string]interface{} {
 	ds.mu.RLock()
@@ -199,6 +292,34 @@ func (ds *DatabaseService) GetStats() map[string]interface{} {
 		stats["idle"] = ds.db.Stats().Idle
 		stats["wait_count"] = ds.db.Stats().WaitCount
 		stats["wait_duration"] = ds.db.Stats().WaitDuration.String()
+	}
+
+	// Добавляем статус миграций
+	if ds.migrator != nil {
+		migrationStats := map[string]interface{}{
+			"migrator_initialized": true,
+		}
+
+		// Пытаемся получить статус миграций, но не падаем при ошибке
+		if statuses, err := ds.migrator.Status(); err == nil {
+			var applied, pending int
+			for _, status := range statuses {
+				if status.Applied {
+					applied++
+				} else {
+					pending++
+				}
+			}
+			migrationStats["migrations_applied"] = applied
+			migrationStats["migrations_pending"] = pending
+			migrationStats["migrations_total"] = len(statuses)
+		}
+
+		stats["migrations"] = migrationStats
+	} else {
+		stats["migrations"] = map[string]interface{}{
+			"migrator_initialized": false,
+		}
 	}
 
 	return stats
@@ -236,4 +357,16 @@ func (ds *DatabaseService) GetDatabaseName() string {
 	}
 
 	return dbName
+}
+
+// CreateMigration создает новый файл миграции
+func (ds *DatabaseService) CreateMigration(name, description string) (string, error) {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+
+	if ds.state != StateRunning || ds.migrator == nil {
+		return "", fmt.Errorf("database service is not running or migrator not initialized")
+	}
+
+	return ds.migrator.CreateMigration(name, description)
 }

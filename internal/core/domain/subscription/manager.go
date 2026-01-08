@@ -1,19 +1,21 @@
-// internal/subscription/manager.go
+// internal/core/domain/subscription/manager.go
 package subscription
 
 import (
+	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"github.com/jmoiron/sqlx"
 )
 
 // Manager управляет всеми аспектами подписок
+// Manager управляет всеми аспектами подписок
 type Manager struct {
 	service        *Service
-	cache          *redis.Client
+	cache          *redis.Cache // Изменено: *redis.Client -> *redis.Cache
 	stats          map[string]interface{}
 	statsUpdatedAt time.Time
 	mu             sync.RWMutex
@@ -22,7 +24,7 @@ type Manager struct {
 // NewManager создает новый менеджер подписок
 func NewManager(
 	db *sqlx.DB,
-	cache *redis.Client,
+	cache *redis.Cache, // Изменено: *redis.Client -> *redis.Cache
 	notifier NotificationService,
 	analytics AnalyticsService,
 	config Config,
@@ -137,22 +139,22 @@ func (m *Manager) FormatLimit(limit int) string {
 }
 
 // GetPlans возвращает все доступные планы
-func (m *Manager) GetPlans() ([]*Plan, error) {
+func (m *Manager) GetPlans() ([]*models.Plan, error) {
 	return m.service.GetAllPlans()
 }
 
 // GetPlan возвращает план по коду
-func (m *Manager) GetPlan(code string) (*Plan, error) {
+func (m *Manager) GetPlan(code string) (*models.Plan, error) {
 	return m.service.GetPlan(code)
 }
 
 // SubscribeUser создает подписку для пользователя
-func (m *Manager) SubscribeUser(userID int, planCode string, trial bool) (*UserSubscription, error) {
+func (m *Manager) SubscribeUser(userID int, planCode string, trial bool) (*models.UserSubscription, error) {
 	return m.service.SubscribeUser(userID, planCode, trial)
 }
 
 // GetUserSubscription возвращает подписку пользователя
-func (m *Manager) GetUserSubscription(userID int) (*UserSubscription, error) {
+func (m *Manager) GetUserSubscription(userID int) (*models.UserSubscription, error) {
 	return m.service.GetUserSubscription(userID)
 }
 
@@ -162,7 +164,7 @@ func (m *Manager) CancelSubscription(userID int, cancelAtPeriodEnd bool) error {
 }
 
 // GetUserLimits возвращает лимиты пользователя
-func (m *Manager) GetUserLimits(userID int) (*PlanLimits, error) {
+func (m *Manager) GetUserLimits(userID int) (*models.PlanLimits, error) {
 	return m.service.GetUserLimits(userID)
 }
 

@@ -1,5 +1,5 @@
-// internal/subscription/types.go
-package subscription
+// internal/infrastructure/persistence/postgres/models/subscription.go
+package models
 
 import (
 	"time"
@@ -7,10 +7,8 @@ import (
 
 // Типы подписок
 const (
-	PlanFree       = "free"
-	PlanBasic      = "basic"
-	PlanPro        = "pro"
-	PlanEnterprise = "enterprise"
+	PlanFree = "free"
+	PlanPro  = "pro"
 )
 
 // Состояния подписки
@@ -99,13 +97,4 @@ type SubscriptionEvent struct {
 	Metadata       map[string]interface{} `json:"metadata"`
 }
 
-// NotificationSettings настройки уведомлений
-type NotificationSettings struct {
-	Enabled             bool     `json:"enabled"`
-	BeforeExpiration    []int    `json:"before_expiration"` // дни до истечения
-	OnPaymentSuccess    bool     `json:"on_payment_success"`
-	OnPaymentFailure    bool     `json:"on_payment_failure"`
-	OnPlanChange        bool     `json:"on_plan_change"`
-	OnTrialEnding       bool     `json:"on_trial_ending"`
-	NotificationMethods []string `json:"notification_methods"` // telegram, email
-}
+
