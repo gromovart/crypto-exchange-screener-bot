@@ -1,4 +1,3 @@
-// internal/infrastructure/config/config.go
 package config
 
 import (
@@ -11,6 +10,37 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+// ============================================
+// КОНФИГУРАЦИЯ БАЗЫ ДАННЫХ
+// ============================================
+
+// DatabaseConfig - конфигурация базы данных
+type DatabaseConfig struct {
+	// Основные параметры подключения
+	Host     string `mapstructure:"DB_HOST"`
+	Port     int    `mapstructure:"DB_PORT"`
+	User     string `mapstructure:"DB_USER"`
+	Password string `mapstructure:"DB_PASSWORD"`
+	Name     string `mapstructure:"DB_NAME"`
+	SSLMode  string `mapstructure:"DB_SSLMODE"`
+
+	// Настройки пула соединений
+	MaxOpenConns    int           `mapstructure:"DB_MAX_OPEN_CONNS"`
+	MaxIdleConns    int           `mapstructure:"DB_MAX_IDLE_CONNS"`
+	MaxConnLifetime time.Duration `mapstructure:"DB_MAX_CONN_LIFETIME"`
+	MaxConnIdleTime time.Duration `mapstructure:"DB_MAX_CONN_IDLE_TIME"`
+
+	// Настройки миграций
+	MigrationsPath    string `mapstructure:"DB_MIGRATIONS_PATH"`
+	EnableAutoMigrate bool   `mapstructure:"DB_ENABLE_AUTO_MIGRATE"`
+
+	// Настройки Redis
+	RedisHost     string `mapstructure:"REDIS_HOST"`
+	RedisPort     int    `mapstructure:"REDIS_PORT"`
+	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
+	RedisDB       int    `mapstructure:"REDIS_DB"`
+}
 
 // ============================================
 // КОНФИГУРАЦИЯ АНАЛИЗАТОРОВ
@@ -36,7 +66,7 @@ type AnalyzerConfigs struct {
 }
 
 // ============================================
-// ОСНОВНАЯ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ
+// ОСНОВНАЯ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ (добавлено DatabaseConfig)
 // ============================================
 
 // Config - основная структура конфигурации
@@ -46,6 +76,11 @@ type Config struct {
 	// ======================
 	Environment string `mapstructure:"ENVIRONMENT"`
 	Version     string `mapstructure:"VERSION"`
+
+	// ======================
+	// БАЗА ДАННЫХ
+	// ======================
+	Database DatabaseConfig `mapstructure:"DATABASE"`
 
 	// ======================
 	// БИРЖА И API КЛЮЧИ
@@ -224,7 +259,7 @@ type Config struct {
 }
 
 // ============================================
-// ЗАГРУЗКА КОНФИГУРАЦИИ
+// ЗАГРУЗКА КОНФИГУРАЦИИ (обновленная)
 // ============================================
 
 // LoadConfig загружает конфигурацию из .env файла
@@ -240,6 +275,28 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Environment = getEnv("ENVIRONMENT", "dev")
 	cfg.Version = getEnv("VERSION", "1.0.0")
+
+	// ======================
+	// БАЗА ДАННЫХ
+	// ======================
+	cfg.Database.Host = getEnv("DB_HOST", "localhost")
+	cfg.Database.Port = getEnvInt("DB_PORT", 5432)
+	cfg.Database.User = getEnv("DB_USER", "bot")
+	cfg.Database.Password = getEnv("DB_PASSWORD", "bot123")
+	cfg.Database.Name = getEnv("DB_NAME", "cryptobot")
+	cfg.Database.SSLMode = getEnv("DB_SSLMODE", "disable")
+	cfg.Database.MaxOpenConns = getEnvInt("DB_MAX_OPEN_CONNS", 25)
+	cfg.Database.MaxIdleConns = getEnvInt("DB_MAX_IDLE_CONNS", 10)
+	cfg.Database.MaxConnLifetime = getEnvDuration("DB_MAX_CONN_LIFETIME", 30*time.Minute)
+	cfg.Database.MaxConnIdleTime = getEnvDuration("DB_MAX_CONN_IDLE_TIME", 10*time.Minute)
+	cfg.Database.MigrationsPath = getEnv("DB_MIGRATIONS_PATH", "./persistence/postgres/migrations")
+	cfg.Database.EnableAutoMigrate = getEnvBool("DB_ENABLE_AUTO_MIGRATE", true)
+
+	// Redis
+	cfg.Database.RedisHost = getEnv("REDIS_HOST", "localhost")
+	cfg.Database.RedisPort = getEnvInt("REDIS_PORT", 6379)
+	cfg.Database.RedisPassword = getEnv("REDIS_PASSWORD", "redis123")
+	cfg.Database.RedisDB = getEnvInt("REDIS_DB", 0)
 
 	// ======================
 	// БИРЖА И API КЛЮЧИ
@@ -493,7 +550,7 @@ func LoadConfig(path string) (*Config, error) {
 }
 
 // ============================================
-// ВАЛИДАЦИЯ
+// ВАЛИДАЦИЯ (обновленная)
 // ============================================
 
 // validate проверяет обязательные параметры конфигурации
@@ -540,6 +597,23 @@ func (c *Config) validate() error {
 		}
 	}
 
+	// Проверка настроек базы данных
+	if c.Database.Host == "" {
+		errors = append(errors, "DB_HOST is required")
+	}
+	if c.Database.Port <= 0 {
+		errors = append(errors, "DB_PORT must be positive")
+	}
+	if c.Database.User == "" {
+		errors = append(errors, "DB_USER is required")
+	}
+	if c.Database.Password == "" {
+		errors = append(errors, "DB_PASSWORD is required")
+	}
+	if c.Database.Name == "" {
+		errors = append(errors, "DB_NAME is required")
+	}
+
 	if len(errors) > 0 {
 		return fmt.Errorf(strings.Join(errors, "; "))
 	}
@@ -548,57 +622,84 @@ func (c *Config) validate() error {
 }
 
 // ============================================
-// ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+// ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ (добавлены новые)
 // ============================================
 
-// IsCounterAnalyzerEnabled проверяет, включен ли анализатор счетчика
-func (c *Config) IsCounterAnalyzerEnabled() bool {
-	return c.AnalyzerConfigs.CounterAnalyzer.Enabled
+// GetDatabaseConfig возвращает конфигурацию базы данных
+func (c *Config) GetDatabaseConfig() DatabaseConfig {
+	return c.Database
 }
 
-// GetSymbolList возвращает список символов для мониторинга
-func (c *Config) GetSymbolList() []string {
-	if c.SymbolFilter == "" || c.SymbolFilter == "all" {
-		return []string{} // Пустой список означает "все символы"
-	}
+// GetPostgresDSN возвращает DSN для подключения к PostgreSQL
+func (c *Config) GetPostgresDSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		c.Database.Host,
+		c.Database.Port,
+		c.Database.User,
+		c.Database.Password,
+		c.Database.Name,
+		c.Database.SSLMode,
+	)
+}
 
-	var symbols []string
-	parts := strings.Split(c.SymbolFilter, ",")
+// GetRedisAddress возвращает адрес Redis
+func (c *Config) GetRedisAddress() string {
+	return fmt.Sprintf("%s:%d", c.Database.RedisHost, c.Database.RedisPort)
+}
 
-	for _, part := range parts {
-		symbol := strings.TrimSpace(part)
-		if symbol != "" {
-			// Если символ не содержит USDT, добавляем его
-			if !strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
-				symbol = strings.ToUpper(symbol) + "USDT"
-			}
-			symbols = append(symbols, symbol)
+// PrintSummary обновлен для отображения настроек БД
+func (c *Config) PrintSummary() {
+	log.Printf("📋 Конфигурация приложения:")
+	log.Printf("   • Окружение: %s", c.Environment)
+	log.Printf("   • Биржа: %s %s", strings.ToUpper(c.Exchange), c.ExchangeType)
+	log.Printf("   • Уровень логирования: %s", c.Logging.Level)
+	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
+
+	// База данных
+	log.Printf("   • База данных: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)
+	log.Printf("   • Redis: %s:%d", c.Database.RedisHost, c.Database.RedisPort)
+
+	if c.Telegram.Enabled {
+		token := c.Telegram.BotToken
+		if len(token) > 10 {
+			token = token[:10] + "..." + token[len(token)-10:]
 		}
+		log.Printf("   • Telegram Token: %s", token)
+		log.Printf("   • Telegram Chat ID: %s", c.Telegram.ChatID)
 	}
 
-	return symbols
-}
+	log.Printf("   • Counter Analyzer включен: %v", c.AnalyzerConfigs.CounterAnalyzer.Enabled)
+	log.Printf("   • HTTP сервер: %v (порт: %d)", c.Logging.HTTPEnabled, c.Logging.HTTPPort)
+	log.Printf("   • Макс. символов: %d", c.MaxSymbolsToMonitor)
+	log.Printf("   • Интервал обновления: %d сек", c.UpdateInterval)
 
-// ShouldExcludeSymbol проверяет, нужно ли исключить символ
-func (c *Config) ShouldExcludeSymbol(symbol string) bool {
-	if c.ExcludeSymbols == "" {
-		return false
-	}
-
-	excludeList := strings.Split(c.ExcludeSymbols, ",")
-	for _, exclude := range excludeList {
-		if strings.TrimSpace(strings.ToUpper(exclude)) == strings.ToUpper(symbol) {
-			return true
-		}
-	}
-	return false
+	// Выводим информацию об анализаторах
+	log.Printf("   • Анализаторы:")
+	log.Printf("     - Growth: %v (порог: %.2f%%)",
+		c.AnalyzerConfigs.GrowthAnalyzer.Enabled,
+		c.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
+	log.Printf("     - Fall: %v (порог: %.2f%%)",
+		c.AnalyzerConfigs.FallAnalyzer.Enabled,
+		c.AnalyzerConfigs.FallAnalyzer.MinFall)
+	log.Printf("     - Counter: %v (период: %s)",
+		c.AnalyzerConfigs.CounterAnalyzer.Enabled,
+		c.GetCounterAnalysisPeriod())
 }
 
 // ============================================
-// УТИЛИТЫ ДЛЯ РАБОТЫ С .ENV
+// ОСТАЛЬНЫЕ МЕТОДЫ БЕЗ ИЗМЕНЕНИЙ
 // ============================================
 
-// Вспомогательные функции
+// [Все остальные методы без изменений: GetSymbolList, ShouldExcludeSymbol, getEnv, getEnvInt,
+// getEnvFloat, getEnvBool, getEnvDuration, parseIntList, parsePatterns, isValidPeriod,
+// IsCounterAnalyzerEnabled, GetCounterBasePeriodMinutes, GetCounterAnalysisPeriod,
+// GetCounterGrowthThreshold, GetCounterFallThreshold, GetCounterNotificationEnabled,
+// GetCounterTrackGrowth, GetCounterTrackFall, GetCounterNotificationThreshold,
+// GetGrowthContinuityThreshold, GetFallContinuityThreshold, GetContinuousAnalyzerMinPoints,
+// GetEnabledAnalyzers]
+
+// Вспомогательные функции (те же, что и раньше)
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -687,74 +788,48 @@ func isValidPeriod(period string) bool {
 	return validPeriods[period]
 }
 
-// ============================================
-// ИНФОРМАЦИОННЫЕ МЕТОДЫ
-// ============================================
+// IsCounterAnalyzerEnabled проверяет, включен ли анализатор счетчика
+func (c *Config) IsCounterAnalyzerEnabled() bool {
+	return c.AnalyzerConfigs.CounterAnalyzer.Enabled
+}
 
-// PrintSummary выводит краткую информацию о конфигурации
-func (c *Config) PrintSummary() {
-	log.Printf("📋 Конфигурация приложения:")
-	log.Printf("   • Окружение: %s", c.Environment)
-	log.Printf("   • Биржа: %s %s", strings.ToUpper(c.Exchange), c.ExchangeType)
-	log.Printf("   • Уровень логирования: %s", c.Logging.Level)
-	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
+// GetSymbolList возвращает список символов для мониторинга
+func (c *Config) GetSymbolList() []string {
+	if c.SymbolFilter == "" || c.SymbolFilter == "all" {
+		return []string{} // Пустой список означает "все символы"
+	}
 
-	if c.Telegram.Enabled {
-		token := c.Telegram.BotToken
-		if len(token) > 10 {
-			token = token[:10] + "..." + token[len(token)-10:]
+	var symbols []string
+	parts := strings.Split(c.SymbolFilter, ",")
+
+	for _, part := range parts {
+		symbol := strings.TrimSpace(part)
+		if symbol != "" {
+			// Если символ не содержит USDT, добавляем его
+			if !strings.HasSuffix(strings.ToUpper(symbol), "USDT") {
+				symbol = strings.ToUpper(symbol) + "USDT"
+			}
+			symbols = append(symbols, symbol)
 		}
-		log.Printf("   • Telegram Token: %s", token)
-		log.Printf("   • Telegram Chat ID: %s", c.Telegram.ChatID)
 	}
 
-	log.Printf("   • Counter Analyzer включен: %v", c.AnalyzerConfigs.CounterAnalyzer.Enabled)
-	log.Printf("   • HTTP сервер: %v (порт: %d)", c.Logging.HTTPEnabled, c.Logging.HTTPPort)
-	log.Printf("   • Макс. символов: %d", c.MaxSymbolsToMonitor)
-	log.Printf("   • Интервал обновления: %d сек", c.UpdateInterval)
-
-	// Выводим информацию об анализаторах
-	log.Printf("   • Анализаторы:")
-	log.Printf("     - Growth: %v (порог: %.2f%%)",
-		c.AnalyzerConfigs.GrowthAnalyzer.Enabled,
-		c.AnalyzerConfigs.GrowthAnalyzer.MinGrowth)
-	log.Printf("     - Fall: %v (порог: %.2f%%)",
-		c.AnalyzerConfigs.FallAnalyzer.Enabled,
-		c.AnalyzerConfigs.FallAnalyzer.MinFall)
-	log.Printf("     - Counter: %v (период: %s)",
-		c.AnalyzerConfigs.CounterAnalyzer.Enabled,
-		c.GetCounterAnalysisPeriod())
+	return symbols
 }
 
-// GetEnabledAnalyzers возвращает список включенных анализаторов
-func (c *Config) GetEnabledAnalyzers() []string {
-	var enabled []string
-
-	if c.AnalyzerConfigs.GrowthAnalyzer.Enabled {
-		enabled = append(enabled, "growth_analyzer")
-	}
-	if c.AnalyzerConfigs.FallAnalyzer.Enabled {
-		enabled = append(enabled, "fall_analyzer")
-	}
-	if c.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
-		enabled = append(enabled, "continuous_analyzer")
-	}
-	if c.AnalyzerConfigs.VolumeAnalyzer.Enabled {
-		enabled = append(enabled, "volume_analyzer")
-	}
-	if c.AnalyzerConfigs.OpenInterestAnalyzer.Enabled {
-		enabled = append(enabled, "open_interest_analyzer")
-	}
-	if c.AnalyzerConfigs.CounterAnalyzer.Enabled {
-		enabled = append(enabled, "counter_analyzer")
+// ShouldExcludeSymbol проверяет, нужно ли исключить символ
+func (c *Config) ShouldExcludeSymbol(symbol string) bool {
+	if c.ExcludeSymbols == "" {
+		return false
 	}
 
-	return enabled
+	excludeList := strings.Split(c.ExcludeSymbols, ",")
+	for _, exclude := range excludeList {
+		if strings.TrimSpace(strings.ToUpper(exclude)) == strings.ToUpper(symbol) {
+			return true
+		}
+	}
+	return false
 }
-
-// ============================================
-// ГЕТТЕРЫ ДЛЯ УДОБНОГО ДОСТУПА
-// ============================================
 
 // GetCounterBasePeriodMinutes получает базовый период CounterAnalyzer
 func (c *Config) GetCounterBasePeriodMinutes() int {
@@ -864,4 +939,30 @@ func (c *Config) GetContinuousAnalyzerMinPoints() int {
 		}
 	}
 	return 3
+}
+
+// GetEnabledAnalyzers возвращает список включенных анализаторов
+func (c *Config) GetEnabledAnalyzers() []string {
+	var enabled []string
+
+	if c.AnalyzerConfigs.GrowthAnalyzer.Enabled {
+		enabled = append(enabled, "growth_analyzer")
+	}
+	if c.AnalyzerConfigs.FallAnalyzer.Enabled {
+		enabled = append(enabled, "fall_analyzer")
+	}
+	if c.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
+		enabled = append(enabled, "continuous_analyzer")
+	}
+	if c.AnalyzerConfigs.VolumeAnalyzer.Enabled {
+		enabled = append(enabled, "volume_analyzer")
+	}
+	if c.AnalyzerConfigs.OpenInterestAnalyzer.Enabled {
+		enabled = append(enabled, "open_interest_analyzer")
+	}
+	if c.AnalyzerConfigs.CounterAnalyzer.Enabled {
+		enabled = append(enabled, "counter_analyzer")
+	}
+
+	return enabled
 }

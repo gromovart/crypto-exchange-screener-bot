@@ -1,4 +1,4 @@
-// internal/database/interface.go
+// internal/infrastructure/persistence/postgres/database/interface.go
 package database
 
 // Database интерфейс для работы с базой данных

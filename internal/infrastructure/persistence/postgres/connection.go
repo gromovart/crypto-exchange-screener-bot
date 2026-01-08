@@ -1,4 +1,4 @@
-// persistence/postgres/connection.go (исправленный)
+// persistence/postgres/connection.go
 package postgres
 
 import (

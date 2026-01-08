@@ -13,6 +13,7 @@ import (
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	database "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/database"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -42,6 +43,9 @@ type DataManager struct {
 	// Дополнительные сервисы
 	telegramBot   *telegram.TelegramBot
 	webhookServer *telegram.WebhookServer
+
+	// НОВОЕ: Сервис базы данных
+	databaseService *database.DatabaseService
 
 	// Управление
 	mu       sync.RWMutex
@@ -91,6 +95,19 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	if dm.config.RateLimitDelay > 0 {
 		fmt.Println("⚠️  RateLimitingMiddleware активен для EventPriceUpdated")
 		fmt.Printf("   Лимит: %v между событиями\n", dm.config.RateLimitDelay)
+	}
+
+	// 0. СОЗДАЕМ СЕРВИС БАЗЫ ДАННЫХ (первым)
+	log.Println("🗄️  Creating database service...")
+	dm.databaseService = database.NewDatabaseService(dm.config)
+
+	// Пытаемся подключиться к базе данных
+	if err := dm.databaseService.Start(); err != nil {
+		log.Printf("⚠️  Failed to start database service: %v", err)
+		log.Println("⚠️  Application will continue without database connection")
+		// Не возвращаем ошибку, чтобы приложение могло работать без БД
+	} else {
+		log.Println("✅ Database service started successfully")
 	}
 
 	// 1. Создаем EventBus
@@ -279,6 +296,11 @@ func (dm *DataManager) registerServices() error {
 		"SignalPipeline":      dm.newServiceAdapter("SignalPipeline", dm.signalPipeline),
 		"NotificationService": dm.newServiceAdapter("NotificationService", dm.notification),
 		"EventBus":            dm.newServiceAdapter("EventBus", dm.eventBus),
+	}
+
+	// Регистрируем DatabaseService если он создан
+	if dm.databaseService != nil {
+		services["DatabaseService"] = dm.newServiceAdapter("DatabaseService", dm.databaseService)
 	}
 
 	if dm.telegramBot != nil {
@@ -506,6 +528,11 @@ func (dm *DataManager) GetPriceFetcher() fetcher.PriceFetcher {
 	return dm.priceFetcher
 }
 
+// GetDatabaseService возвращает сервис базы данных
+func (dm *DataManager) GetDatabaseService() *database.DatabaseService {
+	return dm.databaseService
+}
+
 // GetService возвращает сервис по имени
 func (dm *DataManager) GetService(name string) (interface{}, bool) {
 	switch name {
@@ -519,6 +546,8 @@ func (dm *DataManager) GetService(name string) (interface{}, bool) {
 		return dm.eventBus, true
 	case "TelegramBot":
 		return dm.telegramBot, dm.telegramBot != nil
+	case "DatabaseService":
+		return dm.databaseService, dm.databaseService != nil
 	default:
 		return nil, false
 	}
@@ -709,6 +738,23 @@ func (sa *serviceAdapter) Start() error {
 			return err
 		}
 		sa.state = StateRunning
+
+	case *database.DatabaseService:
+		// DatabaseService уже запущен при инициализации
+		if s.State() == database.StateRunning {
+			sa.state = StateRunning
+		} else if s.State() == database.StateError {
+			sa.state = StateError
+			return fmt.Errorf("database service in error state")
+		} else {
+			// Пытаемся запустить
+			if err := s.Start(); err != nil {
+				sa.state = StateError
+				return err
+			}
+			sa.state = StateRunning
+		}
+
 	case *engine.AnalysisEngine:
 		if err := s.Start(); err != nil {
 			sa.state = StateError
@@ -751,6 +797,12 @@ func (sa *serviceAdapter) Stop() error {
 		if err := s.Stop(); err != nil {
 			return err
 		}
+
+	case *database.DatabaseService:
+		if err := s.Stop(); err != nil {
+			return err
+		}
+
 	case *telegram.TelegramBot:
 		// Telegram бот не требует явной остановки
 	}
@@ -765,7 +817,22 @@ func (sa *serviceAdapter) State() ServiceState {
 
 func (sa *serviceAdapter) HealthCheck() bool {
 	// Простая проверка здоровья
-	return sa.state == StateRunning
+	if sa.state != StateRunning {
+		return false
+	}
+
+	switch s := sa.service.(type) {
+	case *database.DatabaseService:
+		return s.HealthCheck()
+	case *engine.AnalysisEngine:
+		// Для анализатора считаем, что он здоров если состояние Running
+		return true
+	case *fetcher.PriceFetcher:
+		// Для PriceFetcher считаем, что он здоров если состояние Running
+		return true
+	default:
+		return sa.state == StateRunning
+	}
 }
 
 // newServiceAdapter создает адаптер сервиса
