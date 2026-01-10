@@ -1,8 +1,11 @@
-// internal/auth/auth_manager.go
+// internal/core/domain/auth/auth_manager.go
 package auth
 
 // import (
 // 	"context"
+// 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+// 	session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
+// 	users_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
 // 	"crypto/rand"
 // 	"encoding/base64"
 // 	"encoding/json"
@@ -11,10 +14,6 @@ package auth
 // 	"log"
 // 	"strconv"
 // 	"time"
-
-// 	"crypto-exchange-screener-bot/internal/telegram"
-// 	"crypto-exchange-screener-bot/internal/users"
-// 	"crypto-exchange-screener-bot/persistence/postgres/repository"
 
 // 	"github.com/go-redis/redis/v8"
 // )
@@ -27,15 +26,15 @@ package auth
 // )
 
 // type AuthManager struct {
-// 	userRepo    repository.UserRepository
-// 	sessionRepo repository.SessionRepository
+// 	userRepo    users_repo.UserRepository
+// 	sessionRepo session_repo.SessionRepository
 // 	jwtService  *JWTService
 // 	cache       *redis.Client
 // }
 
 // func NewAuthManager(
-// 	userRepo repository.UserRepository,
-// 	sessionRepo repository.SessionRepository,
+// 	userRepo users_repo.UserRepository,
+// 	sessionRepo session_repo.SessionRepository,
 // 	jwtSecret string,
 // ) *AuthManager {
 
@@ -58,7 +57,7 @@ package auth
 // 	firstName,
 // 	lastName,
 // 	chatID string,
-// ) (*users.User, error) {
+// ) (*models.User, error) {
 
 // 	// Проверяем существующего пользователя
 // 	existing, err := am.userRepo.FindByTelegramID(telegramID)
@@ -69,7 +68,7 @@ package auth
 // 	}
 
 // 	// Создаем нового пользователя
-// 	user := &users.User{
+// 	user := &models.User{
 // 		TelegramID: telegramID,
 // 		Username:   username,
 // 		FirstName:  firstName,
@@ -77,12 +76,12 @@ package auth
 // 		ChatID:     chatID,
 // 		Email:      "",
 // 		Phone:      "",
-// 		Role:       users.RoleUser,
+// 		Role:       models.RoleUser,
 // 		IsActive:   true,
 // 		IsVerified: true, // Telegram уже верифицировал
 // 		CreatedAt:  time.Now(),
 // 		UpdatedAt:  time.Now(),
-// 		Settings: users.UserSettings{
+// 		Settings: models.UserSettings{
 // 			MinGrowthThreshold: 2.0,
 // 			MinFallThreshold:   2.0,
 // 			PreferredPeriods:   []int{5, 15, 30},
@@ -164,7 +163,7 @@ package auth
 // 		// Добавляем пользователя в контекст
 // 		ctx.Set("user", user)
 // 		ctx.Set("user_id", user.ID)
-// 		ctx.Set("notifications_enabled", user.Notifications.Enabled)
+// 		ctx.Set("notifications_enabled", models.Notifications.Enabled)
 
 // 		return next(ctx)
 // 	}
@@ -213,7 +212,7 @@ package auth
 // }
 
 // // Кэширование пользователя
-// func (am *AuthManager) CacheUser(user *users.User) error {
+// func (am *AuthManager) CacheUser(user *models.User) error {
 // 	key := fmt.Sprintf("user:%d", user.ID)
 // 	data, err := json.Marshal(user)
 // 	if err != nil {

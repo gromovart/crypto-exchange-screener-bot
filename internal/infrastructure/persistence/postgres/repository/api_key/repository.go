@@ -146,7 +146,9 @@ func (r *APIKeyRepositoryImpl) FindByID(id int) (*models.APIKey, error) {
 
 	// Устанавливаем время последнего использования
 	if lastUsedAt.Valid {
-		key.LastUsedAt = lastUsedAt.Time
+		key.LastUsedAt = &lastUsedAt.Time
+	} else {
+		key.LastUsedAt = nil
 	}
 
 	// Декодируем JSON с разрешениями
@@ -197,7 +199,9 @@ func (r *APIKeyRepositoryImpl) FindWithSecrets(id int) (*models.APIKeyWithSecret
 
 	// Устанавливаем время последнего использования
 	if lastUsedAt.Valid {
-		key.LastUsedAt = lastUsedAt.Time
+		key.LastUsedAt = &lastUsedAt.Time
+	} else {
+		key.LastUsedAt = nil
 	}
 
 	// Декодируем JSON с разрешениями
@@ -263,9 +267,10 @@ func (r *APIKeyRepositoryImpl) FindByUserIDExchange(userID int, exchange string)
 
 	// Устанавливаем время последнего использования
 	if lastUsedAt.Valid {
-		key.LastUsedAt = lastUsedAt.Time
+		key.LastUsedAt = &lastUsedAt.Time
+	} else {
+		key.LastUsedAt = nil
 	}
-
 	// Декодируем JSON с разрешениями
 	if err := json.Unmarshal(permissionsJSON, &key.Permissions); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal permissions: %w", err)
@@ -318,7 +323,9 @@ func (r *APIKeyRepositoryImpl) FindByUserID(userID int) ([]*models.APIKey, error
 
 		// Устанавливаем время последнего использования
 		if lastUsedAt.Valid {
-			key.LastUsedAt = lastUsedAt.Time
+			key.LastUsedAt = &lastUsedAt.Time
+		} else {
+			key.LastUsedAt = nil
 		}
 
 		// Декодируем JSON с разрешениями
@@ -486,7 +493,7 @@ func (r *APIKeyRepositoryImpl) LogUsage(log *models.APIKeyUsageLog) error {
 		responseBodyJSON,
 		log.IPAddress,
 		log.UserAgent,
-		log.LatencyMs,
+		log.LatencyMS,
 		log.ErrorMessage,
 	).Scan(&log.ID, &log.CreatedAt)
 

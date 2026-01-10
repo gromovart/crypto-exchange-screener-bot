@@ -204,7 +204,7 @@ func (b *EventBus) Publish(event types.Event) error {
 		logger.Info("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
 		return nil
 	default:
-		// Буфер полон
+		// Буфер полен
 		if b.config.EnableLogging {
 			logger.Warn("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
 		}
@@ -416,8 +416,15 @@ func (b *EventBus) logMetrics() {
 	log.Printf("   Опубликовано: %d событий", metrics.EventsPublished)
 	log.Printf("   Обработано: %d событий", metrics.EventsProcessed)
 	log.Printf("   Ошибок: %d событий", metrics.EventsFailed)
-	log.Printf("   Среднее время обработки: %v",
-		metrics.ProcessingTime/time.Duration(metrics.EventsProcessed))
+
+	// ИСПРАВЛЕНИЕ: проверка деления на ноль
+	var avgProcessingTime time.Duration
+	if metrics.EventsProcessed > 0 {
+		avgProcessingTime = metrics.ProcessingTime / time.Duration(metrics.EventsProcessed)
+		log.Printf("   Среднее время обработки: %v", avgProcessingTime)
+	} else {
+		log.Printf("   Среднее время обработки: нет данных (0 событий)")
+	}
 
 	for eventType, count := range metrics.SubscribersCount {
 		log.Printf("   %s: %d подписчиков", eventType, count)

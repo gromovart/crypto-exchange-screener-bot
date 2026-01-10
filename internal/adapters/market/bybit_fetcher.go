@@ -2,6 +2,7 @@
 package market
 
 import (
+	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
@@ -48,6 +49,12 @@ type BybitPriceFetcher struct {
 	volumeDeltaCache   map[string]*volumeDeltaCache
 	volumeDeltaCacheMu sync.RWMutex
 	volumeDeltaTTL     time.Duration
+
+	// Настройки timeout и retry
+	maxRetries     int
+	retryDelay     time.Duration
+	lastFetchError time.Time
+	errorCount     int
 }
 
 // Структура кэша дельты
@@ -82,6 +89,11 @@ func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorage,
 		liqEnabled:        true,
 		liqUpdateInterval: 1 * time.Minute, // Обновлять ликвидации чаще
 		lastLiqUpdate:     time.Now(),
+
+		// Настройки timeout и retry
+		maxRetries: 3,
+		retryDelay: 2 * time.Second,
+		errorCount: 0,
 	}
 }
 
@@ -612,15 +624,56 @@ func (f *BybitPriceFetcher) calculateEstimatedOI(symbol string, snapshot *storag
 func (f *BybitPriceFetcher) fetchPrices() error {
 	logger.Debug("🔄 BybitFetcher: начало получения цен...")
 
-	// Получаем тикеры
-	tickers, err := f.client.GetTickers(f.client.Category())
-	if err != nil {
-		logger.Error("❌ BybitFetcher: ошибка получения тикеров: %v", err)
-		return fmt.Errorf("failed to get tickers: %w", err)
+	// Добавляем retry логику
+	var tickers *api.TickerResponse
+	var err error
+
+	for attempt := 1; attempt <= f.maxRetries; attempt++ {
+		logger.Debug("🔄 Попытка %d/%d получения тикеров...", attempt, f.maxRetries)
+
+		// Получаем тикеры
+		tickers, err = f.client.GetTickers(f.client.Category())
+
+		if err == nil && tickers != nil && tickers.RetCode == 0 && len(tickers.Result.List) > 0 {
+			// Успешный запрос
+			f.errorCount = 0
+			f.lastFetchError = time.Time{} // сбрасываем
+			break
+		}
+
+		// Проверяем ошибку
+		if err != nil {
+			logger.Warn("⚠️ Ошибка при получении тикеров (попытка %d/%d): %v", attempt, f.maxRetries, err)
+		} else if tickers != nil && tickers.RetCode != 0 {
+			logger.Warn("⚠️ API вернуло ошибку %d: %s (попытка %d/%d)",
+				tickers.RetCode, tickers.RetMsg, attempt, f.maxRetries)
+		} else if tickers == nil || len(tickers.Result.List) == 0 {
+			logger.Warn("⚠️ Пустой ответ от API (попытка %d/%d)", attempt, f.maxRetries)
+		}
+
+		f.lastFetchError = time.Now()
+		f.errorCount++
+
+		// Если это была последняя попытка
+		if attempt == f.maxRetries {
+			logger.Error("❌ BybitFetcher: все попытки получения тикеров провалились")
+			f.handleFetchFailure()
+			return fmt.Errorf("failed to get tickers after %d retries: %v", f.maxRetries, err)
+		}
+
+		// Ждем перед следующей попыткой
+		time.Sleep(f.retryDelay)
+	}
+
+	// Проверяем результат
+	if tickers == nil || len(tickers.Result.List) == 0 {
+		logger.Warn("⚠️ BybitFetcher: получен пустой список тикеров")
+		f.handleEmptyTickers()
+		return fmt.Errorf("empty tickers response")
 	}
 
 	logger.Debug("📊 BybitFetcher: получено %d тикеров, категория: %s",
-		len(tickers.Result.List), f.client.Category())
+		len(tickers.Result.List), tickers.Result.Category)
 
 	now := time.Now()
 	updatedCount := 0
@@ -630,11 +683,13 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	var priceDataList []types.PriceData
 
 	// Отладка: лог первых 5 тикеров
-	logger.Info("🔍 Первые 5 тикеров из ответа API:")
-	for i := 0; i < 5 && i < len(tickers.Result.List); i++ {
-		ticker := tickers.Result.List[i]
-		logger.Info("   %d. %s: цена=%s, OI=%s, FundingRate='%s'",
-			i+1, ticker.Symbol, ticker.LastPrice, ticker.OpenInterest, ticker.FundingRate)
+	if len(tickers.Result.List) > 0 {
+		logger.Info("🔍 Первые 5 тикеров из ответа API:")
+		for i := 0; i < 5 && i < len(tickers.Result.List); i++ {
+			ticker := tickers.Result.List[i]
+			logger.Info("   %d. %s: цена=%s, OI=%s, FundingRate='%s'",
+				i+1, ticker.Symbol, ticker.LastPrice, ticker.OpenInterest, ticker.FundingRate)
+		}
 	}
 
 	for i, ticker := range tickers.Result.List {
@@ -691,10 +746,13 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		// Также получаем фандинг для фьючерсов
 		fundingRate := 0.0
-
 		if ticker.FundingRate != "" {
 			fundingRate, _ = parseFloat(ticker.FundingRate)
-			logger.Debug("💰 BybitFetcher: %s фандинг = %.4f%%", ticker.Symbol, fundingRate*100)
+			if err != nil {
+				logger.Debug("⚠️ Ошибка парсинга фандинга для %s: %v", ticker.Symbol, err)
+			} else {
+				logger.Debug("💰 BybitFetcher: %s фандинг = %.4f%%", ticker.Symbol, fundingRate*100)
+			}
 		}
 
 		// Change24h
@@ -787,6 +845,27 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	}
 
 	return nil
+}
+
+// handleFetchFailure обрабатывает ситуацию когда не удалось получить данные
+func (f *BybitPriceFetcher) handleFetchFailure() {
+	// Увеличиваем интервал между попытками при постоянных ошибках
+	if f.errorCount > 10 {
+		logger.Warn("⚠️ Много ошибок подряд (%d), переключение в безопасный режим", f.errorCount)
+		// Можно временно отключить некоторые функции или уменьшить частоту запросов
+	}
+}
+
+// handleEmptyTickers обрабатывает пустые тикеры
+func (f *BybitPriceFetcher) handleEmptyTickers() {
+	// Если тикеры пустые, возможно API вернуло ошибку
+	logger.Warn("⚠️ Получен пустой список тикеров, проверьте подключение к интернету")
+
+	// Если есть сохраненные данные, можем продолжать работу с ними
+	storedSymbols := f.storage.GetSymbols()
+	if len(storedSymbols) > 0 {
+		logger.Info("📊 Есть %d сохраненных символов, продолжаем работу", len(storedSymbols))
+	}
 }
 
 // ==================== МЕТОДЫ ЛИКВИДАЦИЙ ====================
@@ -901,6 +980,9 @@ func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
 		"volume_delta_ttl":        f.volumeDeltaTTL.String(),
 		"liq_cache_size":          liqCount,
 		"liq_update_interval":     f.liqUpdateInterval.String(),
+		"max_retries":             f.maxRetries,
+		"error_count":             f.errorCount,
+		"last_fetch_error":        f.lastFetchError.Format("2006-01-02 15:04:05"),
 	}
 }
 

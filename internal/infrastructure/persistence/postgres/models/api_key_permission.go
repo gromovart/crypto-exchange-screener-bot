@@ -1,28 +1,53 @@
+// internal/infrastructure/persistence/postgres/models/api_key_permission.go
 package models
 
 import (
 	"time"
 )
 
-// APIKeyPermission разрешение API ключа
+// APIKeyPermission модель разрешения API ключа
 type APIKeyPermission struct {
-	ID         int       `db:"id" json:"id"`
-	APIKeyID   int       `db:"api_key_id" json:"api_key_id"`
-	Permission string    `db:"permission" json:"permission"`
-	GrantedAt  time.Time `db:"granted_at" json:"granted_at"`
-	GrantedBy  *int      `db:"granted_by" json:"granted_by,omitempty"` // NULLable
+	ID         int       `db:"id"`
+	APIKeyID   int       `db:"api_key_id"`
+	Permission string    `db:"permission"`
+	GrantedAt  time.Time `db:"granted_at"`
+	GrantedBy  *int      `db:"granted_by"`
+
+	// Связи (для eager loading)
+	APIKey        *APIKey `db:"-"`
+	GrantedByUser *User   `db:"-"`
 }
 
-// APIKeyPermissionRequest запрос на добавление разрешения
-type APIKeyPermissionRequest struct {
-	APIKeyID   int    `json:"api_key_id" validate:"required"`
-	Permission string `json:"permission" validate:"required"`
+// IsValidPermission проверяет, является ли разрешение валидным
+func (p *APIKeyPermission) IsValidPermission() bool {
+	switch PermissionType(p.Permission) {
+	case PermissionReadOnly,
+		PermissionTrade,
+		PermissionWithdraw,
+		PermissionMargin,
+		PermissionFutures,
+		PermissionSpot,
+		PermissionWallet,
+		PermissionSubAccount:
+		return true
+	default:
+		return false
+	}
 }
 
-// APIKeyPermissionsList список разрешений
-type APIKeyPermissionsList struct {
-	APIKeyID     int                  `json:"api_key_id"`
-	Permissions  []string             `json:"permissions"`
-	GrantedByMap map[string]int       `json:"granted_by_map,omitempty"`
-	GrantedAtMap map[string]time.Time `json:"granted_at_map,omitempty"`
+// ToMap возвращает представление разрешения в виде map
+func (p *APIKeyPermission) ToMap() map[string]interface{} {
+	result := map[string]interface{}{
+		"id":         p.ID,
+		"api_key_id": p.APIKeyID,
+		"permission": p.Permission,
+		"granted_at": p.GrantedAt,
+		"is_valid":   p.IsValidPermission(),
+	}
+
+	if p.GrantedBy != nil {
+		result["granted_by"] = *p.GrantedBy
+	}
+
+	return result
 }

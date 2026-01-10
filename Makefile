@@ -322,7 +322,7 @@ run-full:
 		exit 1; \
 	fi
 	@echo "📋 Используется конфигурация: $(ENV_FILE)"
-	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full
+	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full 
 
 ## run-prod-binary: Запуск собранной бинарной версии
 run-prod-binary: build

@@ -1,4 +1,4 @@
-// cmd/bot/main.go
+// application/cmd/bot/main.go
 package main
 
 import (
@@ -116,6 +116,10 @@ func main() {
 
 // runSimpleMode запускает простое приложение через bootstrap
 func runSimpleMode(cfg *config.Config) {
+	// Канал для сигналов остановки
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
+
 	// Строим приложение с опциями
 	app, err := bootstrap.NewAppBuilder().
 		WithConfig(cfg).
@@ -126,15 +130,27 @@ func runSimpleMode(cfg *config.Config) {
 		log.Fatal("❌ Failed to build application:", err)
 	}
 
-	// Устанавливаем обработку завершения
-	defer app.Cleanup()
+	// Запускаем приложение в горутине
+	errChan := make(chan error, 1)
+	go func() {
+		if err := app.Run(); err != nil {
+			errChan <- err
+		}
+	}()
 
-	// Запускаем
-	if err := app.Run(); err != nil {
-		app.Cleanup()
-		log.Fatal("❌ Failed to run application:", err)
+	// Ждем либо сигнала остановки, либо ошибки
+	log.Println("🛑 Press Ctrl+C to stop")
+
+	select {
+	case sig := <-stopChan:
+		log.Printf("📶 Received signal: %v", sig)
+	case err := <-errChan:
+		log.Printf("❌ Application error: %v", err)
 	}
 
+	// Останавливаем приложение
+	log.Println("🛑 Stopping application...")
+	app.Cleanup()
 	log.Println("👋 Application stopped gracefully")
 }
 
@@ -232,8 +248,30 @@ func runFullModeImpl(cfg *config.Config, testMode bool) {
 	}
 
 	// Graceful shutdown
+	// Глобальная обработка Ctrl+C
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	graceful := true
+	go func() {
+		for sig := range sigChan {
+			if graceful {
+				fmt.Printf("\n📶 Получен сигнал: %v (начинаем graceful shutdown)\n", sig)
+				fmt.Println("🛑 Нажмите Ctrl+C еще раз для принудительного выхода")
+				graceful = false
+
+				// Запускаем graceful shutdown
+				go func() {
+					time.Sleep(5 * time.Second)
+					fmt.Println("⏰ Таймаут graceful shutdown, выход...")
+					os.Exit(0)
+				}()
+			} else {
+				fmt.Printf("\n📶 Получен второй сигнал: %v (принудительный выход)\n", sig)
+				os.Exit(1)
+			}
+		}
+	}()
 
 	errChan := make(chan error, 1)
 

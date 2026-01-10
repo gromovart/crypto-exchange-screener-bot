@@ -17,8 +17,13 @@ CREATE TABLE user_api_keys (
 
     -- Ограничения
     CONSTRAINT valid_exchange CHECK (exchange IN ('bybit', 'binance', 'kucoin', 'okx', 'gateio')),
-    CONSTRAINT unique_user_exchange UNIQUE (user_id, exchange) WHERE is_active = TRUE
+    CONSTRAINT unique_user_exchange UNIQUE (user_id, exchange)
 );
+
+-- Создаем partial unique index для активных ключей
+CREATE UNIQUE INDEX idx_unique_active_user_exchange
+    ON user_api_keys(user_id, exchange)
+    WHERE is_active = TRUE;
 
 -- Таблица для логов использования API ключей
 CREATE TABLE api_key_usage_logs (
@@ -345,14 +350,3 @@ CREATE TYPE api_key_permission_type AS ENUM (
     'wallet',
     'sub_account'
 );
-
--- Пример заполнения начальными данными (для тестирования)
-INSERT INTO api_key_permissions (permission, granted_by) VALUES
-('read_only', 1),
-('trade', 1),
-('withdraw', 1),
-('margin', 1),
-('futures', 1),
-('spot', 1),
-('wallet', 1),
-('sub_account', 1);

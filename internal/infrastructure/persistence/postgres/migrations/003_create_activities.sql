@@ -13,15 +13,15 @@ CREATE TABLE user_activities (
     location VARCHAR(100), -- город/страна из IP
     severity VARCHAR(20) DEFAULT 'info', -- info, warning, error, security
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для быстрого поиска
-    INDEX idx_user_activities_user_id (user_id),
-    INDEX idx_user_activities_activity_type (activity_type),
-    INDEX idx_user_activities_created_at (created_at),
-    INDEX idx_user_activities_entity (entity_type, entity_id),
-    INDEX idx_user_activities_severity (severity)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для быстрого поиска
+CREATE INDEX idx_user_activities_user_id ON user_activities(user_id);
+CREATE INDEX idx_user_activities_activity_type ON user_activities(activity_type);
+CREATE INDEX idx_user_activities_created_at ON user_activities(created_at);
+CREATE INDEX idx_user_activities_entity ON user_activities(entity_type, entity_id);
+CREATE INDEX idx_user_activities_severity ON user_activities(severity);
 
 -- Таблица для аудита важных действий (отдельно для безопасности)
 CREATE TABLE security_audit_logs (
@@ -39,15 +39,15 @@ CREATE TABLE security_audit_logs (
     success BOOLEAN DEFAULT TRUE,
     error_message TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для аудита безопасности
-    INDEX idx_security_audit_user_id (user_id),
-    INDEX idx_security_audit_action_type (action_type),
-    INDEX idx_security_audit_resource (resource_type, resource_id),
-    INDEX idx_security_audit_created_at (created_at),
-    INDEX idx_security_audit_success (success)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для аудита безопасности
+CREATE INDEX idx_security_audit_user_id ON security_audit_logs(user_id);
+CREATE INDEX idx_security_audit_action_type ON security_audit_logs(action_type);
+CREATE INDEX idx_security_audit_resource ON security_audit_logs(resource_type, resource_id);
+CREATE INDEX idx_security_audit_created_at ON security_audit_logs(created_at);
+CREATE INDEX idx_security_audit_success ON security_audit_logs(success);
 
 -- Таблица для логов входа пользователей
 CREATE TABLE login_attempts (
@@ -62,15 +62,15 @@ CREATE TABLE login_attempts (
     two_factor_used BOOLEAN DEFAULT FALSE,
     location VARCHAR(100),
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для анализа входов
-    INDEX idx_login_attempts_user_id (user_id),
-    INDEX idx_login_attempts_ip_address (ip_address),
-    INDEX idx_login_attempts_success (success),
-    INDEX idx_login_attempts_created_at (created_at),
-    INDEX idx_login_attempts_telegram_id (telegram_id)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для анализа входов
+CREATE INDEX idx_login_attempts_user_id ON login_attempts(user_id);
+CREATE INDEX idx_login_attempts_ip_address ON login_attempts(ip_address);
+CREATE INDEX idx_login_attempts_success ON login_attempts(success);
+CREATE INDEX idx_login_attempts_created_at ON login_attempts(created_at);
+CREATE INDEX idx_login_attempts_telegram_id ON login_attempts(telegram_id);
 
 -- Таблица для отслеживания активности сигналов
 CREATE TABLE signal_activities (
@@ -88,17 +88,17 @@ CREATE TABLE signal_activities (
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 
-    -- Индексы для анализа сигналов
-    INDEX idx_signal_activities_user_id (user_id),
-    INDEX idx_signal_activities_signal_id (signal_id),
-    INDEX idx_signal_activities_symbol (symbol),
-    INDEX idx_signal_activities_created_at (created_at),
-    INDEX idx_signal_activities_action (action),
-    INDEX idx_signal_activities_signal_type (signal_type),
-
     -- Уникальность пользователь + сигнал + действие
     CONSTRAINT unique_signal_action UNIQUE (user_id, signal_id, action)
 );
+
+-- Индексы для анализа сигналов
+CREATE INDEX idx_signal_activities_user_id ON signal_activities(user_id);
+CREATE INDEX idx_signal_activities_signal_id ON signal_activities(signal_id);
+CREATE INDEX idx_signal_activities_symbol ON signal_activities(symbol);
+CREATE INDEX idx_signal_activities_created_at ON signal_activities(created_at);
+CREATE INDEX idx_signal_activities_action ON signal_activities(action);
+CREATE INDEX idx_signal_activities_signal_type ON signal_activities(signal_type);
 
 -- Таблица для логов API запросов от пользователей
 CREATE TABLE api_request_logs (
@@ -116,22 +116,22 @@ CREATE TABLE api_request_logs (
     rate_limit_key VARCHAR(100),
     error_message TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для мониторинга API
-    INDEX idx_api_request_logs_user_id (user_id),
-    INDEX idx_api_request_logs_api_key_id (api_key_id),
-    INDEX idx_api_request_logs_endpoint (endpoint),
-    INDEX idx_api_request_logs_response_status (response_status),
-    INDEX idx_api_request_logs_created_at (created_at),
-    INDEX idx_api_request_logs_method (method)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для мониторинга API
+CREATE INDEX idx_api_request_logs_user_id ON api_request_logs(user_id);
+CREATE INDEX idx_api_request_logs_api_key_id ON api_request_logs(api_key_id);
+CREATE INDEX idx_api_request_logs_endpoint ON api_request_logs(endpoint);
+CREATE INDEX idx_api_request_logs_response_status ON api_request_logs(response_status);
+CREATE INDEX idx_api_request_logs_created_at ON api_request_logs(created_at);
+CREATE INDEX idx_api_request_logs_method ON api_request_logs(method);
 
 -- Таблица для логов подписок и платежей
 CREATE TABLE subscription_activities (
     id SERIAL PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    subscription_id INTEGER REFERENCES user_subscriptions(id) ON DELETE SET NULL,
+    subscription_id INTEGER,
     action_type VARCHAR(50) NOT NULL, -- created, updated, canceled, renewed, payment_failed
     old_plan VARCHAR(50),
     new_plan VARCHAR(50),
@@ -141,14 +141,14 @@ CREATE TABLE subscription_activities (
     payment_id VARCHAR(100),
     failure_reason VARCHAR(200),
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для анализа подписок
-    INDEX idx_subscription_activities_user_id (user_id),
-    INDEX idx_subscription_activities_subscription_id (subscription_id),
-    INDEX idx_subscription_activities_action_type (action_type),
-    INDEX idx_subscription_activities_created_at (created_at)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для анализа подписок
+CREATE INDEX idx_subscription_activities_user_id ON subscription_activities(user_id);
+CREATE INDEX idx_subscription_activities_subscription_id ON subscription_activities(subscription_id);
+CREATE INDEX idx_subscription_activities_action_type ON subscription_activities(action_type);
+CREATE INDEX idx_subscription_activities_created_at ON subscription_activities(created_at);
 
 -- Таблица для логов изменений настроек пользователей
 CREATE TABLE settings_change_logs (
@@ -162,16 +162,14 @@ CREATE TABLE settings_change_logs (
     ip_address INET,
     user_agent TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для отслеживания настроек
-    INDEX idx_settings_change_logs_user_id (user_id),
-    INDEX idx_settings_change_logs_setting_type (setting_type),
-    INDEX idx_settings_change_logs_created_at (created_at),
-
-    -- Для быстрого поиска по типу настройки
-    INDEX idx_settings_change_logs_setting_name (setting_name)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для отслеживания настроек
+CREATE INDEX idx_settings_change_logs_user_id ON settings_change_logs(user_id);
+CREATE INDEX idx_settings_change_logs_setting_type ON settings_change_logs(setting_type);
+CREATE INDEX idx_settings_change_logs_created_at ON settings_change_logs(created_at);
+CREATE INDEX idx_settings_change_logs_setting_name ON settings_change_logs(setting_name);
 
 -- Таблица для логов административных действий
 CREATE TABLE admin_activities (
@@ -187,19 +185,14 @@ CREATE TABLE admin_activities (
     ip_address INET NOT NULL,
     user_agent TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Проверка, что пользователь - администратор
-    CONSTRAINT admin_must_be_admin CHECK (
-        EXISTS (SELECT 1 FROM users WHERE id = admin_id AND role = 'admin')
-    ),
-
-    -- Индексы для аудита админки
-    INDEX idx_admin_activities_admin_id (admin_id),
-    INDEX idx_admin_activities_target_user_id (target_user_id),
-    INDEX idx_admin_activities_action_type (action_type),
-    INDEX idx_admin_activities_created_at (created_at)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для аудита админки
+CREATE INDEX idx_admin_activities_admin_id ON admin_activities(admin_id);
+CREATE INDEX idx_admin_activities_target_user_id ON admin_activities(target_user_id);
+CREATE INDEX idx_admin_activities_action_type ON admin_activities(action_type);
+CREATE INDEX idx_admin_activities_created_at ON admin_activities(created_at);
 
 -- Таблица для агрегированной статистики активности
 CREATE TABLE activity_summary (
@@ -238,12 +231,12 @@ CREATE TABLE activity_summary (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 
     -- Одна запись на пользователя в день
-    CONSTRAINT unique_user_date UNIQUE (user_id, date),
-
-    -- Индексы для отчетов
-    INDEX idx_activity_summary_date (date),
-    INDEX idx_activity_summary_user_id (user_id)
+    CONSTRAINT unique_user_date UNIQUE (user_id, date)
 );
+
+-- Индексы для отчетов
+CREATE INDEX idx_activity_summary_date ON activity_summary(date);
+CREATE INDEX idx_activity_summary_user_id ON activity_summary(user_id);
 
 -- Таблица для аномальной активности (система обнаружения аномалий)
 CREATE TABLE anomaly_detection_logs (
@@ -262,15 +255,15 @@ CREATE TABLE anomaly_detection_logs (
     resolved_by INTEGER REFERENCES users(id),
     resolution_notes TEXT,
     metadata JSONB DEFAULT '{}',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-
-    -- Индексы для мониторинга аномалий
-    INDEX idx_anomaly_detection_user_id (user_id),
-    INDEX idx_anomaly_detection_anomaly_type (anomaly_type),
-    INDEX idx_anomaly_detection_severity (severity),
-    INDEX idx_anomaly_detection_resolved (resolved),
-    INDEX idx_anomaly_detection_created_at (created_at)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Индексы для мониторинга аномалий
+CREATE INDEX idx_anomaly_detection_user_id ON anomaly_detection_logs(user_id);
+CREATE INDEX idx_anomaly_detection_anomaly_type ON anomaly_detection_logs(anomaly_type);
+CREATE INDEX idx_anomaly_detection_severity ON anomaly_detection_logs(severity);
+CREATE INDEX idx_anomaly_detection_resolved ON anomaly_detection_logs(resolved);
+CREATE INDEX idx_anomaly_detection_created_at ON anomaly_detection_logs(created_at);
 
 -- Таблица для геолокации активности
 CREATE TABLE activity_geolocation (
@@ -291,16 +284,39 @@ CREATE TABLE activity_geolocation (
     user_count INTEGER DEFAULT 1,
 
     -- Уникальный IP
-    CONSTRAINT unique_ip_address UNIQUE (ip_address),
-
-    -- Индексы для геоанализа
-    INDEX idx_activity_geolocation_country (country_code),
-    INDEX idx_activity_geolocation_city (city),
-    INDEX idx_activity_geolocation_threat_score (threat_score),
-    INDEX idx_activity_geolocation_last_seen (last_seen)
+    CONSTRAINT unique_ip_address UNIQUE (ip_address)
 );
 
+-- Индексы для геоанализа
+CREATE INDEX idx_activity_geolocation_country ON activity_geolocation(country_code);
+CREATE INDEX idx_activity_geolocation_city ON activity_geolocation(city);
+CREATE INDEX idx_activity_geolocation_threat_score ON activity_geolocation(threat_score);
+CREATE INDEX idx_activity_geolocation_last_seen ON activity_geolocation(last_seen);
+
 -- Триггеры и функции
+
+-- Функция для проверки, что пользователь является администратором
+CREATE OR REPLACE FUNCTION check_admin_role()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Проверяем, что пользователь с admin_id имеет роль 'admin'
+    IF NOT EXISTS (
+        SELECT 1 FROM users
+        WHERE id = NEW.admin_id
+            AND role = 'admin'
+    ) THEN
+        RAISE EXCEPTION 'Пользователь с ID % не является администратором', NEW.admin_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Триггер для проверки роли администратора перед вставкой
+CREATE TRIGGER check_admin_role_trigger
+    BEFORE INSERT OR UPDATE ON admin_activities
+    FOR EACH ROW
+    EXECUTE FUNCTION check_admin_role();
 
 -- Триггер для обновления updated_at
 CREATE TRIGGER update_activity_summary_updated_at
@@ -438,12 +454,12 @@ $$ language 'plpgsql';
 
 -- Функция для логирования попыток входа
 CREATE OR REPLACE FUNCTION log_login_attempt(
+    p_ip_address INET,          -- обязательный, без DEFAULT - ставим первым
+    p_success BOOLEAN,          -- обязательный, без DEFAULT - ставим вторым
     p_user_id INTEGER DEFAULT NULL,
     p_telegram_id BIGINT DEFAULT NULL,
     p_username VARCHAR DEFAULT NULL,
-    p_ip_address INET,
     p_user_agent TEXT DEFAULT NULL,
-    p_success BOOLEAN,
     p_failure_reason VARCHAR DEFAULT NULL,
     p_two_factor_used BOOLEAN DEFAULT FALSE
 ) RETURNS INTEGER AS $$
@@ -742,6 +758,3 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO activity_monitor;
 
 -- Индекс для полнотекстового поиска в деталях активности
 CREATE INDEX idx_user_activities_details_gin ON user_activities USING GIN (details jsonb_path_ops);
-
--- Индекс для быстрого поиска по временным диапазонам
-CREATE INDEX idx_user_activities_date_range ON user_activities (created_at DESC) WHERE created_at > NOW() - INTERVAL '30 days';

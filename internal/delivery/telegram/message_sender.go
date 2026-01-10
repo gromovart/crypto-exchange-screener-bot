@@ -195,13 +195,13 @@ func (ms *MessageSender) SendTestMessage() error {
 }
 
 // SetReplyKeyboard устанавливает reply клавиатуру
-func (ms *MessageSender) SetReplyKeyboard(keyboard ReplyKeyboardMarkup) error {
+func (ms *MessageSender) SetReplyKeyboard(chatID string, keyboard ReplyKeyboardMarkup) error {
 	message := struct {
 		ChatID      string              `json:"chat_id"`
 		Text        string              `json:"text"`
 		ReplyMarkup ReplyKeyboardMarkup `json:"reply_markup,omitempty"`
 	}{
-		ChatID:      ms.chatID, // Используем ms.chatID
+		ChatID:      chatID, // Используем переданный chatID
 		Text:        "⚙️ *Меню настроек активировано*\n\nВсе настройки доступны в меню ниже ⬇️",
 		ReplyMarkup: keyboard,
 	}

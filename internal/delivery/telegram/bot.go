@@ -2,6 +2,7 @@
 package telegram
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/utils"
@@ -15,20 +16,23 @@ import (
 
 // TelegramBot - бот для отправки уведомлений в Telegram
 type TelegramBot struct {
-	config        *config.Config
-	httpClient    *http.Client
-	baseURL       string
-	chatID        string
-	notifier      *Notifier
-	menuManager   *MenuManager
-	messageSender *MessageSender
-	mu            sync.RWMutex
-	startupTime   time.Time
-	welcomeSent   bool
-	testMode      bool
-	testModeMu    sync.RWMutex
-	buttonBuilder *ButtonURLBuilder
-	menuUtils     *MenuUtils
+	config          *config.Config
+	httpClient      *http.Client
+	baseURL         string
+	chatID          string
+	notifier        *Notifier
+	menuManager     *MenuManager
+	messageSender   *MessageSender
+	mu              sync.RWMutex
+	startupTime     time.Time
+	welcomeSent     bool
+	testMode        bool
+	testModeMu      sync.RWMutex
+	buttonBuilder   *ButtonURLBuilder
+	menuUtils       *MenuUtils
+	authHandlers    *AuthHandlers    // Обработчики авторизации
+	authInitializer *AuthInitializer // Инициализатор авторизации
+	userService     *users.Service   // Сервис пользователей
 }
 
 // NewTelegramBot создает новый экземпляр Telegram бота
@@ -36,8 +40,18 @@ func NewTelegramBot(cfg *config.Config) *TelegramBot {
 	return GetOrCreateBot(cfg)
 }
 
+// NewTelegramBotWithAuth создает бота с поддержкой авторизации
+func NewTelegramBotWithAuth(cfg *config.Config, userService *users.Service) *TelegramBot {
+	return GetOrCreateBotWithAuth(cfg, userService)
+}
+
 // NewTelegramBotWithChatID создает бота для конкретного чата (для мониторинга)
 func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
+	return NewTelegramBotWithChatIDAndAuth(cfg, chatID, nil)
+}
+
+// NewTelegramBotWithChatIDAndAuth создает бота для чата с поддержкой авторизации
+func NewTelegramBotWithChatIDAndAuth(cfg *config.Config, chatID string, userService *users.Service) *TelegramBot {
 	if cfg == nil || cfg.TelegramBotToken == "" || chatID == "" {
 		log.Println("⚠️ Telegram Bot Token или Chat ID не указаны")
 		return nil
@@ -53,7 +67,7 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 	notifier := NewNotifier(&chatConfig)
 	notifier.SetMessageSender(messageSender)
 
-	// Используем menuUtils для создания менеджера меню
+	// Создаем менеджер меню
 	menuManager := NewMenuManagerWithUtils(&chatConfig, messageSender, menuUtils)
 
 	// Создаем buttonBuilder для кнопок
@@ -72,10 +86,124 @@ func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
 		testMode:      cfg.MonitoringTestMode || false,
 		buttonBuilder: buttonBuilder,
 		menuUtils:     menuUtils,
+		userService:   userService,
 	}
 
-	log.Printf("🤖 Создан Telegram бот для мониторинга (chat_id: %s)", chatID)
+	// Инициализируем авторизацию если userService предоставлен
+	if userService != nil {
+		if err := bot.initAuth(); err != nil {
+			log.Printf("⚠️ Ошибка инициализации авторизации: %v", err)
+		}
+	}
+
+	log.Printf("🤖 Создан Telegram бот для мониторинга с авторизацией (chat_id: %s, auth: %v)",
+		chatID, userService != nil)
+
 	return bot
+}
+
+// НОВЫЕ МЕТОДЫ ДЛЯ ИНИЦИАЛИЗАЦИИ АВТОРИЗАЦИИ
+
+// initAuth инициализирует систему авторизации для бота
+func (tb *TelegramBot) initAuth() error {
+	if tb.userService == nil {
+		log.Println("⚠️ UserService не доступен, авторизация отключена")
+		return nil
+	}
+
+	log.Println("🔐 Инициализация системы авторизации...")
+
+	// Создаем инициализатор авторизации
+	tb.authInitializer = NewAuthInitializer(tb.config, tb.userService)
+
+	// Проверяем конфигурацию
+	if err := tb.authInitializer.ValidateAuthConfig(); err != nil {
+		log.Printf("⚠️ Ошибка проверки конфигурации авторизации: %v", err)
+		return err
+	}
+
+	// Инициализируем авторизацию
+	authHandlers, err := tb.authInitializer.InitializeAuth(tb)
+	if err != nil {
+		log.Printf("❌ Ошибка инициализации авторизации: %v", err)
+		return err
+	}
+
+	tb.authHandlers = authHandlers
+	log.Println("✅ Система авторизации инициализирована")
+	return nil
+}
+
+// GetUpdatesHandler возвращает обработчик обновлений с авторизацией
+func (tb *TelegramBot) GetUpdatesHandler() *UpdatesHandler {
+	if tb.HasAuth() {
+		return NewUpdatesHandlerWithAuth(tb.config, tb, tb.authHandlers)
+	}
+	return NewUpdatesHandler(tb.config, tb)
+}
+
+// StartWithAuth запускает бота с обработчиком обновлений с авторизацией
+func (tb *TelegramBot) StartWithAuth() error {
+	updatesHandler := tb.GetUpdatesHandler()
+	return updatesHandler.Start()
+}
+
+// SetUserService устанавливает сервис пользователей и инициализирует авторизацию
+func (tb *TelegramBot) SetUserService(userService *users.Service) error {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	tb.userService = userService
+
+	// Инициализируем авторизацию
+	return tb.initAuth()
+}
+
+// SetupAuth настраивает авторизацию для бота
+func (tb *TelegramBot) SetupAuth(authHandlers *AuthHandlers) {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+
+	tb.authHandlers = authHandlers
+
+	// Настраиваем авторизацию в menuManager
+	if tb.menuManager != nil {
+		tb.menuManager.SetupAuth(authHandlers)
+	}
+
+	log.Println("🔐 Авторизация настроена для Telegram бота")
+}
+
+// HasAuth возвращает true, если авторизация настроена
+func (tb *TelegramBot) HasAuth() bool {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return tb.authHandlers != nil
+}
+
+// GetAuthHandlers возвращает обработчики авторизации
+func (tb *TelegramBot) GetAuthHandlers() *AuthHandlers {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return tb.authHandlers
+}
+
+// GetAuthMiddleware возвращает middleware авторизации
+func (tb *TelegramBot) GetAuthMiddleware() *AuthMiddleware {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+
+	if tb.authHandlers != nil {
+		return tb.authHandlers.GetAuthMiddleware()
+	}
+	return nil
+}
+
+// GetAuthInitializer возвращает инициализатор авторизации
+func (tb *TelegramBot) GetAuthInitializer() *AuthInitializer {
+	tb.mu.RLock()
+	defer tb.mu.RUnlock()
+	return tb.authInitializer
 }
 
 // SetTestMode включает/выключает тестовый режим
@@ -202,7 +330,7 @@ func (tb *TelegramBot) SendMessage(text string) error {
 	return tb.messageSender.SendTextMessage(text, nil, false)
 }
 
-// SendMessageWithKeyboard отправляет сообщение с клавиатурой
+// SendMessageWithKeyboard отправляет сообщение с клавиатуру
 func (tb *TelegramBot) SendMessageWithKeyboard(text string, keyboard *InlineKeyboardMarkup) error {
 	return tb.messageSender.SendTextMessage(text, keyboard, false)
 }
@@ -401,12 +529,14 @@ func (tb *TelegramBot) GetStats() string {
 			"📊 Уведомления: %v\n"+
 			"🔄 Меню: %v\n"+
 			"🧪 Тестовый режим: %v\n"+
+			"🔐 Авторизация: %v\n"+
 			"🏦 Биржа: %s",
 		ButtonTexts.Status,
 		uptime,
 		tb.config.TelegramEnabled,
 		tb.menuManager != nil && tb.menuManager.IsEnabled(),
 		tb.testMode,
+		tb.HasAuth(),
 		tb.config.Exchange,
 	)
 }

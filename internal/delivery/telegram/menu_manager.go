@@ -5,6 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"log"
 	"sync"
+	"time"
 )
 
 // MenuManager - менеджер меню
@@ -94,7 +95,29 @@ func (mm *MenuManager) SetupMenu() error {
 
 	// Используем KeyboardSystem для получения главного меню
 	menu := mm.keyboardSystem.GetMainMenu()
-	return mm.messageSender.SetReplyKeyboard(menu)
+
+	// Добавляем retry логику при отсутствии интернета
+	maxRetries := 3
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		err := mm.messageSender.SetReplyKeyboard(mm.messageSender.GetChatID(), menu)
+		if err == nil {
+			log.Println("✅ Меню успешно установлено")
+			return nil
+		}
+
+		lastErr = err
+		log.Printf("⚠️ Попытка %d/%d установки меню не удалась: %v", i+1, maxRetries, err)
+
+		// Не ждем перед следующей попыткой для последней попытки
+		if i < maxRetries-1 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+
+	log.Printf("⚠️ Failed to setup menu after %d retries: %v", maxRetries, lastErr)
+	return lastErr
 }
 
 // RemoveMenu удаляет меню
@@ -104,7 +127,7 @@ func (mm *MenuManager) RemoveMenu() error {
 		Selective:      false,
 	}
 
-	return mm.messageSender.SetReplyKeyboard(menu)
+	return mm.messageSender.SetReplyKeyboard(mm.messageSender.GetChatID(), menu)
 }
 
 // StartCommandHandler обрабатывает команду /start
@@ -138,7 +161,7 @@ func (mm *MenuManager) GetKeyboardSystem() *KeyboardSystem {
 func (mm *MenuManager) SendSettingsMessage(chatID string) error {
 	// Используем KeyboardSystem для получения меню настроек
 	menu := mm.keyboardSystem.GetSettingsMenu()
-	mm.messageSender.SetReplyKeyboard(menu)
+	mm.messageSender.SetReplyKeyboard(chatID, menu)
 	return mm.handlers.SendSettingsInfo(chatID)
 }
 
@@ -155,28 +178,28 @@ func (mm *MenuManager) SendHelp(chatID string) error {
 // SendNotificationsMenu отправляет меню уведомлений
 func (mm *MenuManager) SendNotificationsMenu(chatID string) error {
 	menu := mm.keyboardSystem.GetNotificationsMenu()
-	mm.messageSender.SetReplyKeyboard(menu)
+	mm.messageSender.SetReplyKeyboard(chatID, menu)
 	return mm.handlers.SendNotificationsInfo(chatID)
 }
 
 // SendSignalTypesMenu отправляет меню типов сигналов
 func (mm *MenuManager) SendSignalTypesMenu(chatID string) error {
 	menu := mm.keyboardSystem.GetSignalTypesMenu()
-	mm.messageSender.SetReplyKeyboard(menu)
+	mm.messageSender.SetReplyKeyboard(chatID, menu)
 	return mm.handlers.SendSignalTypesInfo(chatID)
 }
 
 // SendPeriodMenu отправляет меню периодов
 func (mm *MenuManager) SendPeriodMenu(chatID string) error {
 	menu := mm.keyboardSystem.GetPeriodsMenu()
-	mm.messageSender.SetReplyKeyboard(menu)
+	mm.messageSender.SetReplyKeyboard(chatID, menu)
 	return mm.handlers.SendPeriodsInfo(chatID)
 }
 
 // SendResetMenu отправляет меню сброса
 func (mm *MenuManager) SendResetMenu(chatID string) error {
 	menu := mm.keyboardSystem.GetResetMenu()
-	mm.messageSender.SetReplyKeyboard(menu)
+	mm.messageSender.SetReplyKeyboard(chatID, menu)
 	return mm.handlers.SendResetInfo(chatID)
 }
 
@@ -228,4 +251,16 @@ func (mm *MenuManager) CreateCounterNotificationKeyboard(symbol string, periodMi
 // ClearKeyboardCache очищает кэш клавиатур
 func (mm *MenuManager) ClearKeyboardCache() {
 	mm.keyboardSystem.ClearCache()
+}
+
+// SetupAuth настраивает авторизацию (алиас для SetupAuthHandlers)
+func (mm *MenuManager) SetupAuth(authHandlers *AuthHandlers) {
+	// В этой упрощенной версии MenuManager нет поддержки авторизации
+	// Просто логируем вызов
+	log.Printf("⚠️ MenuManager.SetupAuth called, but auth is not supported in this version")
+
+	// Можно передать authHandlers в обработчики если нужно
+	if mm.handlers != nil {
+		mm.handlers.SetAuthHandlers(authHandlers)
+	}
 }

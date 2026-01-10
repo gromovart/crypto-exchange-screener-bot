@@ -4,6 +4,7 @@ package telegram
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -14,6 +15,7 @@ type MenuHandlers struct {
 	messageSender  *MessageSender
 	keyboardSystem *KeyboardSystem // ВМЕСТО MenuKeyboards
 	menuUtils      *MenuUtils
+	authHandlers   *AuthHandlers // НОВОЕ: обработчики авторизации
 }
 
 // NewMenuHandlers создает новые обработчики меню (старый конструктор для обратной совместимости)
@@ -26,10 +28,25 @@ func NewMenuHandlers(cfg *config.Config, messageSender *MessageSender) *MenuHand
 		messageSender:  messageSender,
 		keyboardSystem: keyboardSystem,
 		menuUtils:      menuUtils,
+		authHandlers:   nil, // Без авторизации
 	}
 }
 
-// NewMenuHandlersWithUtils создает обработчики меню с утилитами
+// NewMenuHandlersWithAuth создает обработчики меню с поддержкой авторизации
+func NewMenuHandlersWithAuth(cfg *config.Config, messageSender *MessageSender, authHandlers *AuthHandlers) *MenuHandlers {
+	menuUtils := NewDefaultMenuUtils()
+	keyboardSystem := NewKeyboardSystem(cfg.Exchange)
+
+	return &MenuHandlers{
+		config:         cfg,
+		messageSender:  messageSender,
+		keyboardSystem: keyboardSystem,
+		menuUtils:      menuUtils,
+		authHandlers:   authHandlers, // С авторизацией
+	}
+}
+
+// NewMenuHandlersWithUtils создает обработчики меню с утилиты
 func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuHandlers {
 	keyboardSystem := NewKeyboardSystem(cfg.Exchange) // НОВЫЙ KeyboardSystem
 
@@ -38,6 +55,7 @@ func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, 
 		messageSender:  messageSender,
 		keyboardSystem: keyboardSystem,
 		menuUtils:      menuUtils,
+		authHandlers:   nil, // Без авторизации
 	}
 }
 
@@ -61,16 +79,41 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 
 // HandleMessage обрабатывает текстовые сообщения из меню
 func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
+	log.Printf("🔍 HandleMessage вызван: text='%s', chatID='%s'", text, chatID)
+
 	switch text {
 	case "⚙️ Настройки":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
+		log.Printf("🎯 Обработка кнопки 'Настройки' для чата %s", chatID)
+
+		// 1. Получаем меню настроек
+		log.Printf("📋 Получаем меню настроек...")
+		settingsMenu := mh.keyboardSystem.GetSettingsMenu()
+		log.Printf("✅ Меню настроек получено: %+v", settingsMenu)
+
+		// 2. Устанавливаем клавиатуру для этого чата
+		log.Printf("⌨️ Устанавливаем клавиатуру для чата %s...", chatID)
+		err := mh.messageSender.SetReplyKeyboard(chatID, settingsMenu)
+		if err != nil {
+			log.Printf("❌ Ошибка установки клавиатуры: %v", err)
+			return err
+		}
+		log.Printf("✅ Клавиатура установлена")
+
+		// 3. Отправляем сообщение с информацией
+		log.Printf("📤 Отправляем сообщение с информацией...")
 		return mh.SendSettingsInfo(chatID)
 
 	case "📊 Статус":
+		log.Printf("🎯 Обработка кнопки 'Статус' для чата %s", chatID)
 		return mh.SendStatus(chatID)
 
 	case "🔔 Уведомления":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetNotificationsMenu())
+		log.Printf("🎯 Обработка кнопки 'Уведомления' для чата %s", chatID)
+		// Получаем меню уведомлений
+		notificationsMenu := mh.keyboardSystem.GetNotificationsMenu()
+		// Устанавливаем клавиатуру
+		mh.messageSender.SetReplyKeyboard(chatID, notificationsMenu)
+		// Отправляем информацию
 		return mh.SendNotificationsInfo(chatID)
 
 	case "✅ Включить":
@@ -80,7 +123,12 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.HandleNotifyOff(chatID)
 
 	case "📈 Сигналы":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSignalTypesMenu())
+		log.Printf("🎯 Обработка кнопки 'Сигналы' для чата %s", chatID)
+		// Получаем меню типов сигналов
+		signalTypesMenu := mh.keyboardSystem.GetSignalTypesMenu()
+		// Устанавливаем клавиатуру
+		mh.messageSender.SetReplyKeyboard(chatID, signalTypesMenu)
+		// Отправляем информацию
 		return mh.SendSignalTypesInfo(chatID)
 
 	case "📈 Только рост":
@@ -99,7 +147,12 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.messageSender.SendMessageToChat(chatID, "📊 Теперь отслеживаются все сигналы", nil)
 
 	case "⏱️ Периоды":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetPeriodsMenu())
+		log.Printf("🎯 Обработка кнопки 'Периоды' для чата %s", chatID)
+		// Получаем меню периодов
+		periodsMenu := mh.keyboardSystem.GetPeriodsMenu()
+		// Устанавливаем клавиатуру
+		mh.messageSender.SetReplyKeyboard(chatID, periodsMenu)
+		// Отправляем информацию
 		return mh.SendPeriodsInfo(chatID)
 
 	case "⏱️ 5мин", "⏱️ 5 мин":
@@ -118,7 +171,12 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.HandlePeriodChange(chatID, "4h")
 
 	case "🔄 Сбросить":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetResetMenu())
+		log.Printf("🎯 Обработка кнопки 'Сбросить' для чата %s", chatID)
+		// Получаем меню сброса
+		resetMenu := mh.keyboardSystem.GetResetMenu()
+		// Устанавливаем клавиатуру
+		mh.messageSender.SetReplyKeyboard(chatID, resetMenu)
+		// Отправляем информацию
 		return mh.SendResetInfo(chatID)
 
 	case "🔄 Все счетчики":
@@ -128,13 +186,25 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 		return mh.SendHelp(chatID)
 
 	case "🔙 Назад", "🔙 Главное меню":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
+		log.Printf("🎯 Обработка кнопки 'Назад' для чата %s", chatID)
+		// Получаем главное меню
+		mainMenu := mh.keyboardSystem.GetMainMenu()
+		// Устанавливаем клавиатуру
+		mh.messageSender.SetReplyKeyboard(chatID, mainMenu)
 		return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
 
 	default:
+		log.Printf("❓ Неизвестная команда: '%s' для чата %s", text, chatID)
 		if strings.HasPrefix(text, "/") {
+			// Проверяем, является ли команда командой авторизации
+			if mh.isAuthCommand(text) {
+				log.Printf("🔐 Команда авторизации: '%s'", text)
+				return mh.handleAuthMessage(text, chatID)
+			}
+			log.Printf("⚡ Обработка команды: '%s'", text)
 			return mh.HandleCommand(text, chatID)
 		}
+		log.Printf("📝 Отправка сообщения об ошибке для неизвестной команды")
 		return mh.messageSender.SendMessageToChat(chatID,
 			"❓ Неизвестная команда. Используйте меню ниже или /help", nil)
 	}
@@ -142,6 +212,13 @@ func (mh *MenuHandlers) HandleMessage(text, chatID string) error {
 
 // HandleCallback обрабатывает callback от inline кнопок
 func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error {
+	log.Printf("🔄 Handling callback: %s for chat %s", callbackData, chatID)
+
+	// ПРОВЕРЯЕМ, относится ли callback к авторизации
+	if mh.isAuthCallback(callbackData) {
+		return mh.handleAuthCallback(callbackData, chatID)
+	}
+
 	// Используем menuUtils для парсинга callback данных
 	action, params := mh.menuUtils.ParseCallbackData(callbackData)
 
@@ -150,19 +227,19 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 		if len(params) > 0 {
 			switch params[0] {
 			case "notify":
-				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetNotificationsMenu())
+				mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetNotificationsMenu())
 				return mh.SendNotificationsInfo(chatID)
 			case "signals":
-				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSignalTypesMenu())
+				mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetSignalTypesMenu())
 				return mh.SendSignalTypesInfo(chatID)
 			case "periods":
-				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetPeriodsMenu())
+				mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetPeriodsMenu())
 				return mh.SendPeriodsInfo(chatID)
 			case "reset":
-				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetResetMenu())
+				mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetResetMenu())
 				return mh.SendResetInfo(chatID)
 			case "back":
-				mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
+				mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetMainMenu())
 				return mh.messageSender.SendMessageToChat(chatID, "🔙 Возврат в главное меню", nil)
 			}
 		}
@@ -199,7 +276,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 		return mh.SendStatus(chatID)
 
 	case CallbackSettings:
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
+		mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetSettingsMenu())
 		return mh.SendSettingsInfo(chatID)
 
 	case CallbackSettingsNotifyToggle:
@@ -270,7 +347,7 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 			"⚙️ *Настройки бота:*", keyboard)
 
 	case CallbackSettingsBackToMain:
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetMainMenu())
+		mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetMainMenu())
 		return mh.messageSender.SendMessageToChat(chatID,
 			"🔙 Возврат в главное меню", nil)
 
@@ -309,6 +386,112 @@ func (mh *MenuHandlers) HandleCallback(callbackData string, chatID string) error
 	}
 
 	return fmt.Errorf("unknown callback data: %s", callbackData)
+}
+
+// НОВЫЕ МЕТОДЫ ДЛЯ ОБРАБОТКИ АВТОРИЗАЦИИ
+
+// isAuthCallback проверяет, относится ли callback к авторизации
+func (mh *MenuHandlers) isAuthCallback(callbackData string) bool {
+	if mh.authHandlers == nil {
+		return false
+	}
+
+	// Проверяем префиксы callback'ов авторизации
+	authPrefixes := []string{
+		"auth_",
+		"settings_",
+		"admin_",
+		"premium_",
+		"advanced_",
+	}
+
+	for _, prefix := range authPrefixes {
+		if strings.HasPrefix(callbackData, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleAuthCallback обрабатывает callback'ы авторизации
+func (mh *MenuHandlers) handleAuthCallback(callbackData string, chatID string) error {
+	if mh.authHandlers == nil {
+		return fmt.Errorf("auth handlers not initialized")
+	}
+
+	// TODO: Реализовать полную обработку через AuthMiddleware
+	// Пока просто логируем и возвращаем заглушку
+	log.Printf("🔐 Auth callback detected: %s for chat %s", callbackData, chatID)
+
+	// Временное сообщение
+	message := "🔐 *Функционал авторизации*\n\n" +
+		"Система авторизации в процессе интеграции.\n" +
+		"Доступные команды:\n" +
+		"/profile - Ваш профиль\n" +
+		"/settings - Настройки\n" +
+		"/notifications - Управление уведомлениями\n\n" +
+		"Callback получен: " + callbackData
+
+	return mh.messageSender.SendMessageToChat(chatID, message, nil)
+}
+
+// isAuthCommand проверяет, является ли команда командой авторизации
+func (mh *MenuHandlers) isAuthCommand(text string) bool {
+	authCommands := []string{
+		"/profile",
+		"/settings",
+		"/notifications",
+		"/thresholds",
+		"/periods",
+		"/language",
+		"/premium",
+		"/advanced",
+		"/admin",
+		"/stats",
+		"/users",
+		"/login",
+		"/logout",
+	}
+
+	for _, cmd := range authCommands {
+		if strings.HasPrefix(text, cmd) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleAuthMessage обрабатывает сообщения авторизации
+func (mh *MenuHandlers) handleAuthMessage(text, chatID string) error {
+	if mh.authHandlers == nil {
+		return fmt.Errorf("auth handlers not initialized")
+	}
+
+	log.Printf("🔐 Auth command detected: %s for chat %s", text, chatID)
+
+	// Временное сообщение
+	message := "🔐 *Команда авторизации*\n\n" +
+		"Система авторизации в процессе интеграции.\n" +
+		"Скоро будут доступны:\n" +
+		"• Персональный профиль\n" +
+		"• Настройки уведомлений\n" +
+		"• История сигналов\n" +
+		"• Премиум функции\n\n" +
+		"Команда: " + text
+
+	return mh.messageSender.SendMessageToChat(chatID, message, nil)
+}
+
+// SetAuthHandlers устанавливает обработчики авторизации
+func (mh *MenuHandlers) SetAuthHandlers(authHandlers *AuthHandlers) {
+	mh.authHandlers = authHandlers
+}
+
+// GetAuthHandlers возвращает обработчики авторизации
+func (mh *MenuHandlers) GetAuthHandlers() *AuthHandlers {
+	return mh.authHandlers
 }
 
 // SendSymbolSelectionInline отправляет inline меню выбора символа
@@ -436,11 +619,15 @@ func (mh *MenuHandlers) HandleCommand(cmd, chatID string) error {
 	case "/notify_off":
 		return mh.HandleNotifyOff(chatID)
 	case "/settings":
-		mh.messageSender.SetReplyKeyboard(mh.keyboardSystem.GetSettingsMenu())
+		mh.messageSender.SetReplyKeyboard(chatID, mh.keyboardSystem.GetSettingsMenu())
 		return mh.SendSettingsInfo(chatID)
 	case "/test":
 		return mh.messageSender.SendTestMessage()
 	default:
+		// Проверяем, является ли команда командой авторизации
+		if mh.isAuthCommand(cmd) {
+			return mh.handleAuthMessage(cmd, chatID)
+		}
 		return mh.messageSender.SendMessageToChat(chatID,
 			fmt.Sprintf("❓ Неизвестная команда: %s. Используйте /help", cmd), nil)
 	}

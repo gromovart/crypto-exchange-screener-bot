@@ -19,6 +19,7 @@ type UpdatesHandler struct {
 	pollingActive bool
 	lastUpdateID  int64
 	httpClient    *http.Client
+	authHandlers  *AuthHandlers // НОВОЕ: обработчики авторизации
 }
 
 // NewUpdatesHandler создает новый обработчик обновлений
@@ -30,6 +31,20 @@ func NewUpdatesHandler(cfg *config.Config, bot *TelegramBot) *UpdatesHandler {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		authHandlers: nil, // Без авторизации
+	}
+}
+
+// NewUpdatesHandlerWithAuth создает обработчик обновлений с поддержкой авторизации
+func NewUpdatesHandlerWithAuth(cfg *config.Config, bot *TelegramBot, authHandlers *AuthHandlers) *UpdatesHandler {
+	return &UpdatesHandler{
+		config:       cfg,
+		bot:          bot,
+		lastUpdateID: 0,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		authHandlers: authHandlers, // С авторизацией
 	}
 }
 
@@ -160,15 +175,22 @@ func (uh *UpdatesHandler) processUpdate(update TelegramUpdate) {
 		chatID := fmt.Sprintf("%d", update.Message.Chat.ID)
 		text := strings.TrimSpace(update.Message.Text)
 
-		log.Printf("💬 Сообщение от chat %s: %s", chatID, text)
+		log.Printf("💬 Сообщение от %s: '%s'", chatID, text)
+
+		// Специальная отладка для кнопки "Настройки"
+		if text == "⚙️ Настройки" {
+			log.Printf("🎯 ОБНАРУЖЕНА КНОПКА 'Настройки'")
+			log.Printf("🔍 Сравнение: получено='%s' (байты: %v)", text, []byte(text))
+		}
 
 		if strings.HasPrefix(text, "/") {
 			// Обработка команд
 			uh.handleCommand(text, chatID)
 		} else {
 			// Обработка нажатий кнопок меню
+			log.Printf("🔄 Передача в бота: '%s'", text)
 			if err := uh.bot.HandleMessage(text, chatID); err != nil {
-				log.Printf("❌ Ошибка обработки кнопки меню: %v", err)
+				log.Printf("❌ Ошибка обработки: %v", err)
 			}
 		}
 	}
@@ -193,6 +215,12 @@ func (uh *UpdatesHandler) processUpdate(update TelegramUpdate) {
 func (uh *UpdatesHandler) handleCommand(command, chatID string) {
 	log.Printf("⚡ Обработка команды: %s", command)
 
+	// Проверяем, является ли команда командой авторизации
+	if uh.isAuthCommand(command) {
+		uh.handleAuthCommand(command, chatID)
+		return
+	}
+
 	switch command {
 	case "/start":
 		if err := uh.bot.StartCommandHandler(chatID); err != nil {
@@ -215,6 +243,114 @@ func (uh *UpdatesHandler) handleCommand(command, chatID string) {
 			log.Printf("❌ Ошибка отправки ответа: %v", err)
 		}
 	}
+}
+
+// НОВЫЕ МЕТОДЫ ДЛЯ ОБРАБОТКИ АВТОРИЗАЦИИ
+
+// isAuthCommand проверяет, является ли команда командой авторизации
+func (uh *UpdatesHandler) isAuthCommand(command string) bool {
+	authCommands := []string{
+		"/profile",
+		"/settings",
+		"/notifications",
+		"/thresholds",
+		"/periods",
+		"/language",
+		"/premium",
+		"/advanced",
+		"/admin",
+		"/stats",
+		"/users",
+		"/login",
+		"/logout",
+		"/help",
+	}
+
+	for _, cmd := range authCommands {
+		if strings.HasPrefix(command, cmd) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// handleAuthCommand обрабатывает команды авторизации
+func (uh *UpdatesHandler) handleAuthCommand(command, chatID string) {
+	log.Printf("🔐 Обработка команды авторизации: %s", command)
+
+	// Проверяем, настроены ли обработчики авторизации
+	if uh.authHandlers == nil {
+		log.Println("⚠️ Обработчики авторизации не настроены")
+		if err := uh.bot.SendMessage("🔐 Система авторизации не настроена"); err != nil {
+			log.Printf("❌ Ошибка отправки сообщения: %v", err)
+		}
+		return
+	}
+
+	// Получаем middleware авторизации
+	authMiddleware := uh.authHandlers.GetAuthMiddleware()
+	if authMiddleware == nil {
+		log.Println("⚠️ Middleware авторизации не доступен")
+		if err := uh.bot.SendMessage("🔐 Middleware авторизации не доступен"); err != nil {
+			log.Printf("❌ Ошибка отправки сообщения: %v", err)
+		}
+		return
+	}
+
+	// Обрабатываем команду через соответствующий обработчик
+	switch command {
+	case "/profile":
+		// Создаем handler, но не используем пока что (нужен TelegramUpdate)
+		_ = authMiddleware.WithUserContext("profile", uh.authHandlers.handleProfile)
+		log.Println("📋 Команда /profile будет обработана через auth middleware")
+		uh.bot.SendMessage("👤 Функционал профиля скоро будет доступен")
+
+	case "/settings":
+		_ = authMiddleware.WithUserContext("settings", uh.authHandlers.handleSettings)
+		log.Println("⚙️ Команда /settings будет обработана через auth middleware")
+		uh.bot.SendMessage("⚙️ Функционал настроек скоро будет доступен")
+
+	case "/notifications":
+		_ = authMiddleware.WithUserContext("notifications", uh.authHandlers.handleNotifications)
+		log.Println("🔔 Команда /notifications будет обработана через auth middleware")
+		uh.bot.SendMessage("🔔 Функционал уведомлений скоро будет доступен")
+
+	case "/help":
+		_ = authMiddleware.WithUserContext("help", uh.authHandlers.handleHelp)
+		log.Println("📋 Команда /help будет обработана через auth middleware")
+		uh.bot.SendMessage("📋 Функционал справки скоро будет доступен")
+
+	case "/premium":
+		_ = authMiddleware.WithPremiumContext("premium", uh.authHandlers.handlePremium)
+		log.Println("🌟 Команда /premium будет обработана через auth middleware")
+		uh.bot.SendMessage("🌟 Функционал премиум скоро будет доступен")
+
+	case "/admin":
+		_ = authMiddleware.WithAdminContext("admin", uh.authHandlers.handleAdmin)
+		log.Println("👑 Команда /admin будет обработана через auth middleware")
+		uh.bot.SendMessage("👑 Функционал администратора скоро будет доступен")
+
+	default:
+		log.Printf("❓ Неизвестная команда авторизации: %s", command)
+		uh.bot.SendMessage(fmt.Sprintf("❓ Неизвестная команда авторизации: %s", command))
+	}
+}
+
+// SetAuthHandlers устанавливает обработчики авторизации
+func (uh *UpdatesHandler) SetAuthHandlers(authHandlers *AuthHandlers) {
+	uh.authHandlers = authHandlers
+	log.Println("🔐 Обработчики авторизации установлены для UpdatesHandler")
+}
+
+// GetAuthHandlers возвращает обработчики авторизации
+func (uh *UpdatesHandler) GetAuthHandlers() *AuthHandlers {
+	return uh.authHandlers
+}
+
+// HasAuth возвращает true, если авторизация настроена
+func (uh *UpdatesHandler) HasAuth() bool {
+	return uh.authHandlers != nil
 }
 
 // answerCallbackQuery отвечает на callback запрос
