@@ -9,8 +9,9 @@ import (
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
+	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
-	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
+	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	redis "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
@@ -48,6 +49,7 @@ type DataManager struct {
 	// НОВОЕ: Сервис базы данных
 	databaseService *database.DatabaseService
 	redisService    *redis.RedisService
+	userService     *users.Service
 
 	// Управление
 	mu       sync.RWMutex
@@ -91,6 +93,7 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 }
 
 // InitializeComponents инициализирует все компоненты
+// InitializeComponents инициализирует все компоненты
 func (dm *DataManager) InitializeComponents(testMode bool) error {
 	fmt.Printf("🔍 DataManager: RateLimitDelay = %v\n", dm.config.RateLimitDelay)
 
@@ -116,15 +119,6 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	log.Println("🔴 Creating Redis service...")
 	dm.redisService = redis.NewRedisService(dm.config)
 
-	// Пытаемся подключиться к базе данных
-	if err := dm.databaseService.Start(); err != nil {
-		log.Printf("⚠️  Failed to start database service: %v", err)
-		log.Println("⚠️  Application will continue without database connection")
-		// Не возвращаем ошибку, чтобы приложение могло работать без БД
-	} else {
-		log.Println("✅ Database service started successfully")
-	}
-
 	// Пытаемся подключиться к Redis
 	if err := dm.redisService.Start(); err != nil {
 		log.Printf("⚠️  Failed to start Redis service: %v", err)
@@ -132,6 +126,38 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		// Не возвращаем ошибку, чтобы приложение могло работать без Redis
 	} else {
 		log.Println("✅ Redis service started successfully")
+	}
+
+	// 🔐 СОЗДАЕМ СЕРВИС ПОЛЬЗОВАТЕЛЕЙ ДЛЯ АВТОРИЗАЦИИ (перед Telegram ботом)
+	log.Println("👤 Создание сервиса пользователей для авторизации...")
+	if dm.databaseService != nil && dm.redisService != nil {
+		// Получаем соединение с БД
+		db := dm.databaseService.GetDB()
+		// Получаем Redis кэш
+		redisCache := dm.redisService.GetCache()
+
+		if db != nil && redisCache != nil {
+			// Создаем конфигурацию
+			userConfig := users.Config{
+				DefaultMinGrowthThreshold: 2.0,
+				DefaultMaxSignalsPerDay:   50,
+				SessionTTL:                24 * time.Hour,
+				MaxSessionsPerUser:        5,
+			}
+
+			// Создаем сервис пользователей
+			var err error
+			dm.userService, err = users.NewService(db, redisCache, nil, userConfig)
+			if err != nil {
+				log.Printf("⚠️  Не удалось создать сервис пользователей: %v", err)
+			} else {
+				log.Println("✅ Сервис пользователей создан для авторизации")
+			}
+		} else {
+			log.Println("⚠️  Не удалось получить подключение к БД или Redis")
+		}
+	} else {
+		log.Println("⚠️  DatabaseService или RedisService не создан, авторизация будет отключена")
 	}
 
 	// 1. Создаем EventBus
@@ -168,13 +194,21 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	}
 	log.Println("✅ CompositeNotificationService создан через фабрику")
 
-	// 6. СОЗДАЕМ/ПОЛУЧАЕМ TELEGRAM БОТА (Singleton)
+	// 6. СОЗДАЕМ TELEGRAM БОТА С АВТОРИЗАЦИЕЙ (если userService создан)
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		log.Println("🤖 Получение Telegram бота (Singleton)...")
-		dm.telegramBot = telegram.GetOrCreateBot(dm.config)
+		log.Println("🤖 Создание Telegram бота с авторизацией (Singleton)...")
+
+		// Если userService создан, создаем бота с авторизацией
+		if dm.userService != nil {
+			dm.telegramBot = telegram.GetOrCreateBotWithAuth(dm.config, dm.userService)
+			log.Println("✅ Telegram бот создан с авторизацией (Singleton)")
+		} else {
+			// Иначе создаем бота без авторизации
+			dm.telegramBot = telegram.GetOrCreateBot(dm.config)
+			log.Println("✅ Telegram бот создан без авторизации (Singleton)")
+		}
 
 		if dm.telegramBot != nil {
-			logger.Info("✅ Telegram бот получен (Singleton)")
 			dm.telegramBot.SetTestMode(testMode)
 
 			// Отправляем приветственное сообщение только если не в тестовом режиме
@@ -340,7 +374,9 @@ func (dm *DataManager) registerServices() error {
 	if dm.webhookServer != nil {
 		services["WebhookServer"] = dm.newServiceAdapter("WebhookServer", dm.webhookServer)
 	}
-
+	if dm.userService != nil {
+		services["UserService"] = dm.newServiceAdapter("UserService", dm.userService)
+	}
 	for name, service := range services {
 		if err := dm.registry.Register(name, service); err != nil {
 			return fmt.Errorf("failed to register service %s: %w", name, err)

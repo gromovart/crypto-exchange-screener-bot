@@ -129,6 +129,8 @@ func (uh *UpdatesHandler) pollUpdates() {
 func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", uh.config.TelegramBotToken)
 
+	log.Printf("🔄 Запрос обновлений с offset: %d", uh.lastUpdateID)
+
 	// Параметры запроса
 	params := map[string]interface{}{
 		"offset":  uh.lastUpdateID,
@@ -139,6 +141,7 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	// Отправляем запрос
 	resp, err := uh.httpClient.Post(url, "application/json", toJSONReader(params))
 	if err != nil {
+		log.Printf("❌ Ошибка запроса к Telegram API: %v", err)
 		return nil, fmt.Errorf("failed to get updates: %w", err)
 	}
 	defer resp.Body.Close()
@@ -146,8 +149,11 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	// Читаем ответ
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("❌ Ошибка чтения ответа: %v", err)
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
+
+	log.Printf("📥 Ответ от Telegram API (первые 200 символов): %s", string(body[:min(200, len(body))]))
 
 	// Парсим ответ
 	var response struct {
@@ -156,13 +162,17 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
+		log.Printf("❌ Ошибка парсинга JSON: %v", err)
+		log.Printf("📄 Полный ответ: %s", string(body))
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if !response.OK {
+		log.Printf("❌ Telegram API вернул ошибку: %s", string(body))
 		return nil, fmt.Errorf("telegram API error: %s", string(body))
 	}
 
+	log.Printf("✅ Получено обновлений: %d", len(response.Result))
 	return response.Result, nil
 }
 

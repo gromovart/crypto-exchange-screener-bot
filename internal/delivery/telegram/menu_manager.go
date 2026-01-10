@@ -255,12 +255,13 @@ func (mm *MenuManager) ClearKeyboardCache() {
 
 // SetupAuth настраивает авторизацию (алиас для SetupAuthHandlers)
 func (mm *MenuManager) SetupAuth(authHandlers *AuthHandlers) {
-	// В этой упрощенной версии MenuManager нет поддержки авторизации
-	// Просто логируем вызов
-	log.Printf("⚠️ MenuManager.SetupAuth called, but auth is not supported in this version")
-
-	// Можно передать authHandlers в обработчики если нужно
+	// В этой версии MenuManager нет поддержки авторизации
+	// Просто логируем вызов для отладки
+	// Передаем authHandlers в MenuHandlers
 	if mm.handlers != nil {
 		mm.handlers.SetAuthHandlers(authHandlers)
+		log.Printf("✅ AuthHandlers установлены в MenuHandlers")
+	} else {
+		log.Printf("⚠️ MenuHandlers не инициализированы, auth не настроена")
 	}
 }

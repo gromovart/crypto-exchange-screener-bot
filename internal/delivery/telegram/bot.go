@@ -161,8 +161,6 @@ func (tb *TelegramBot) SetUserService(userService *users.Service) error {
 
 // SetupAuth настраивает авторизацию для бота
 func (tb *TelegramBot) SetupAuth(authHandlers *AuthHandlers) {
-	tb.mu.Lock()
-	defer tb.mu.Unlock()
 
 	tb.authHandlers = authHandlers
 

@@ -38,6 +38,14 @@ func NewRedisService(cfg *config.Config) *RedisService {
 	}
 }
 
+// NewCacheWithClient создает Cache с существующим клиентом
+func NewCacheWithClient(client *redis.Client) *Cache {
+	return &Cache{
+		client: client,
+		prefix: "cryptobot:",
+	}
+}
+
 // Start запускает Redis сервис
 func (rs *RedisService) Start() error {
 	if rs.state == StateRunning {
@@ -242,4 +250,10 @@ func (rs *RedisService) Exists(ctx context.Context, key string) (bool, error) {
 	}
 
 	return result > 0, nil
+}
+func (rs *RedisService) GetCache() *Cache {
+	if rs.client == nil {
+		return nil
+	}
+	return NewCacheWithClient(rs.client)
 }
