@@ -24,6 +24,55 @@ var ButtonTexts = struct {
 	Back:        "🔙 Назад",
 }
 
+// AuthButtonTexts содержит тексты для кнопок авторизации
+var AuthButtonTexts = struct {
+	Profile             string
+	Settings            string
+	Notifications       string
+	Stats               string
+	Thresholds          string
+	Periods             string
+	Language            string
+	Timezone            string
+	DisplayMode         string
+	Login               string
+	Logout              string
+	Premium             string
+	Advanced            string
+	Admin               string
+	Users               string
+	System              string
+	Logs                string
+	Analytics           string
+	Priority            string
+	CustomNotifications string
+	ResetSettings       string
+	Toggle              string
+}{
+	Profile:             "🔑 Профиль",
+	Settings:            "⚙️ Настройки",
+	Notifications:       "🔔 Уведомления",
+	Stats:               "📊 Статистика",
+	Thresholds:          "🎯 Пороги",
+	Periods:             "⏱️ Периоды",
+	Language:            "🌐 Язык",
+	Timezone:            "🕐 Часовой пояс",
+	DisplayMode:         "👁️ Отображение",
+	Login:               "🔑 Войти",
+	Logout:              "🚪 Выйти",
+	Premium:             "🌟 Премиум",
+	Advanced:            "🚀 Расширенная",
+	Admin:               "👑 Админ",
+	Users:               "👥 Пользователи",
+	System:              "⚙️ Система",
+	Logs:                "🔄 Логи",
+	Analytics:           "📈 Аналитика",
+	Priority:            "⏱️ Приоритет",
+	CustomNotifications: "🔔 Кастомные",
+	ResetSettings:       "🔄 Сбросить",
+	Toggle:              "🔄",
+}
+
 // ButtonStyles содержит стили для кнопок
 var ButtonStyles = struct {
 	Primary   string

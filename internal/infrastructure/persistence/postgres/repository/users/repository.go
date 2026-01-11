@@ -238,7 +238,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
-			preferred_periods, min_volume_filter, exclude_patterns,
+			preferred_periods, min_volume_filter, exclude_patterns,  -- ЭТИ ПОЛЯ ЕСТЬ!
 			language, timezone, display_mode,
 			role, is_active, is_verified,
 			subscription_tier, max_signals_per_day,
@@ -248,7 +248,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			$8, $9, $10, $11,
 			$12, $13,
 			$14, $15,
-			$16, $17, $18,
+			$16, $17, $18,  -- ЭТИ ПАРАМЕТРЫ ДОБАВЛЯЕМ
 			$19, $20, $21,
 			$22, $23, $24,
 			$25, $26,
@@ -264,7 +264,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		user.NotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
 		user.QuietHoursStart, user.QuietHoursEnd,
 		user.MinGrowthThreshold, user.MinFallThreshold,
-		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns),
+		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns), // ДОБАВЛЯЕМ!
 		user.Language, user.Timezone, user.DisplayMode,
 		user.Role, user.IsActive, user.IsVerified,
 		user.SubscriptionTier, user.MaxSignalsPerDay,

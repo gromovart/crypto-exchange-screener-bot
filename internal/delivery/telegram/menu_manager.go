@@ -73,11 +73,8 @@ func (mm *MenuManager) SetEnabled(enabled bool) {
 	defer mm.mu.Unlock()
 	mm.enabled = enabled
 
-	if enabled {
-		mm.SetupMenu()
-	} else {
-		mm.RemoveMenu()
-	}
+	log.Printf("📋 Меню %s (управление через команды)",
+		map[bool]string{true: "включено", false: "выключено"}[enabled])
 }
 
 // IsEnabled возвращает статус меню
@@ -89,6 +86,8 @@ func (mm *MenuManager) IsEnabled() bool {
 
 // SetupMenu устанавливает главное меню
 func (mm *MenuManager) SetupMenu() error {
+	log.Printf("🔍 SetupMenu вызван (enabled: %v)", mm.IsEnabled())
+
 	if !mm.IsEnabled() {
 		return nil
 	}

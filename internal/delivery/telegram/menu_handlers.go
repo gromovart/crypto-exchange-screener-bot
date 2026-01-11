@@ -5,6 +5,8 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"fmt"
 	"log"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -61,8 +63,9 @@ func NewMenuHandlersWithUtils(cfg *config.Config, messageSender *MessageSender, 
 
 // StartCommandHandler обрабатывает команду /start
 func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
+	log.Printf("🔍 StartCommandHandler ВЫЗВАН: chatID=%s", chatID)
+
 	message := "🚀 *Crypto Exchange Screener Bot*\n\n" +
-		"✅ *Бот активирован!*\n\n" +
 		"*Основные команды:*\n" +
 		"• /start - Начало работы\n" +
 		"• /status - Статус системы\n" +
@@ -71,10 +74,29 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 		"• /help - Справка\n\n" +
 		"Используйте меню ниже для управления ботом:"
 
-	// Используем KeyboardSystem для создания клавиатуры
-	keyboard := mh.keyboardSystem.CreateWelcomeKeyboard()
+	// 1. Сначала отправляем приветственное сообщение с inline клавиатурой
+	err := mh.messageSender.SendMessageToChat(chatID, message, nil)
+	if err != nil {
+		log.Printf("❌ Ошибка отправки приветственного сообщения: %v", err)
+		return err
+	}
 
-	return mh.messageSender.SendMessageToChat(chatID, message, keyboard)
+	// 2. Затем устанавливаем reply клавиатуру (меню) для этого чата
+	// 🔴 Устанавливаем меню ТОЛЬКО после успешной отправки приветствия
+	mainMenu := mh.keyboardSystem.GetMainMenu()
+
+	// Добавляем небольшую задержку перед установкой меню
+	time.Sleep(300 * time.Millisecond)
+
+	setupErr := mh.messageSender.SetReplyKeyboard(chatID, mainMenu)
+	if setupErr != nil {
+		log.Printf("⚠️ Ошибка установки меню: %v", setupErr)
+		// Не возвращаем ошибку, чтобы пользователь все равно получил приветствие
+		return nil
+	}
+
+	log.Printf("✅ Меню установлено для чата %s после команды /start", chatID)
+	return nil
 }
 
 // HandleMessage обрабатывает текстовые сообщения из меню
@@ -759,4 +781,25 @@ func getSignalTypesStatus(config *config.Config) string {
 		return "Только падение"
 	}
 	return "Ничего"
+}
+
+// Вспомогательная функция для получения информации о вызывающем коде
+func callerInfo() string {
+	pc := make([]uintptr, 10)
+	n := runtime.Callers(3, pc) // 3 уровня вверх
+	if n == 0 {
+		return "unknown"
+	}
+
+	frames := runtime.CallersFrames(pc[:n])
+	for {
+		frame, more := frames.Next()
+		if !strings.Contains(frame.File, "runtime/") {
+			return fmt.Sprintf("%s:%d %s", filepath.Base(frame.File), frame.Line, frame.Function)
+		}
+		if !more {
+			break
+		}
+	}
+	return "unknown"
 }

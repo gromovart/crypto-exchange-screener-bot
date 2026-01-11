@@ -56,12 +56,21 @@ func (ai *AuthInitializer) InitializeAuthForSingleton() (*AuthHandlers, error) {
 // SetupAuthCommands регистрирует команды авторизации в обработчике обновлений
 func (ai *AuthInitializer) SetupAuthCommands(updatesHandler *UpdatesHandler, authHandlers *AuthHandlers) {
 	if updatesHandler == nil || authHandlers == nil {
-		log.Println("⚠️ Не удалось настроить команды авторизации")
+		log.Println("⚠️ Не удалось настроить команды авторизации: updatesHandler или authHandlers nil")
 		return
 	}
 
-	// TODO: Реализовать регистрацию команд авторизации в UpdatesHandler
-	log.Println("📋 Команды авторизации готовы к регистрации")
+	log.Println("📋 Настройка команд авторизации...")
+
+	// Устанавливаем authHandlers в updatesHandler
+	updatesHandler.SetAuthHandlers(authHandlers)
+
+	// Логируем успешную настройку
+	if updatesHandler.HasAuth() {
+		log.Println("✅ Команды авторизации настроены в UpdatesHandler")
+	} else {
+		log.Println("⚠️ Команды авторизации не настроены: updatesHandler не имеет authHandlers")
+	}
 }
 
 // GetAuthMiddleware возвращает middleware авторизации для бота
@@ -87,12 +96,12 @@ func (ai *AuthInitializer) CreateDefaultAuthKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "🔑 Профиль", CallbackData: "auth_profile"},
-				{Text: "⚙️ Настройки", CallbackData: "auth_settings"},
+				{Text: AuthButtonTexts.Profile, CallbackData: CallbackAuthProfile},
+				{Text: AuthButtonTexts.Settings, CallbackData: CallbackAuthSettings},
 			},
 			{
-				{Text: "🔔 Уведомления", CallbackData: "auth_notifications"},
-				{Text: "📊 Статистика", CallbackData: "auth_stats"},
+				{Text: AuthButtonTexts.Notifications, CallbackData: CallbackAuthNotifications},
+				{Text: AuthButtonTexts.Stats, CallbackData: CallbackAuthStats},
 			},
 		},
 	}
@@ -103,12 +112,12 @@ func (ai *AuthInitializer) CreateAdminAuthKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "👥 Пользователи", CallbackData: "admin_users"},
-				{Text: "📊 Статистика", CallbackData: "admin_stats"},
+				{Text: AuthButtonTexts.Users, CallbackData: CallbackAdminUsers},
+				{Text: AuthButtonTexts.Stats, CallbackData: CallbackAdminStats},
 			},
 			{
-				{Text: "⚙️ Система", CallbackData: "admin_system"},
-				{Text: "🔙 Назад", CallbackData: "admin_back"},
+				{Text: AuthButtonTexts.System, CallbackData: CallbackAdminSystem},
+				{Text: ButtonTexts.Back, CallbackData: CallbackAdminBack},
 			},
 		},
 	}
@@ -119,12 +128,12 @@ func (ai *AuthInitializer) CreatePremiumAuthKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "🚀 Расширенная аналитика", CallbackData: "premium_analytics"},
-				{Text: "📈 Детальные сигналы", CallbackData: "premium_signals"},
+				{Text: "🚀 Расширенная аналитика", CallbackData: CallbackPremiumAnalytics},
+				{Text: "📈 Детальные сигналы", CallbackData: CallbackPremiumSignals},
 			},
 			{
-				{Text: "⏱️ Приоритет", CallbackData: "premium_priority"},
-				{Text: "🔙 Назад", CallbackData: "premium_back"},
+				{Text: AuthButtonTexts.Priority, CallbackData: CallbackPremiumPriority},
+				{Text: ButtonTexts.Back, CallbackData: CallbackPremiumBack},
 			},
 		},
 	}

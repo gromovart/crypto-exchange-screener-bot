@@ -38,11 +38,6 @@ func GetOrCreateBot(cfg *config.Config) *TelegramBot {
 
 		botInstance = createBot(cfg)
 
-		// Настраиваем меню
-		if err := botInstance.menuManager.SetupMenu(); err != nil {
-			log.Printf("⚠️ Failed to setup menu: %v", err)
-		}
-
 		log.Printf("✅ Telegram бот создан (Singleton, auth: %v)", botInstance.HasAuth())
 	})
 
@@ -60,11 +55,6 @@ func GetOrCreateBotWithAuth(cfg *config.Config, userService *users.Service) *Tel
 		}
 
 		botInstance = createBotWithAuth(cfg, userService)
-
-		// Настраиваем меню
-		if err := botInstance.menuManager.SetupMenu(); err != nil {
-			log.Printf("⚠️ Failed to setup menu: %v", err)
-		}
 
 		log.Printf("✅ Telegram бот создан с авторизацией (Singleton, auth: %v)", botInstance.HasAuth())
 		botCreated = true
@@ -272,6 +262,16 @@ func startUpdatesHandlerForSingleton() {
 		botInstance.GetAuthHandlers(),
 	)
 
+	// НАСТРАИВАЕМ КОМАНДЫ АВТОРИЗАЦИИ
+	// Получаем AuthInitializer
+	authInitializer := botInstance.GetAuthInitializer()
+	if authInitializer != nil && botInstance.GetAuthHandlers() != nil {
+		authInitializer.SetupAuthCommands(updatesHandlerInstance, botInstance.GetAuthHandlers())
+		log.Println("✅ Команды авторизации настроены для UpdatesHandler")
+	} else {
+		log.Println("⚠️ Не удалось настроить команды авторизации: AuthInitializer или AuthHandlers недоступны")
+	}
+
 	// Запускаем в отдельной горутине
 	go func() {
 		log.Println("🚀 Запуск UpdatesHandler...")
@@ -312,11 +312,6 @@ func createBot(cfg *config.Config) *TelegramBot {
 		userService:   nil, // Без авторизации
 	}
 
-	// Настраиваем меню
-	if err := menuManager.SetupMenu(); err != nil {
-		log.Printf("⚠️ Failed to setup menu: %v", err)
-	}
-
 	return bot
 }
 
@@ -355,11 +350,5 @@ func createBotWithAuth(cfg *config.Config, userService *users.Service) *Telegram
 			log.Printf("⚠️ Ошибка инициализации авторизации: %v", err)
 		}
 	}
-
-	// Настраиваем меню
-	if err := menuManager.SetupMenu(); err != nil {
-		log.Printf("⚠️ Failed to setup menu: %v", err)
-	}
-
 	return bot
 }

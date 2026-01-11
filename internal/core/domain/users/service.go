@@ -96,6 +96,7 @@ func (s *Service) CreateUser(telegramID int64, username, firstName, lastName str
 		MinGrowthThreshold:   s.config.DefaultMinGrowthThreshold,
 		MaxSignalsPerDay:     s.config.DefaultMaxSignalsPerDay,
 		NotificationsEnabled: true,
+		SubscriptionTier:     models.TierFree,
 		CreatedAt:            time.Now(),
 		UpdatedAt:            time.Now(),
 	}
