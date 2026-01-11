@@ -3,6 +3,8 @@ package utils
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -86,25 +88,31 @@ func ParseIntervalToMinutes(interval string) (int, error) {
 }
 
 // ParsePeriodToMinutes преобразует строку периода в минуты
-func ParsePeriodToMinutes(period string) int {
-	period = strings.ToLower(period)
+func ParsePeriodToMinutes(periodStr string) int {
+	periodStr = strings.ToLower(periodStr)
 
-	switch period {
-	case "5m", "5 минут", "5 мин":
-		return 5
-	case "15m", "15 минут", "15 мин":
-		return 15
-	case "30m", "30 минут", "30 мин":
-		return 30
-	case "1h", "1 час":
-		return 60
-	case "4h", "4 часа":
-		return 240
-	case "1d", "1 день":
-		return 1440
-	default:
-		return 15 // по умолчанию
+	// Удаляем все нецифровые символы для получения числа
+	re := regexp.MustCompile(`\d+`)
+	matches := re.FindString(periodStr)
+	if matches == "" {
+		return 15 // default
 	}
+
+	num, err := strconv.Atoi(matches)
+	if err != nil {
+		return 15
+	}
+
+	// Определяем единицу измерения
+	if strings.Contains(periodStr, "h") || strings.Contains(periodStr, "час") {
+		return num * 60
+	} else if strings.Contains(periodStr, "d") || strings.Contains(periodStr, "д") || strings.Contains(periodStr, "день") {
+		return num * 1440
+	} else if strings.Contains(periodStr, "m") || strings.Contains(periodStr, "мин") {
+		return num
+	}
+
+	return num // предполагаем минуты
 }
 
 // PeriodToName возвращает человекочитаемое название периода

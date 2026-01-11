@@ -47,11 +47,26 @@ func (h *AuthHandlers) GetAuthMiddleware() *AuthMiddleware {
 func (h *AuthHandlers) handleStart(user *models.User, update *TelegramUpdate) error {
 	chatID := h.authMiddleware.getChatID(update)
 
+	// Форматируем имя пользователя
+	firstName := user.FirstName
+	if firstName == "" {
+		firstName = "Гость"
+	}
+	firstName = escapeMarkdown(firstName)
+
+	// Форматируем username
+	usernameDisplay := user.Username
+	if usernameDisplay == "" {
+		usernameDisplay = "не указан"
+	} else {
+		usernameDisplay = "@" + usernameDisplay
+	}
+
 	// Приветственное сообщение
 	message := fmt.Sprintf(
 		"👋 *Добро пожаловать, %s!*\n\n"+
 			"🚀 *Crypto Exchange Screener Bot*\n\n"+
-			"✅ Ваш аккаунт: @%s\n"+
+			"✅ Ваш аккаунт: %s\n"+
 			"👤 Имя: %s\n"+
 			"⭐ Роль: %s\n"+
 			"📅 Дата регистрации: %s\n\n"+
@@ -62,9 +77,9 @@ func (h *AuthHandlers) handleStart(user *models.User, update *TelegramUpdate) er
 			"/notifications - Управление уведомлениями\n"+
 			"/help - Справка\n\n"+
 			"Используйте меню ниже для управления ботом:",
-		user.FirstName,
-		user.Username,
-		user.FirstName,
+		firstName,
+		usernameDisplay,
+		firstName,
 		getRoleDisplayName(user.Role),
 		user.CreatedAt.Format("02.01.2006"),
 	)
@@ -77,26 +92,39 @@ func (h *AuthHandlers) handleStart(user *models.User, update *TelegramUpdate) er
 
 // handleProfile обработчик команды /profile
 func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) error {
-
-	log.Printf("🔍 DEBUG: FirstName: %q (contains *: %v, contains _: %v)",
-		user.FirstName,
-		strings.Contains(user.FirstName, "*"),
-		strings.Contains(user.FirstName, "_"))
-	log.Printf("🔍 DEBUG: Username: %q", user.Username)
-	log.Printf("🔍 DEBUG: CreatedAt: %s", user.CreatedAt.Format("02.01.2006"))
-	log.Printf("🔍 DEBUG: LastLoginAt: %s", user.LastLoginAt.Format("02.01.2006 15:04"))
 	chatID := h.authMiddleware.getChatID(update)
 
 	// Получаем статистику пользователя
 	stats := h.getUserStats(user)
+
+	// Форматируем имя пользователя с экранированием
+	firstName := user.FirstName
+	if firstName == "" {
+		firstName = "Гость"
+	}
+	firstName = escapeMarkdown(firstName)
+
+	// Форматируем username
+	usernameDisplay := user.Username
+	if usernameDisplay == "" {
+		usernameDisplay = "не указан"
+	} else {
+		usernameDisplay = "@" + usernameDisplay
+	}
+
+	// Форматируем дату последнего входа
+	lastLoginDisplay := "еще не входил"
+	if !user.LastLoginAt.IsZero() {
+		lastLoginDisplay = user.LastLoginAt.Format("02.01.2006 15:04")
+	}
 
 	// Форматируем сообщение профиля
 	message := fmt.Sprintf(
 		"👤 *Ваш профиль*\n\n"+
 			"🆔 ID: %d\n"+
 			"📱 Telegram ID: %d\n"+
-			"👤 Имя: %s\n"+ // user.FirstName может содержать *
-			"📧 Username: @%s\n"+
+			"👤 Имя: %s\n"+ // Экраненное имя
+			"📧 Username: %s\n"+ // Правильное отображение username
 			"⭐ Роль: %s\n"+
 			"💰 Тариф: %s\n"+
 			"✅ Статус: %s\n"+
@@ -104,18 +132,18 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 			"🔐 Последний вход: %s\n\n",
 		user.ID,
 		user.TelegramID,
-		"Test User", // ВРЕМЕННО: безопасное имя
-		user.Username,
+		firstName,
+		usernameDisplay,
 		getRoleDisplayName(user.Role),
 		getSubscriptionTierDisplayName(user.SubscriptionTier),
 		getStatusDisplay(user.IsActive),
 		user.CreatedAt.Format("02.01.2006"),
-		user.LastLoginAt.Format("02.01.2006 15:04"),
+		lastLoginDisplay,
 	)
 
 	// Добавляем статистику если есть
 	message += fmt.Sprintf(
-		"📊 *Статистика*\n"+ // Теперь есть закрывающий *
+		"📊 *Статистика*\n"+
 			"📈 Сигналов сегодня: %d/%d\n"+
 			"🎯 Минимальный рост: %.2f%%\n"+
 			"📉 Минимальное падение: %.2f%%\n\n",
@@ -138,10 +166,6 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 			},
 		},
 	}
-	log.Printf("🔍 DEBUG: Profile message length: %d bytes", len(message))
-	log.Printf("🔍 DEBUG: First 400 chars: %s", message[:min(400, len(message))])
-	log.Printf("🔍 DEBUG: Chars 300-350: %s", message[300:min(350, len(message))])
-	log.Printf("🔍 DEBUG: Chars 320-340: %q", message[320:min(340, len(message))])
 
 	return h.authMiddleware.sendMessage(chatID, message, keyboard)
 }
@@ -150,19 +174,39 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 func (h *AuthHandlers) handleLogin(user *models.User, update *TelegramUpdate) error {
 	chatID := h.authMiddleware.getChatID(update)
 
-	// Пользователь уже авторизован через Telegram
+	// Форматируем имя пользователя
+	firstName := user.FirstName
+	if firstName == "" {
+		firstName = "Гость"
+	}
+	firstName = escapeMarkdown(firstName)
+
+	// Форматируем username
+	usernameDisplay := user.Username
+	if usernameDisplay == "" {
+		usernameDisplay = "не указан"
+	} else {
+		usernameDisplay = "@" + usernameDisplay
+	}
+
+	// Форматируем дату последнего входа
+	lastLoginDisplay := "еще не входил"
+	if !user.LastLoginAt.IsZero() {
+		lastLoginDisplay = user.LastLoginAt.Format("02.01.2006 15:04")
+	}
+
 	message := fmt.Sprintf(
 		"✅ *Вы уже авторизованы!*\n\n"+
 			"👤 Имя: %s\n"+
-			"📧 Username: @%s\n"+
+			"📧 Username: %s\n"+
 			"⭐ Роль: %s\n"+
 			"📅 В системе с: %s\n\n"+
 			"Последний вход: %s",
-		user.FirstName,
-		user.Username,
+		firstName,
+		usernameDisplay,
 		getRoleDisplayName(user.Role),
 		user.CreatedAt.Format("02.01.2006"),
-		user.LastLoginAt.Format("02.01.2006 15:04"),
+		lastLoginDisplay,
 	)
 
 	// Обновляем время последнего входа
@@ -718,4 +762,29 @@ func getDisplayModeName(mode string) string {
 	default:
 		return mode
 	}
+}
+
+// escapeMarkdown экранирует специальные символы Markdown
+func escapeMarkdown(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	// Экранируем Markdown символы
+	replacer := strings.NewReplacer(
+		"*", "\\*",
+		"_", "\\_",
+		"`", "\\`",
+		"[", "\\[",
+		"]", "\\]",
+		"(", "\\(",
+		")", "\\)",
+		"~", "\\~",
+		"#", "\\#",
+		"+", "\\+",
+		"-", "\\-",
+		".", "\\.",
+		"!", "\\!",
+	)
+	return replacer.Replace(text)
 }

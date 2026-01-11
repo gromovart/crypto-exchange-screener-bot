@@ -196,17 +196,21 @@ func (b *ButtonURLBuilder) GetChartButton(symbol string) InlineKeyboardButton {
 // GetTradeURL возвращает URL для торговли
 func (b *ButtonURLBuilder) GetTradeURL(symbol string, periodMinutes int) string {
 	cleanSymbol := strings.ToUpper(symbol)
-	interval := b.getIntervalString(periodMinutes)
+	intervalParam := b.getIntervalString(periodMinutes)
 
 	switch b.exchange {
 	case "binance":
-		return fmt.Sprintf("https://www.binance.com/en/trade/%s?layout=pro&interval=%s", cleanSymbol, interval)
+		return fmt.Sprintf("https://www.binance.com/en/trade/%s?layout=pro&%s",
+			strings.Replace(cleanSymbol, "USDT", "_USDT", 1), intervalParam)
+
 	case "kucoin":
-		return fmt.Sprintf("https://www.kucoin.com/trade/%s", cleanSymbol)
+		return fmt.Sprintf("https://www.kucoin.com/trade/%s?%s", cleanSymbol, intervalParam)
+
 	case "okx":
-		return fmt.Sprintf("https://www.okx.com/trade-spot/%s", strings.ToLower(symbol))
-	default: // bybit
-		return fmt.Sprintf("https://www.bybit.com/trade/usdt/%s?interval=%s", cleanSymbol, interval)
+		return fmt.Sprintf("https://www.okx.com/trade-spot/%s?%s", strings.ToLower(cleanSymbol), intervalParam)
+
+	default: // bybit и другие
+		return fmt.Sprintf("https://www.bybit.com/trade/usdt/%s?%s", cleanSymbol, intervalParam)
 	}
 }
 
@@ -337,21 +341,71 @@ func (b *ButtonURLBuilder) UpdateSettingsKeyboard(bot *TelegramBot) *InlineKeybo
 
 // getIntervalString преобразует минуты в строку интервала
 func (b *ButtonURLBuilder) getIntervalString(minutes int) string {
-	switch minutes {
-	case 1, 5:
-		return "5"
-	case 15:
-		return "15"
-	case 30:
-		return "30"
-	case 60:
-		return "60"
-	case 240:
-		return "240"
-	case 1440:
-		return "1D"
+	switch b.exchange {
+	case "bybit":
+		// Bybit использует параметр defaultChartInterval с числовым значением в минутах
+		// Например: defaultChartInterval=60 (1 час), defaultChartInterval=240 (4 часа)
+		return fmt.Sprintf("defaultChartInterval=%d", minutes)
+
+	case "binance":
+		// Binance: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d
+		switch minutes {
+		case 1:
+			return "interval=1m"
+		case 3:
+			return "interval=3m"
+		case 5:
+			return "interval=5m"
+		case 15:
+			return "interval=15m"
+		case 30:
+			return "interval=30m"
+		case 60:
+			return "interval=1h"
+		case 120:
+			return "interval=2h"
+		case 240:
+			return "interval=4h"
+		case 360:
+			return "interval=6h"
+		case 480:
+			return "interval=8h"
+		case 720:
+			return "interval=12h"
+		case 1440:
+			return "interval=1d"
+		default:
+			return "interval=15m"
+		}
+
+	case "kucoin":
+		// KuCoin использует простой параметр interval с числовым значением
+		return fmt.Sprintf("interval=%d", minutes)
+
+	case "okx":
+		// OKX использует granularity параметр
+		switch minutes {
+		case 1:
+			return "granularity=60"
+		case 5:
+			return "granularity=300"
+		case 15:
+			return "granularity=900"
+		case 30:
+			return "granularity=1800"
+		case 60:
+			return "granularity=3600"
+		case 240:
+			return "granularity=14400"
+		case 1440:
+			return "granularity=86400"
+		default:
+			return "granularity=900" // 15 минут по умолчанию
+		}
+
 	default:
-		return "15"
+		// Для других бирж используем Bybit формат как default
+		return fmt.Sprintf("defaultChartInterval=%d", minutes)
 	}
 }
 
