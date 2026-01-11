@@ -35,9 +35,9 @@ type InlineKeyboardMarkup struct {
 
 // TelegramMessage - сообщение с клавиатурой
 type TelegramMessage struct {
-	ChatID      string      `json:"chat_id"`
-	Text        string      `json:"text"`
-	ParseMode   string      `json:"parse_mode,omitempty"`
+	ChatID string `json:"chat_id"`
+	Text   string `json:"text"`
+	// ParseMode   string      `json:"parse_mode,omitempty"`
 	ReplyMarkup interface{} `json:"reply_markup,omitempty"`
 }
 

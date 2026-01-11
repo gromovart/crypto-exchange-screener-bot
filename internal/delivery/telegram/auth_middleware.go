@@ -203,13 +203,14 @@ func (m *AuthMiddleware) sendAuthError(chatID int64, message string) error {
 
 // sendMessage отправляет сообщение пользователю через Telegram API
 func (m *AuthMiddleware) sendMessage(chatID int64, text string, replyMarkup interface{}) error {
+	log.Printf("🔍 DEBUG sendMessage: chatID=%d, text length=%d, first 100 chars: %s",
+		chatID, len(text), text[:min(100, len(text))])
 	url := fmt.Sprintf("%ssendMessage", m.baseURL)
 
-	// Подготавливаем запрос
+	// Подготавливаем запрос (БЕЗ parse_mode)
 	request := map[string]interface{}{
-		"chat_id":    chatID,
-		"text":       text,
-		"parse_mode": "Markdown",
+		"chat_id": chatID,
+		"text":    text,
 	}
 
 	if replyMarkup != nil {
@@ -358,11 +359,11 @@ func (m *AuthMiddleware) answerCallbackQuery(callbackID string, text string, sho
 func (m *AuthMiddleware) editMessageText(chatID, messageID int64, text string, replyMarkup interface{}) error {
 	url := fmt.Sprintf("%seditMessageText", m.baseURL)
 
+	// Подготавливаем запрос (БЕЗ parse_mode)
 	request := map[string]interface{}{
 		"chat_id":    chatID,
 		"message_id": messageID,
 		"text":       text,
-		"parse_mode": "Markdown",
 	}
 
 	if replyMarkup != nil {

@@ -77,6 +77,14 @@ func (h *AuthHandlers) handleStart(user *models.User, update *TelegramUpdate) er
 
 // handleProfile обработчик команды /profile
 func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) error {
+
+	log.Printf("🔍 DEBUG: FirstName: %q (contains *: %v, contains _: %v)",
+		user.FirstName,
+		strings.Contains(user.FirstName, "*"),
+		strings.Contains(user.FirstName, "_"))
+	log.Printf("🔍 DEBUG: Username: %q", user.Username)
+	log.Printf("🔍 DEBUG: CreatedAt: %s", user.CreatedAt.Format("02.01.2006"))
+	log.Printf("🔍 DEBUG: LastLoginAt: %s", user.LastLoginAt.Format("02.01.2006 15:04"))
 	chatID := h.authMiddleware.getChatID(update)
 
 	// Получаем статистику пользователя
@@ -87,7 +95,7 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 		"👤 *Ваш профиль*\n\n"+
 			"🆔 ID: %d\n"+
 			"📱 Telegram ID: %d\n"+
-			"👤 Имя: %s\n"+
+			"👤 Имя: %s\n"+ // user.FirstName может содержать *
 			"📧 Username: @%s\n"+
 			"⭐ Роль: %s\n"+
 			"💰 Тариф: %s\n"+
@@ -96,7 +104,7 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 			"🔐 Последний вход: %s\n\n",
 		user.ID,
 		user.TelegramID,
-		user.FirstName,
+		"Test User", // ВРЕМЕННО: безопасное имя
 		user.Username,
 		getRoleDisplayName(user.Role),
 		getSubscriptionTierDisplayName(user.SubscriptionTier),
@@ -107,7 +115,7 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 
 	// Добавляем статистику если есть
 	message += fmt.Sprintf(
-		"📊 *Статистика*\n"+
+		"📊 *Статистика*\n"+ // Теперь есть закрывающий *
 			"📈 Сигналов сегодня: %d/%d\n"+
 			"🎯 Минимальный рост: %.2f%%\n"+
 			"📉 Минимальное падение: %.2f%%\n\n",
@@ -130,6 +138,10 @@ func (h *AuthHandlers) handleProfile(user *models.User, update *TelegramUpdate) 
 			},
 		},
 	}
+	log.Printf("🔍 DEBUG: Profile message length: %d bytes", len(message))
+	log.Printf("🔍 DEBUG: First 400 chars: %s", message[:min(400, len(message))])
+	log.Printf("🔍 DEBUG: Chars 300-350: %s", message[300:min(350, len(message))])
+	log.Printf("🔍 DEBUG: Chars 320-340: %q", message[320:min(340, len(message))])
 
 	return h.authMiddleware.sendMessage(chatID, message, keyboard)
 }

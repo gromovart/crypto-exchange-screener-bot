@@ -145,9 +145,8 @@ func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMa
 	}
 
 	message := TelegramMessage{
-		ChatID:    ms.chatID, // Используем ms.chatID
-		Text:      text,
-		ParseMode: "Markdown",
+		ChatID: ms.chatID,
+		Text:   text,
 	}
 
 	if keyboard != nil {
@@ -166,9 +165,8 @@ func (ms *MessageSender) SendTextMessage(text string, keyboard *InlineKeyboardMa
 // SendMessageToChat отправляет сообщение в указанный чат
 func (ms *MessageSender) SendMessageToChat(chatID string, text string, keyboard *InlineKeyboardMarkup) error {
 	message := TelegramMessage{
-		ChatID:    chatID,
-		Text:      text,
-		ParseMode: "Markdown",
+		ChatID: chatID,
+		Text:   text,
 	}
 
 	if keyboard != nil {

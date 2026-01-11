@@ -3,6 +3,7 @@ package telegram
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -273,7 +274,7 @@ func (uh *UpdatesHandler) isOldUpdate(update TelegramUpdate) bool {
 	age := time.Since(messageTimestamp)
 
 	// Игнорируем сообщения старше 5 минут
-	return age > 5*time.Minute
+	return age > 24*time.Hour
 }
 
 // processUpdate обрабатывает одно обновление
@@ -318,12 +319,67 @@ func (uh *UpdatesHandler) processUpdate(update TelegramUpdate) {
 
 		log.Printf("🔄 Callback от chat %s: %s", chatID, callbackData)
 
-		if err := uh.bot.HandleCallback(callbackData, chatID); err != nil {
-			log.Printf("❌ Ошибка обработки callback: %v", err)
+		// 🔴 ПРОВЕРКА: Если это auth callback, обрабатываем отдельно
+		if strings.HasPrefix(callbackData, "auth_") {
+			log.Printf("🔐 Auth callback detected: %s for chat %s", callbackData, chatID)
+			uh.handleAuthCallback(callbackData, &update)
+		} else {
+			if err := uh.bot.HandleCallback(callbackData, chatID); err != nil {
+				log.Printf("❌ Ошибка обработки callback: %v", err)
+			}
 		}
 
 		// Отвечаем на callback
 		uh.answerCallbackQuery(update.CallbackQuery.ID)
+	}
+}
+
+// handleAuthCallback обрабатывает callback авторизации
+func (uh *UpdatesHandler) handleAuthCallback(callbackData string, update *TelegramUpdate) {
+	if uh.authHandlers == nil {
+		log.Printf("⚠️ Auth handlers not initialized for callback: %s", callbackData)
+		return
+	}
+
+	// Получаем middleware авторизации
+	authMiddleware := uh.authHandlers.GetAuthMiddleware()
+	if authMiddleware == nil {
+		log.Printf("⚠️ Auth middleware not available for callback: %s", callbackData)
+		return
+	}
+
+	var handler func(update *TelegramUpdate) error
+
+	// Определяем обработчик по callbackData
+	switch callbackData {
+	case "auth_profile":
+		handler = authMiddleware.WithUserContext("profile", uh.authHandlers.handleProfile)
+	case "auth_settings":
+		handler = authMiddleware.WithUserContext("settings", uh.authHandlers.handleSettings)
+	case "auth_notifications":
+		handler = authMiddleware.WithUserContext("notifications", uh.authHandlers.handleNotifications)
+	case "auth_thresholds":
+		handler = authMiddleware.WithUserContext("thresholds", uh.authHandlers.handleThresholds)
+	case "auth_stats":
+		// В authHandlers нет handleStats для пользователя, используем getUserStats
+		handler = authMiddleware.WithUserContext("stats", func(user *models.User, update *TelegramUpdate) error {
+			// Простая реализация
+			chatID := authMiddleware.getChatID(update)
+			message := fmt.Sprintf("📊 Статистика пользователя %s:\n\n", user.Username)
+			return authMiddleware.sendMessage(chatID, message, nil)
+		})
+	case "auth_login":
+		handler = authMiddleware.WithUserContext("login", uh.authHandlers.handleLogin)
+	default:
+		log.Printf("❓ Unknown auth callback: %s", callbackData)
+		return
+	}
+
+	// Вызываем обработчик
+	if handler != nil {
+		if err := handler(update); err != nil {
+			log.Printf("❌ Ошибка обработки auth callback %s: %v", callbackData, err)
+		}
 	}
 }
 
