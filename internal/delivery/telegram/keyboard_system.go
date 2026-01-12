@@ -224,7 +224,7 @@ func (ks *KeyboardSystem) CreateInlineMenuPeriods() *InlineKeyboardMarkup {
 			{
 				{Text: "1 час", CallbackData: CallbackPeriod1h},
 				{Text: "4 часа", CallbackData: CallbackPeriod4h},
-				{Text: "🔙 Назад", CallbackData: CallbackSettingsBack},
+				{Text: "🔙 Назад", CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -243,7 +243,7 @@ func (ks *KeyboardSystem) CreateInlineMenuReset() *InlineKeyboardMarkup {
 				{Text: "📉 Счетчик падения", CallbackData: "reset_fall"},
 			},
 			{
-				{Text: "🔙 Назад", CallbackData: CallbackSettingsBack},
+				{Text: "🔙 Назад", CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -266,14 +266,14 @@ func (ks *KeyboardSystem) CreateSignalTypeKeyboard(growthEnabled, fallEnabled bo
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: growthText, CallbackData: CallbackTrackGrowthOnly},
-				{Text: fallText, CallbackData: CallbackTrackFallOnly},
+				{Text: growthText, CallbackData: CallbackNotifyGrowthOnly},
+				{Text: fallText, CallbackData: CallbackNotifyFallOnly},
 			},
 			{
-				{Text: bothText, CallbackData: CallbackTrackBoth},
+				{Text: bothText, CallbackData: CallbackNotifyBoth},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -294,7 +294,7 @@ func (ks *KeyboardSystem) CreatePeriodSelectionKeyboard() *InlineKeyboardMarkup 
 				{Text: "1 день", CallbackData: CallbackPeriod1d},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -309,7 +309,7 @@ func (ks *KeyboardSystem) CreateResetKeyboard() *InlineKeyboardMarkup {
 				{Text: "📊 По символу", CallbackData: CallbackResetBySymbol},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -330,7 +330,7 @@ func (ks *KeyboardSystem) CreateSymbolSelectionKeyboard() *InlineKeyboardMarkup 
 				{Text: "DOGEUSDT", CallbackData: "symbol_dogeusdt"},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -346,7 +346,7 @@ func (ks *KeyboardSystem) CreateTestKeyboard() *InlineKeyboardMarkup {
 			},
 			{
 				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
-				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettingsMain},
 			},
 		},
 	}
@@ -487,7 +487,7 @@ func (ks *KeyboardSystem) buildWelcomeKeyboard() *InlineKeyboardMarkup {
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
 				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
-				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettingsMain},
 			},
 			{
 				{Text: ButtonTexts.Help, CallbackData: "help"},
@@ -511,15 +511,15 @@ func (ks *KeyboardSystem) buildSettingsKeyboard(notificationsEnabled, testMode b
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: notifyText, CallbackData: CallbackSettingsNotifyToggle},
+				{Text: notifyText, CallbackData: CallbackNotifyToggle},
 				{Text: "⚙️ Изменить пороги", CallbackData: "change_thresholds"},
 			},
 			{
-				{Text: "📊 Изменить период", CallbackData: CallbackSettingsChangePeriod},
+				{Text: "📊 Изменить период", CallbackData: CallbackPeriodSelect},
 				{Text: testModeText, CallbackData: "toggle_test_mode"},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -587,7 +587,7 @@ func CreateStatusButton() InlineKeyboardButton {
 func CreateSettingsButton() InlineKeyboardButton {
 	return InlineKeyboardButton{
 		Text:         ButtonTexts.Settings,
-		CallbackData: CallbackSettings,
+		CallbackData: CallbackSettingsMain,
 	}
 }
 
@@ -603,7 +603,7 @@ func CreateHelpButton() InlineKeyboardButton {
 func CreateBackButton() InlineKeyboardButton {
 	return InlineKeyboardButton{
 		Text:         ButtonTexts.Back,
-		CallbackData: CallbackSettingsBack,
+		CallbackData: CallbackMenuBack,
 	}
 }
 
@@ -631,7 +631,7 @@ func CreateToggleNotificationsButton(isEnabled bool) InlineKeyboardButton {
 	}
 	return InlineKeyboardButton{
 		Text:         text,
-		CallbackData: CallbackSettingsNotifyToggle,
+		CallbackData: CallbackNotifyToggle,
 	}
 }
 
@@ -647,7 +647,7 @@ func CreateChangeThresholdsButton() InlineKeyboardButton {
 func CreateChangePeriodButton() InlineKeyboardButton {
 	return InlineKeyboardButton{
 		Text:         "📊 Изменить период",
-		CallbackData: CallbackSettingsChangePeriod,
+		CallbackData: CallbackPeriodSelect,
 	}
 }
 

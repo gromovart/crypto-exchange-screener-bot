@@ -291,7 +291,7 @@ func createBot(cfg *config.Config) *TelegramBot {
 	notifier.SetMessageSender(messageSender)
 
 	// Создаем менеджер меню
-	menuManager := NewMenuManagerWithUtils(cfg, messageSender, menuUtils)
+	menuManager := NewMenuManager(cfg, messageSender)
 
 	// Создаем buttonBuilder для кнопок
 	buttonBuilder := NewButtonURLBuilder(cfg.Exchange)
@@ -323,7 +323,7 @@ func createBotWithAuth(cfg *config.Config, userService *users.Service) *Telegram
 	notifier.SetMessageSender(messageSender)
 
 	// Создаем менеджер меню
-	menuManager := NewMenuManagerWithUtils(cfg, messageSender, menuUtils)
+	menuManager := NewMenuManager(cfg, messageSender)
 
 	// Создаем buttonBuilder для кнопок
 	buttonBuilder := NewButtonURLBuilder(cfg.Exchange)

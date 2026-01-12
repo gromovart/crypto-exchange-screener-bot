@@ -68,7 +68,7 @@ func NewTelegramBotWithChatIDAndAuth(cfg *config.Config, chatID string, userServ
 	notifier.SetMessageSender(messageSender)
 
 	// Создаем менеджер меню
-	menuManager := NewMenuManagerWithUtils(&chatConfig, messageSender, menuUtils)
+	menuManager := NewMenuManager(cfg, messageSender)
 
 	// Создаем buttonBuilder для кнопок
 	buttonBuilder := NewButtonURLBuilder(cfg.Exchange)
@@ -166,7 +166,7 @@ func (tb *TelegramBot) SetupAuth(authHandlers *AuthHandlers) {
 
 	// Настраиваем авторизацию в menuManager
 	if tb.menuManager != nil {
-		tb.menuManager.SetupAuth(authHandlers)
+		tb.menuManager.SetAuthHandlers(authHandlers)
 	}
 
 	log.Println("🔐 Авторизация настроена для Telegram бота")
@@ -565,11 +565,11 @@ func CreateWelcomeKeyboard() *InlineKeyboardMarkup {
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
 				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
-				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettingsMain},
 			},
 			{
-				{Text: ButtonTexts.Help, CallbackData: "help"},
-				{Text: ButtonTexts.Chart, CallbackData: "chart"},
+				{Text: ButtonTexts.Help, CallbackData: CallbackHelp},
+				{Text: ButtonTexts.Chart, CallbackData: CallbackChart},
 			},
 		},
 	}
@@ -580,15 +580,15 @@ func CreateSettingsKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "🔔 Включить уведомления", CallbackData: CallbackSettingsNotifyToggle},
-				{Text: "⚙️ Изменить пороги", CallbackData: "change_thresholds"},
+				{Text: "🔔 Включить уведомления", CallbackData: CallbackNotifyToggle},
+				{Text: "⚙️ Изменить пороги", CallbackData: CallbackThresholdsMenu},
 			},
 			{
-				{Text: "📊 Изменить период", CallbackData: CallbackSettingsChangePeriod},
-				{Text: "🧪 Тестовый режим", CallbackData: "toggle_test_mode"},
+				{Text: "📊 Изменить период", CallbackData: CallbackPeriodSelect},
+				{Text: "🧪 Тестовый режим", CallbackData: CallbackToggleTestMode},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}
@@ -599,16 +599,17 @@ func CreateTestKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "✅ Тест", CallbackData: "test_ok"},
-				{Text: "❌ Отмена", CallbackData: "test_cancel"},
+				{Text: "✅ Тест", CallbackData: CallbackTestOK},
+				{Text: "❌ Отмена", CallbackData: CallbackTestCancel},
 			},
 			{
 				{Text: ButtonTexts.Status, CallbackData: CallbackStats},
-				{Text: ButtonTexts.Settings, CallbackData: CallbackSettings},
+				{Text: ButtonTexts.Settings, CallbackData: CallbackSettingsMain},
 			},
 		},
 	}
 }
+
 func (tb *TelegramBot) GetMessageSender() *MessageSender {
 	return tb.messageSender
 }

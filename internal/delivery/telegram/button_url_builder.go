@@ -1,4 +1,3 @@
-// internal/delivery/telegram/button_url_builder.go
 package telegram
 
 import (
@@ -325,15 +324,15 @@ func (b *ButtonURLBuilder) UpdateSettingsKeyboard(bot *TelegramBot) *InlineKeybo
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: notifyText, CallbackData: CallbackSettingsNotifyToggle},
-				{Text: "⚙️ Изменить пороги", CallbackData: "change_thresholds"},
+				{Text: notifyText, CallbackData: CallbackNotifyToggle},
+				{Text: "⚙️ Изменить пороги", CallbackData: CallbackThresholdsMenu},
 			},
 			{
-				{Text: "📊 Изменить период", CallbackData: CallbackSettingsChangePeriod},
+				{Text: "📊 Изменить период", CallbackData: CallbackPeriodManage},
 				{Text: testModeText, CallbackData: "toggle_test_mode"},
 			},
 			{
-				{Text: ButtonTexts.Back, CallbackData: CallbackSettingsBack},
+				{Text: ButtonTexts.Back, CallbackData: CallbackMenuBack},
 			},
 		},
 	}

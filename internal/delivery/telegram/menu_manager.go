@@ -2,131 +2,53 @@
 package telegram
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	"log"
-	"sync"
-	"time"
 )
 
-// MenuManager - менеджер меню
+// MenuManager управляет меню и обработчиками
 type MenuManager struct {
-	config         *config.Config
-	enabled        bool
-	mu             sync.RWMutex
-	messageSender  *MessageSender
-	handlers       *MenuHandlers
-	keyboardSystem *KeyboardSystem // ВМЕСТО MenuKeyboards
-	menuUtils      *MenuUtils
+	handlers *MenuHandlers
 }
 
-// NewMenuManager создает новый менеджер меню (старый конструктор)
+// NewMenuManager создает новый менеджер меню
 func NewMenuManager(cfg *config.Config, messageSender *MessageSender) *MenuManager {
-	// Используем новый конструктор с KeyboardSystem
-	keyboardSystem := NewKeyboardSystem(cfg.Exchange)
-	menuUtils := NewDefaultMenuUtils()
-	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
-
+	handlers := NewMenuHandlersWithUtils(cfg, messageSender, NewDefaultMenuUtils())
 	return &MenuManager{
-		config:         cfg,
-		enabled:        true,
-		messageSender:  messageSender,
-		handlers:       handlers,
-		keyboardSystem: keyboardSystem,
-		menuUtils:      menuUtils,
+		handlers: handlers,
 	}
 }
 
-// NewMenuManagerWithUtils создает менеджер меню с утилитами
-func NewMenuManagerWithUtils(cfg *config.Config, messageSender *MessageSender, menuUtils *MenuUtils) *MenuManager {
-	// Используем новый конструктор с KeyboardSystem
-	keyboardSystem := NewKeyboardSystem(cfg.Exchange)
-	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
-
+// NewMenuManagerWithAuth создает менеджер меню с поддержкой авторизации
+func NewMenuManagerWithAuth(cfg *config.Config, messageSender *MessageSender, authHandlers *AuthHandlers) *MenuManager {
+	handlers := NewMenuHandlersWithUtils(cfg, messageSender, NewDefaultMenuUtils())
+	handlers.SetAuthHandlers(authHandlers)
 	return &MenuManager{
-		config:         cfg,
-		enabled:        true,
-		messageSender:  messageSender,
-		handlers:       handlers,
-		keyboardSystem: keyboardSystem,
-		menuUtils:      menuUtils,
+		handlers: handlers,
 	}
 }
 
-// NewMenuManagerWithKeyboardSystem создает менеджер меню с KeyboardSystem
-func NewMenuManagerWithKeyboardSystem(cfg *config.Config, messageSender *MessageSender, keyboardSystem *KeyboardSystem) *MenuManager {
-	menuUtils := NewDefaultMenuUtils()
-	handlers := NewMenuHandlersWithUtils(cfg, messageSender, menuUtils)
-
+// NewMenuManagerWithUserServices создает менеджер меню с сервисами пользователей
+func NewMenuManagerWithUserServices(cfg *config.Config, messageSender *MessageSender, userService *users.Service, settingsManager *users.SettingsManager) *MenuManager {
+	handlers := NewMenuHandlersWithServices(cfg, messageSender, userService, settingsManager)
 	return &MenuManager{
-		config:         cfg,
-		enabled:        true,
-		messageSender:  messageSender,
-		handlers:       handlers,
-		keyboardSystem: keyboardSystem,
-		menuUtils:      menuUtils,
+		handlers: handlers,
 	}
 }
 
-// SetEnabled включает/выключает меню
-func (mm *MenuManager) SetEnabled(enabled bool) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	mm.enabled = enabled
-
-	log.Printf("📋 Меню %s (управление через команды)",
-		map[bool]string{true: "включено", false: "выключено"}[enabled])
+// HandleMessage обрабатывает текстовые сообщения
+func (mm *MenuManager) HandleMessage(text, chatID string) error {
+	return mm.handlers.HandleMessage(text, chatID)
 }
 
-// IsEnabled возвращает статус меню
-func (mm *MenuManager) IsEnabled() bool {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	return mm.enabled
+// HandleCallback обрабатывает callback от inline кнопок
+func (mm *MenuManager) HandleCallback(callbackData, chatID string) error {
+	return mm.handlers.HandleCallback(callbackData, chatID)
 }
 
-// SetupMenu устанавливает главное меню
-func (mm *MenuManager) SetupMenu() error {
-	log.Printf("🔍 SetupMenu вызван (enabled: %v)", mm.IsEnabled())
-
-	if !mm.IsEnabled() {
-		return nil
-	}
-
-	// Используем KeyboardSystem для получения главного меню
-	menu := mm.keyboardSystem.GetMainMenu()
-
-	// Добавляем retry логику при отсутствии интернета
-	maxRetries := 3
-	var lastErr error
-
-	for i := 0; i < maxRetries; i++ {
-		err := mm.messageSender.SetReplyKeyboard(mm.messageSender.GetChatID(), menu)
-		if err == nil {
-			log.Println("✅ Меню успешно установлено")
-			return nil
-		}
-
-		lastErr = err
-		log.Printf("⚠️ Попытка %d/%d установки меню не удалась: %v", i+1, maxRetries, err)
-
-		// Не ждем перед следующей попыткой для последней попытки
-		if i < maxRetries-1 {
-			time.Sleep(2 * time.Second)
-		}
-	}
-
-	log.Printf("⚠️ Failed to setup menu after %d retries: %v", maxRetries, lastErr)
-	return lastErr
-}
-
-// RemoveMenu удаляет меню
-func (mm *MenuManager) RemoveMenu() error {
-	menu := ReplyKeyboardMarkup{
-		RemoveKeyboard: true,
-		Selective:      false,
-	}
-
-	return mm.messageSender.SetReplyKeyboard(mm.messageSender.GetChatID(), menu)
+// HandleCommand обрабатывает текстовые команды
+func (mm *MenuManager) HandleCommand(cmd, chatID string) error {
+	return mm.handlers.HandleCommand(cmd, chatID)
 }
 
 // StartCommandHandler обрабатывает команду /start
@@ -134,87 +56,58 @@ func (mm *MenuManager) StartCommandHandler(chatID string) error {
 	return mm.handlers.StartCommandHandler(chatID)
 }
 
-// HandleMessage обрабатывает текстовые сообщения
-func (mm *MenuManager) HandleMessage(text, chatID string) error {
-	log.Printf("📝 Handling menu message from chat %s: %s", chatID, text)
-	return mm.handlers.HandleMessage(text, chatID)
-}
-
-// HandleCallback обрабатывает callback от inline кнопок
-func (mm *MenuManager) HandleCallback(callbackData string, chatID string) error {
-	log.Printf("🔄 Handling callback: %s for chat %s", callbackData, chatID)
-	return mm.handlers.HandleCallback(callbackData, chatID)
-}
-
-// GetMenuUtils возвращает утилиты меню
-func (mm *MenuManager) GetMenuUtils() *MenuUtils {
-	return mm.menuUtils
-}
-
-// GetKeyboardSystem возвращает систему клавиатур
-func (mm *MenuManager) GetKeyboardSystem() *KeyboardSystem {
-	return mm.keyboardSystem
-}
-
-// SendSettingsMessage отправляет сообщение настроек
-func (mm *MenuManager) SendSettingsMessage(chatID string) error {
-	// Используем KeyboardSystem для получения меню настроек
-	menu := mm.keyboardSystem.GetSettingsMenu()
-	mm.messageSender.SetReplyKeyboard(chatID, menu)
-	return mm.handlers.SendSettingsInfo(chatID)
+// SendSettingsInfo отправляет информацию о настройках
+func (mm *MenuManager) SendSettingsInfo(chatID string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendSettingsInfo(chatID, userID)
 }
 
 // SendStatus отправляет статус системы
 func (mm *MenuManager) SendStatus(chatID string) error {
-	return mm.handlers.SendStatus(chatID)
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendStatus(chatID, userID)
 }
 
-// SendHelp отправляет справку
-func (mm *MenuManager) SendHelp(chatID string) error {
-	return mm.handlers.SendHelp(chatID)
+// SendNotificationsInfo отправляет информацию об уведомлениях
+func (mm *MenuManager) SendNotificationsInfo(chatID string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendNotificationsInfo(chatID, userID)
 }
 
-// SendNotificationsMenu отправляет меню уведомлений
-func (mm *MenuManager) SendNotificationsMenu(chatID string) error {
-	menu := mm.keyboardSystem.GetNotificationsMenu()
-	mm.messageSender.SetReplyKeyboard(chatID, menu)
-	return mm.handlers.SendNotificationsInfo(chatID)
+// SendSignalTypesInfo отправляет информацию о типах сигналов
+func (mm *MenuManager) SendSignalTypesInfo(chatID string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendSignalTypesInfo(chatID, userID)
 }
 
-// SendSignalTypesMenu отправляет меню типов сигналов
-func (mm *MenuManager) SendSignalTypesMenu(chatID string) error {
-	menu := mm.keyboardSystem.GetSignalTypesMenu()
-	mm.messageSender.SetReplyKeyboard(chatID, menu)
-	return mm.handlers.SendSignalTypesInfo(chatID)
+// SendPeriodsInfo отправляет информацию о периодах
+func (mm *MenuManager) SendPeriodsInfo(chatID string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendPeriodsInfo(chatID, userID)
 }
 
-// SendPeriodMenu отправляет меню периодов
-func (mm *MenuManager) SendPeriodMenu(chatID string) error {
-	menu := mm.keyboardSystem.GetPeriodsMenu()
-	mm.messageSender.SetReplyKeyboard(chatID, menu)
-	return mm.handlers.SendPeriodsInfo(chatID)
-}
-
-// SendResetMenu отправляет меню сброса
-func (mm *MenuManager) SendResetMenu(chatID string) error {
-	menu := mm.keyboardSystem.GetResetMenu()
-	mm.messageSender.SetReplyKeyboard(chatID, menu)
-	return mm.handlers.SendResetInfo(chatID)
+// SendResetInfo отправляет информацию о сбросе
+func (mm *MenuManager) SendResetInfo(chatID string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.SendResetInfo(chatID, userID)
 }
 
 // HandleNotifyOn включает уведомления
 func (mm *MenuManager) HandleNotifyOn(chatID string) error {
-	return mm.handlers.HandleNotifyOn(chatID)
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.HandleNotifyOn(chatID, userID)
 }
 
 // HandleNotifyOff выключает уведомления
 func (mm *MenuManager) HandleNotifyOff(chatID string) error {
-	return mm.handlers.HandleNotifyOff(chatID)
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.HandleNotifyOff(chatID, userID)
 }
 
 // HandlePeriodChange обрабатывает изменение периода
-func (mm *MenuManager) HandlePeriodChange(chatID string, period string) error {
-	return mm.handlers.HandlePeriodChange(chatID, period)
+func (mm *MenuManager) HandlePeriodChange(chatID, period string) error {
+	userID := mm.handlers.getUserIDFromChatID(chatID)
+	return mm.handlers.HandlePeriodChange(chatID, userID, period)
 }
 
 // HandleResetAllCounters сбрасывает все счетчики
@@ -222,45 +115,27 @@ func (mm *MenuManager) HandleResetAllCounters(chatID string) error {
 	return mm.handlers.HandleResetAllCounters(chatID)
 }
 
-// GetMainMenu возвращает главное меню (для внешнего использования)
-func (mm *MenuManager) GetMainMenu() ReplyKeyboardMarkup {
-	return mm.keyboardSystem.GetMainMenu()
+// SendSymbolSelectionInline отправляет inline меню выбора символа
+func (mm *MenuManager) SendSymbolSelectionInline(chatID string) error {
+	return mm.handlers.SendSymbolSelectionInline(chatID)
 }
 
-// GetSettingsMenu возвращает меню настроек (для внешнего использования)
-func (mm *MenuManager) GetSettingsMenu() ReplyKeyboardMarkup {
-	return mm.keyboardSystem.GetSettingsMenu()
+// SendHelp отправляет справку
+func (mm *MenuManager) SendHelp(chatID string) error {
+	return mm.handlers.SendHelp(chatID)
 }
 
-// CreateNotificationKeyboard создает клавиатуру для уведомлений
-func (mm *MenuManager) CreateNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
-	return mm.keyboardSystem.CreateNotificationKeyboard(symbol, periodMinutes)
+// SetUserServices устанавливает сервисы пользователей
+func (mm *MenuManager) SetUserServices(userService *users.Service, settingsManager *users.SettingsManager) {
+	mm.handlers.SetUserServices(userService, settingsManager)
 }
 
-// CreateEnhancedNotificationKeyboard создает расширенную клавиатуру для уведомлений
-func (mm *MenuManager) CreateEnhancedNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
-	return mm.keyboardSystem.CreateEnhancedNotificationKeyboard(symbol, periodMinutes)
+// SetAuthHandlers устанавливает обработчики авторизации
+func (mm *MenuManager) SetAuthHandlers(authHandlers *AuthHandlers) {
+	mm.handlers.SetAuthHandlers(authHandlers)
 }
 
-// CreateCounterNotificationKeyboard создает клавиатуру для счетчика
-func (mm *MenuManager) CreateCounterNotificationKeyboard(symbol string, periodMinutes int) *InlineKeyboardMarkup {
-	return mm.keyboardSystem.CreateCounterNotificationKeyboard(symbol, periodMinutes)
-}
-
-// ClearKeyboardCache очищает кэш клавиатур
-func (mm *MenuManager) ClearKeyboardCache() {
-	mm.keyboardSystem.ClearCache()
-}
-
-// SetupAuth настраивает авторизацию (алиас для SetupAuthHandlers)
-func (mm *MenuManager) SetupAuth(authHandlers *AuthHandlers) {
-	// В этой версии MenuManager нет поддержки авторизации
-	// Просто логируем вызов для отладки
-	// Передаем authHandlers в MenuHandlers
-	if mm.handlers != nil {
-		mm.handlers.SetAuthHandlers(authHandlers)
-		log.Printf("✅ AuthHandlers установлены в MenuHandlers")
-	} else {
-		log.Printf("⚠️ MenuHandlers не инициализированы, auth не настроена")
-	}
+// GetAuthHandlers возвращает обработчики авторизации
+func (mm *MenuManager) GetAuthHandlers() *AuthHandlers {
+	return mm.handlers.GetAuthHandlers()
 }

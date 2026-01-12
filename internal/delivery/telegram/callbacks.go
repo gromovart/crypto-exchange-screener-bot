@@ -3,100 +3,109 @@ package telegram
 
 // Callback constants
 const (
-	// Main menu
-	CallbackStats     = "stats"
-	CallbackSettings  = "settings"
-	CallbackNotifyOn  = "notify_on"
-	CallbackNotifyOff = "notify_off"
+	// ============== MAIN MENU ==============
+	CallbackStats             = "stats"              // 📊 Статус
+	CallbackSettingsMain      = "settings_main"      // ⚙️ Настройки
+	CallbackNotificationsMenu = "notifications_menu" // 🔔 Уведомления
+	CallbackSignalsMenu       = "signals_menu"       // 📈 Сигналы
+	CallbackPeriodsMenu       = "periods_menu"       // ⏱️ Периоды
+	CallbackResetMenu         = "reset_menu"         // 🔄 Сбросить
+	CallbackHelp              = "help"               // 📋 Помощь
 
-	// Settings menu
-	CallbackSettingsNotifyToggle = "settings_notify_toggle"
-	CallbackSettingsSignalType   = "settings_signal_type"
-	CallbackSettingsChangePeriod = "settings_change_period"
-	CallbackSettingsResetCounter = "settings_reset_counter"
-	CallbackSettingsBack         = "settings_back"
-	CallbackSettingsBackToMain   = "settings_back_to_main"
+	// ============== SETTINGS MENU ==============
+	// Для НЕавторизованных
+	CallbackAuthLogin    = "auth_login"    // 🔑 Войти / Авторизация
+	CallbackNotifyToggle = "notify_toggle" // ✅/❌ Включить/Выключить
+	CallbackPeriodSelect = "period_select" // ⏱️ Периоды (базовый)
 
-	// Signal type menu
-	CallbackTrackGrowthOnly = "settings_track_growth_only"
-	CallbackTrackFallOnly   = "settings_track_fall_only"
-	CallbackTrackBoth       = "settings_track_both"
+	// Для АВТОРИЗОВАННЫХ
+	CallbackProfileMain    = "profile_main"    // 👤 Мой профиль
+	CallbackThresholdsMenu = "thresholds_menu" // 📊 Пороги сигналов
+	CallbackPeriodManage   = "period_manage"   // ⏱️ Периоды (расширенный)
+	CallbackResetSettings  = "reset_settings"  // ⚙️ Сбросить настройки
 
-	// Period menu
-	CallbackPeriod5m  = "settings_period_5m"
-	CallbackPeriod15m = "settings_period_15m"
-	CallbackPeriod30m = "settings_period_30m"
-	CallbackPeriod1h  = "settings_period_1h"
-	CallbackPeriod4h  = "settings_period_4h"
-	CallbackPeriod1d  = "settings_period_1d"
+	// Навигация
+	CallbackMenuBack = "menu_back" // 🔙 Назад
+	CallbackMenuMain = "menu_main" // 🔙 Главное меню
 
-	// Reset menu
-	CallbackResetAll      = "settings_reset_all"
-	CallbackResetBySymbol = "settings_reset_by_symbol"
+	// ============== NOTIFICATIONS MENU ==============
+	// (одинаковое для всех)
+	CallbackNotifyToggleAll  = "notify_toggle"      // ✅/❌ Включить/Выключить
+	CallbackNotifyGrowthOnly = "notify_growth_only" // 📈 Только рост
+	CallbackNotifyFallOnly   = "notify_fall_only"   // 📉 Только падение
+	CallbackNotifyBoth       = "notify_both"        // 📊 Все сигналы
 
-	// Counter callbacks (for existing functionality)
-	CallbackCounterSettings  = "counter_settings"
-	CallbackCounterNotifyOn  = "counter_notify_on"
-	CallbackCounterNotifyOff = "counter_notify_off"
+	// ============== THRESHOLDS MENU ==============
+	// (только для авторизованных)
+	CallbackThresholdGrowth = "threshold_growth" // 📈 Мин. рост: X%
+	CallbackThresholdFall   = "threshold_fall"   // 📉 Мин. падение: X%
+	CallbackQuietHours      = "quiet_hours"      // 🕐 Тихие часы: XX-XX
+
+	// ============== PERIODS MENU ==============
+	// Базовый (для всех)
+	CallbackPeriod5m  = "period_5m"  // ⏱️ 5 минут
+	CallbackPeriod15m = "period_15m" // ⏱️ 15 минут
+	CallbackPeriod30m = "period_30m" // ⏱️ 30 минут
+	CallbackPeriod1h  = "period_1h"  // ⏱️ 1 час
+	CallbackPeriod4h  = "period_4h"  // ⏱️ 4 часа
+
+	// Расширенный (только auth) - управление предпочтительными
+	CallbackPeriod1d           = "period_1d"            // ⏱️ 1 день
+	CallbackPeriodManageAdd    = "period_manage_add"    // ➕ Добавить период
+	CallbackPeriodManageRemove = "period_manage_remove" // ➖ Удалить период
+	CallbackPeriodManageReset  = "period_manage_reset"  // 🔄 Сбросить выбор
+
+	// ============== PROFILE MENU ==============
+	// (только для авторизованных)
+	CallbackProfileStats        = "profile_stats"        // 📊 Статистика
+	CallbackProfileSubscription = "profile_subscription" // 💎 Подписка: X
 
 	// ============== AUTH CALLBACKS ==============
-	// Auth callbacks
-	CallbackAuthProfile       = "auth_profile"
-	CallbackAuthSettings      = "auth_settings"
-	CallbackAuthNotifications = "auth_notifications"
-	CallbackAuthStats         = "auth_stats"
-	CallbackAuthThresholds    = "auth_thresholds"
-	CallbackAuthLogin         = "auth_login"
-	CallbackAuthLogout        = "auth_logout"
+	CallbackAuthLogout   = "auth_logout"   // 👋 Выйти
+	CallbackAuthForgot   = "auth_forgot"   // 🔓 Забыли пароль?
+	CallbackAuthRegister = "auth_register" // 📝 Регистрация
 
-	// Admin callbacks
-	CallbackAdminUsers  = "admin_users"
-	CallbackAdminStats  = "admin_stats"
-	CallbackAdminSystem = "admin_system"
-	CallbackAdminLogs   = "admin_logs"
-	CallbackAdminBack   = "admin_back"
+	// ============== RESET MENU ==============
+	CallbackResetAll      = "reset_all"       // 🗑️ Сбросить все
+	CallbackResetCounters = "reset_counters"  // 📊 Сбросить счетчики
+	CallbackResetBySymbol = "reset_by_symbol" // 🔤 Сбросить по символу
 
-	// Premium callbacks
-	CallbackPremiumAnalytics = "premium_analytics"
-	CallbackPremiumSignals   = "premium_signals"
-	CallbackPremiumPriority  = "premium_priority"
-	CallbackPremiumBack      = "premium_back"
+	// ============== SYMBOL SELECTION ==============
+	CallbackSymbolBTCUSDT = "symbol_btcusdt" // BTC/USDT
+	CallbackSymbolETHUSDT = "symbol_ethusdt" // ETH/USDT
+	CallbackSymbolBNBUSDT = "symbol_bnbusdt" // BNB/USDT
+	CallbackSymbolSOLUSDT = "symbol_solusdt" // SOL/USDT
+	CallbackSymbolXRPUSDT = "symbol_xrpusdt" // XRP/USDT
+	CallbackSymbolBack    = "symbol_back"    // 🔙 Назад к сбросу
 
-	// Settings callbacks
-	CallbackSettingsToggleNotifications = "settings_toggle_notifications"
-	CallbackSettingsToggleGrowth        = "settings_toggle_growth"
-	CallbackSettingsToggleFall          = "settings_toggle_fall"
-	CallbackSettingsToggleContinuous    = "settings_toggle_continuous"
-	CallbackSettingsSetQuietHours       = "settings_set_quiet_hours"
-	CallbackSettingsSetGrowthThreshold  = "settings_set_growth_threshold"
-	CallbackSettingsSetFallThreshold    = "settings_set_fall_threshold"
-	CallbackSettingsThreshold2          = "settings_threshold_2"
-	CallbackSettingsThreshold3          = "settings_threshold_3"
-	CallbackSettingsThreshold5          = "settings_threshold_5"
-	CallbackSettingsReset               = "settings_reset"
-	CallbackSettingsPeriod1m            = "settings_period_1"
-	CallbackSettingsPeriod5m            = "settings_period_5"
-	CallbackSettingsPeriod15m           = "settings_period_15"
-	CallbackSettingsPeriod30m           = "settings_period_30"
-	CallbackSettingsPeriod60m           = "settings_period_60"
-	CallbackSettingsPeriod240m          = "settings_period_240"
-	CallbackSettingsPeriod1440m         = "settings_period_1440"
-	CallbackSettingsLanguageRu          = "settings_language_ru"
-	CallbackSettingsLanguageEn          = "settings_language_en"
-	CallbackSettingsLanguageEs          = "settings_language_es"
-	CallbackSettingsLanguageZh          = "settings_language_zh"
-
-	// Advanced callbacks
-	CallbackAdvancedCharts   = "advanced_charts"
-	CallbackAdvancedStats    = "advanced_stats"
-	CallbackAdvancedAnalysis = "advanced_analysis"
-	CallbackAdvancedRisks    = "advanced_risks"
-	CallbackAdvancedReports  = "advanced_reports"
-	CallbackAdvancedBack     = "advanced_back"
-
-	// Admin users callbacks
-	CallbackAdminUsersSearch = "admin_users_search"
-	CallbackAdminUsersList   = "admin_users_list"
-	CallbackAdminUsersRoles  = "admin_users_roles"
-	CallbackAdminUsersStatus = "admin_users_status"
+	// ============== TEST & DEBUG ==============
+	CallbackTest           = "test"             // 🧪 Тестовое сообщение
+	CallbackTestOK         = "test_ok"          // ✅ Тест OK
+	CallbackTestCancel     = "test_cancel"      // ❌ Тест отмена
+	CallbackToggleTestMode = "toggle_test_mode" // 🧪 Переключить тестовый режим
+	CallbackChart          = "chart"            // 📈 Графики
 )
+
+// УДАЛЕННЫЕ КОЛБЭКИ (лишние, неиспользуемые):
+/*
+CallbackNotifyOn, CallbackNotifyOff,
+CallbackSettingsNotifyToggle, CallbackSettingsSignalType, CallbackSettingsChangePeriod,
+CallbackSettingsResetCounter, CallbackSettingsBack, CallbackSettingsBackToMain,
+CallbackTrackGrowthOnly, CallbackTrackFallOnly, CallbackTrackBoth,
+CallbackCounterSettings, CallbackCounterNotifyOn, CallbackCounterNotifyOff,
+CallbackAuthProfile, CallbackAuthSettings, CallbackAuthNotifications, CallbackAuthStats,
+CallbackAuthThresholds, CallbackAdminUsers, CallbackAdminStats, CallbackAdminSystem,
+CallbackAdminLogs, CallbackAdminBack, CallbackPremiumAnalytics, CallbackPremiumSignals,
+CallbackPremiumPriority, CallbackPremiumBack, CallbackSettingsToggleNotifications,
+CallbackSettingsToggleGrowth, CallbackSettingsToggleFall, CallbackSettingsToggleContinuous,
+CallbackSettingsSetQuietHours, CallbackSettingsSetGrowthThreshold, CallbackSettingsSetFallThreshold,
+CallbackSettingsThreshold2, CallbackSettingsThreshold3, CallbackSettingsThreshold5,
+CallbackSettingsReset, CallbackSettingsPeriod1m, CallbackSettingsPeriod5m,
+CallbackSettingsPeriod15m, CallbackSettingsPeriod30m, CallbackSettingsPeriod60m,
+CallbackSettingsPeriod240m, CallbackSettingsPeriod1440m, CallbackSettingsLanguageRu,
+CallbackSettingsLanguageEn, CallbackSettingsLanguageEs, CallbackSettingsLanguageZh,
+CallbackAdvancedCharts, CallbackAdvancedStats, CallbackAdvancedAnalysis,
+CallbackAdvancedRisks, CallbackAdvancedReports, CallbackAdvancedBack,
+CallbackAdminUsersSearch, CallbackAdminUsersList, CallbackAdminUsersRoles,
+CallbackAdminUsersStatus, CallbackResetBySymbol (старый)
+*/

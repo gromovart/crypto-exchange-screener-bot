@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 
@@ -241,11 +242,22 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 			user.QuietHoursStart, user.QuietHoursEnd)
 	}
 
+	// Форматируем периоды
+	periodsStr := "Не настроены"
+	if len(user.PreferredPeriods) > 0 {
+		periods := make([]string, 0, len(user.PreferredPeriods))
+		for _, p := range user.PreferredPeriods {
+			periods = append(periods, sm.formatPeriodMinutes(p))
+		}
+		periodsStr = stringJoin(periods, ", ")
+	}
+
 	return fmt.Sprintf(
 		"⚙️ *Настройки пользователя* @%s\n\n"+
 			"📊 *Анализ:*\n"+
 			"   Рост: ≥ %.2f%%\n"+
-			"   Падение: ≥ %.2f%%\n\n"+
+			"   Падение: ≥ %.2f%%\n"+
+			"   Периоды: %s\n\n"+
 			"🔔 *Уведомления:*\n"+
 			"   Все: %s\n"+
 			"   Рост: %s\n"+
@@ -257,6 +269,7 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 		user.Username,
 		user.MinGrowthThreshold,
 		user.MinFallThreshold,
+		periodsStr,
 		notificationsStatus,
 		growthStatus,
 		fallStatus,
@@ -265,6 +278,26 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 		user.MaxSignalsPerDay,
 		user.SubscriptionTier,
 	)
+}
+
+// formatPeriodMinutes форматирует минуты в читаемый период
+func (sm *SettingsManager) formatPeriodMinutes(minutes int) string {
+	switch minutes {
+	case 5:
+		return "5m"
+	case 15:
+		return "15m"
+	case 30:
+		return "30m"
+	case 60:
+		return "1h"
+	case 240:
+		return "4h"
+	case 1440:
+		return "1d"
+	default:
+		return fmt.Sprintf("%dm", minutes)
+	}
 }
 
 // formatToggleResult форматирует результат переключения
@@ -301,4 +334,28 @@ func (sm *SettingsManager) invalidateUserCache(userID int) {
 	for _, key := range keys {
 		sm.redisClient.Del(ctx, key)
 	}
+}
+
+// stringJoin объединяет строки (аналог strings.Join но для []string)
+func stringJoin(elems []string, sep string) string {
+	switch len(elems) {
+	case 0:
+		return ""
+	case 1:
+		return elems[0]
+	}
+
+	n := len(sep) * (len(elems) - 1)
+	for i := 0; i < len(elems); i++ {
+		n += len(elems[i])
+	}
+
+	var b strings.Builder
+	b.Grow(n)
+	b.WriteString(elems[0])
+	for _, s := range elems[1:] {
+		b.WriteString(sep)
+		b.WriteString(s)
+	}
+	return b.String()
 }

@@ -534,3 +534,55 @@ go list -f '{{join .Deps "\n"}}' ./... | sort | uniq
 # Или используйте:
 go vet ./...
 golangci-lint run
+
+
+📊 ИСПРАВЛЕННАЯ СТРУКТУРА МЕНЮ (С АВТОРИЗАЦИЕЙ)
+=============================================
+
+🏠 ГЛАВНОЕ МЕНЮ (Reply Keyboard)
+├── ⚙️ Настройки → callback: settings_main
+├── 📊 Статус → callback: status
+├── 🔔 Уведомления → callback: notifications_menu
+├── 📈 Сигналы → callback: signals_menu
+├── ⏱️ Периоды → callback: periods_menu
+├── 🔄 Сбросить → callback: reset_menu
+└── 📋 Помощь → command: /help
+
+⚙️ МЕНЮ НАСТРОЕК (адаптивное)
+│
+├── 👤 ДЛЯ НЕАВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ:
+│   ├── 🔑 Войти / Авторизация → callback: auth_login
+│   ├── 🔔 Уведомления → callback: notifications_menu
+│   ├── ⏱️ Периоды → callback: periods_menu
+│   └── 🔙 Назад → callback: menu_main
+│
+├── 👤 ДЛЯ АВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ:
+│   ├── 👤 Мой профиль → callback: profile_main
+│   ├── 🔔 Уведомления → callback: notifications_menu
+│   ├── 📊 Пороги сигналов → callback: thresholds_menu
+│   ├── ⏱️ Периоды → callback: periods_menu
+│   ├── ⚙️ Сбросить настройки → callback: reset_settings
+│   └── 🔙 Назад → callback: menu_main
+│
+├── 🔔 МЕНЮ УВЕДОМЛЕНИЙ (одинаковое для всех)
+│   ├── ✅ Включить → callback: notify_toggle
+│   ├── ❌ Выключить → callback: notify_toggle
+│   ├── 📈 Только рост → callback: notify_growth_only
+│   ├── 📉 Только падение → callback: notify_fall_only
+│   ├── 📊 Все сигналы → callback: notify_both
+│   └── 🔙 Назад → callback: settings_main
+│
+├── 📊 МЕНЮ ПОРОГОВ (только для авторизованных)
+│   ├── 📈 Мин. рост: 1.5% → callback: threshold_growth
+│   ├── 📉 Мин. падение: 1.5% → callback: threshold_fall
+│   ├── 🕐 Тихие часы: 22-08 → callback: quiet_hours
+│   └── 🔙 Назад → callback: settings_main
+│
+├── ⏱️ МЕНЮ ПЕРИОДОВ (адаптивное)
+│   ├── [БАЗОВЫЙ] Текущий: 15мин → callback: period_select
+│   └── [РАСШИРЕННЫЙ] Предпочтительные: 5m,15m,1h → callback: period_manage
+│
+└── 👤 ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ (только для авторизованных)
+    ├── 📊 Статистика → callback: profile_stats
+    ├── 💎 Подписка: Free → callback: profile_subscription
+    └── 🔙 Назад → callback: settings_main

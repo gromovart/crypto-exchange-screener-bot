@@ -1,4 +1,3 @@
-// internal/delivery/telegram/auth_init.go
 package telegram
 
 import (
@@ -96,28 +95,12 @@ func (ai *AuthInitializer) CreateDefaultAuthKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: AuthButtonTexts.Profile, CallbackData: CallbackAuthProfile},
-				{Text: AuthButtonTexts.Settings, CallbackData: CallbackAuthSettings},
+				{Text: "👤 Профиль", CallbackData: CallbackProfileMain},
+				{Text: "⚙️ Настройки", CallbackData: CallbackSettingsMain},
 			},
 			{
-				{Text: AuthButtonTexts.Notifications, CallbackData: CallbackAuthNotifications},
-				{Text: AuthButtonTexts.Stats, CallbackData: CallbackAuthStats},
-			},
-		},
-	}
-}
-
-// CreateAdminAuthKeyboard создает клавиатуру для администратора
-func (ai *AuthInitializer) CreateAdminAuthKeyboard() *InlineKeyboardMarkup {
-	return &InlineKeyboardMarkup{
-		InlineKeyboard: [][]InlineKeyboardButton{
-			{
-				{Text: AuthButtonTexts.Users, CallbackData: CallbackAdminUsers},
-				{Text: AuthButtonTexts.Stats, CallbackData: CallbackAdminStats},
-			},
-			{
-				{Text: AuthButtonTexts.System, CallbackData: CallbackAdminSystem},
-				{Text: ButtonTexts.Back, CallbackData: CallbackAdminBack},
+				{Text: "🔔 Уведомления", CallbackData: CallbackNotificationsMenu},
+				{Text: "📊 Статистика", CallbackData: CallbackProfileStats},
 			},
 		},
 	}
@@ -128,12 +111,12 @@ func (ai *AuthInitializer) CreatePremiumAuthKeyboard() *InlineKeyboardMarkup {
 	return &InlineKeyboardMarkup{
 		InlineKeyboard: [][]InlineKeyboardButton{
 			{
-				{Text: "🚀 Расширенная аналитика", CallbackData: CallbackPremiumAnalytics},
-				{Text: "📈 Детальные сигналы", CallbackData: CallbackPremiumSignals},
+				{Text: "🚀 Расширенная аналитика", CallbackData: "premium_analytics"},
+				{Text: "📈 Детальные сигналы", CallbackData: "premium_signals"},
 			},
 			{
-				{Text: AuthButtonTexts.Priority, CallbackData: CallbackPremiumPriority},
-				{Text: ButtonTexts.Back, CallbackData: CallbackPremiumBack},
+				{Text: "⏱️ Приоритет", CallbackData: "premium_priority"},
+				{Text: ButtonTexts.Back, CallbackData: "premium_back"},
 			},
 		},
 	}

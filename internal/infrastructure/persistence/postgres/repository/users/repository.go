@@ -734,3 +734,33 @@ func getNullTime(t time.Time) sql.NullTime {
 		Valid: true,
 	}
 }
+
+// GetByTelegramID получает пользователя по Telegram ID
+func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int64) (*models.User, error) {
+	var user models.User
+	query := `SELECT id, telegram_id, username, first_name, last_name, chat_id,
+		created_at, updated_at, min_growth_threshold, min_fall_threshold,
+		notifications_enabled, notify_growth, notify_fall, notify_continuous,
+		quiet_hours_start, quiet_hours_end, preferred_periods, min_volume_filter,
+		exclude_patterns, language, timezone, display_mode, subscription_tier,
+		signals_today, max_signals_per_day, is_active, last_activity_at
+		FROM users WHERE telegram_id = $1`
+
+	err := r.db.QueryRowContext(ctx, query, telegramID).Scan(
+		&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.LastName, &user.ChatID,
+		&user.CreatedAt, &user.UpdatedAt, &user.MinGrowthThreshold, &user.MinFallThreshold,
+		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
+		&user.QuietHoursStart, &user.QuietHoursEnd, pq.Array(&user.PreferredPeriods), &user.MinVolumeFilter,
+		&user.ExcludePatterns, &user.Language, &user.Timezone, &user.DisplayMode, &user.SubscriptionTier,
+		&user.SignalsToday, &user.MaxSignalsPerDay, &user.IsActive, &user.LastLoginAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user by telegram ID: %w", err)
+	}
+
+	return &user, nil
+}
