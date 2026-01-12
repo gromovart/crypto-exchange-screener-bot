@@ -708,8 +708,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		// Проверка на аномальные значения
 		if volumeUSD > 1000000000 && price < 0.1 { // Объем > 1B при цене < $0.1
-			logger.Warn("⚠️ Подозрительный объем для %s: цена=$%f, объем=$%.0f",
-				ticker.Symbol, price, volumeUSD)
+			// logger.Warn("⚠️ Подозрительный объем для %s: цена=$%f, объем=$%.0f",
+			// 	ticker.Symbol, price, volumeUSD)
 			// Используем скорректированный объем
 			volumeUSD = volumeUSD / 1000 // Уменьшаем в 1000 раз
 		}
@@ -729,12 +729,12 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			if volumeUSD > 0 {
 				ratio := openInterest / volumeUSD
 				if ratio > 10 { // OI не должен быть больше 10x объема
-					logger.Warn("⚠️ Подозрительное соотношение OI/Volume для %s: OI=%.0f, Volume=%.0f, соотношение=%.1fx",
-						ticker.Symbol, openInterest, volumeUSD, ratio)
+					// logger.Warn("⚠️ Подозрительное соотношение OI/Volume для %s: OI=%.0f, Volume=%.0f, соотношение=%.1fx",
+					// 	ticker.Symbol, openInterest, volumeUSD, ratio)
 
 					// Корректируем OI до 5% от объема
 					correctedOI := volumeUSD * 0.05
-					logger.Info("📉 Скорректированный OI для %s: %.0f (было %.0f)",
+					logger.Debug("📉 Скорректированный OI для %s: %.0f (было %.0f)",
 						ticker.Symbol, correctedOI, openInterest)
 					openInterest = correctedOI
 				}

@@ -4,6 +4,7 @@ package telegram
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -188,7 +189,7 @@ func (uh *UpdatesHandler) pollUpdates() {
 	for uh.pollingActive {
 		updates, err := uh.getUpdates()
 		if err != nil {
-			log.Printf("❌ Ошибка получения обновлений: %v", err)
+			logger.Error("❌ Ошибка получения обновлений: %v", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -210,7 +211,7 @@ func (uh *UpdatesHandler) pollUpdates() {
 func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	url := fmt.Sprintf("https://api.telegram.org/bot%s/getUpdates", uh.config.TelegramBotToken)
 
-	log.Printf("🔄 Запрос обновлений с offset: %d", uh.lastUpdateID)
+	logger.Debug("🔄 Запрос обновлений с offset: %d", uh.lastUpdateID)
 
 	// Параметры запроса
 	params := map[string]interface{}{
@@ -222,7 +223,7 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	// Отправляем запрос
 	resp, err := uh.httpClient.Post(url, "application/json", toJSONReader(params))
 	if err != nil {
-		log.Printf("❌ Ошибка запроса к Telegram API: %v", err)
+		logger.Error("❌ Ошибка запроса к Telegram API: %v", err)
 		return nil, fmt.Errorf("failed to get updates: %w", err)
 	}
 	defer resp.Body.Close()
@@ -230,11 +231,11 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	// Читаем ответ
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("❌ Ошибка чтения ответа: %v", err)
+		logger.Error("❌ Ошибка чтения ответа: %v", err)
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	log.Printf("📥 Ответ от Telegram API (первые 200 символов): %s", string(body[:min(200, len(body))]))
+	logger.Debug("📥 Ответ от Telegram API (первые 200 символов): %s", string(body[:min(200, len(body))]))
 
 	// Парсим ответ
 	var response struct {
@@ -243,17 +244,17 @@ func (uh *UpdatesHandler) getUpdates() ([]TelegramUpdate, error) {
 	}
 
 	if err := json.Unmarshal(body, &response); err != nil {
-		log.Printf("❌ Ошибка парсинга JSON: %v", err)
-		log.Printf("📄 Полный ответ: %s", string(body))
+		logger.Error("❌ Ошибка парсинга JSON: %v", err)
+		logger.Error("📄 Полный ответ: %s", string(body))
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	if !response.OK {
-		log.Printf("❌ Telegram API вернул ошибку: %s", string(body))
+		logger.Error("❌ Telegram API вернул ошибку: %s", string(body))
 		return nil, fmt.Errorf("telegram API error: %s", string(body))
 	}
 
-	log.Printf("✅ Получено обновлений: %d", len(response.Result))
+	logger.Debug("✅ Получено обновлений: %d", len(response.Result))
 	return response.Result, nil
 }
 

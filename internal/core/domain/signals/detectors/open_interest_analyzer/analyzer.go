@@ -77,7 +77,7 @@ func (a *OpenInterestAnalyzer) Analyze(data []types.PriceData, cfg map[string]in
 	}
 
 	symbol := data[0].Symbol
-	logger.Info("🔍 OpenInterestAnalyzer v2: начало анализа %s, точек данных: %d",
+	logger.Debug("🔍 OpenInterestAnalyzer v2: начало анализа %s, точек данных: %d",
 		symbol, len(data))
 
 	// Конвертируем конфигурацию

@@ -16,6 +16,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // BYBIT CLIENT
@@ -238,20 +239,20 @@ func (c *BybitClient) GetRecentLiquidations(symbol string, limit int) ([]Liquida
 		if item.ExecType == "Liquidation" || item.ExecType == "BustTrade" {
 			price, err := strconv.ParseFloat(item.Price, 64)
 			if err != nil {
-				log.Printf("⚠️ Ошибка парсинга цены ликвидации %s: %v", item.Price, err)
+				logger.Warn("⚠️ Ошибка парсинга цены ликвидации %s: %v", item.Price, err)
 				continue
 			}
 
 			size, err := strconv.ParseFloat(item.Size, 64)
 			if err != nil {
-				log.Printf("⚠️ Ошибка парсинга размера ликвидации %s: %v", item.Size, err)
+				logger.Warn("⚠️ Ошибка парсинга размера ликвидации %s: %v", item.Size, err)
 				continue
 			}
 
 			// Парсим время (миллисекунды)
 			timestampMs, err := strconv.ParseInt(item.Time, 10, 64)
 			if err != nil {
-				log.Printf("⚠️ Ошибка парсинга времени ликвидации %s: %v", item.Time, err)
+				logger.Warn("⚠️ Ошибка парсинга времени ликвидации %s: %v", item.Time, err)
 				continue
 			}
 
@@ -266,12 +267,12 @@ func (c *BybitClient) GetRecentLiquidations(symbol string, limit int) ([]Liquida
 				IsLiquidation: true,
 			})
 
-			log.Printf("💥 Найдена ликвидация %s: %s %.2f @ $%.2f ($%.0f)",
+			logger.Debug("💥 Найдена ликвидация %s: %s %.2f @ $%.2f ($%.0f)",
 				item.Symbol, item.Side, size, price, price*size)
 		}
 	}
 
-	log.Printf("📊 Получено %d ликвидаций для %s", len(liquidations), symbol)
+	logger.Debug("📊 Получено %d ликвидаций для %s", len(liquidations), symbol)
 	return liquidations, nil
 }
 
@@ -291,19 +292,19 @@ func (c *BybitClient) GetLiquidationsVolume(symbol string, period time.Duration)
 	var totalVolume float64
 	cutoffTime := time.Now().Add(-period)
 
-	log.Printf("🔍 Анализ ликвидаций для %s за период %v", symbol, period)
+	logger.Debug("🔍 Анализ ликвидаций для %s за период %v", symbol, period)
 
 	for _, liq := range liquidations {
 		if liq.Time.After(cutoffTime) {
 			volume := liq.Price * liq.Quantity // Объем в USD
 			totalVolume += volume
 
-			log.Printf("   + Ликвидация %s: $%.0f @ $%.2f",
+			logger.Debug("   + Ликвидация %s: $%.0f @ $%.2f",
 				liq.Side, volume, liq.Price)
 		}
 	}
 
-	log.Printf("💰 Общий объем ликвидаций %s за %v: $%.0f",
+	logger.Debug("💰 Общий объем ликвидаций %s за %v: $%.0f",
 		symbol, period, totalVolume)
 
 	return totalVolume, nil
@@ -311,7 +312,7 @@ func (c *BybitClient) GetLiquidationsVolume(symbol string, period time.Duration)
 
 // GetLiquidationsSummary получает сводку по ликвидациям
 func (c *BybitClient) GetLiquidationsSummary(symbol string, period time.Duration) (map[string]interface{}, error) {
-	log.Printf("📊 Получение сводки ликвидаций для %s за %v", symbol, period)
+	logger.Debug("📊 Получение сводки ликвидаций для %s за %v", symbol, period)
 
 	// Получаем данные
 	liquidations, err := c.GetRecentLiquidations(symbol, 200) // Максимум 200 записей
@@ -323,7 +324,7 @@ func (c *BybitClient) GetLiquidationsSummary(symbol string, period time.Duration
 	var totalVolume, longLiqVolume, shortLiqVolume float64
 	var longCount, shortCount int
 
-	log.Printf("🔍 Фильтрация %d записей ликвидаций...", len(liquidations))
+	logger.Debug("🔍 Фильтрация %d записей ликвидаций...", len(liquidations))
 
 	for _, liq := range liquidations {
 		if liq.Time.After(cutoffTime) {
@@ -336,11 +337,11 @@ func (c *BybitClient) GetLiquidationsSummary(symbol string, period time.Duration
 			if liq.Side == "Buy" { // Buy ликвидация = ликвидация длинной позиции
 				longLiqVolume += volume
 				longCount++
-				log.Printf("   📉 Long liquidation: $%.0f", volume)
+				logger.Debug("   📉 Long liquidation: $%.0f", volume)
 			} else if liq.Side == "Sell" { // Sell ликвидация = ликвидация короткой позиции
 				shortLiqVolume += volume
 				shortCount++
-				log.Printf("   📈 Short liquidation: $%.0f", volume)
+				logger.Debug("   📈 Short liquidation: $%.0f", volume)
 			}
 		}
 	}
@@ -363,11 +364,11 @@ func (c *BybitClient) GetLiquidationsSummary(symbol string, period time.Duration
 		"update_time":      time.Now(),
 	}
 
-	log.Printf("✅ Сводка ликвидаций %s:", symbol)
-	log.Printf("   Общий объем: $%.0f", totalVolume)
-	log.Printf("   Long ликвидации: $%.0f (%.1f%%)", longLiqVolume, longRatio)
-	log.Printf("   Short ликвидации: $%.0f (%.1f%%)", shortLiqVolume, shortRatio)
-	log.Printf("   Количество: %d (long: %d, short: %d)",
+	logger.Debug("✅ Сводка ликвидаций %s:", symbol)
+	logger.Debug("   Общий объем: $%.0f", totalVolume)
+	logger.Debug("   Long ликвидации: $%.0f (%.1f%%)", longLiqVolume, longRatio)
+	logger.Debug("   Short ликвидации: $%.0f (%.1f%%)", shortLiqVolume, shortRatio)
+	logger.Debug("   Количество: %d (long: %d, short: %d)",
 		longCount+shortCount, longCount, shortCount)
 
 	return result, nil
@@ -496,13 +497,13 @@ func (c *BybitClient) GetOpenInterestForSymbols(symbols []string) (map[string]fl
 	for _, symbol := range symbols {
 		oi, err := c.GetOpenInterest(symbol)
 		if err != nil {
-			log.Printf("⚠️ Ошибка получения OI для %s: %v", symbol, err)
+			logger.Warn("⚠️ Ошибка получения OI для %s: %v", symbol, err)
 			continue
 		}
 
 		if oi > 0 {
 			result[symbol] = oi
-			log.Printf("✅ Получен OI для %s: %.0f", symbol, oi)
+			logger.Debug("✅ Получен OI для %s: %.0f", symbol, oi)
 		}
 
 		// Rate limiting

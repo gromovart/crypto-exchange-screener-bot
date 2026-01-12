@@ -75,7 +75,7 @@ func (a *FallAnalyzer) Analyze(data []types.PriceData, cfg map[string]interface{
 	}
 
 	symbol := data[0].Symbol
-	logger.Info("🔻 FallAnalyzer v2: начало анализа %s, точек данных: %d",
+	logger.Debug("🔻 FallAnalyzer v2: начало анализа %s, точек данных: %d",
 		symbol, len(data))
 
 	// Конвертируем конфигурацию

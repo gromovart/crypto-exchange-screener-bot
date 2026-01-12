@@ -9,6 +9,7 @@ import (
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"sort"
@@ -703,7 +704,7 @@ func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
 		}
 		// Логируем для отладки
 		if data.OpenInterest > 0 {
-			log.Printf("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
+			logger.Debug("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
 				data.Symbol, data.OpenInterest, data.FundingRate*100, data.Change24h)
 		}
 	}

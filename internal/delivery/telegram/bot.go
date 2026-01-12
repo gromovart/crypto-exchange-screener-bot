@@ -609,3 +609,6 @@ func CreateTestKeyboard() *InlineKeyboardMarkup {
 		},
 	}
 }
+func (tb *TelegramBot) GetMessageSender() *MessageSender {
+	return tb.messageSender
+}

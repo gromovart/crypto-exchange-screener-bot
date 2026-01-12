@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // MarketMetricsCalculator - калькулятор рыночных метрик
@@ -90,7 +91,7 @@ func (c *MarketMetricsCalculator) CalculateOIChange24h(symbol string) float64 {
 		}); ok {
 			if metrics, exists := storage.GetSymbolMetrics(symbol); exists {
 				oiChange := getFloatFromMap(metrics, "OIChange24h", 0)
-				log.Printf("✅ Получен OI change для %s: %.1f%%", symbol, oiChange)
+				logger.Debug("✅ Получен OI change для %s: %.1f%%", symbol, oiChange)
 				return oiChange
 			}
 		}

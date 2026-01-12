@@ -85,4 +85,5 @@ const (
 	EventConfigChanged              EventType = "config_changed"
 	EventCounterSignalDetected      EventType = "counter_signal_detected"
 	EventCounterNotificationRequest EventType = "counter_notification_request"
+	EventUserNotification           EventType = "user_notification"
 )

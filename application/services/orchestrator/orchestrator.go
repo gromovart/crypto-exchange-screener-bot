@@ -1,4 +1,5 @@
 // application/services/orchestrator/orchestrator.go
+
 package orchestrator
 
 import (
@@ -24,6 +25,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	usernotification "crypto-exchange-screener-bot/application/services/notification"
 )
 
 // DataManager главный менеджер данных
@@ -50,6 +53,10 @@ type DataManager struct {
 	databaseService *database.DatabaseService
 	redisService    *redis.RedisService
 	userService     *users.Service
+
+	// НОВЫЕ: Сервисы уведомлений пользователям
+	userNotificationService *usernotification.UserNotificationService
+	userNotificationHandler *telegram.UserNotificationHandler
 
 	// Управление
 	mu       sync.RWMutex
@@ -93,7 +100,6 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 }
 
 // InitializeComponents инициализирует все компоненты
-// InitializeComponents инициализирует все компоненты
 func (dm *DataManager) InitializeComponents(testMode bool) error {
 	fmt.Printf("🔍 DataManager: RateLimitDelay = %v\n", dm.config.RateLimitDelay)
 
@@ -102,65 +108,30 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		fmt.Printf("   Лимит: %v между событиями\n", dm.config.RateLimitDelay)
 	}
 
-	// 0. СОЗДАЕМ СЕРВИС БАЗЫ ДАННЫХ (первым)
+	// ==================== БЛОК 1: ИНФРАСТРУКТУРА ====================
+
+	// 1.1 База данных
 	log.Println("🗄️  Creating database service...")
 	dm.databaseService = database.NewDatabaseService(dm.config)
-
-	// Пытаемся подключиться к базе данных
 	if err := dm.databaseService.Start(); err != nil {
 		log.Printf("⚠️  Failed to start database service: %v", err)
 		log.Println("⚠️  Application will continue without database connection")
-		// Не возвращаем ошибку, чтобы приложение могло работать без БД
 	} else {
 		log.Println("✅ Database service started successfully")
 	}
 
-	// 0.1 СОЗДАЕМ REDIS СЕРВИС (вторым)
+	// 1.2 Redis
 	log.Println("🔴 Creating Redis service...")
 	dm.redisService = redis.NewRedisService(dm.config)
-
-	// Пытаемся подключиться к Redis
 	if err := dm.redisService.Start(); err != nil {
 		log.Printf("⚠️  Failed to start Redis service: %v", err)
 		log.Println("⚠️  Application will continue without Redis connection")
-		// Не возвращаем ошибку, чтобы приложение могло работать без Redis
 	} else {
 		log.Println("✅ Redis service started successfully")
 	}
 
-	// 🔐 СОЗДАЕМ СЕРВИС ПОЛЬЗОВАТЕЛЕЙ ДЛЯ АВТОРИЗАЦИИ (перед Telegram ботом)
-	log.Println("👤 Создание сервиса пользователей для авторизации...")
-	if dm.databaseService != nil && dm.redisService != nil {
-		// Получаем соединение с БД
-		db := dm.databaseService.GetDB()
-		// Получаем Redis кэш
-		redisCache := dm.redisService.GetCache()
-
-		if db != nil && redisCache != nil {
-			// Создаем конфигурацию
-			userConfig := users.Config{
-				DefaultMinGrowthThreshold: 2.0,
-				DefaultMaxSignalsPerDay:   50,
-				SessionTTL:                24 * time.Hour,
-				MaxSessionsPerUser:        5,
-			}
-
-			// Создаем сервис пользователей
-			var err error
-			dm.userService, err = users.NewService(db, redisCache, nil, userConfig)
-			if err != nil {
-				log.Printf("⚠️  Не удалось создать сервис пользователей: %v", err)
-			} else {
-				log.Println("✅ Сервис пользователей создан для авторизации")
-			}
-		} else {
-			log.Println("⚠️  Не удалось получить подключение к БД или Redis")
-		}
-	} else {
-		log.Println("⚠️  DatabaseService или RedisService не создан, авторизация будет отключена")
-	}
-
-	// 1. Создаем EventBus
+	// 1.3 EventBus
+	log.Println("🚌 Creating EventBus...")
 	eventBusConfig := events.EventBusConfig{
 		BufferSize:    dm.config.EventBus.BufferSize,
 		WorkerCount:   dm.config.EventBus.WorkerCount,
@@ -168,8 +139,12 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		EnableLogging: dm.config.EventBus.EnableLogging,
 	}
 	dm.eventBus = events.NewEventBus(eventBusConfig)
+	log.Println("✅ EventBus created")
 
-	// 2. Создаем хранилище
+	// ==================== БЛОК 2: ХРАНЕНИЕ И ПОЛУЧЕНИЕ ДАННЫХ ====================
+
+	// 2.1 Хранилище цен
+	log.Println("💾 Creating price storage...")
 	storageConfig := &storage.StorageConfig{
 		MaxHistoryPerSymbol: 10000,
 		MaxSymbols:          1000,
@@ -177,62 +152,117 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		RetentionPeriod:     24 * time.Hour,
 	}
 	dm.storage = storage.NewInMemoryPriceStorage(storageConfig)
+	log.Println("✅ Price storage created")
 
-	// 3. Создаем API клиент
+	// 2.2 API клиент
+	log.Println("🌐 Creating API client...")
 	apiClient := bybit.NewBybitClient(dm.config)
 
-	// 4. Создаем PriceFetcher
+	// 2.3 Получение цен
+	log.Println("📡 Creating PriceFetcher...")
 	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus)
+	log.Println("✅ PriceFetcher created")
 
-	// 5. Создаем CompositeNotificationService через фабрику
-	log.Println("📱 Создание CompositeNotificationService через фабрику...")
-	notifierFactory := notifier.NewNotifierFactory(dm.eventBus)
-	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)
+	// ==================== БЛОК 3: ПОЛЬЗОВАТЕЛИ И АВТОРИЗАЦИЯ ====================
 
-	if dm.notification == nil {
-		return fmt.Errorf("не удалось создать CompositeNotificationService")
+	// 3.1 Сервис пользователей
+	log.Println("👤 Creating user service...")
+	if dm.databaseService != nil && dm.redisService != nil {
+		db := dm.databaseService.GetDB()
+		redisCache := dm.redisService.GetCache()
+
+		if db != nil && redisCache != nil {
+			userConfig := users.Config{
+				DefaultMinGrowthThreshold: 2.0,
+				DefaultMaxSignalsPerDay:   50,
+				SessionTTL:                24 * time.Hour,
+				MaxSessionsPerUser:        5,
+			}
+
+			var err error
+			dm.userService, err = users.NewService(db, redisCache, nil, userConfig)
+			if err != nil {
+				log.Printf("⚠️  Не удалось создать сервис пользователей: %v", err)
+			} else {
+				log.Println("✅ User service created")
+			}
+		} else {
+			log.Println("⚠️  Database or Redis connection not available")
+		}
+	} else {
+		log.Println("⚠️  DatabaseService or RedisService not available")
 	}
-	log.Println("✅ CompositeNotificationService создан через фабрику")
 
-	// 6. СОЗДАЕМ TELEGRAM БОТА С АВТОРИЗАЦИЕЙ (если userService создан)
+	// ==================== БЛОК 4: TELEGRAM И УВЕДОМЛЕНИЯ ====================
+
+	// 4.1 Telegram бот
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		log.Println("🤖 Создание Telegram бота с авторизацией (Singleton)...")
-
-		// Если userService создан, создаем бота с авторизацией
+		log.Println("🤖 Creating Telegram bot...")
 		if dm.userService != nil {
 			dm.telegramBot = telegram.GetOrCreateBotWithAuth(dm.config, dm.userService)
-			log.Println("✅ Telegram бот создан с авторизацией (Singleton)")
+			log.Println("✅ Telegram bot created with auth (Singleton)")
 		} else {
-			// Иначе создаем бота без авторизации
 			dm.telegramBot = telegram.GetOrCreateBot(dm.config)
-			log.Println("✅ Telegram бот создан без авторизации (Singleton)")
+			log.Println("✅ Telegram bot created without auth (Singleton)")
 		}
 
 		if dm.telegramBot != nil {
 			dm.telegramBot.SetTestMode(testMode)
-
-			// 🔴 УБИРАЕМ автоматическую отправку приветственного сообщения
-			// Приветственное сообщение будет отправляться только при команде /start от пользователя
 			if testMode {
-				log.Println("🧪 Тестовый режим - приветственные сообщения отключены")
+				log.Println("🧪 Test mode - welcome messages disabled")
 			} else {
-				log.Println("✅ Бот готов, приветственное сообщение будет отправлено при команде /start")
+				log.Println("✅ Bot ready, welcome message will be sent on /start command")
 			}
 		}
 	}
 
-	// 7. Создаем AnalysisEngine через фабрику, передавая уже созданного бота
-	log.Println("🔧 Создание AnalysisEngine с передачей marketFetcher...")
+	// 4.2 Сервис уведомлений пользователям
+	log.Println("📨 Creating UserNotificationService...")
+	if dm.userService != nil && dm.eventBus != nil {
+		dm.userNotificationService = usernotification.NewUserNotificationService(
+			dm.userService,
+			dm.eventBus,
+		)
+		log.Println("✅ UserNotificationService created")
+	} else {
+		log.Printf("⚠️  UserNotificationService not created: userService=%v, eventBus=%v",
+			dm.userService != nil, dm.eventBus != nil)
+	}
 
-	// 🔴 ИСПРАВЛЕНИЕ: Создаем фабрику с priceFetcher
+	// 4.3 Обработчик уведомлений пользователям
+	log.Println("🤖 Creating UserNotificationHandler...")
+	if dm.config.TelegramEnabled && dm.telegramBot != nil && dm.telegramBot.GetMessageSender() != nil {
+		dm.userNotificationHandler = telegram.NewUserNotificationHandler(
+			dm.telegramBot.GetMessageSender(),
+			dm.config.Exchange,
+		)
+		log.Println("✅ UserNotificationHandler created")
+	} else {
+		log.Printf("⚠️  UserNotificationHandler not created: TelegramEnabled=%v, telegramBot=%v, GetMessageSender=%v",
+			dm.config.TelegramEnabled, dm.telegramBot != nil,
+			dm.telegramBot != nil && dm.telegramBot.GetMessageSender() != nil)
+	}
+
+	// 4.4 Составной сервис уведомлений
+	log.Println("📱 Creating CompositeNotificationService...")
+	notifierFactory := notifier.NewNotifierFactory(dm.eventBus)
+	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)
+	if dm.notification == nil {
+		return fmt.Errorf("failed to create CompositeNotificationService")
+	}
+	log.Println("✅ CompositeNotificationService created")
+
+	// ==================== БЛОК 5: АНАЛИЗ И ОБРАБОТКА ====================
+
+	// 5.1 Движок анализа
+	log.Println("🔧 Creating AnalysisEngine...")
 	analysisFactory := engine.NewFactory(dm.priceFetcher)
 
-	// Получаем TelegramNotifier из CompositeNotificationService
-	var telegramNotifier *notification.TelegramNotifier // Изменен тип
+	var telegramNotifier *notification.TelegramNotifier
 	if dm.notification != nil {
 		for _, notifier := range dm.notification.GetNotifiers() {
 			if tn, ok := notifier.(*notification.TelegramNotifier); ok {
-				telegramNotifier = tn // Теперь типы совместимы
+				telegramNotifier = tn
 				break
 			}
 		}
@@ -244,22 +274,25 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		dm.config,
 		telegramNotifier,
 	)
+	log.Println("✅ AnalysisEngine created")
 
-	log.Printf("✅ AnalysisEngine создан с фабрикой")
-	log.Printf("   PriceFetcher передан в фабрику: %v", dm.priceFetcher != nil)
-	log.Printf("   TelegramNotifier: %v", telegramNotifier != nil)
-
-	// 8. Создаем SignalPipeline
+	// 5.2 Пайплайн сигналов
+	log.Println("🔄 Creating SignalPipeline...")
 	dm.signalPipeline = pipeline.NewSignalPipeline(dm.eventBus)
+	log.Println("✅ SignalPipeline created")
 
-	// 9. Регистрируем подписчиков (теперь только основные)
-	log.Println("📋 Регистрация базовых подписчиков EventBus...")
+	// ==================== БЛОК 6: РЕГИСТРАЦИЯ И НАСТРОЙКА ====================
+
+	// 6.1 Регистрация подписчиков
+	log.Println("📋 Registering EventBus subscribers...")
 	dm.registerBasicSubscribers()
 
-	// 10. Создаем реестр сервисов
+	// 6.2 Реестр сервисов
+	log.Println("📝 Creating service registry...")
 	dm.registry = NewServiceRegistry()
 
-	// 11. Создаем менеджер жизненного цикла
+	// 6.3 Менеджер жизненного цикла
+	log.Println("⚙️ Creating lifecycle manager...")
 	coordinatorConfig := CoordinatorConfig{
 		EnableEventLogging:  true,
 		EventBufferSize:     1000,
@@ -271,42 +304,73 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		MetricsPort:         "9090",
 	}
 	dm.lifecycle = NewLifecycleManager(dm.registry, dm.eventBus, coordinatorConfig)
+	log.Println("✅ Lifecycle manager created")
 
-	// 12. Настраиваем пайплайн
+	// 6.4 Настройка пайплайна
+	log.Println("🔗 Setting up pipeline...")
 	dm.setupPipeline()
 
-	// 13. Регистрируем сервисы
+	// 6.5 Регистрация сервисов
+	log.Println("🏷️ Registering services...")
 	if err := dm.registerServices(); err != nil {
 		return err
 	}
+	log.Println("✅ Services registered")
 
-	// 14. Подписываем notification service на события
+	// 6.6 Подписка notification service
+	log.Println("🔔 Subscribing notification service...")
 	dm.subscribeNotificationService()
 
+	log.Println("🎉 All components initialized successfully!")
 	return nil
 }
 
 // registerBasicSubscribers регистрирует только базовых подписчиков
 func (dm *DataManager) registerBasicSubscribers() {
+	log.Println("📋 Starting subscriber registration...")
+
 	// Консольный логгер для ошибок и сигналов
 	consoleSubscriber := events.NewConsoleLoggerSubscriber()
 	dm.eventBus.Subscribe(types.EventSignalDetected, consoleSubscriber)
 	dm.eventBus.Subscribe(types.EventPriceUpdated, consoleSubscriber)
 	dm.eventBus.Subscribe(types.EventError, consoleSubscriber)
+	log.Println("✅ Console logger subscribed")
 
-	// Регистрируем telegram.Notifier если Telegram бот доступен
+	// Старый Notifier для обычных сигналов
 	if dm.telegramBot != nil {
 		telegramNotifier := telegram.NewNotifier(dm.config)
 		telegramNotifier.SetTelegramBot(dm.telegramBot)
 
 		dm.eventBus.Subscribe(types.EventSignalDetected, telegramNotifier)
-		dm.eventBus.Subscribe(types.EventCounterSignalDetected, telegramNotifier)
 		dm.eventBus.Subscribe(types.EventCounterNotificationRequest, telegramNotifier)
-
-		log.Println("✅ Telegram Notifier зарегистрирован как подписчик EventBus")
+		log.Println("✅ Telegram Notifier subscribed for regular signals")
 	}
 
-	log.Println("✅ Базовые подписчики зарегистрированы")
+	// НОВАЯ СИСТЕМА: UserNotificationService для Counter сигналов
+	if dm.userNotificationService != nil {
+		dm.eventBus.Subscribe(types.EventCounterSignalDetected, dm.userNotificationService)
+		log.Println("✅ UserNotificationService subscribed for EventCounterSignalDetected")
+	} else {
+		log.Println("❌ UserNotificationService not available - Counter signals will not be sent to users")
+
+		// Fallback: используем старый Notifier если новая система недоступна
+		if dm.telegramBot != nil {
+			telegramNotifier := telegram.NewNotifier(dm.config)
+			telegramNotifier.SetTelegramBot(dm.telegramBot)
+			dm.eventBus.Subscribe(types.EventCounterSignalDetected, telegramNotifier)
+			log.Println("⚠️  Using old Notifier as fallback for EventCounterSignalDetected")
+		}
+	}
+
+	// НОВАЯ СИСТЕМА: UserNotificationHandler для пользовательских уведомлений
+	if dm.userNotificationHandler != nil {
+		dm.eventBus.Subscribe(types.EventUserNotification, dm.userNotificationHandler)
+		log.Println("✅ UserNotificationHandler subscribed for EventUserNotification")
+	} else {
+		log.Println("❌ UserNotificationHandler not available - user notifications will not be sent")
+	}
+
+	log.Println("🎯 Subscriber registration completed")
 }
 
 // subscribeNotificationService подписывает notification service на события сигналов
@@ -320,7 +384,6 @@ func (dm *DataManager) subscribeNotificationService() {
 		[]types.EventType{types.EventSignalDetected},
 		func(event types.Event) error {
 			if dm.notification != nil && dm.notification.IsEnabled() {
-				// Преобразуем сигнал для нотификации
 				if signal, ok := event.Data.(analysis.Signal); ok {
 					trendSignal := adapters.AnalysisSignalToTrendSignal(signal)
 					return dm.notification.Send(trendSignal)
@@ -331,19 +394,18 @@ func (dm *DataManager) subscribeNotificationService() {
 	)
 
 	dm.eventBus.Subscribe(types.EventSignalDetected, notificationSubscriber)
-	log.Println("✅ Notification service подписан на события сигналов")
+	log.Println("✅ Notification service subscribed to signal events")
 }
 
 // setupPipeline настраивает этапы обработки сигналов
 func (dm *DataManager) setupPipeline() {
-	// Добавляем этапы валидации и обогащения
 	dm.signalPipeline.AddStage(&pipeline.ValidationStage{})
 	dm.signalPipeline.AddStage(&pipeline.EnrichmentStage{})
+	log.Println("✅ Pipeline stages configured")
 }
 
 // registerServices регистрирует сервисы в реестре
 func (dm *DataManager) registerServices() error {
-	// Регистрируем все сервисы
 	services := map[string]Service{
 		"PriceStorage":        dm.newServiceAdapter("PriceStorage", dm.storage),
 		"PriceFetcher":        dm.newServiceAdapter("PriceFetcher", dm.priceFetcher),
@@ -353,31 +415,40 @@ func (dm *DataManager) registerServices() error {
 		"EventBus":            dm.newServiceAdapter("EventBus", dm.eventBus),
 	}
 
-	// Регистрируем DatabaseService если он создан
+	// Инфраструктура
 	if dm.databaseService != nil {
 		services["DatabaseService"] = dm.newServiceAdapter("DatabaseService", dm.databaseService)
 	}
-
-	// Регистрируем RedisService если он создан
 	if dm.redisService != nil {
 		services["RedisService"] = dm.newServiceAdapter("RedisService", dm.redisService)
 	}
 
+	// Telegram
 	if dm.telegramBot != nil {
 		services["TelegramBot"] = dm.newServiceAdapter("TelegramBot", dm.telegramBot)
 	}
-
-	// ДОБАВИЛИ регистрацию WebhookServer
 	if dm.webhookServer != nil {
 		services["WebhookServer"] = dm.newServiceAdapter("WebhookServer", dm.webhookServer)
 	}
+
+	// Пользователи
 	if dm.userService != nil {
 		services["UserService"] = dm.newServiceAdapter("UserService", dm.userService)
 	}
+
+	// Новая система уведомлений
+	if dm.userNotificationService != nil {
+		services["UserNotificationService"] = dm.newServiceAdapter("UserNotificationService", dm.userNotificationService)
+	}
+	if dm.userNotificationHandler != nil {
+		services["UserNotificationHandler"] = dm.newServiceAdapter("UserNotificationHandler", dm.userNotificationHandler)
+	}
+
 	for name, service := range services {
 		if err := dm.registry.Register(name, service); err != nil {
 			return fmt.Errorf("failed to register service %s: %w", name, err)
 		}
+		log.Printf("✅ Registered service: %s", name)
 	}
 
 	return nil
@@ -385,11 +456,11 @@ func (dm *DataManager) registerServices() error {
 
 // setupDependencies настраивает зависимости между сервисами
 func (dm *DataManager) setupDependencies() {
-	// AnalysisEngine зависит от PriceStorage и EventBus
+	// Анализ зависит от хранилища и EventBus
 	dm.lifecycle.AddDependency("AnalysisEngine", "PriceStorage")
 	dm.lifecycle.AddDependency("AnalysisEngine", "EventBus")
 
-	// SignalPipeline зависит от EventBus
+	// Пайплайн зависит от EventBus
 	dm.lifecycle.AddDependency("SignalPipeline", "EventBus")
 
 	// NotificationService зависит от EventBus
@@ -404,18 +475,24 @@ func (dm *DataManager) setupDependencies() {
 	if dm.webhookServer != nil {
 		dm.lifecycle.AddDependency("WebhookServer", "TelegramBot")
 	}
+
+	// Новая система зависит от EventBus
+	if dm.userNotificationService != nil {
+		dm.lifecycle.AddDependency("UserNotificationService", "EventBus")
+	}
+	if dm.userNotificationHandler != nil {
+		dm.lifecycle.AddDependency("UserNotificationHandler", "EventBus")
+	}
 }
 
 // startBackgroundTasks запускает фоновые задачи
 func (dm *DataManager) startBackgroundTasks() {
-	// Задача обновления статистики системы
+	// Обновление статистики системы
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
-
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -426,14 +503,12 @@ func (dm *DataManager) startBackgroundTasks() {
 		}
 	}()
 
-	// Задача автоматической очистки старых данных
+	// Очистка старых данных
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
-
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -446,14 +521,12 @@ func (dm *DataManager) startBackgroundTasks() {
 		}
 	}()
 
-	// Задача мониторинга здоровья
+	// Мониторинг здоровья
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
-
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -470,23 +543,17 @@ func (dm *DataManager) updateSystemStats() {
 	dm.mu.Lock()
 	defer dm.mu.Unlock()
 
-	// Получаем информацию о сервисах
 	servicesInfo := dm.registry.GetAllInfo()
-
-	// Получаем статистику хранилища
 	storageStats := dm.storage.GetStats()
 
-	// Получаем использование памяти
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	// Получаем статистику анализа
 	var analysisStats interface{}
 	if dm.analysisEngine != nil {
 		analysisStats = dm.analysisEngine.GetStats()
 	}
 
-	// Получаем статистику EventBus
 	var eventBusStats interface{}
 	if dm.eventBus != nil {
 		eventBusStats = dm.eventBus.GetMetrics()
@@ -509,9 +576,7 @@ func (dm *DataManager) updateSystemStats() {
 // checkHealth проверяет здоровье системы
 func (dm *DataManager) checkHealth() {
 	health := dm.GetHealthStatus()
-
 	if health.Status != "healthy" {
-		// Публикуем событие в EventBus
 		dm.eventBus.Publish(types.Event{
 			Type:   types.EventError,
 			Source: "DataManager",
@@ -520,7 +585,6 @@ func (dm *DataManager) checkHealth() {
 				"message": "System health check failed",
 			},
 		})
-
 		logger.Info("⚠️ System health check failed: %s", health.Status)
 	}
 }
@@ -536,7 +600,6 @@ func (dm *DataManager) GetSystemStats() SystemStats {
 func (dm *DataManager) GetHealthStatus() HealthStatus {
 	servicesInfo := dm.registry.GetAllInfo()
 	serviceStatus := make(map[string]string)
-
 	allHealthy := true
 
 	for name, info := range servicesInfo {
@@ -616,7 +679,13 @@ func (dm *DataManager) GetService(name string) (interface{}, bool) {
 	case "DatabaseService":
 		return dm.databaseService, dm.databaseService != nil
 	case "RedisService":
-		return dm.redisService, dm.redisService != nil // НОВОЕ
+		return dm.redisService, dm.redisService != nil
+	case "UserService":
+		return dm.userService, dm.userService != nil
+	case "UserNotificationService":
+		return dm.userNotificationService, dm.userNotificationService != nil
+	case "UserNotificationHandler":
+		return dm.userNotificationHandler, dm.userNotificationHandler != nil
 	default:
 		return nil, false
 	}
@@ -668,21 +737,16 @@ func (dm *DataManager) Stop() error {
 	defer dm.mu.Unlock()
 
 	log.Println("🛑 Stopping DataManager...")
-
-	// Останавливаем фоновые задачи
 	close(dm.stopChan)
 	dm.wg.Wait()
 
-	// Останавливаем сервисы через LifecycleManager
 	errors := dm.lifecycle.StopAll()
-
 	if len(errors) > 0 {
 		for service, err := range errors {
 			logger.Info("⚠️ Failed to stop %s: %v", service, err)
 		}
 	}
 
-	// Останавливаем EventBus последним
 	if dm.eventBus != nil {
 		dm.eventBus.Stop()
 	}
@@ -763,11 +827,8 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 	if dm.telegramBot == nil {
 		return fmt.Errorf("telegram bot not initialized")
 	}
-
-	// Создаем подписчика для Telegram
 	telegramSubscriber := events.NewTelegramNotifierSubscriber(dm.telegramBot)
 	dm.eventBus.Subscribe(types.EventSignalDetected, telegramSubscriber)
-
 	return nil
 }
 
@@ -789,12 +850,10 @@ func (sa *serviceAdapter) Start() error {
 
 	switch s := sa.service.(type) {
 	case storage.PriceStorage:
-		// Хранилище не требует запуска
 		sa.state = StateRunning
 
 	case fetcher.PriceFetcher:
-		// Запускаем с интервалом из конфигурации
-		updateInterval := time.Duration(10) * time.Second // дефолтное значение
+		updateInterval := time.Duration(10) * time.Second
 		if err := s.Start(updateInterval); err != nil {
 			sa.state = StateError
 			return err
@@ -809,14 +868,12 @@ func (sa *serviceAdapter) Start() error {
 		sa.state = StateRunning
 
 	case *database.DatabaseService:
-		// DatabaseService уже запущен при инициализации
 		if s.State() == database.StateRunning {
 			sa.state = StateRunning
 		} else if s.State() == database.StateError {
 			sa.state = StateError
 			return fmt.Errorf("database service in error state")
 		} else {
-			// Пытаемся запустить
 			if err := s.Start(); err != nil {
 				sa.state = StateError
 				return err
@@ -825,14 +882,12 @@ func (sa *serviceAdapter) Start() error {
 		}
 
 	case *redis.RedisService:
-		// RedisService уже запущен при инициализации
 		if s.State() == redis.StateRunning {
 			sa.state = StateRunning
 		} else if s.State() == redis.StateError {
 			sa.state = StateError
 			return fmt.Errorf("Redis service in error state")
 		} else {
-			// Пытаемся запустить
 			if err := s.Start(); err != nil {
 				sa.state = StateError
 				return err
@@ -852,7 +907,6 @@ func (sa *serviceAdapter) Start() error {
 		sa.state = StateRunning
 
 	case *notifier.CompositeNotificationService:
-		// NotificationService не требует явного запуска
 		sa.state = StateRunning
 
 	case *events.EventBus:
@@ -860,7 +914,12 @@ func (sa *serviceAdapter) Start() error {
 		sa.state = StateRunning
 
 	case *telegram.TelegramBot:
-		// Telegram бот запускается при создании
+		sa.state = StateRunning
+
+	case *usernotification.UserNotificationService:
+		sa.state = StateRunning
+
+	case *telegram.UserNotificationHandler:
 		sa.state = StateRunning
 	}
 
@@ -877,24 +936,18 @@ func (sa *serviceAdapter) Stop() error {
 		s.Stop()
 	case *events.EventBus:
 		s.Stop()
-
 	case *telegram.WebhookServer:
 		if err := s.Stop(); err != nil {
 			return err
 		}
-
 	case *database.DatabaseService:
 		if err := s.Stop(); err != nil {
 			return err
 		}
-
 	case *redis.RedisService:
 		if err := s.Stop(); err != nil {
 			return err
 		}
-
-	case *telegram.TelegramBot:
-		// Telegram бот не требует явной остановки
 	}
 
 	sa.state = StateStopped
@@ -906,7 +959,6 @@ func (sa *serviceAdapter) State() ServiceState {
 }
 
 func (sa *serviceAdapter) HealthCheck() bool {
-	// Простая проверка здоровья
 	if sa.state != StateRunning {
 		return false
 	}
@@ -916,12 +968,6 @@ func (sa *serviceAdapter) HealthCheck() bool {
 		return s.HealthCheck()
 	case *redis.RedisService:
 		return s.HealthCheck()
-	case *engine.AnalysisEngine:
-		// Для анализатора считаем, что он здоров если состояние Running
-		return true
-	case *fetcher.PriceFetcher:
-		// Для PriceFetcher считаем, что он здоров если состояние Running
-		return true
 	default:
 		return sa.state == StateRunning
 	}
@@ -936,12 +982,12 @@ func (dm *DataManager) newServiceAdapter(name string, service interface{}) Servi
 	}
 }
 
-// Добавим метод для проверки инициализации
+// IsInitialized проверяет инициализацию
 func (dm *DataManager) IsInitialized() bool {
 	return dm.storage != nil && dm.eventBus != nil && dm.analysisEngine != nil
 }
 
-// Добавим метод для получения анализаторов
+// GetAnalyzers возвращает список анализаторов
 func (dm *DataManager) GetAnalyzers() []string {
 	if dm.analysisEngine != nil {
 		return dm.analysisEngine.GetAnalyzers()
@@ -949,7 +995,7 @@ func (dm *DataManager) GetAnalyzers() []string {
 	return []string{}
 }
 
-// Добавим метод для ручного запуска анализа
+// TriggerAnalysis запускает ручной анализ
 func (dm *DataManager) TriggerAnalysis() {
 	if dm.analysisEngine != nil {
 		go func() {
