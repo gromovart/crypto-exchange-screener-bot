@@ -15,14 +15,6 @@ var (
 	botInstance *TelegramBot
 	botOnce     sync.Once
 
-	// Singleton экземпляр для мониторинга
-	monitoringBotInstance *TelegramBot
-	monitoringBotOnce     sync.Once
-
-	// Список всех созданных ботов для мониторинга
-	monitoringBots []*TelegramBot
-	monitoringMu   sync.RWMutex
-
 	// Обработчик обновлений для Singleton бота
 	updatesHandlerInstance *UpdatesHandler
 	updatesHandlerOnce     sync.RWMutex
@@ -82,91 +74,6 @@ func GetOrCreateBotWithAuth(cfg *config.Config, userService *users.Service) *Tel
 // GetBot возвращает Singleton экземпляр бота (без создания)
 func GetBot() *TelegramBot {
 	return botInstance
-}
-
-// GetMonitoringBot создает или получает бота для мониторинга
-func GetMonitoringBot(cfg *config.Config, chatID string) *TelegramBot {
-	monitoringMu.Lock()
-	defer monitoringMu.Unlock()
-
-	// Ищем существующий бот для этого chat_id
-	for _, bot := range monitoringBots {
-		if bot.chatID == chatID {
-			return bot
-		}
-	}
-
-	// Создаем нового бота
-	bot := NewTelegramBotWithChatID(cfg, chatID)
-	if bot != nil {
-		monitoringBots = append(monitoringBots, bot)
-		log.Printf("📱 Добавлен бот для мониторинга с chat_id: %s (всего: %d)", chatID, len(monitoringBots))
-	}
-
-	return bot
-}
-
-// GetMonitoringBotWithAuth создает или получает бота для мониторинга с авторизацией
-func GetMonitoringBotWithAuth(cfg *config.Config, chatID string, userService *users.Service) *TelegramBot {
-	monitoringMu.Lock()
-	defer monitoringMu.Unlock()
-
-	// Ищем существующий бот для этого chat_id
-	for _, bot := range monitoringBots {
-		if bot.chatID == chatID {
-			return bot
-		}
-	}
-
-	// Создаем нового бота с авторизацией
-	bot := NewTelegramBotWithChatIDAndAuth(cfg, chatID, userService)
-	if bot != nil {
-		monitoringBots = append(monitoringBots, bot)
-		log.Printf("📱 Добавлен бот для мониторинга с авторизацией (chat_id: %s, всего: %d)", chatID, len(monitoringBots))
-	}
-
-	return bot
-}
-
-// GetAllMonitoringBots возвращает всех ботов для мониторинга
-func GetAllMonitoringBots() []*TelegramBot {
-	monitoringMu.RLock()
-	defer monitoringMu.RUnlock()
-	return monitoringBots
-}
-
-// RemoveMonitoringBot удаляет бота для мониторинга
-func RemoveMonitoringBot(chatID string) bool {
-	monitoringMu.Lock()
-	defer monitoringMu.Unlock()
-
-	for i, bot := range monitoringBots {
-		if bot.chatID == chatID {
-			// Удаляем бота из списка
-			monitoringBots = append(monitoringBots[:i], monitoringBots[i+1:]...)
-			log.Printf("🗑️ Удален бот для мониторинга с chat_id: %s (осталось: %d)", chatID, len(monitoringBots))
-			return true
-		}
-	}
-
-	return false
-}
-
-// ClearMonitoringBots очищает всех ботов для мониторинга
-func ClearMonitoringBots() {
-	monitoringMu.Lock()
-	defer monitoringMu.Unlock()
-
-	count := len(monitoringBots)
-	monitoringBots = nil
-	log.Printf("🧹 Очищены все боты для мониторинга (%d штук)", count)
-}
-
-// GetMonitoringBotCount возвращает количество ботов для мониторинга
-func GetMonitoringBotCount() int {
-	monitoringMu.RLock()
-	defer monitoringMu.RUnlock()
-	return len(monitoringBots)
 }
 
 // GetOrCreateUpdatesHandler получает или создает обработчик обновлений для Singleton бота

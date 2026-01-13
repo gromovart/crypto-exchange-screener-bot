@@ -5,7 +5,6 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/types"
 	"log"
-	"time"
 )
 
 // NotifierFactory фабрика для создания нотификаторов
@@ -54,13 +53,6 @@ func (nf *NotifierFactory) CreateCompositeNotifier(cfg *config.Config) *Composit
 		if telegramNotifier != nil {
 			service.AddNotifier(telegramNotifier)
 
-			// Отправляем системное сообщение о запуске
-			go func() {
-				time.Sleep(2 * time.Second)
-				if err := telegramNotifier.SendStartupMessage("Crypto Exchange Screener Bot", "1.0.0"); err != nil {
-					log.Printf("⚠️ Не удалось отправить startup сообщение: %v", err)
-				}
-			}()
 		}
 	}
 

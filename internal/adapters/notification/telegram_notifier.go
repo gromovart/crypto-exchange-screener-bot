@@ -12,11 +12,10 @@ import (
 
 // TelegramNotifier - единая точка взаимодействия с Telegram через EventBus
 type TelegramNotifier struct {
-	mainBot       *telegram.TelegramBot // Основной чат
-	systemMonitor *SystemMonitor        // Системный мониторинг
-	eventBus      events.EventBus       // Шина событий для публикации
-	enabled       bool
-	stats         map[string]interface{}
+	mainBot  *telegram.TelegramBot // Основной чат
+	eventBus events.EventBus       // Шина событий для публикации
+	enabled  bool
+	stats    map[string]interface{}
 }
 
 // NewTelegramNotifier создает новый нотификатор с EventBus
@@ -33,20 +32,10 @@ func NewTelegramNotifier(cfg *config.Config, eventBus events.EventBus) *Telegram
 		return nil
 	}
 
-	// Системный мониторинг (если настроен)
-	var systemMonitor *SystemMonitor
-	if cfg.Monitoring.Enabled && cfg.Monitoring.ChatID != "" {
-		systemMonitor = NewSystemMonitor(cfg)
-		if systemMonitor == nil {
-			log.Println("⚠️ TelegramNotifier: Не удалось создать системный монитор")
-		}
-	}
-
 	return &TelegramNotifier{
-		mainBot:       mainBot,
-		systemMonitor: systemMonitor,
-		eventBus:      eventBus,
-		enabled:       true,
+		mainBot:  mainBot,
+		eventBus: eventBus,
+		enabled:  true,
 		stats: map[string]interface{}{
 			"trading_signals_sent": 0,
 			"system_messages_sent": 0,
@@ -140,28 +129,6 @@ func (tn *TelegramNotifier) SendDirectMessage(message string) error {
 	return tn.mainBot.SendMessage(message)
 }
 
-// SendSystemStatus отправляет системный статус в мониторинг
-func (tn *TelegramNotifier) SendSystemStatus(status string) error {
-	if tn.systemMonitor == nil {
-		return nil
-	}
-
-	err := tn.systemMonitor.SendSystemStatus(status)
-	if err == nil {
-		tn.stats["system_messages_sent"] = tn.stats["system_messages_sent"].(int) + 1
-	}
-	return err
-}
-
-// SendStartupMessage отправляет сообщение о запуске
-func (tn *TelegramNotifier) SendStartupMessage(appName, version string) error {
-	if tn.systemMonitor == nil {
-		return nil
-	}
-
-	return tn.systemMonitor.SendStartupMessage(appName, version)
-}
-
 // SendControlMessage отправляет сообщение в основной чат
 func (tn *TelegramNotifier) SendControlMessage(message string) error {
 	if !tn.enabled || tn.mainBot == nil {
@@ -180,11 +147,6 @@ func (tn *TelegramNotifier) SendTestMessage() error {
 	return tn.mainBot.SendTestMessage()
 }
 
-// GetSystemMonitor возвращает системный монитор
-func (tn *TelegramNotifier) GetSystemMonitor() *SystemMonitor {
-	return tn.systemMonitor
-}
-
 // Name возвращает имя
 func (tn *TelegramNotifier) Name() string {
 	return "telegram_notifier"
@@ -198,9 +160,6 @@ func (tn *TelegramNotifier) IsEnabled() bool {
 // SetEnabled включает/выключает
 func (tn *TelegramNotifier) SetEnabled(enabled bool) {
 	tn.enabled = enabled
-	if tn.systemMonitor != nil {
-		tn.systemMonitor.SetEnabled(enabled)
-	}
 }
 
 // GetStats возвращает статистику
@@ -209,14 +168,5 @@ func (tn *TelegramNotifier) GetStats() map[string]interface{} {
 	for k, v := range tn.stats {
 		statsCopy[k] = v
 	}
-
-	// Добавляем статистику системного монитора
-	if tn.systemMonitor != nil {
-		systemStats := tn.systemMonitor.GetStats()
-		for k, v := range systemStats {
-			statsCopy["system_"+k] = v
-		}
-	}
-
 	return statsCopy
 }

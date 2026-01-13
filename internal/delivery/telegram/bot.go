@@ -45,65 +45,6 @@ func NewTelegramBotWithAuth(cfg *config.Config, userService *users.Service) *Tel
 	return GetOrCreateBotWithAuth(cfg, userService)
 }
 
-// NewTelegramBotWithChatID создает бота для конкретного чата (для мониторинга)
-func NewTelegramBotWithChatID(cfg *config.Config, chatID string) *TelegramBot {
-	return NewTelegramBotWithChatIDAndAuth(cfg, chatID, nil)
-}
-
-// NewTelegramBotWithChatIDAndAuth создает бота для чата с поддержкой авторизации
-func NewTelegramBotWithChatIDAndAuth(cfg *config.Config, chatID string, userService *users.Service) *TelegramBot {
-	if cfg == nil || cfg.TelegramBotToken == "" || chatID == "" {
-		log.Println("⚠️ Telegram Bot Token или Chat ID не указаны")
-		return nil
-	}
-
-	// Создаем копию конфигурации с новым chat_id
-	chatConfig := *cfg
-	chatConfig.TelegramChatID = chatID
-
-	// Создаем новый бот для мониторинга (не Singleton!)
-	messageSender := NewMessageSender(&chatConfig)
-	menuUtils := NewMenuUtils(cfg.Exchange)
-	notifier := NewNotifier(&chatConfig)
-	notifier.SetMessageSender(messageSender)
-
-	// Создаем менеджер меню
-	menuManager := NewMenuManager(cfg, messageSender)
-
-	// Создаем buttonBuilder для кнопок
-	buttonBuilder := NewButtonURLBuilder(cfg.Exchange)
-
-	bot := &TelegramBot{
-		config:        &chatConfig,
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
-		baseURL:       fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
-		chatID:        chatID,
-		notifier:      notifier,
-		menuManager:   menuManager,
-		messageSender: messageSender,
-		startupTime:   time.Now(),
-		welcomeSent:   true, // НЕ отправляем приветствие для мониторинг-бота!
-		testMode:      cfg.MonitoringTestMode || false,
-		buttonBuilder: buttonBuilder,
-		menuUtils:     menuUtils,
-		userService:   userService,
-	}
-
-	// Инициализируем авторизацию если userService предоставлен
-	if userService != nil {
-		if err := bot.initAuth(); err != nil {
-			log.Printf("⚠️ Ошибка инициализации авторизации: %v", err)
-		}
-	}
-
-	log.Printf("🤖 Создан Telegram бот для мониторинга с авторизацией (chat_id: %s, auth: %v)",
-		chatID, userService != nil)
-
-	return bot
-}
-
-// НОВЫЕ МЕТОДЫ ДЛЯ ИНИЦИАЛИЗАЦИИ АВТОРИЗАЦИИ
-
 // initAuth инициализирует систему авторизации для бота
 func (tb *TelegramBot) initAuth() error {
 	if tb.userService == nil {

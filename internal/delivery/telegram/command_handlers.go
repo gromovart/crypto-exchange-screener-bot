@@ -28,7 +28,6 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 	}
 
 	// 2. Затем устанавливаем reply клавиатуру (меню) для этого чата
-	// 🔴 Устанавливаем меню ТОЛЬКО после успешной отправки приветствия
 	mainMenu := mh.keyboardSystem.GetMainMenu()
 
 	// Добавляем небольшую задержку перед установкой меню
@@ -37,7 +36,6 @@ func (mh *MenuHandlers) StartCommandHandler(chatID string) error {
 	setupErr := mh.messageSender.SetReplyKeyboard(chatID, mainMenu)
 	if setupErr != nil {
 		log.Printf("⚠️ Ошибка установки меню: %v", setupErr)
-		// Не возвращаем ошибку, чтобы пользователь все равно получил приветствие
 		return nil
 	}
 
