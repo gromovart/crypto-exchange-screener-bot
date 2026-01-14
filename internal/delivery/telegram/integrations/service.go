@@ -1,3 +1,4 @@
+// internal/delivery/telegram/integrations/service.go
 package integrations
 
 import (
@@ -8,6 +9,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	counterctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
 	signalctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/signal"
@@ -90,11 +92,14 @@ func NewTelegramPackageService(
 		log.Println("⚠️ Using stub message sender")
 	}
 
-	// 3. Создаем внутренние сервисы
-	profileService := profilesvc.NewService(userService, subscriptionService)
-	counterService := countersvc.NewService()
+	// 3. Создаем провайдер форматтеров
+	formatterProvider := formatters.NewFormatterProvider("BYBIT") // Можно брать из конфига
 
-	// 4. Создаем контроллеры
+	// 4. Создаем внутренние сервисы
+	profileService := profilesvc.NewService(userService, subscriptionService)
+	counterService := countersvc.NewService(userService, formatterProvider, messageSender) // ОБНОВЛЕНО: добавляем messageSender
+
+	// 5. Создаем контроллеры
 	counterController := counterctrl.NewController(counterService)
 
 	service := &telegramPackageServiceImpl{

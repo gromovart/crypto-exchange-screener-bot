@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/message_sender/rate_limiter.go
 package message_sender
 
 import (

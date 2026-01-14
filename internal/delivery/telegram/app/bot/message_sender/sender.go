@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/message_sender/sender.go
 package message_sender
 
 import (
