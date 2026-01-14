@@ -3,7 +3,6 @@ package buttons
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
-	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"fmt"
 	"strings"
@@ -22,15 +21,14 @@ func (b *ButtonBuilder) CreateSignalKeyboard(symbol string) telegram.InlineKeybo
 	return telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
-				{Text: fmt.Sprintf("%s График", constants.ButtonTexts.Chart), URL: b.getChartURL(symbol)},
-				{Text: constants.ButtonTexts.Trade, URL: b.getTradeURL(symbol)},
-			},
-			{
-				{Text: constants.ButtonTexts.CoinGecko, URL: b.getCoinGeckoURL(symbol)},
-				{Text: constants.ButtonTexts.TradingView, URL: b.getTradingViewURL(symbol)},
-			},
-			{
-				{Text: constants.ButtonTexts.Coinglass, URL: b.getCoinglassURL(symbol)},
+				{
+					Text: constants.ButtonTexts.Trade,
+					URL:  b.getTradeURL(symbol),
+				},
+				{
+					Text: constants.ButtonTexts.Chart,
+					URL:  b.getTradingViewURL(symbol),
+				},
 			},
 		},
 	}
@@ -203,10 +201,4 @@ func (b *ButtonBuilder) getTradingViewURL(symbol string) string {
 func (b *ButtonBuilder) getCoinglassURL(symbol string) string {
 	cleanSymbol := strings.ReplaceAll(symbol, "/", "")
 	return fmt.Sprintf("https://www.coinglass.com/t/%s", cleanSymbol)
-}
-
-// GetBotInfo возвращает информацию о боте (для совместимости)
-func (b *ButtonBuilder) GetBotInfo() *bot.TelegramBot {
-	// Возвращаем nil, так как это устаревший метод
-	return nil
 }

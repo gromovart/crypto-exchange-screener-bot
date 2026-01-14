@@ -60,6 +60,15 @@ type CounterData struct {
 	DeltaSource        string
 	Confidence         float64
 	Timestamp          time.Time
+
+	// НОВЫЕ ПОЛЯ для прогресса подтверждений
+	Confirmations         int
+	RequiredConfirmations int
+	TotalSlots            int
+	FilledSlots           int
+	ProgressPercentage    float64
+	NextAnalysis          time.Time
+	NextSignal            time.Time
 }
 
 // FormatCounterSignal форматирует counter сигнал для отправки в Telegram
@@ -133,14 +142,27 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n")
 	}
 
-	// 7. ПРОГРЕСС СЧЕТЧИКА
-	// 📡 3/5 🟡🟡🟡▫️▫️ (60%)
-	// 🕐 Период: 1 час
-	builder.WriteString(p.ProgressFormatter.FormatProgressBlock(
-		data.SignalCount,
-		data.MaxSignals,
-		data.Period,
-	))
+	// 7. ПРОГРЕСС ПОДТВЕРЖДЕНИЙ (новый раздел)
+	// 📡 Подтверждений: 3/6 🟢🟢🟢▫️▫️▫️ (50%)
+	// 🕐 Следующий анализ: 10:10
+	// ⏰ Следующий сигнал: 10:40 (через 20м)
+	if data.RequiredConfirmations > 0 {
+		builder.WriteString(p.ProgressFormatter.FormatConfirmationProgress(
+			data.Confirmations,
+			data.RequiredConfirmations,
+			data.Period,
+			data.NextAnalysis,
+			data.NextSignal,
+		))
+		builder.WriteString("\n\n")
+	} else {
+		// Обратная совместимость со старым форматом
+		builder.WriteString(p.ProgressFormatter.FormatProgressBlock(
+			data.SignalCount,
+			data.MaxSignals,
+			data.Period,
+		))
+	}
 
 	// 8. РЕКОМЕНДАЦИИ (если есть данные)
 	// 🎯 РЕКОМЕНДАЦИЯ:

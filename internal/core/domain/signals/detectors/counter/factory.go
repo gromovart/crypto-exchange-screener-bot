@@ -3,6 +3,7 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage" // ДОБАВИТЬ
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 )
@@ -17,8 +18,8 @@ func NewCounterAnalyzerFactory() *CounterAnalyzerFactory {
 
 // CreateAnalyzer создает CounterAnalyzer с настройками по умолчанию
 func (f *CounterAnalyzerFactory) CreateAnalyzer(
-	storage interface{},
-	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
+	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	eventBus types.EventBus,
 	marketFetcher interface{},
 ) *CounterAnalyzer {
 	config := f.DefaultConfig()
@@ -28,8 +29,8 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
 func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	config common.AnalyzerConfig,
-	storage interface{},
-	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
+	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	eventBus types.EventBus,
 	marketFetcher interface{},
 ) *CounterAnalyzer {
 	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
@@ -38,8 +39,8 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 // CreateFromCustomSettings создает CounterAnalyzer из пользовательских настроек
 func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 	customSettings map[string]interface{},
-	storage interface{},
-	eventBus types.EventBus, // ИЗМЕНЕНО: eventBus вместо notifier
+	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	eventBus types.EventBus,
 	marketFetcher interface{},
 ) *CounterAnalyzer {
 	config := common.AnalyzerConfig{
@@ -50,6 +51,48 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 		CustomSettings: f.mergeWithDefaults(customSettings),
 	}
 	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
+}
+
+// CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
+func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
+	config := common.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.7,
+		MinConfidence: 10.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"base_period_minutes": 1,
+			"analysis_period":     "15m",
+			"growth_threshold":    0.1,
+			"fall_threshold":      0.1,
+			"track_growth":        true,
+			"track_fall":          true,
+			"notify_on_signal":    false,
+			"chart_provider":      "coinglass",
+		},
+	}
+	// Для тестов передаем nil storage
+	return NewCounterAnalyzer(config, nil, nil, nil)
+}
+
+// CreateMinimalAnalyzer создает минимальный анализатор
+func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStorage) *CounterAnalyzer { // ИЗМЕНЕНО
+	config := common.AnalyzerConfig{
+		Enabled:       true,
+		Weight:        0.7,
+		MinConfidence: 10.0,
+		MinDataPoints: 2,
+		CustomSettings: map[string]interface{}{
+			"base_period_minutes": 1,
+			"analysis_period":     "15m",
+			"growth_threshold":    0.1,
+			"fall_threshold":      0.1,
+			"track_growth":        true,
+			"track_fall":          true,
+			"notify_on_signal":    false,
+		},
+	}
+	return NewCounterAnalyzer(config, storage, nil, nil)
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию
@@ -109,47 +152,6 @@ func (f *CounterAnalyzerFactory) mergeWithDefaults(customSettings map[string]int
 		result[k] = v
 	}
 	return result
-}
-
-// CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
-func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
-	config := common.AnalyzerConfig{
-		Enabled:       true,
-		Weight:        0.7,
-		MinConfidence: 10.0,
-		MinDataPoints: 2,
-		CustomSettings: map[string]interface{}{
-			"base_period_minutes": 1,
-			"analysis_period":     "15m",
-			"growth_threshold":    0.1,
-			"fall_threshold":      0.1,
-			"track_growth":        true,
-			"track_fall":          true,
-			"notify_on_signal":    false,
-			"chart_provider":      "coinglass",
-		},
-	}
-	return NewCounterAnalyzer(config, nil, nil, nil)
-}
-
-// CreateMinimalAnalyzer создает минимальный анализатор
-func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage interface{}) *CounterAnalyzer {
-	config := common.AnalyzerConfig{
-		Enabled:       true,
-		Weight:        0.7,
-		MinConfidence: 10.0,
-		MinDataPoints: 2,
-		CustomSettings: map[string]interface{}{
-			"base_period_minutes": 1,
-			"analysis_period":     "15m",
-			"growth_threshold":    0.1,
-			"fall_threshold":      0.1,
-			"track_growth":        true,
-			"track_fall":          true,
-			"notify_on_signal":    false,
-		},
-	}
-	return NewCounterAnalyzer(config, storage, nil, nil)
 }
 
 // ValidateConfig проверяет корректность конфигурации

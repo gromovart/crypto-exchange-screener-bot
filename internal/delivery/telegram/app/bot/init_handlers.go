@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/init_handlers.go
 package bot
 
 import (
