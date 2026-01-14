@@ -416,12 +416,7 @@ func logConfig(cfg *config.Config, testMode bool) {
 func startSystem(dataManager *manager.DataManager, cfg *config.Config, testMode bool) error {
 	// Проверяем Telegram бота перед запуском
 	if bot := dataManager.GetTelegramBot(); bot != nil {
-		botTestMode := bot.IsTestMode()
-		logger.Info("🤖 Telegram bot initialized (test mode: %v)", botTestMode)
-
-		if testMode && !botTestMode {
-			logger.Warn("⚠️ Запущен в тестовом режиме, но Telegram bot не в тестовом режиме")
-		}
+		logger.Info("🤖 Telegram bot initialized")
 	} else if cfg.TelegramEnabled {
 		logger.Warn("⚠️ Telegram включен в конфигурации, но бот не создан")
 	}

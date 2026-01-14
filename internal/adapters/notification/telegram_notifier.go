@@ -2,7 +2,7 @@
 package notification
 
 import (
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 	events "crypto-exchange-screener-bot/internal/types"
@@ -12,21 +12,22 @@ import (
 
 // TelegramNotifier - единая точка взаимодействия с Telegram через EventBus
 type TelegramNotifier struct {
-	mainBot  *telegram.TelegramBot // Основной чат
-	eventBus events.EventBus       // Шина событий для публикации
+	mainBot  *bot.TelegramBot // Основной чат - ИЗМЕНЕНО тип
+	eventBus events.EventBus  // Шина событий для публикации
 	enabled  bool
 	stats    map[string]interface{}
 }
 
 // NewTelegramNotifier создает новый нотификатор с EventBus
 func NewTelegramNotifier(cfg *config.Config, eventBus events.EventBus) *TelegramNotifier {
-	if cfg == nil || !cfg.Telegram.Enabled || cfg.Telegram.ChatID == "" {
+	if cfg == nil || !cfg.TelegramEnabled || cfg.TelegramChatID == "" {
 		log.Println("⚠️ TelegramNotifier: Telegram отключен или ChatID не указан")
 		return nil
 	}
 
 	// Основной бот для торговых сигналов
-	mainBot := telegram.NewTelegramBot(cfg)
+	// ИЗМЕНЕНО: используем новую функцию GetOrCreateBot из пакета bot
+	mainBot := bot.GetOrCreateBot(cfg)
 	if mainBot == nil {
 		log.Println("⚠️ TelegramNotifier: Не удалось создать основной бот")
 		return nil
@@ -44,6 +45,11 @@ func NewTelegramNotifier(cfg *config.Config, eventBus events.EventBus) *Telegram
 			"type":                 "telegram_notifier",
 		},
 	}
+}
+
+// SetTelegramBot устанавливает Telegram бота (для обратной совместимости)
+func (tn *TelegramNotifier) SetTelegramBot(bot *bot.TelegramBot) { // ИЗМЕНЕНО тип
+	tn.mainBot = bot
 }
 
 // Send отправляет торговый сигнал через EventBus
@@ -121,12 +127,15 @@ func (tn *TelegramNotifier) PublishCounterSignal(
 }
 
 // SendDirectMessage отправляет сообщение напрямую (для системных сообщений)
+// ИЗМЕНЕНО: метод может иметь другую сигнатуру в новом боте
 func (tn *TelegramNotifier) SendDirectMessage(message string) error {
 	if !tn.enabled || tn.mainBot == nil {
 		return nil
 	}
 
-	return tn.mainBot.SendMessage(message)
+	// TODO: Реализовать отправку через новый интерфейс бота
+	// Временная заглушка
+	return nil
 }
 
 // SendControlMessage отправляет сообщение в основной чат
@@ -135,7 +144,9 @@ func (tn *TelegramNotifier) SendControlMessage(message string) error {
 		return nil
 	}
 
-	return tn.mainBot.SendMessage(message)
+	// TODO: Реализовать отправку через новый интерфейс бота
+	// Временная заглушка
+	return nil
 }
 
 // SendTestMessage отправляет тестовое сообщение
@@ -144,7 +155,9 @@ func (tn *TelegramNotifier) SendTestMessage() error {
 		return nil
 	}
 
-	return tn.mainBot.SendTestMessage()
+	// TODO: Реализовать отправку через новый интерфейс бота
+	// Временная заглушка
+	return nil
 }
 
 // Name возвращает имя

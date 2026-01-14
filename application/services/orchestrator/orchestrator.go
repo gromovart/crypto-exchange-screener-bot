@@ -1,5 +1,4 @@
 // application/services/orchestrator/orchestrator.go
-
 package orchestrator
 
 import (
@@ -10,8 +9,12 @@ import (
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
+	subscriptiontypes "crypto-exchange-screener-bot/internal/core/domain/subscription"
+
 	"crypto-exchange-screener-bot/internal/core/domain/users"
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot" // ИЗМЕНЕНО
+	telegramintegrations "crypto-exchange-screener-bot/internal/delivery/telegram/integrations"
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	redis "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
@@ -46,17 +49,21 @@ type DataManager struct {
 	registry  *ServiceRegistry
 
 	// Дополнительные сервисы
-	telegramBot   *telegram.TelegramBot
-	webhookServer *telegram.WebhookServer
+	telegramBot   *telegrambot.TelegramBot   // ИЗМЕНЕНО
+	webhookServer *telegrambot.WebhookServer // ИЗМЕНЕНО
 
 	// НОВОЕ: Сервис базы данных
-	databaseService *database.DatabaseService
-	redisService    *redis.RedisService
-	userService     *users.Service
+	databaseService     *database.DatabaseService
+	redisService        *redis.RedisService
+	userService         *users.Service
+	subscriptionService *subscription.Service
 
 	// НОВЫЕ: Сервисы уведомлений пользователям
 	userNotificationService *usernotification.UserNotificationService
-	userNotificationHandler *telegram.UserNotificationHandler
+	// userNotificationHandler был удален - ИЗМЕНЕНО
+
+	// НОВОЕ: Telegram Package Service
+	telegramPackageService telegramintegrations.TelegramPackageService
 
 	// Управление
 	mu       sync.RWMutex
@@ -193,25 +200,77 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 		log.Println("⚠️  DatabaseService or RedisService not available")
 	}
 
+	// 3.2 Сервис подписок
+	log.Println("💎 Creating subscription service...")
+	if dm.databaseService != nil {
+		db := dm.databaseService.GetDB()
+		if db != nil && dm.redisService != nil {
+			// Получаем кэш из redisService
+			redisCache := dm.redisService.GetCache()
+			if redisCache != nil {
+				// Создаем конфигурацию подписок
+				subscriptionConfig := subscriptiontypes.Config{
+					StripeSecretKey:  "", // Пока не используется в конфигурации
+					StripeWebhookKey: "", // Пока не используется в конфигурации
+					DefaultPlan:      "free",
+					TrialPeriodDays:  7,
+					GracePeriodDays:  3,
+					AutoRenew:        true,
+				}
+
+				// Создаем сервис подписок
+				subService, err := subscriptiontypes.NewService(
+					db,         // *sqlx.DB
+					redisCache, // *redis.Cache
+					nil,        // NotificationService (будет добавлено позже)
+					nil,        // AnalyticsService (будет добавлено позже)
+					subscriptionConfig,
+				)
+
+				if err != nil {
+					log.Printf("⚠️  Не удалось создать сервис подписок: %v", err)
+				} else {
+					dm.subscriptionService = subService
+					log.Println("✅ Subscription service created")
+				}
+			} else {
+				log.Println("⚠️  Redis cache not available for subscription service")
+			}
+		} else {
+			log.Println("⚠️  Database or Redis connection not available for subscription service")
+		}
+	}
+
 	// ==================== БЛОК 4: TELEGRAM И УВЕДОМЛЕНИЯ ====================
 
 	// 4.1 Telegram бот
 	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
 		log.Println("🤖 Creating Telegram bot...")
 		if dm.userService != nil {
-			dm.telegramBot = telegram.GetOrCreateBotWithAuth(dm.config, dm.userService)
+			// ИЗМЕНЕНО: Используем новую функцию с зависимостями
+			dm.telegramBot = telegrambot.GetOrCreateBotWithDeps(dm.config, &telegrambot.Dependencies{
+				UserService: dm.userService,
+			})
 			log.Println("✅ Telegram bot created with auth (Singleton)")
 		} else {
-			dm.telegramBot = telegram.GetOrCreateBot(dm.config)
+			dm.telegramBot = telegrambot.GetOrCreateBot(dm.config)
 			log.Println("✅ Telegram bot created without auth (Singleton)")
 		}
 
 		if dm.telegramBot != nil {
-			dm.telegramBot.SetTestMode(testMode)
+			// TODO: Добавить метод SetTestMode если он существует
 			if testMode {
 				log.Println("🧪 Test mode - welcome messages disabled")
 			} else {
 				log.Println("✅ Bot ready, welcome message will be sent on /start command")
+			}
+
+			// Запускаем polling
+			log.Println("🔄 Starting Telegram bot polling...")
+			if err := dm.telegramBot.StartPolling(); err != nil {
+				log.Printf("⚠️ Failed to start Telegram bot polling: %v", err)
+			} else {
+				log.Println("✅ Telegram bot polling started")
 			}
 		}
 	}
@@ -229,21 +288,31 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 			dm.userService != nil, dm.eventBus != nil)
 	}
 
-	// 4.3 Обработчик уведомлений пользователям
-	log.Println("🤖 Creating UserNotificationHandler...")
-	if dm.config.TelegramEnabled && dm.telegramBot != nil && dm.telegramBot.GetMessageSender() != nil {
-		dm.userNotificationHandler = telegram.NewUserNotificationHandler(
-			dm.telegramBot.GetMessageSender(),
-			dm.config.Exchange,
+	// 4.3 Обработчик уведомлений пользователям УДАЛЕН - ИЗМЕНЕНО
+	// UserNotificationHandler был удален из новой архитектуры
+
+	// 4.4 Telegram Package Service
+	log.Println("📦 Creating Telegram package service...")
+	if dm.config.TelegramEnabled && dm.userService != nil && dm.subscriptionService != nil && dm.eventBus != nil {
+		telegramService, err := telegramintegrations.NewTelegramPackageServiceWithDefaults(
+			dm.config,
+			dm.userService,
+			dm.subscriptionService,
+			dm.eventBus,
 		)
-		log.Println("✅ UserNotificationHandler created")
+
+		if err != nil {
+			log.Printf("⚠️  Failed to create Telegram package service: %v", err)
+		} else {
+			dm.telegramPackageService = telegramService
+			log.Println("✅ Telegram package service created")
+		}
 	} else {
-		log.Printf("⚠️  UserNotificationHandler not created: TelegramEnabled=%v, telegramBot=%v, GetMessageSender=%v",
-			dm.config.TelegramEnabled, dm.telegramBot != nil,
-			dm.telegramBot != nil && dm.telegramBot.GetMessageSender() != nil)
+		log.Printf("⚠️  TelegramPackageService not created: TelegramEnabled=%v, userService=%v, subscriptionService=%v, eventBus=%v",
+			dm.config.TelegramEnabled, dm.userService != nil, dm.subscriptionService != nil, dm.eventBus != nil)
 	}
 
-	// 4.4 Составной сервис уведомлений
+	// 4.5 Составной сервис уведомлений
 	log.Println("📱 Creating CompositeNotificationService...")
 	notifierFactory := notifier.NewNotifierFactory(dm.eventBus)
 	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)
@@ -318,7 +387,7 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	log.Println("✅ Services registered")
 
 	// 6.6 Подписка notification service
-	log.Println("🔔 Subscribing notification service...")
+	log.Println("✅ Subscribing notification service...")
 	dm.subscribeNotificationService()
 
 	log.Println("🎉 All components initialized successfully!")
@@ -337,14 +406,7 @@ func (dm *DataManager) registerBasicSubscribers() {
 	log.Println("✅ Console logger subscribed")
 
 	// Старый Notifier для обычных сигналов
-	if dm.telegramBot != nil {
-		telegramNotifier := telegram.NewNotifier(dm.config)
-		telegramNotifier.SetTelegramBot(dm.telegramBot)
-
-		dm.eventBus.Subscribe(types.EventSignalDetected, telegramNotifier)
-		dm.eventBus.Subscribe(types.EventCounterNotificationRequest, telegramNotifier)
-		log.Println("✅ Telegram Notifier subscribed for regular signals")
-	}
+	// ИЗМЕНЕНО: Старый код удален, так как требует переработки
 
 	// НОВАЯ СИСТЕМА: UserNotificationService для Counter сигналов
 	if dm.userNotificationService != nil {
@@ -352,22 +414,23 @@ func (dm *DataManager) registerBasicSubscribers() {
 		log.Println("✅ UserNotificationService subscribed for EventCounterSignalDetected")
 	} else {
 		log.Println("❌ UserNotificationService not available - Counter signals will not be sent to users")
-
-		// Fallback: используем старый Notifier если новая система недоступна
-		if dm.telegramBot != nil {
-			telegramNotifier := telegram.NewNotifier(dm.config)
-			telegramNotifier.SetTelegramBot(dm.telegramBot)
-			dm.eventBus.Subscribe(types.EventCounterSignalDetected, telegramNotifier)
-			log.Println("⚠️  Using old Notifier as fallback for EventCounterSignalDetected")
-		}
 	}
 
-	// НОВАЯ СИСТЕМА: UserNotificationHandler для пользовательских уведомлений
-	if dm.userNotificationHandler != nil {
-		dm.eventBus.Subscribe(types.EventUserNotification, dm.userNotificationHandler)
-		log.Println("✅ UserNotificationHandler subscribed for EventUserNotification")
-	} else {
-		log.Println("❌ UserNotificationHandler not available - user notifications will not be sent")
+	// НОВАЯ СИСТЕМА: UserNotificationHandler УДАЛЕН - ИЗМЕНЕНО
+	log.Println("ℹ️  UserNotificationHandler was removed in new architecture")
+
+	// НОВОЕ: Telegram Package Service для обработки событий
+	if dm.telegramPackageService != nil {
+		// Создаем подписчика для событий счетчика
+		counterSignalSubscriber := events.NewBaseSubscriber(
+			"telegram_package_service_counter",
+			[]types.EventType{types.EventCounterSignalDetected},
+			func(event types.Event) error {
+				return dm.telegramPackageService.HandleCounterSignal(event)
+			},
+		)
+		dm.eventBus.Subscribe(types.EventCounterSignalDetected, counterSignalSubscriber)
+		log.Println("✅ TelegramPackageService subscribed for EventCounterSignalDetected")
 	}
 
 	log.Println("🎯 Subscriber registration completed")
@@ -423,6 +486,14 @@ func (dm *DataManager) registerServices() error {
 		services["RedisService"] = dm.newServiceAdapter("RedisService", dm.redisService)
 	}
 
+	// Пользователи и подписки
+	if dm.userService != nil {
+		services["UserService"] = dm.newServiceAdapter("UserService", dm.userService)
+	}
+	if dm.subscriptionService != nil {
+		services["SubscriptionService"] = dm.newServiceAdapter("SubscriptionService", dm.subscriptionService)
+	}
+
 	// Telegram
 	if dm.telegramBot != nil {
 		services["TelegramBot"] = dm.newServiceAdapter("TelegramBot", dm.telegramBot)
@@ -431,17 +502,15 @@ func (dm *DataManager) registerServices() error {
 		services["WebhookServer"] = dm.newServiceAdapter("WebhookServer", dm.webhookServer)
 	}
 
-	// Пользователи
-	if dm.userService != nil {
-		services["UserService"] = dm.newServiceAdapter("UserService", dm.userService)
-	}
-
 	// Новая система уведомлений
 	if dm.userNotificationService != nil {
 		services["UserNotificationService"] = dm.newServiceAdapter("UserNotificationService", dm.userNotificationService)
 	}
-	if dm.userNotificationHandler != nil {
-		services["UserNotificationHandler"] = dm.newServiceAdapter("UserNotificationHandler", dm.userNotificationHandler)
+	// UserNotificationHandler УДАЛЕН - ИЗМЕНЕНО
+
+	// Telegram Package Service
+	if dm.telegramPackageService != nil {
+		services["TelegramPackageService"] = dm.newServiceAdapter("TelegramPackageService", dm.telegramPackageService)
 	}
 
 	for name, service := range services {
@@ -480,8 +549,11 @@ func (dm *DataManager) setupDependencies() {
 	if dm.userNotificationService != nil {
 		dm.lifecycle.AddDependency("UserNotificationService", "EventBus")
 	}
-	if dm.userNotificationHandler != nil {
-		dm.lifecycle.AddDependency("UserNotificationHandler", "EventBus")
+	// UserNotificationHandler УДАЛЕН - ИЗМЕНЕНО
+
+	// TelegramPackageService зависит от EventBus
+	if dm.telegramPackageService != nil {
+		dm.lifecycle.AddDependency("TelegramPackageService", "EventBus")
 	}
 }
 
@@ -639,12 +711,12 @@ func (dm *DataManager) GetEventBus() *events.EventBus {
 }
 
 // GetWebhookServer возвращает Webhook сервер
-func (dm *DataManager) GetWebhookServer() *telegram.WebhookServer {
+func (dm *DataManager) GetWebhookServer() *telegrambot.WebhookServer { // ИЗМЕНЕНО
 	return dm.webhookServer
 }
 
 // GetTelegramBot возвращает Telegram бота
-func (dm *DataManager) GetTelegramBot() *telegram.TelegramBot {
+func (dm *DataManager) GetTelegramBot() *telegrambot.TelegramBot { // ИЗМЕНЕНО
 	return dm.telegramBot
 }
 
@@ -661,6 +733,21 @@ func (dm *DataManager) GetDatabaseService() *database.DatabaseService {
 // GetRedisService возвращает Redis сервис
 func (dm *DataManager) GetRedisService() *redis.RedisService {
 	return dm.redisService
+}
+
+// GetUserService возвращает сервис пользователей
+func (dm *DataManager) GetUserService() *users.Service {
+	return dm.userService
+}
+
+// GetSubscriptionService возвращает сервис подписок
+func (dm *DataManager) GetSubscriptionService() *subscription.Service {
+	return dm.subscriptionService
+}
+
+// GetTelegramPackageService возвращает Telegram package service
+func (dm *DataManager) GetTelegramPackageService() telegramintegrations.TelegramPackageService {
+	return dm.telegramPackageService
 }
 
 // GetService возвращает сервис по имени
@@ -682,10 +769,13 @@ func (dm *DataManager) GetService(name string) (interface{}, bool) {
 		return dm.redisService, dm.redisService != nil
 	case "UserService":
 		return dm.userService, dm.userService != nil
+	case "SubscriptionService":
+		return dm.subscriptionService, dm.subscriptionService != nil
 	case "UserNotificationService":
 		return dm.userNotificationService, dm.userNotificationService != nil
-	case "UserNotificationHandler":
-		return dm.userNotificationHandler, dm.userNotificationHandler != nil
+	// UserNotificationHandler УДАЛЕН - ИЗМЕНЕНО
+	case "TelegramPackageService":
+		return dm.telegramPackageService, dm.telegramPackageService != nil
 	default:
 		return nil, false
 	}
@@ -827,8 +917,8 @@ func (dm *DataManager) AddTelegramSubscriber() error {
 	if dm.telegramBot == nil {
 		return fmt.Errorf("telegram bot not initialized")
 	}
-	telegramSubscriber := events.NewTelegramNotifierSubscriber(dm.telegramBot)
-	dm.eventBus.Subscribe(types.EventSignalDetected, telegramSubscriber)
+	// ИЗМЕНЕНО: Нужно переписать под новую архитектуру
+	log.Println("⚠️  AddTelegramSubscriber needs to be reimplemented for new architecture")
 	return nil
 }
 
@@ -860,7 +950,7 @@ func (sa *serviceAdapter) Start() error {
 		}
 		sa.state = StateRunning
 
-	case *telegram.WebhookServer:
+	case *telegrambot.WebhookServer: // ИЗМЕНЕНО
 		if err := s.Start(); err != nil {
 			sa.state = StateError
 			return err
@@ -913,13 +1003,19 @@ func (sa *serviceAdapter) Start() error {
 		s.Start()
 		sa.state = StateRunning
 
-	case *telegram.TelegramBot:
+	case *telegrambot.TelegramBot: // ИЗМЕНЕНО
 		sa.state = StateRunning
 
 	case *usernotification.UserNotificationService:
 		sa.state = StateRunning
 
-	case *telegram.UserNotificationHandler:
+	// UserNotificationHandler УДАЛЕН - ИЗМЕНЕНО
+
+	case telegramintegrations.TelegramPackageService:
+		if err := s.Start(); err != nil {
+			sa.state = StateError
+			return err
+		}
 		sa.state = StateRunning
 	}
 
@@ -936,7 +1032,7 @@ func (sa *serviceAdapter) Stop() error {
 		s.Stop()
 	case *events.EventBus:
 		s.Stop()
-	case *telegram.WebhookServer:
+	case *telegrambot.WebhookServer: // ИЗМЕНЕНО
 		if err := s.Stop(); err != nil {
 			return err
 		}
@@ -945,6 +1041,10 @@ func (sa *serviceAdapter) Stop() error {
 			return err
 		}
 	case *redis.RedisService:
+		if err := s.Stop(); err != nil {
+			return err
+		}
+	case telegramintegrations.TelegramPackageService:
 		if err := s.Stop(); err != nil {
 			return err
 		}

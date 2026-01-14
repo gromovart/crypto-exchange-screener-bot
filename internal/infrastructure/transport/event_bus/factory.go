@@ -4,7 +4,7 @@ package events
 import (
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot" // ИЗМЕНЕНО
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
@@ -45,7 +45,7 @@ func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 func (f *Factory) RegisterDefaultSubscribers(
 	bus *EventBus,
 	cfg *config.Config,
-	telegramBot *telegram.TelegramBot,
+	telegramBot *telegrambot.TelegramBot, // ИЗМЕНЕНО тип
 	notificationService *notifier.CompositeNotificationService,
 ) {
 	// Консольный логгер (всегда включен)
@@ -59,12 +59,12 @@ func (f *Factory) RegisterDefaultSubscribers(
 		log.Println("📱 Регистрация TelegramNotifier подписчика...")
 
 		// Ищем существующий TelegramNotifier в CompositeNotificationService
-		var telegramNotifier *notifier.TelegramNotifier // ИЗМЕНИЛ ТИП
+		var telegramNotifier *notifier.TelegramNotifier
 
 		if notificationService != nil {
 			// Пробуем получить существующий TelegramNotifier
 			for _, n := range notificationService.GetNotifiers() {
-				if tn, ok := n.(*notifier.TelegramNotifier); ok { // ИЗМЕНИЛ ТИП
+				if tn, ok := n.(*notifier.TelegramNotifier); ok {
 					telegramNotifier = tn
 					break
 				}

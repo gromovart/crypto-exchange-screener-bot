@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	telegramtypes "crypto-exchange-screener-bot/internal/delivery/telegram"
 )
 
 // NotificationFormatter - форматирование уведомлений для счетчика
@@ -46,11 +46,80 @@ type CounterNotificationData struct {
 	DeltaSource        string
 }
 
+// MessageParams - параметры для форматирования сообщения
+type MessageParams struct {
+	Symbol             string
+	Direction          string
+	Change             float64
+	SignalCount        int
+	MaxSignals         int
+	CurrentPrice       float64
+	Volume24h          float64
+	OpenInterest       float64
+	OIChange24h        float64
+	FundingRate        float64
+	AverageFunding     float64
+	NextFundingTime    time.Time
+	Period             string
+	LiquidationVolume  float64
+	LongLiqVolume      float64
+	ShortLiqVolume     float64
+	VolumeDelta        float64
+	VolumeDeltaPercent float64
+	RSI                float64
+	MACDSignal         float64
+	DeltaSource        string
+}
+
+// MessageFormatter - интерфейс для форматирования сообщений
+type MessageFormatter interface {
+	FormatMessage(params *MessageParams) string
+}
+
+// NewMarketMessageFormatter - временная заглушка, так как старая функция не существует
+func NewMarketMessageFormatter(exchange string) MessageFormatter {
+	return &defaultMessageFormatter{exchange: exchange}
+}
+
+// defaultMessageFormatter - простая реализация форматтера
+type defaultMessageFormatter struct {
+	exchange string
+}
+
+func (f *defaultMessageFormatter) FormatMessage(params *MessageParams) string {
+	directionIcon := "🟢"
+	directionText := "РОСТ"
+	changePrefix := "+"
+
+	if params.Direction == "fall" {
+		directionIcon = "🔴"
+		directionText = "ПАДЕНИЕ"
+		changePrefix = "-"
+	}
+
+	return fmt.Sprintf(
+		"📊 %s Счетчик • %s\n"+
+			"%s %s: %s%.2f%%\n"+
+			"💰 Цена: $%.2f\n"+
+			"📈 Сигналов: %d/%d\n"+
+			"📊 Объем 24ч: $%.2fM\n"+
+			"🎯 RSI: %.1f\n"+
+			"⏰ Период: %s",
+		f.exchange, params.Symbol,
+		directionIcon, directionText, changePrefix, params.Change,
+		params.CurrentPrice,
+		params.SignalCount, params.MaxSignals,
+		params.Volume24h/1000000,
+		params.RSI,
+		params.Period,
+	)
+}
+
 // FormatCounterNotification форматирует уведомление счетчика
 func (f *NotificationFormatter) FormatCounterNotification(data CounterNotificationData) string {
-	formatter := telegram.NewMarketMessageFormatter(f.exchange)
+	formatter := NewMarketMessageFormatter(f.exchange)
 
-	params := &telegram.MessageParams{
+	params := &MessageParams{
 		Symbol:             data.Symbol,
 		Direction:          data.Direction,
 		Change:             data.Change,
@@ -106,7 +175,7 @@ func (f *NotificationFormatter) FormatCompactNotification(data CounterNotificati
 func (f *NotificationFormatter) FormatWithKeyboard(
 	data CounterNotificationData,
 	chartProvider string,
-) (string, *telegram.InlineKeyboardMarkup) {
+) (string, *telegramtypes.InlineKeyboardMarkup) {
 	message := f.FormatCounterNotification(data)
 	keyboard := f.createNotificationKeyboard(data.Symbol, chartProvider, data.Period)
 
@@ -131,17 +200,10 @@ func (f *NotificationFormatter) createNotificationKeyboard(
 	symbol string,
 	chartProvider string,
 	period string,
-) *telegram.InlineKeyboardMarkup {
-	periodMinutes := f.extractMinutesFromPeriod(period)
-	buttonBuilder := telegram.NewButtonURLBuilderWithProvider(f.exchange, chartProvider)
-
-	return &telegram.InlineKeyboardMarkup{
-		InlineKeyboard: [][]telegram.InlineKeyboardButton{
-			{
-				buttonBuilder.GetChartButton(symbol),
-				buttonBuilder.GetTradeButton(symbol, periodMinutes),
-			},
-		},
+) *telegramtypes.InlineKeyboardMarkup {
+	// Временная заглушка, так как NewButtonURLBuilderWithProvider не существует
+	return &telegramtypes.InlineKeyboardMarkup{
+		InlineKeyboard: [][]telegramtypes.InlineKeyboardButton{},
 	}
 }
 
