@@ -85,19 +85,32 @@ func NewTelegramPackageService(
 		return nil, fmt.Errorf("botClient is required")
 	}
 
-	// 2. Получаем MessageSender из бота
-	messageSender := botClient.GetMessageSender()
-	if messageSender == nil {
+	// 2. СОЗДАЕМ РЕАЛЬНЫЙ MESSAGE SENDER если Telegram включен
+	var messageSender message_sender.MessageSender
+
+	if config.TelegramEnabled && config.TelegramBotToken != "" {
+		// СОЗДАЕМ РЕАЛЬНЫЙ MESSAGE SENDER
+		messageSender = message_sender.NewMessageSender(config)
+		log.Printf("✅ Using REAL MessageSender for Telegram (Token: %s...)",
+			maskToken(config.TelegramBotToken))
+	} else {
+		// Используем stub
 		messageSender = &stubMessageSender{}
-		log.Println("⚠️ Using stub message sender")
+		log.Println("⚠️ Using stub message sender (Telegram disabled or no token)")
+	}
+
+	// 2.1 Получаем MessageSender из бота (если не создали реальный)
+	botMessageSender := botClient.GetMessageSender()
+	if botMessageSender != nil && messageSender == nil {
+		messageSender = botMessageSender
 	}
 
 	// 3. Создаем провайдер форматтеров
-	formatterProvider := formatters.NewFormatterProvider("BYBIT") // Можно брать из конфига
+	formatterProvider := formatters.NewFormatterProvider("BYBIT")
 
 	// 4. Создаем внутренние сервисы
 	profileService := profilesvc.NewService(userService, subscriptionService)
-	counterService := countersvc.NewService(userService, formatterProvider, messageSender) // ОБНОВЛЕНО: добавляем messageSender
+	counterService := countersvc.NewService(userService, formatterProvider, messageSender)
 
 	// 5. Создаем контроллеры
 	counterController := counterctrl.NewController(counterService)
@@ -121,6 +134,13 @@ func NewTelegramPackageService(
 
 	log.Println("✅ Telegram package service created")
 	return service, nil
+}
+
+func maskToken(token string) string {
+	if len(token) < 10 {
+		return "***"
+	}
+	return token[:6] + "..." + token[len(token)-4:]
 }
 
 // GetUserProfile возвращает профиль пользователя
@@ -380,7 +400,8 @@ func (s *stubTelegramBotClient) SendTextMessage(chatID int64, text string, keybo
 }
 
 func (s *stubTelegramBotClient) GetMessageSender() message_sender.MessageSender {
-	return &stubMessageSender{}
+	// Возвращаем nil, чтобы использовался реальный MessageSender из конфигурации
+	return nil
 }
 
 func (s *stubTelegramBotClient) HandleUpdate(update interface{}) error {

@@ -81,6 +81,27 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 	// Форматируем сообщение
 	formattedMessage := s.formatter.FormatCounterSignal(data)
 
+	// ЛОГИРУЕМ ПОЛНОЕ СООБЩЕНИЕ
+	log.Printf("📨 DEBUG: Полное сообщение для %s:\n%s",
+		data.Symbol, formattedMessage)
+
+	log.Printf("📨 Отправка counter уведомления для %s пользователю %s (chat_id: %s)",
+		data.Symbol, user.Username, user.ChatID)
+
+	// Проверяем message sender
+	if s.messageSender == nil {
+		log.Printf("❌ MessageSender is NIL!")
+		return fmt.Errorf("message sender not initialized")
+	}
+
+	// Проверяем тип message sender
+	log.Printf("📱 MessageSender type: %T", s.messageSender)
+
+	// Проверяем тестовый режим если есть метод
+	if sender, ok := s.messageSender.(interface{ IsTestMode() bool }); ok {
+		log.Printf("🧪 MessageSender test mode: %v", sender.IsTestMode())
+	}
+
 	log.Printf("📨 Отправка counter уведомления для %s пользователю %s (chat_id: %s)",
 		data.Symbol, user.Username, user.ChatID)
 
