@@ -3,6 +3,7 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/types"
@@ -29,6 +30,7 @@ func NewServiceWithDependencies(
 	userService *users.Service,
 	formatter *formatters.FormatterProvider,
 	messageSender message_sender.MessageSender,
+	buttonBuilder *buttons.ButtonBuilder, // ДОБАВЛЕНО
 ) Service {
-	return NewService(userService, formatter, messageSender)
+	return NewService(userService, formatter, messageSender, buttonBuilder)
 }

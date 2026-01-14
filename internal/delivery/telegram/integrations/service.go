@@ -9,6 +9,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	counterctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
@@ -105,14 +106,18 @@ func NewTelegramPackageService(
 		messageSender = botMessageSender
 	}
 
-	// 3. Создаем провайдер форматтеров
-	formatterProvider := formatters.NewFormatterProvider("BYBIT")
+	// 3. СОЗДАЕМ BUTTON BUILDER
+	buttonBuilder := buttons.NewButtonBuilder()
+	log.Println("🛠️ ButtonBuilder created")
 
-	// 4. Создаем внутренние сервисы
+	// 4. Создаем провайдер форматтеров
+	formatterProvider := formatters.NewFormatterProvider("BYBIT") // Можно брать из конфига
+
+	// 5. Создаем внутренние сервисы
 	profileService := profilesvc.NewService(userService, subscriptionService)
-	counterService := countersvc.NewService(userService, formatterProvider, messageSender)
+	counterService := countersvc.NewService(userService, formatterProvider, messageSender, buttonBuilder)
 
-	// 5. Создаем контроллеры
+	// 6. Создаем контроллеры
 	counterController := counterctrl.NewController(counterService)
 
 	service := &telegramPackageServiceImpl{
@@ -134,13 +139,6 @@ func NewTelegramPackageService(
 
 	log.Println("✅ Telegram package service created")
 	return service, nil
-}
-
-func maskToken(token string) string {
-	if len(token) < 10 {
-		return "***"
-	}
-	return token[:6] + "..." + token[len(token)-4:]
 }
 
 // GetUserProfile возвращает профиль пользователя
@@ -324,6 +322,14 @@ func (s *telegramPackageServiceImpl) IsRunning() bool {
 	return s.isRunning
 }
 
+// maskToken маскирует токен для безопасного логирования
+func maskToken(token string) string {
+	if len(token) < 10 {
+		return "***"
+	}
+	return token[:6] + "..." + token[len(token)-4:]
+}
+
 // stubMessageSender заглушка для MessageSender
 type stubMessageSender struct{}
 
@@ -368,27 +374,6 @@ func (s *stubMessageSender) IsTestMode() bool {
 	return false
 }
 
-// NewTelegramPackageServiceWithDefaults создает сервис с ботом по умолчанию
-func NewTelegramPackageServiceWithDefaults(
-	config *config.Config,
-	userService *users.Service,
-	subscriptionService *subscription.Service,
-	eventBus types.EventBus,
-) (TelegramPackageService, error) {
-
-	botClient := &stubTelegramBotClient{
-		config: config,
-	}
-
-	return NewTelegramPackageService(
-		config,
-		userService,
-		subscriptionService,
-		eventBus,
-		botClient,
-	)
-}
-
 // stubTelegramBotClient заглушка для TelegramBotClient
 type stubTelegramBotClient struct {
 	config *config.Config
@@ -415,6 +400,27 @@ func (s *stubTelegramBotClient) IsRunning() bool {
 
 func (s *stubTelegramBotClient) GetConfig() *config.Config {
 	return s.config
+}
+
+// NewTelegramPackageServiceWithDefaults создает сервис с ботом по умолчанию
+func NewTelegramPackageServiceWithDefaults(
+	config *config.Config,
+	userService *users.Service,
+	subscriptionService *subscription.Service,
+	eventBus types.EventBus,
+) (TelegramPackageService, error) {
+
+	botClient := &stubTelegramBotClient{
+		config: config,
+	}
+
+	return NewTelegramPackageService(
+		config,
+		userService,
+		subscriptionService,
+		eventBus,
+		botClient,
+	)
 }
 
 func min(a, b int) int {

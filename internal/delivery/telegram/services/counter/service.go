@@ -3,6 +3,7 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
@@ -17,14 +18,21 @@ type serviceImpl struct {
 	userService   *users.Service
 	formatter     *formatters.FormatterProvider
 	messageSender message_sender.MessageSender
+	buttonBuilder *buttons.ButtonBuilder
 }
 
 // NewService создает новый сервис счетчика
-func NewService(userService *users.Service, formatter *formatters.FormatterProvider, messageSender message_sender.MessageSender) Service {
+func NewService(
+	userService *users.Service,
+	formatter *formatters.FormatterProvider,
+	messageSender message_sender.MessageSender,
+	buttonBuilder *buttons.ButtonBuilder,
+) Service {
 	return &serviceImpl{
 		userService:   userService,
 		formatter:     formatter,
 		messageSender: messageSender,
+		buttonBuilder: buttonBuilder,
 	}
 }
 
@@ -81,27 +89,6 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 	// Форматируем сообщение
 	formattedMessage := s.formatter.FormatCounterSignal(data)
 
-	// ЛОГИРУЕМ ПОЛНОЕ СООБЩЕНИЕ
-	log.Printf("📨 DEBUG: Полное сообщение для %s:\n%s",
-		data.Symbol, formattedMessage)
-
-	log.Printf("📨 Отправка counter уведомления для %s пользователю %s (chat_id: %s)",
-		data.Symbol, user.Username, user.ChatID)
-
-	// Проверяем message sender
-	if s.messageSender == nil {
-		log.Printf("❌ MessageSender is NIL!")
-		return fmt.Errorf("message sender not initialized")
-	}
-
-	// Проверяем тип message sender
-	log.Printf("📱 MessageSender type: %T", s.messageSender)
-
-	// Проверяем тестовый режим если есть метод
-	if sender, ok := s.messageSender.(interface{ IsTestMode() bool }); ok {
-		log.Printf("🧪 MessageSender test mode: %v", sender.IsTestMode())
-	}
-
 	log.Printf("📨 Отправка counter уведомления для %s пользователю %s (chat_id: %s)",
 		data.Symbol, user.Username, user.ChatID)
 
@@ -117,13 +104,22 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 		return fmt.Errorf("неверный формат chat_id у пользователя %s: %s", user.Username, user.ChatID)
 	}
 
-	// Отправляем через message sender
+	// СОЗДАЕМ КЛАВИАТУРУ С КНОПКАМИ "График" и "Торговать"
+	var keyboard interface{} = nil
+	if s.buttonBuilder != nil {
+		keyboard = s.buttonBuilder.CreateSignalKeyboard(data.Symbol)
+		log.Printf("🛠️ Создана клавиатура для %s с кнопками: График, Торговать", data.Symbol)
+	} else {
+		log.Printf("⚠️ ButtonBuilder не инициализирован, клавиатура не будет добавлена")
+	}
+
+	// Отправляем через message sender с клавиатурой
 	if s.messageSender != nil {
-		err := s.messageSender.SendTextMessage(chatID, formattedMessage, nil)
+		err := s.messageSender.SendTextMessage(chatID, formattedMessage, keyboard)
 		if err != nil {
 			return fmt.Errorf("ошибка отправки в Telegram: %w", err)
 		}
-		log.Printf("✅ Сообщение отправлено пользователю %s", user.Username)
+		log.Printf("✅ Сообщение с клавиатурой отправлено пользователю %s", user.Username)
 	} else {
 		log.Printf("⚠️ MessageSender не инициализирован, сообщение не отправлено")
 		return fmt.Errorf("message sender not initialized")
