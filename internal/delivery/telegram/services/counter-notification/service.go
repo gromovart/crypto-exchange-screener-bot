@@ -20,36 +20,24 @@ func NewService() Service {
 	return &serviceImpl{}
 }
 
-// NotificationParams параметры для Exec
-type notificationParams struct {
-	Event types.Event `json:"event"`
-}
-
-// NotificationResult результат Exec
-type notificationResult struct {
-	Processed bool   `json:"processed"`
-	Message   string `json:"message,omitempty"`
-	SentTo    int    `json:"sent_to,omitempty"`
-}
-
 // Exec выполняет обработку запроса на уведомление счетчика
 func (s *serviceImpl) Exec(params interface{}) (interface{}, error) {
 	// Приводим параметры к нужному типу
-	parsedParams, ok := params.(notificationParams)
+	parsedParams, ok := params.(NotificationParams)
 	if !ok {
-		return notificationResult{Processed: false},
-			fmt.Errorf("неверный тип параметров: ожидается notificationParams")
+		return NotificationResult{Processed: false},
+			fmt.Errorf("неверный тип параметров: ожидается NotificationParams")
 	}
 
 	if parsedParams.Event.Type != types.EventCounterNotificationRequest {
-		return notificationResult{Processed: false},
+		return NotificationResult{Processed: false},
 			fmt.Errorf("неподдерживаемый тип события: %s", parsedParams.Event.Type)
 	}
 
 	// Извлекаем данные уведомления
 	notificationData, err := s.extractNotificationData(parsedParams.Event.Data)
 	if err != nil {
-		return notificationResult{Processed: false},
+		return NotificationResult{Processed: false},
 			fmt.Errorf("ошибка извлечения данных уведомления: %w", err)
 	}
 
@@ -64,30 +52,18 @@ func (s *serviceImpl) Exec(params interface{}) (interface{}, error) {
 		notificationData.CurrentCount, notificationData.MaxSignals,
 		notificationData.Percentage)
 
-	return notificationResult{
+	return NotificationResult{
 		Processed: true,
 		Message:   fmt.Sprintf("Уведомление для %s отправлено", notificationData.Symbol),
 		SentTo:    1, // TODO: реальное количество получателей
 	}, nil
 }
 
-// NotificationData данные уведомления счетчика
-type notificationData struct {
-	Symbol          string                  `json:"symbol"`
-	SignalType      types.CounterSignalType `json:"signal_type"`
-	CurrentCount    int                     `json:"current_count"`
-	Period          types.CounterPeriod     `json:"period"`
-	PeriodStartTime time.Time               `json:"period_start_time"`
-	Timestamp       time.Time               `json:"timestamp"`
-	MaxSignals      int                     `json:"max_signals"`
-	Percentage      float64                 `json:"percentage"`
-}
-
 // extractNotificationData извлекает данные уведомления из события
-func (s *serviceImpl) extractNotificationData(eventData interface{}) (notificationData, error) {
+func (s *serviceImpl) extractNotificationData(eventData interface{}) (NotificationData, error) {
 	// Пробуем преобразовать в CounterNotification
 	if notification, ok := eventData.(types.CounterNotification); ok {
-		return notificationData{
+		return NotificationData{
 			Symbol:          notification.Symbol,
 			SignalType:      notification.SignalType,
 			CurrentCount:    notification.CurrentCount,
@@ -100,7 +76,7 @@ func (s *serviceImpl) extractNotificationData(eventData interface{}) (notificati
 	}
 
 	// Временная заглушка
-	return notificationData{
+	return NotificationData{
 		Symbol:          "BTCUSDT",
 		SignalType:      types.CounterTypeGrowth,
 		CurrentCount:    8,

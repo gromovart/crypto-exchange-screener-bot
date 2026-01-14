@@ -19,35 +19,24 @@ func NewService() Service {
 	return &serviceImpl{}
 }
 
-// CounterParams параметры для Exec
-type counterParams struct {
-	Event types.Event `json:"event"`
-}
-
-// CounterResult результат Exec
-type counterResult struct {
-	Processed bool   `json:"processed"`
-	Message   string `json:"message,omitempty"`
-}
-
 // Exec выполняет обработку события счетчика
 func (s *serviceImpl) Exec(params interface{}) (interface{}, error) {
 	// Приводим параметры к нужному типу
-	parsedParams, ok := params.(counterParams)
+	parsedParams, ok := params.(CounterParams)
 	if !ok {
-		return counterResult{Processed: false},
-			fmt.Errorf("неверный тип параметров: ожидается counterParams")
+		return CounterResult{Processed: false},
+			fmt.Errorf("неверный тип параметров: ожидается CounterParams")
 	}
 
 	if parsedParams.Event.Type != types.EventCounterSignalDetected {
-		return counterResult{Processed: false},
+		return CounterResult{Processed: false},
 			fmt.Errorf("неподдерживаемый тип события: %s", parsedParams.Event.Type)
 	}
 
 	// Извлекаем данные счетчика
 	counterData, err := s.extractCounterData(parsedParams.Event.Data)
 	if err != nil {
-		return counterResult{Processed: false},
+		return CounterResult{Processed: false},
 			fmt.Errorf("ошибка извлечения данных счетчика: %w", err)
 	}
 
@@ -59,7 +48,7 @@ func (s *serviceImpl) Exec(params interface{}) (interface{}, error) {
 	fmt.Printf("🔢 CounterService: Обработка счетчика для %s (рост: %d, падение: %d, период: %s)\n",
 		counterData.Symbol, counterData.GrowthCount, counterData.FallCount, counterData.Period)
 
-	return counterResult{
+	return CounterResult{
 		Processed: true,
 		Message:   fmt.Sprintf("Счетчик %s обработан", counterData.Symbol),
 	}, nil

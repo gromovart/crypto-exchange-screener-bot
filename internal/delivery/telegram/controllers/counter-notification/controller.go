@@ -2,18 +2,18 @@
 package counternotification
 
 import (
-	counternotification "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter-notification"
+	counterNotificationService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter-notification"
 	"crypto-exchange-screener-bot/internal/types"
 	"log"
 )
 
 // controllerImpl реализация CounterNotificationController
 type controllerImpl struct {
-	service counternotification.Service
+	service counterNotificationService.Service
 }
 
 // NewController создает новый контроллер уведомлений счетчика
-func NewController(service counternotification.Service) Controller {
+func NewController(service counterNotificationService.Service) Controller {
 	return &controllerImpl{service: service}
 }
 
@@ -22,9 +22,7 @@ func (c *controllerImpl) HandleEvent(event types.Event) error {
 	log.Printf("🤖 CounterNotificationController: Событие %s от %s", event.Type, event.Source)
 
 	// Создаем параметры для сервиса
-	params := struct {
-		Event types.Event `json:"event"`
-	}{
+	params := counterNotificationService.NotificationParams{
 		Event: event,
 	}
 
