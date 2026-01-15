@@ -19,6 +19,26 @@ func NewSignalFormatter() *SignalFormatter {
 }
 
 // FormatSignalBlock форматирует блок сигнала и цены
+func (f *SignalFormatter) FormatSignalHeader(
+	direction string,
+	change float64,
+	currentPrice float64,
+) string {
+	directionIcon := "🟢"
+	directionText := "РОСТ"
+	changePrefix := "+"
+
+	if direction == "fall" {
+		directionIcon = "🔴"
+		directionText = "ПАДЕНИЕ"
+		changePrefix = "-"
+	}
+
+	return fmt.Sprintf("%s %s %s%.2f%%\n",
+		directionIcon, directionText, changePrefix, math.Abs(change))
+}
+
+// FormatSignalBlock форматирует блок сигнала и цены
 func (f *SignalFormatter) FormatSignalBlock(
 	direction string,
 	change float64,
@@ -36,7 +56,7 @@ func (f *SignalFormatter) FormatSignalBlock(
 
 	priceStr := f.numberFormatter.FormatPrice(currentPrice)
 
-	return fmt.Sprintf("%s %s %s%.2f%%\n💰 $%s\n\n",
+	return fmt.Sprintf("%s %s %s%.2f%%\n💰 $%s\n",
 		directionIcon, directionText, changePrefix, math.Abs(change), priceStr)
 }
 

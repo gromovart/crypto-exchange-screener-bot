@@ -76,6 +76,20 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	var builder strings.Builder
 
 	// 1. ЗАГОЛОВОК
+
+	// 🔴 ПАДЕНИЕ -60.00% 🚨
+	// 💰 $0.07388
+	builder.WriteString(p.SignalFormatter.FormatSignalHeader(
+		data.Direction,
+		data.ChangePercent,
+		data.CurrentPrice,
+	))
+
+	// 2. СИМВОЛ
+	// 📛 DOLOUSDT
+	builder.WriteString(fmt.Sprintf("📛 %s\n\n", data.Symbol))
+
+	// 3. БИРЖА
 	// 🏷️ BYBIT • 1ч
 	timeframe := p.HeaderFormatter.ExtractTimeframe(data.Period)
 	intensityEmoji := p.HeaderFormatter.GetIntensityEmoji(data.ChangePercent)
@@ -85,26 +99,10 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString(intensityEmoji + " ")
 	}
 
-	// 2. СИМВОЛ И ТИП КОНТРАКТА
-	// 📛 DOLOUSDT
-	// 📄 USDT-фьючерс
-	contractType := p.HeaderFormatter.GetContractType(data.Symbol)
-	builder.WriteString(fmt.Sprintf("📛 %s\n", data.Symbol))
-	builder.WriteString(fmt.Sprintf("📄 %s\n", contractType))
-
-	// 3. ВРЕМЯ
+	// 4. ВРЕМЯ
 	// 🕐 22:07:06
 	builder.WriteString(fmt.Sprintf("🕐 %s\n\n",
 		data.Timestamp.Format("15:04:05")))
-
-	// 4. СИГНАЛ И ЦЕНА
-	// 🔴 ПАДЕНИЕ -60.00% 🚨
-	// 💰 $0.07388
-	builder.WriteString(p.SignalFormatter.FormatSignalBlock(
-		data.Direction,
-		data.ChangePercent,
-		data.CurrentPrice,
-	))
 
 	// 5. РЫНОЧНЫЕ МЕТРИКИ
 	// 📈 OI: $90.0M (🟢+7.0%)
