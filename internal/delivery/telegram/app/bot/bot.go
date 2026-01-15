@@ -11,6 +11,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"sync"
 )
@@ -59,8 +60,11 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	// Создаем фабрику хэндлеров
 	handlerFactory := handlers.NewHandlerFactory()
 
-	// Инициализируем фабрику
-	InitHandlerFactory(handlerFactory)
+	// Создаем сервис для переключения уведомлений
+	notificationsToggleService := notifications_toggle.NewService(deps.UserService)
+
+	// Инициализируем фабрику с сервисом
+	InitHandlerFactory(handlerFactory, notificationsToggleService)
 
 	// Регистрируем все хэндлеры
 	router := handlerFactory.RegisterAllHandlers()

@@ -1,4 +1,4 @@
-// internal/delivery/telegram/app/bot/callbacks/callbacks.go
+// internal/delivery/telegram/app/bot/constants/callbacks.go
 package constants
 
 // Callback constants
@@ -30,7 +30,7 @@ const (
 
 	// ============== NOTIFICATIONS MENU ==============
 	// (одинаковое для всех)
-	CallbackNotifyToggleAll  = "notify_toggle"      // ✅/❌ Включить/Выключить
+	CallbackNotifyToggleAll  = "notify_toggle_all"  // ✅/❌ Включить/Выключить (ИСПРАВЛЕНО)
 	CallbackNotifyGrowthOnly = "notify_growth_only" // 📈 Только рост
 	CallbackNotifyFallOnly   = "notify_fall_only"   // 📉 Только падение
 	CallbackNotifyBoth       = "notify_both"        // 📊 Все сигналы
