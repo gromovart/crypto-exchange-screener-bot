@@ -24,6 +24,10 @@ import (
 	reset_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_menu"
 	reset_settings_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_settings"
 	settings_main "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/settings_main"
+	signal_set_fall_threshold_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_set_fall_threshold"
+	signal_set_growth_threshold_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_set_growth_threshold"
+	signal_toggle_fall_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_toggle_fall"
+	signal_toggle_growth_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_toggle_growth"
 	signals_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signals_menu"
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
 	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
@@ -161,21 +165,21 @@ func InitHandlerFactory(
 
 	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (с сервисами)
 	// TODO: Раскомментировать после создания обработчиков
-	// factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
-	// 	return signal_toggle_growth_handler.NewHandler(signalSettingsService)
-	// })
+	factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
+		return signal_toggle_growth_handler.NewHandler(signalSettingsService)
+	})
 
-	// factory.RegisterHandlerCreator(constants.CallbackSignalToggleFall, func() handlers.Handler {
-	// 	return signal_toggle_fall_handler.NewHandler(signalSettingsService)
-	// })
+	factory.RegisterHandlerCreator(constants.CallbackSignalToggleFall, func() handlers.Handler {
+		return signal_toggle_fall_handler.NewHandler(signalSettingsService)
+	})
 
-	// factory.RegisterHandlerCreator(constants.CallbackSignalSetGrowthThreshold, func() handlers.Handler {
-	// 	return signal_set_growth_threshold_handler.NewHandler(signalSettingsService)
-	// })
+	factory.RegisterHandlerCreator(constants.CallbackSignalSetGrowthThreshold, func() handlers.Handler {
+		return signal_set_growth_threshold_handler.NewHandler(signalSettingsService)
+	})
 
-	// factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
-	// 	return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
-	// })
+	factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
+		return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
+	})
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
 	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
