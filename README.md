@@ -552,8 +552,6 @@ golangci-lint run
 │
 ├── 👤 ДЛЯ НЕАВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ:
 │   ├── 🔑 Войти / Авторизация → callback: auth_login
-│   ├── 🔔 Уведомления → callback: notifications_menu
-│   ├── ⏱️ Периоды → callback: periods_menu
 │   └── 🔙 Назад → callback: menu_main
 │
 ├── 👤 ДЛЯ АВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ:

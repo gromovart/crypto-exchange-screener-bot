@@ -13,11 +13,7 @@ const (
 	CallbackHelp              = "help"               // 📋 Помощь
 
 	// ============== SETTINGS MENU ==============
-	// Для НЕавторизованных
-	CallbackAuthLogin    = "auth_login"    // 🔑 Войти / Авторизация
-	CallbackNotifyToggle = "notify_toggle" // ✅/❌ Включить/Выключить
-	CallbackPeriodSelect = "period_select" // ⏱️ Периоды (базовый)
-
+	CallbackAuthLogin = "auth_login" // 🔑 Войти / Авторизация
 	// Для АВТОРИЗОВАННЫХ
 	CallbackProfileMain    = "profile_main"    // 👤 Мой профиль
 	CallbackThresholdsMenu = "thresholds_menu" // 📊 Пороги сигналов
@@ -30,13 +26,12 @@ const (
 
 	// ============== NOTIFICATIONS MENU ==============
 	// (одинаковое для всех)
-	CallbackNotifyToggleAll  = "notify_toggle_all"  // ✅/❌ Включить/Выключить (ИСПРАВЛЕНО)
+	CallbackNotifyToggleAll  = "notify_toggle_all"  // ✅/❌ Включить/Выключить
 	CallbackNotifyGrowthOnly = "notify_growth_only" // 📈 Только рост
 	CallbackNotifyFallOnly   = "notify_fall_only"   // 📉 Только падение
 	CallbackNotifyBoth       = "notify_both"        // 📊 Все сигналы
 
 	// ============== THRESHOLDS MENU ==============
-	// (только для авторизованных)
 	CallbackThresholdGrowth = "threshold_growth" // 📈 Мин. рост: X%
 	CallbackThresholdFall   = "threshold_fall"   // 📉 Мин. падение: X%
 	CallbackQuietHours      = "quiet_hours"      // 🕐 Тихие часы: XX-XX
@@ -49,14 +44,13 @@ const (
 	CallbackPeriod1h  = "period_1h"  // ⏱️ 1 час
 	CallbackPeriod4h  = "period_4h"  // ⏱️ 4 часа
 
-	// Расширенный (только auth) - управление предпочтительными
+	// Расширенный - управление предпочтительными
 	CallbackPeriod1d           = "period_1d"            // ⏱️ 1 день
 	CallbackPeriodManageAdd    = "period_manage_add"    // ➕ Добавить период
 	CallbackPeriodManageRemove = "period_manage_remove" // ➖ Удалить период
 	CallbackPeriodManageReset  = "period_manage_reset"  // 🔄 Сбросить выбор
 
 	// ============== PROFILE MENU ==============
-	// (только для авторизованных)
 	CallbackProfileStats        = "profile_stats"        // 📊 Статистика
 	CallbackProfileSubscription = "profile_subscription" // 💎 Подписка: X
 

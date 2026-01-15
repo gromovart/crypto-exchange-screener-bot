@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/init_handlers.go
 package bot
 
 import (
@@ -6,13 +5,28 @@ import (
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
+
+	auth_login_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_login"
+	auth_logout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_logout"
 	help_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/help"
+	menu_main "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/menu_main"
 	notifications_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notifications_menu"
 	notifications_toggle_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notifications_toggle"
+	notify_both_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_both"
+	notify_fall_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only"
+	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
+	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
+	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
 	profile_main "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/profile_main"
+	profile_stats_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/profile_stats"
+	profile_subscription_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/profile_subscription"
+	reset_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_menu"
+	reset_settings_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_settings"
 	settings_main "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/settings_main"
+	signals_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signals_menu"
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
+	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
 	periods_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/periods"
@@ -84,6 +98,66 @@ func InitHandlerFactory(
 		return stats_callback.NewHandler()
 	})
 
+	factory.RegisterHandlerCreator(constants.CallbackMenuMain, func() handlers.Handler {
+		return menu_main.NewHandler()
+	})
+
+	// НОВЫЕ CALLBACK ОБРАБОТЧИКИ ДЛЯ МЕНЮ
+	factory.RegisterHandlerCreator(constants.CallbackSignalsMenu, func() handlers.Handler {
+		return signals_menu_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackResetMenu, func() handlers.Handler {
+		return reset_menu_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackThresholdsMenu, func() handlers.Handler {
+		return thresholds_menu_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackAuthLogin, func() handlers.Handler {
+		return auth_login_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackAuthLogout, func() handlers.Handler {
+		return auth_logout_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackResetSettings, func() handlers.Handler {
+		return reset_settings_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackPeriodManage, func() handlers.Handler {
+		return period_manage_handler.NewHandler()
+	})
+
+	// Обработчик для выбора периода (использует общий префикс)
+	factory.RegisterHandlerCreator("period_select", func() handlers.Handler {
+		return period_select_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackProfileStats, func() handlers.Handler {
+		return profile_stats_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackProfileSubscription, func() handlers.Handler {
+		return profile_subscription_handler.NewHandler()
+	})
+
+	// CALLBACK ОБРАБОТЧИКИ ДЛЯ УВЕДОМЛЕНИЙ
+	factory.RegisterHandlerCreator(constants.CallbackNotifyGrowthOnly, func() handlers.Handler {
+		return notify_growth_only_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackNotifyFallOnly, func() handlers.Handler {
+		return notify_fall_only_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackNotifyBoth, func() handlers.Handler {
+		return notify_both_handler.NewHandler()
+	})
+
+	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
 	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
 		return notifications_toggle_handler.NewHandler(notificationsToggleService)
 	})
