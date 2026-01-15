@@ -13,10 +13,8 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	counterctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
-	signalctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/signal"
 	countersvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	profilesvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
-	signalsvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 )
@@ -43,11 +41,9 @@ type telegramPackageServiceImpl struct {
 	messageSender  message_sender.MessageSender
 	profileService profilesvc.Service
 	counterService countersvc.Service
-	signalService  signalsvc.Service
 
 	// Контроллеры
 	counterController counterctrl.Controller
-	signalController  signalctrl.Controller
 
 	// Управление
 	mu                sync.RWMutex
@@ -234,7 +230,6 @@ func (s *telegramPackageServiceImpl) GetPackageStats() map[string]interface{} {
 		"services": map[string]bool{
 			"profile_service": s.profileService != nil,
 			"counter_service": s.counterService != nil,
-			"signal_service":  s.signalService != nil,
 			"bot_client":      s.botClient != nil,
 			"message_sender":  s.messageSender != nil,
 		},
@@ -258,7 +253,6 @@ func (s *telegramPackageServiceImpl) GetHealthStatus() HealthStatus {
 
 	checkService("profile_service", s.profileService)
 	checkService("counter_service", s.counterService)
-	checkService("signal_service", s.signalService)
 	checkService("bot_client", s.botClient)
 	checkService("message_sender", s.messageSender)
 
