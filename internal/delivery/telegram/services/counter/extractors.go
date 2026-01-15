@@ -2,7 +2,7 @@
 package counter
 
 import (
-	"log"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"time"
 )
 
@@ -49,7 +49,7 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 	data.NextAnalysis = s.calculateNextAnalysis(data.Timestamp, data.Period)
 	data.NextSignal = s.calculateNextSignal(data.Timestamp, data.Period, data.Confirmations, data.RequiredConfirmations)
 
-	log.Printf("🔍 extractRawDataFromParams: RSI=%.2f, MACD=%.2f",
+	logger.Debug("🔍 extractRawDataFromParams: RSI=%.2f, MACD=%.2f",
 		params.RSI, params.MACDSignal)
 
 	return data, nil

@@ -312,7 +312,7 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 	for _, analyzer := range analyzersList {
 		signals, err := analyzer.Analyze(data, analyzer.GetConfig())
 		if err != nil {
-			log.Printf("⚠️ Ошибка анализа %s анализатором %s: %v", symbol, analyzer.Name(), err)
+			logger.Debug("⚠️ Ошибка анализа %s анализатором %s: %v", symbol, analyzer.Name(), err)
 			continue
 		}
 
@@ -349,7 +349,7 @@ func (e *AnalysisEngine) analyzeParallel(symbols []string) map[string]*analysis.
 
 			result, err := e.AnalyzeSymbol(s, e.config.AnalysisPeriods)
 			if err != nil {
-				log.Printf("⚠️ Ошибка анализа %s: %v", s, err)
+				logger.Debug("⚠️ Ошибка анализа %s: %v", s, err)
 				return
 			}
 
@@ -370,7 +370,7 @@ func (e *AnalysisEngine) analyzeSequential(symbols []string) map[string]*analysi
 	for _, symbol := range symbols {
 		result, err := e.AnalyzeSymbol(symbol, e.config.AnalysisPeriods)
 		if err != nil {
-			log.Printf("⚠️ Ошибка анализа %s: %v", symbol, err)
+			logger.Debug("⚠️ Ошибка анализа %s: %v", symbol, err)
 			continue
 		}
 

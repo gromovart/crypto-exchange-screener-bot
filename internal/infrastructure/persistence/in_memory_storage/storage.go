@@ -3,7 +3,7 @@ package storage
 
 import (
 	"container/list"
-	"log"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"regexp"
 	"sort"
 	"sync"
@@ -38,10 +38,10 @@ type InMemoryPriceStorage struct {
 func NewInMemoryPriceStorage(config *StorageConfig) *InMemoryPriceStorage {
 	if config == nil {
 		config = &StorageConfig{
-			MaxHistoryPerSymbol: 10000,
+			MaxHistoryPerSymbol: 17280,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * time.Minute,
-			RetentionPeriod:     24 * time.Hour,
+			RetentionPeriod:     48 * time.Hour,
 		}
 	}
 
@@ -460,7 +460,7 @@ func (s *InMemoryPriceStorage) GetSymbolMetrics(symbol string) (*SymbolMetrics, 
 	}
 
 	// ОТЛАДОЧНЫЙ ЛОГ
-	log.Printf("💾 Storage.GetSymbolMetrics: %s - OI=%.0f, Funding=%.6f",
+	logger.Debug("💾 Storage.GetSymbolMetrics: %s - OI=%.0f, Funding=%.6f",
 		symbol, snapshot.OpenInterest, snapshot.FundingRate)
 
 	// Рассчитываем изменения

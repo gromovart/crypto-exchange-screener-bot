@@ -9,7 +9,6 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
-	"log"
 )
 
 // serviceImpl реализация CounterService
@@ -38,10 +37,6 @@ func NewService(
 // Exec выполняет обработку события счетчика
 // Теперь принимает конкретный тип CounterParams вместо interface{}
 func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
-
-	log.Printf("🔍 Service.Exec: получены параметры: %s %s %.4f%%, RSI=%.2f, MACD=%.2f",
-		params.Symbol, params.Direction, params.ChangePercent, params.RSI, params.MACDSignal)
-
 	// Извлекаем данные счетчика из CounterParams
 	rawData, err := s.extractRawDataFromParams(params)
 	if err != nil {

@@ -55,7 +55,7 @@ func NewBybitClient(cfg *config.Config) *BybitClient {
 
 	return &BybitClient{
 		httpClient: &http.Client{
-			Timeout: time.Duration(cfg.HTTPPort) * time.Second,
+			Timeout: 10 * time.Second, // вынести в отдельную переменную конфигурации
 			Transport: &http.Transport{
 				MaxIdleConns:        cfg.MaxConcurrentRequests,
 				MaxIdleConnsPerHost: cfg.MaxConcurrentRequests,
@@ -666,7 +666,7 @@ func (c *BybitClient) GetRecentTrades(symbol string, limit int) ([]TradeData, er
 		})
 	}
 
-	log.Printf("📊 Получено %d сделок для %s", len(trades), symbol)
+	logger.Debug("📊 Получено %d сделок для %s", len(trades), symbol)
 	return trades, nil
 }
 
@@ -675,7 +675,7 @@ func (c *BybitClient) CalculateVolumeDelta(symbol string, period time.Duration) 
 	startTime := time.Now().Add(-period)
 	endTime := time.Now()
 
-	log.Printf("🔍 Расчет дельты объемов для %s за период %v", symbol, period)
+	logger.Debug("🔍 Расчет дельты объемов для %s за период %v", symbol, period)
 
 	// Оцениваем количество сделок (~60 сделок в минуту для активного символа)
 	estimatedTrades := int(period.Minutes() * 60)
@@ -713,7 +713,7 @@ func (c *BybitClient) CalculateVolumeDelta(symbol string, period time.Duration) 
 	}
 
 	if len(filteredTrades) == 0 {
-		log.Printf("⚠️ Нет сделок для %s за период %v", symbol, period)
+		logger.Warn("⚠️ Нет сделок для %s за период %v", symbol, period)
 		// Возвращаем нулевую дельту вместо ошибки
 		return &VolumeDelta{
 			Symbol:       symbol,
@@ -739,11 +739,11 @@ func (c *BybitClient) CalculateVolumeDelta(symbol string, period time.Duration) 
 		deltaPercent = (delta / totalVolume) * 100
 	}
 
-	log.Printf("📈 Дельта объемов %s:", symbol)
-	log.Printf("   Период: %v - %v", startTime.Format("15:04:05"), endTime.Format("15:04:05"))
-	log.Printf("   Сделки: %d (Buy: %d, Sell: %d)", len(filteredTrades), buyCount, sellCount)
-	log.Printf("   Объемы: Buy $%.0f, Sell $%.0f", buyVolume, sellVolume)
-	log.Printf("   Дельта: $%.0f (%.2f%%)", delta, deltaPercent)
+	logger.Debug("📈 Дельта объемов %s:", symbol)
+	logger.Debug("   Период: %v - %v", startTime.Format("15:04:05"), endTime.Format("15:04:05"))
+	logger.Debug("   Сделки: %d (Buy: %d, Sell: %d)", len(filteredTrades), buyCount, sellCount)
+	logger.Debug("   Объемы: Buy $%.0f, Sell $%.0f", buyVolume, sellVolume)
+	logger.Debug("   Дельта: $%.0f (%.2f%%)", delta, deltaPercent)
 
 	return &VolumeDelta{
 		Symbol:       symbol,

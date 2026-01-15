@@ -17,6 +17,7 @@ import (
 	profilesvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // PackageStats статистика пакета
@@ -178,7 +179,7 @@ func (s *telegramPackageServiceImpl) HandleCounterSignal(event types.Event) erro
 	s.stats.CounterSignals++
 	s.mu.Unlock()
 
-	log.Printf("🔢 Handling counter signal: %s", event.Type)
+	logger.Debug("🔢 Handling counter signal: %s", event.Type)
 	return s.counterController.HandleEvent(event)
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // VolumeDeltaCalculator - калькулятор дельты объемов
@@ -79,7 +80,7 @@ func (c *VolumeDeltaCalculator) safeDelete(symbol string) {
 	if cache, exists := c.volumeDeltaCache[symbol]; exists {
 		if time.Now().After(cache.expiration) {
 			delete(c.volumeDeltaCache, symbol)
-			log.Printf("🧹 Удален просроченный кэш для %s (возраст: %v)",
+			logger.Debug("🧹 Удален просроченный кэш для %s (возраст: %v)",
 				symbol, time.Since(cache.updateTime).Round(time.Second))
 		}
 	}
@@ -128,7 +129,7 @@ func (c *VolumeDeltaCalculator) setToCache(symbol string, deltaData *types.Volum
 func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) *types.VolumeDeltaData {
 	// 1. Проверяем кэш (используем исправленный метод)
 	if cached, found := c.getFromCache(symbol); found {
-		log.Printf("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s, возраст: %v)",
+		logger.Debug("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s, возраст: %v)",
 			symbol, cached.deltaData.Delta, cached.deltaData.DeltaPercent,
 			cached.deltaData.Source, time.Since(cached.updateTime).Round(time.Second))
 		return cached.deltaData
@@ -137,17 +138,17 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 	// 2. Пробуем получить реальные данные через API
 	apiDeltaData, apiErr := c.getFromAPI(symbol)
 	if apiErr == nil && (apiDeltaData.Delta != 0 || apiDeltaData.DeltaPercent != 0) {
-		log.Printf("✅ Получена реальная дельта из API для %s: $%.0f (%.1f%%)",
+		logger.Debug("✅ Получена реальная дельта из API для %s: $%.0f (%.1f%%)",
 			symbol, apiDeltaData.Delta, apiDeltaData.DeltaPercent)
 		c.setToCache(symbol, apiDeltaData)
 		return apiDeltaData
 	}
 
 	// 3. Fallback: Данные из хранилища (вызываем метод из volume_delta_fallback.go)
-	log.Printf("⚠️ API недоступно для %s: %v", symbol, apiErr)
+	logger.Warn("⚠️ API недоступно для %s: %v", symbol, apiErr)
 	storageDeltaData := c.getFromStorage(symbol, direction)
 	if storageDeltaData != nil {
-		log.Printf("📊 Используем дельту из хранилища для %s: $%.0f (%.1f%%)",
+		logger.Debug("📊 Используем дельту из хранилища для %s: $%.0f (%.1f%%)",
 			symbol, storageDeltaData.Delta, storageDeltaData.DeltaPercent)
 		c.setToCache(symbol, storageDeltaData)
 		return storageDeltaData
@@ -155,7 +156,7 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 
 	// 4. Final Fallback: Базовая эмуляция (вызываем метод из volume_delta_fallback.go)
 	emulatedDeltaData := c.calculateBasicDelta(symbol, direction)
-	log.Printf("📊 Используем базовую дельту для %s: $%.0f (%.1f%%)",
+	logger.Debug("📊 Используем базовую дельту для %s: $%.0f (%.1f%%)",
 		symbol, emulatedDeltaData.Delta, emulatedDeltaData.DeltaPercent)
 	c.setToCache(symbol, emulatedDeltaData)
 	return emulatedDeltaData
@@ -164,30 +165,30 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 // getFromAPI получает реальную дельту через API
 func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaData, error) {
 	if c.marketFetcher == nil {
-		log.Printf("❌ MARKET FETCHER IS NIL для %s!", symbol)
+		logger.Error("❌ MARKET FETCHER IS NIL для %s!", symbol)
 		return nil, fmt.Errorf("market fetcher not available")
 	}
 
-	log.Printf("🔍 Проверяем интерфейс marketFetcher для %s: %T", symbol, c.marketFetcher)
+	logger.Debug("🔍 Проверяем интерфейс marketFetcher для %s: %T", symbol, c.marketFetcher)
 
 	// 🔴 ПРОВЕРКА 1: Полный интерфейс
 	if fetcher, ok := c.marketFetcher.(interface {
 		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
 	}); ok {
-		log.Printf("✅ MarketFetcher реализует GetRealTimeVolumeDelta для %s", symbol)
+		logger.Debug("✅ MarketFetcher реализует GetRealTimeVolumeDelta для %s", symbol)
 
 		volumeDelta, err := fetcher.GetRealTimeVolumeDelta(symbol)
 		if err != nil {
-			log.Printf("❌ Ошибка API дельты для %s: %v", symbol, err)
+			logger.Error("❌ Ошибка API дельты для %s: %v", symbol, err)
 			return nil, fmt.Errorf("API error: %w", err)
 		}
 
 		if volumeDelta == nil {
-			log.Printf("⚠️ Получен nil volume delta для %s", symbol)
+			logger.Warn("⚠️ Получен nil volume delta для %s", symbol)
 			return nil, fmt.Errorf("nil volume delta response")
 		}
 
-		log.Printf("✅ Получена реальная дельта для %s: $%.0f (%.1f%%)",
+		logger.Debug("✅ Получена реальная дельта для %s: $%.0f (%.1f%%)",
 			symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
 
 		return &types.VolumeDeltaData{
@@ -202,8 +203,7 @@ func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaDat
 		}, nil
 	} else {
 		// 🔴 ПРОВЕРКА 2: Basic интерфейс
-		log.Printf("❌ MarketFetcher не реализует GetRealTimeVolumeDelta для %s", symbol)
-		log.Printf("   Тип marketFetcher: %T", c.marketFetcher)
+		logger.Error("❌ MarketFetcher не реализует GetRealTimeVolumeDelta для %s", symbol)
 
 		// Проверим базовые методы PriceFetcher
 		if _, ok := c.marketFetcher.(interface {
@@ -228,9 +228,9 @@ func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaDat
 
 // TestConnection тестирует подключение к API дельты с детальной диагностикой
 func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
-	log.Printf("🧪 Тестирование подключения к API дельты для %s", symbol)
-	log.Printf("🔍 Тип marketFetcher: %T", c.marketFetcher)
-	log.Printf("🔍 MarketFetcher равен nil: %v", c.marketFetcher == nil)
+	logger.Debug("🧪 Тестирование подключения к API дельты для %s", symbol)
+	logger.Debug("🔍 Тип marketFetcher: %T", c.marketFetcher)
+	logger.Debug("🔍 MarketFetcher равен nil: %v", c.marketFetcher == nil)
 
 	if c.marketFetcher == nil {
 		return fmt.Errorf("market fetcher not available")
@@ -244,7 +244,7 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 	if fetcher, ok := c.marketFetcher.(interface {
 		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
 	}); ok {
-		log.Printf("✅ MarketFetcher реализует GetRealTimeVolumeDelta")
+		logger.Debug("✅ MarketFetcher реализует GetRealTimeVolumeDelta")
 		fetcherInterface = fetcher
 
 		// 🔴 ИСПРАВЛЕНИЕ: Убираем неиспользуемую переменную, просто проверяем интерфейс
@@ -253,10 +253,10 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 			Stop() error
 			GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
 		}); ok {
-			log.Printf("✅ Это полный BybitPriceFetcher")
+			logger.Debug("✅ Это полный BybitPriceFetcher")
 		}
 	} else {
-		log.Printf("❌ MarketFetcher не реализует GetRealTimeVolumeDelta")
+		logger.Error("❌ MarketFetcher не реализует GetRealTimeVolumeDelta")
 
 		// Проверяем какие методы доступны
 		methods := []string{
@@ -268,7 +268,7 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 			"CalculateEstimatedVolumeDelta",
 		}
 
-		log.Printf("🔍 Доступные методы:")
+		logger.Debug("🔍 Доступные методы:")
 		for _, method := range methods {
 			switch method {
 			case "Start":
@@ -311,19 +311,19 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 	}
 
 	// Пробуем получить данные
-	log.Printf("🔄 Пытаемся получить данные дельты для %s...", symbol)
+	logger.Debug("🔄 Пытаемся получить данные дельты для %s...", symbol)
 	volumeDelta, err := fetcherInterface.GetRealTimeVolumeDelta(symbol)
 	if err != nil {
-		log.Printf("❌ Ошибка получения реальной дельты: %v", err)
+		logger.Error("❌ Ошибка получения реальной дельты: %v", err)
 
 		// Fallback: проверяем другие методы
 		if fallbackFetcher, ok := c.marketFetcher.(interface {
 			CalculateEstimatedVolumeDelta(string, string, float64) (*bybit.VolumeDelta, error)
 		}); ok {
-			log.Printf("🔄 Пробуем fallback метод CalculateEstimatedVolumeDelta...")
+			logger.Debug("🔄 Пробуем fallback метод CalculateEstimatedVolumeDelta...")
 			estimatedDelta, err := fallbackFetcher.CalculateEstimatedVolumeDelta(symbol, "growth", 1000000)
 			if err == nil && estimatedDelta != nil {
-				log.Printf("📊 Fallback дельта: $%.0f (%.1f%%)",
+				logger.Debug("📊 Fallback дельта: $%.0f (%.1f%%)",
 					estimatedDelta.Delta, estimatedDelta.DeltaPercent)
 				return nil // Хотя это не реальные данные, метод работает
 			}
@@ -335,7 +335,7 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 		return fmt.Errorf("nil volume delta response")
 	}
 
-	log.Printf("✅ Тест пройден! Дельта для %s: $%.0f (%.1f%%, источник: API)",
+	logger.Debug("✅ Тест пройден! Дельта для %s: $%.0f (%.1f%%, источник: API)",
 		symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
 
 	return nil
@@ -349,5 +349,5 @@ func (c *VolumeDeltaCalculator) ClearCache() {
 	count := len(c.volumeDeltaCache)
 	c.volumeDeltaCache = make(map[string]*volumeDeltaCache)
 
-	log.Printf("🧹 Полная очистка кэша дельты: удалено %d записей", count)
+	logger.Debug("🧹 Полная очистка кэша дельты: удалено %d записей", count)
 }

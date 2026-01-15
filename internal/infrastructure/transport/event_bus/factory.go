@@ -7,7 +7,7 @@ import (
 	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot" // ИЗМЕНЕНО
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
-	"fmt"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
 	"time"
 )
@@ -116,7 +116,7 @@ func (f *Factory) createConsoleLoggerSubscriber() *BaseSubscriber {
 		[]types.EventType{types.EventPriceUpdated, types.EventSignalDetected, types.EventError},
 		func(event types.Event) error {
 			// Реализация консольного логирования
-			fmt.Printf("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
+			logger.Debug("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
 			return nil
 		},
 	)

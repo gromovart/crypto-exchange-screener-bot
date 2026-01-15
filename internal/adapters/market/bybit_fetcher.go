@@ -108,23 +108,25 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 	f.running = true
 	f.wg.Add(1)
 
+	// ДОБАВЛЯЕМ: Логируем
+	logger.Info("🚀 BybitFetcher: ЗАПУСК с интервалом %v", interval)
+
 	// Запускаем фоновую очистку кэша дельты
 	f.startCacheCleanupLoop()
 
 	go func() {
 		defer f.wg.Done()
+		logger.Debug("🏃 BybitFetcher: горутина запущена")
 
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
+		logger.Debug("⏰ BybitFetcher: таймер создан с интервалом %v", interval)
+
 		// Первоначальный запрос
 		if err := f.fetchPrices(); err != nil {
-			logger.Warn("Ошибка первоначального получения цен: %v", err)
+			logger.Warn("⚠️ Ошибка первоначального получения цен: %v", err)
 		}
-
-		// Запускаем отдельный горутин для получения OI
-		f.wg.Add(1)
-		go f.fetchOpenInterestLoop(interval * 3) // Получаем OI реже
 
 		// Запускаем отдельный горутин для получения ликвидаций
 		f.wg.Add(1)
@@ -133,10 +135,13 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 		for {
 			select {
 			case <-ticker.C:
+				logger.Debug("⏰ BybitFetcher: сработал таймер в %s",
+					time.Now().Format("15:04:05.000"))
 				if err := f.fetchPrices(); err != nil {
-					logger.Warn("Ошибка получения цен: %v", err)
+					logger.Warn("⚠️ Ошибка получения цен: %v", err)
 				}
 			case <-f.stopChan:
+				logger.Debug("🛑 BybitFetcher: получен сигнал остановки")
 				return
 			}
 		}
@@ -372,30 +377,6 @@ func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.Liquida
 
 // ==================== МЕТОДЫ OPEN INTEREST ====================
 
-// fetchOpenInterestLoop циклически получает Open Interest
-func (f *BybitPriceFetcher) fetchOpenInterestLoop(interval time.Duration) {
-	defer f.wg.Done()
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	// Первоначальный запрос
-	if err := f.fetchOpenInterest(); err != nil {
-		logger.Warn("Ошибка первоначального получения OI: %v", err)
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := f.fetchOpenInterest(); err != nil {
-				logger.Warn("Ошибка получения OI: %v", err)
-			}
-		case <-f.stopChan:
-			return
-		}
-	}
-}
-
 // fetchOpenInterest получает реальный OI через API
 func (f *BybitPriceFetcher) fetchOpenInterest() error {
 	// Проверяем, прошло ли достаточно времени с последнего обновления
@@ -484,35 +465,35 @@ func (f *BybitPriceFetcher) fetchOpenInterest() error {
 }
 
 // getOpenInterestForSymbol получает OI для конкретного символа
-func (f *BybitPriceFetcher) getOpenInterestForSymbol(symbol string) float64 {
-	f.oiCacheMu.RLock()
-	oi, exists := f.oiCache[symbol]
-	f.oiCacheMu.RUnlock()
+// func (f *BybitPriceFetcher) getOpenInterestForSymbol(symbol string) float64 {
+// 	f.oiCacheMu.RLock()
+// 	oi, exists := f.oiCache[symbol]
+// 	f.oiCacheMu.RUnlock()
 
-	if exists && oi > 0 {
-		logger.Debug("📊 BybitFetcher: OI из кэша для %s: %.0f", symbol, oi)
-		return oi
-	}
+// 	if exists && oi > 0 {
+// 		logger.Debug("📊 BybitFetcher: OI из кэша для %s: %.0f", symbol, oi)
+// 		return oi
+// 	}
 
-	// Если нет в кэше, ПРОБУЕМ ПОЛУЧИТЬ С API
-	oi, err := f.client.GetOpenInterest(symbol)
-	if err != nil {
-		logger.Debug("⚠️ Не удалось получить OI для %s: %v", symbol, err)
-		// Используем эвристику
-		estimatedOI := f.calculateEstimatedOIFromStorage(symbol)
-		logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", symbol, estimatedOI)
-		return estimatedOI
-	}
+// 	// Если нет в кэше, ПРОБУЕМ ПОЛУЧИТЬ С API
+// 	oi, err := f.client.GetOpenInterest(symbol)
+// 	if err != nil {
+// 		logger.Debug("⚠️ Не удалось получить OI для %s: %v", symbol, err)
+// 		// Используем эвристику
+// 		estimatedOI := f.calculateEstimatedOIFromStorage(symbol)
+// 		logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", symbol, estimatedOI)
+// 		return estimatedOI
+// 	}
 
-	// Кэшируем
-	f.oiCacheMu.Lock()
-	f.oiCache[symbol] = oi
-	f.oiCacheMu.Unlock()
+// 	// Кэшируем
+// 	f.oiCacheMu.Lock()
+// 	f.oiCache[symbol] = oi
+// 	f.oiCacheMu.Unlock()
 
-	logger.Debug("📊 BybitFetcher: получен OI с API для %s: %.0f", symbol, oi)
+// 	logger.Debug("📊 BybitFetcher: получен OI с API для %s: %.0f", symbol, oi)
 
-	return oi
-}
+// 	return oi
+// }
 
 // calculateEstimatedOIFromStorage рассчитывает OI на основе данных из хранилища
 func (f *BybitPriceFetcher) calculateEstimatedOIFromStorage(symbol string) float64 {
@@ -622,7 +603,8 @@ func (f *BybitPriceFetcher) calculateEstimatedOI(symbol string, snapshot *storag
 // ==================== ОСНОВНОЙ МЕТОД ПОЛУЧЕНИЯ ЦЕН ====================
 
 func (f *BybitPriceFetcher) fetchPrices() error {
-	logger.Debug("🔄 BybitFetcher: начало получения цен...")
+	startTime := time.Now()
+	logger.Info("🔄 BybitFetcher: НАЧАЛО запроса цен в %s", startTime.Format("15:04:05.000"))
 
 	// Добавляем retry логику
 	var tickers *api.TickerResponse
@@ -678,16 +660,17 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	now := time.Now()
 	updatedCount := 0
 	errorCount := 0
+	oiUpdatedFromTicker := 0
 
 	// Собираем все цены в массив
 	var priceDataList []types.PriceData
 
 	// Отладка: лог первых 5 тикеров
 	if len(tickers.Result.List) > 0 {
-		logger.Info("🔍 Первые 5 тикеров из ответа API:")
+		logger.Debug("🔍 Первые 5 тикеров из ответа API:")
 		for i := 0; i < 5 && i < len(tickers.Result.List); i++ {
 			ticker := tickers.Result.List[i]
-			logger.Info("   %d. %s: цена=%s, OI=%s, FundingRate='%s'",
+			logger.Debug("   %d. %s: цена=%s, OI=%s, FundingRate='%s'",
 				i+1, ticker.Symbol, ticker.LastPrice, ticker.OpenInterest, ticker.FundingRate)
 		}
 	}
@@ -706,42 +689,38 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		// Парсим объем в USDT (turnover)
 		volumeUSD, _ := parseFloat(ticker.Turnover24h)
 
-		// Проверка на аномальные значения
-		if volumeUSD > 1000000000 && price < 0.1 { // Объем > 1B при цене < $0.1
-			// logger.Warn("⚠️ Подозрительный объем для %s: цена=$%f, объем=$%.0f",
-			// 	ticker.Symbol, price, volumeUSD)
-			// Используем скорректированный объем
-			volumeUSD = volumeUSD / 1000 // Уменьшаем в 1000 раз
+		// ==================== ИЗМЕНЕНИЕ: ПОЛУЧЕНИЕ OI ИЗ ТИКЕРА ====================
+		// Используем OI из тикера вместо отдельного API вызова
+		var openInterest float64
+		oiFromTicker, oiErr := parseFloat(ticker.OpenInterest)
+
+		if oiErr == nil && oiFromTicker > 0 {
+			// OI есть в тикере - используем его
+			openInterest = oiFromTicker
+
+			// Обновляем кэш
+			f.oiCacheMu.Lock()
+			f.oiCache[ticker.Symbol] = openInterest
+			f.oiCacheMu.Unlock()
+
+			oiUpdatedFromTicker++
+			logger.Debug("📊 BybitFetcher: OI из тикера для %s: %.0f", ticker.Symbol, openInterest)
+		} else {
+			// OI нет в тикере или ошибка парсинга - используем кэш или расчетное значение
+			openInterest = f.getCachedOrEstimatedOI(ticker.Symbol)
+			logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", ticker.Symbol, openInterest)
 		}
+		// ==================== КОНЕЦ ИЗМЕНЕНИЯ ====================
 
-		// Если turnover недоступен, используем расчетный объем
-		if volumeUSD == 0 && price > 0 && volumeBase > 0 {
-			volumeUSD = price * volumeBase
-			logger.Debug("📝 BybitFetcher: расчетный VolumeUSD для %s: %f", ticker.Symbol, volumeUSD)
-		}
-
-		// Используем метод getOpenInterestForSymbol
-		openInterest := f.getOpenInterestForSymbol(ticker.Symbol)
-
-		// Проверка на реалистичность OI
-		if openInterest > 0 {
-			// Проверяем соотношение OI к объему
-			if volumeUSD > 0 {
-				ratio := openInterest / volumeUSD
-				if ratio > 10 { // OI не должен быть больше 10x объема
-					// logger.Warn("⚠️ Подозрительное соотношение OI/Volume для %s: OI=%.0f, Volume=%.0f, соотношение=%.1fx",
-					// 	ticker.Symbol, openInterest, volumeUSD, ratio)
-
-					// Корректируем OI до 5% от объема
-					correctedOI := volumeUSD * 0.05
-					logger.Debug("📉 Скорректированный OI для %s: %.0f (было %.0f)",
-						ticker.Symbol, correctedOI, openInterest)
-					openInterest = correctedOI
-				}
+		// Проверка на реалистичность OI (оставляем существующую проверку)
+		if openInterest > 0 && volumeUSD > 0 {
+			ratio := openInterest / volumeUSD
+			if ratio > 10 { // OI не должен быть больше 10x объема
+				correctedOI := volumeUSD * 0.05
+				logger.Debug("📉 Скорректированный OI для %s: %.0f (было %.0f)",
+					ticker.Symbol, correctedOI, openInterest)
+				openInterest = correctedOI
 			}
-
-			logger.Debug("📊 BybitFetcher: %s OI=%.0f, Volume=%.0f",
-				ticker.Symbol, openInterest, volumeUSD)
 		}
 
 		// Также получаем фандинг для фьючерсов
@@ -772,17 +751,6 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			if l, err := parseFloat(ticker.Low24h); err == nil {
 				low24h = l
 			}
-		}
-
-		// Детальный лог для FUSDT
-		if ticker.Symbol == "FUSDT" {
-			logger.Info("🔍 Детальная информация для FUSDT:")
-			logger.Info("   Цена: %s -> %.8f", ticker.LastPrice, price)
-			logger.Info("   Объем24h: %s -> %.0f", ticker.Volume24h, volumeBase)
-			logger.Info("   Turnover24h: %s -> %.0f", ticker.Turnover24h, volumeUSD)
-			logger.Info("   OI строка: '%s'", ticker.OpenInterest)
-			logger.Info("   Фандинг строка: '%s' -> %.6f%%", ticker.FundingRate, fundingRate*100)
-			logger.Info("   Полученный OI: %.0f", openInterest)
 		}
 
 		// Сохраняем цену со всеми параметрами
@@ -825,7 +793,12 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		}
 	}
 
-	logger.Info("✅ BybitFetcher: успешно сохранено %d цен, ошибок: %d", updatedCount, errorCount)
+	// Логируем статистику OI
+	logger.Debug("📊 BybitFetcher: OI получено из тикеров: %d/%d символов",
+		oiUpdatedFromTicker, len(tickers.Result.List))
+
+	logger.Info("✅ BybitFetcher: успешно сохранено %d цен за %v, ошибок: %d",
+		updatedCount, time.Since(startTime).Round(time.Millisecond), errorCount)
 
 	// Публикуем одно событие со всеми ценами
 	if updatedCount > 0 && f.eventBus != nil {
@@ -840,11 +813,26 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		if err != nil {
 			logger.Error("❌ BybitFetcher: ошибка публикации события: %v", err)
 		} else {
-			logger.Info("📨 BybitFetcher: опубликовано событие с %d ценами", updatedCount)
+			logger.Debug("📨 BybitFetcher: опубликовано событие с %d ценами", updatedCount)
 		}
 	}
 
 	return nil
+}
+
+// НОВЫЙ МЕТОД: получает OI из кэша или расчетное значение
+func (f *BybitPriceFetcher) getCachedOrEstimatedOI(symbol string) float64 {
+	// Сначала проверяем кэш
+	f.oiCacheMu.RLock()
+	oi, exists := f.oiCache[symbol]
+	f.oiCacheMu.RUnlock()
+
+	if exists && oi > 0 {
+		return oi
+	}
+
+	// Если нет в кэше, используем расчетное значение
+	return f.calculateEstimatedOIFromStorage(symbol)
 }
 
 // handleFetchFailure обрабатывает ситуацию когда не удалось получить данные

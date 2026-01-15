@@ -235,7 +235,12 @@ func (a *CounterAnalyzer) createRawSignal(
 	}
 
 	rsi := a.techCalculator.CalculateRSI(data)
-	macdSignal := a.techCalculator.CalculateMACD(data)
+
+	// НОВОЕ: Получаем все компоненты MACD вместо одного значения
+	macdLine, signalLine, histogram := a.techCalculator.CalculateMACD(data)
+	// Используем MACD линию как основной сигнал (для обратной совместимости)
+	macdSignal := macdLine
+
 	periodMinutes := getPeriodMinutes(period)
 
 	// СОЗДАЕМ Custom map
@@ -248,6 +253,11 @@ func (a *CounterAnalyzer) createRawSignal(
 	customMap["symbol"] = symbol
 	customMap["confirmations"] = confirmations
 	customMap["required_confirmations"] = GetRequiredConfirmations(period)
+
+	// НОВОЕ: Добавляем MACD компоненты в custom
+	customMap["macd_line"] = macdLine
+	customMap["macd_signal_line"] = signalLine
+	customMap["macd_histogram"] = histogram
 
 	return analysis.Signal{
 		ID:            uuid.New().String(),
@@ -280,7 +290,10 @@ func (a *CounterAnalyzer) createRawSignal(
 				"volume_delta":           volumeDelta,
 				"volume_delta_percent":   volumeDeltaPercent,
 				"rsi":                    rsi,
-				"macd_signal":            macdSignal,
+				"macd_signal":            macdSignal, // Для обратной совместимости
+				"macd_line":              macdLine,   // НОВОЕ
+				"macd_signal_line":       signalLine, // НОВОЕ
+				"macd_histogram":         histogram,  // НОВОЕ
 			},
 			Custom: customMap,
 		},
@@ -300,7 +313,7 @@ func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 	for key, value := range signalMap {
 		if key == "change_percent" || key == "period" || key == "custom" ||
 			key == "period_string" || key == "symbol" || key == "direction" {
-			fmt.Printf("      %s: %v (тип: %T)\n", key, value, value)
+			logger.Debug("      %s: %v (тип: %T)\n", key, value, value)
 		}
 	}
 
@@ -371,7 +384,7 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 		})
 	}
 
-	logger.Debug("✅ Получено %d точек данных для %s за %s\n",
+	logger.Info("✅ Получено %d точек данных для %s за %s\n",
 		len(result), symbol, period)
 
 	return result, nil
