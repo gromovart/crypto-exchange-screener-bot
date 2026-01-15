@@ -19,6 +19,10 @@ type VolumeDeltaCalculator struct {
 	volumeDeltaCache   map[string]*volumeDeltaCache
 	volumeDeltaCacheMu sync.RWMutex
 	volumeDeltaTTL     time.Duration
+
+	// Для безопасного удаления просроченных записей
+	deleteQueue chan string
+	stopCh      chan struct{}
 }
 
 type volumeDeltaCache struct {
@@ -29,20 +33,104 @@ type volumeDeltaCache struct {
 
 // NewVolumeDeltaCalculator создает новый калькулятор дельты
 func NewVolumeDeltaCalculator(marketFetcher interface{}, storage interface{}) *VolumeDeltaCalculator {
-	return &VolumeDeltaCalculator{
+	calc := &VolumeDeltaCalculator{
 		marketFetcher:    marketFetcher,
 		storage:          storage,
 		volumeDeltaCache: make(map[string]*volumeDeltaCache),
 		volumeDeltaTTL:   30 * time.Second,
+		deleteQueue:      make(chan string, 1000), // Буферизованный канал для асинхронного удаления
+		stopCh:           make(chan struct{}),
+	}
+
+	// Запускаем обработчик для безопасного удаления просроченных записей
+	go calc.startDeletionHandler()
+
+	return calc
+}
+
+// Stop останавливает обработчик удаления
+func (c *VolumeDeltaCalculator) Stop() {
+	select {
+	case <-c.stopCh:
+		// Уже остановлен
+	default:
+		close(c.stopCh)
+	}
+}
+
+// startDeletionHandler обрабатывает асинхронное удаление записей
+func (c *VolumeDeltaCalculator) startDeletionHandler() {
+	for {
+		select {
+		case symbol := <-c.deleteQueue:
+			c.safeDelete(symbol)
+		case <-c.stopCh:
+			return
+		}
+	}
+}
+
+// safeDelete безопасно удаляет запись из кэша
+func (c *VolumeDeltaCalculator) safeDelete(symbol string) {
+	c.volumeDeltaCacheMu.Lock()
+	defer c.volumeDeltaCacheMu.Unlock()
+
+	// Двойная проверка на случай, если запись уже удалена или обновлена
+	if cache, exists := c.volumeDeltaCache[symbol]; exists {
+		if time.Now().After(cache.expiration) {
+			delete(c.volumeDeltaCache, symbol)
+			log.Printf("🧹 Удален просроченный кэш для %s (возраст: %v)",
+				symbol, time.Since(cache.updateTime).Round(time.Second))
+		}
+	}
+}
+
+// getFromCache получает дельту из кэша (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+func (c *VolumeDeltaCalculator) getFromCache(symbol string) (*volumeDeltaCache, bool) {
+	c.volumeDeltaCacheMu.RLock()
+	defer c.volumeDeltaCacheMu.RUnlock()
+
+	cache, exists := c.volumeDeltaCache[symbol]
+	if !exists {
+		return nil, false
+	}
+
+	if time.Now().Before(cache.expiration) {
+		return cache, true
+	}
+
+	// Кэш устарел - планируем асинхронное удаление
+	// Отправляем в канал вместо непосредственного удаления
+	select {
+	case c.deleteQueue <- symbol:
+		// Успешно поставлено в очередь на удаление
+	default:
+		// Канал переполнен - пропускаем удаление, будет удалено при следующей проверке
+		log.Printf("⚠️ Канал удаления переполнен для %s, пропускаем удаление", symbol)
+	}
+
+	return nil, false
+}
+
+// setToCache сохраняет дельту в кэш
+func (c *VolumeDeltaCalculator) setToCache(symbol string, deltaData *types.VolumeDeltaData) {
+	c.volumeDeltaCacheMu.Lock()
+	defer c.volumeDeltaCacheMu.Unlock()
+
+	c.volumeDeltaCache[symbol] = &volumeDeltaCache{
+		deltaData:  deltaData,
+		expiration: time.Now().Add(c.volumeDeltaTTL),
+		updateTime: time.Now(),
 	}
 }
 
 // CalculateWithFallback получает дельту с многоуровневым fallback
 func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) *types.VolumeDeltaData {
-	// 1. Проверяем кэш
+	// 1. Проверяем кэш (используем исправленный метод)
 	if cached, found := c.getFromCache(symbol); found {
-		log.Printf("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s)",
-			symbol, cached.deltaData.Delta, cached.deltaData.DeltaPercent, cached.deltaData.Source)
+		log.Printf("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s, возраст: %v)",
+			symbol, cached.deltaData.Delta, cached.deltaData.DeltaPercent,
+			cached.deltaData.Source, time.Since(cached.updateTime).Round(time.Second))
 		return cached.deltaData
 	}
 
@@ -55,7 +143,7 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 		return apiDeltaData
 	}
 
-	// 3. Fallback: Данные из хранилища
+	// 3. Fallback: Данные из хранилища (вызываем метод из volume_delta_fallback.go)
 	log.Printf("⚠️ API недоступно для %s: %v", symbol, apiErr)
 	storageDeltaData := c.getFromStorage(symbol, direction)
 	if storageDeltaData != nil {
@@ -65,7 +153,7 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 		return storageDeltaData
 	}
 
-	// 4. Final Fallback: Базовая эмуляция
+	// 4. Final Fallback: Базовая эмуляция (вызываем метод из volume_delta_fallback.go)
 	emulatedDeltaData := c.calculateBasicDelta(symbol, direction)
 	log.Printf("📊 Используем базовую дельту для %s: $%.0f (%.1f%%)",
 		symbol, emulatedDeltaData.Delta, emulatedDeltaData.DeltaPercent)
@@ -136,33 +224,6 @@ func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaDat
 	}
 
 	return nil, fmt.Errorf("market fetcher doesn't support volume delta")
-}
-
-// getFromCache получает дельту из кэша
-func (c *VolumeDeltaCalculator) getFromCache(symbol string) (*volumeDeltaCache, bool) {
-	c.volumeDeltaCacheMu.RLock()
-	defer c.volumeDeltaCacheMu.RUnlock()
-
-	if cache, exists := c.volumeDeltaCache[symbol]; exists {
-		if time.Now().Before(cache.expiration) {
-			return cache, true
-		}
-		// Кэш устарел
-		delete(c.volumeDeltaCache, symbol)
-	}
-	return nil, false
-}
-
-// setToCache сохраняет дельту в кэш
-func (c *VolumeDeltaCalculator) setToCache(symbol string, deltaData *types.VolumeDeltaData) {
-	c.volumeDeltaCacheMu.Lock()
-	defer c.volumeDeltaCacheMu.Unlock()
-
-	c.volumeDeltaCache[symbol] = &volumeDeltaCache{
-		deltaData:  deltaData,
-		expiration: time.Now().Add(c.volumeDeltaTTL),
-		updateTime: time.Now(),
-	}
 }
 
 // TestConnection тестирует подключение к API дельты с детальной диагностикой
@@ -278,4 +339,15 @@ func (c *VolumeDeltaCalculator) TestConnection(symbol string) error {
 		symbol, volumeDelta.Delta, volumeDelta.DeltaPercent)
 
 	return nil
+}
+
+// ClearCache очищает весь кэш
+func (c *VolumeDeltaCalculator) ClearCache() {
+	c.volumeDeltaCacheMu.Lock()
+	defer c.volumeDeltaCacheMu.Unlock()
+
+	count := len(c.volumeDeltaCache)
+	c.volumeDeltaCache = make(map[string]*volumeDeltaCache)
+
+	log.Printf("🧹 Полная очистка кэша дельты: удалено %d записей", count)
 }

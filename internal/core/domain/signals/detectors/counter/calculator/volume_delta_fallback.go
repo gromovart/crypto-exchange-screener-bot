@@ -104,13 +104,3 @@ func (c *VolumeDeltaCalculator) GetCacheInfo() map[string]interface{} {
 
 	return info
 }
-
-// ClearCache очищает кэш дельты
-func (c *VolumeDeltaCalculator) ClearCache() {
-	c.volumeDeltaCacheMu.Lock()
-	defer c.volumeDeltaCacheMu.Unlock()
-
-	cleared := len(c.volumeDeltaCache)
-	c.volumeDeltaCache = make(map[string]*volumeDeltaCache)
-	log.Printf("🧹 Кэш дельты очищен: удалено %d записей", cleared)
-}
