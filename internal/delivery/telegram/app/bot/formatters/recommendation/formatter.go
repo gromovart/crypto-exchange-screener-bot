@@ -38,17 +38,21 @@ func (f *Formatter) FormatResult(
 	result.WriteString("📊 Анализ сигналов:\n")
 
 	// Рекомендации
+	// Форматируем строки с фиксированной шириной для номеров
 	for i, rec := range recommendations {
 		cleanText := f.getCleanTextWithoutIcons(rec)
 		icon := f.getRecommendationIcon(rec)
 
+		// Используем фиксированную ширину: 3 символа для номера
+		numberStr := fmt.Sprintf("%2d.", i+1) // " 1.", "10." и т.д.
+
 		// Форматируем строку с двумя табами
 		if icon != "" && cleanText != "" {
-			result.WriteString(fmt.Sprintf("%d.\t\t%s %s\n", i+1, icon, cleanText))
+			result.WriteString(fmt.Sprintf("%s\t%s %s\n", numberStr, icon, cleanText))
 		} else if icon != "" {
-			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, icon))
+			result.WriteString(fmt.Sprintf("%s\t%s\n", numberStr, icon))
 		} else {
-			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, cleanText))
+			result.WriteString(fmt.Sprintf("%s\t%s\n", numberStr, cleanText))
 		}
 	}
 
