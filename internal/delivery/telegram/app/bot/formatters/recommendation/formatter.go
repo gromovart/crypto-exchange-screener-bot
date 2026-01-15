@@ -14,11 +14,12 @@ func NewFormatter() *Formatter {
 	return &Formatter{}
 }
 
-// FormatResult форматирует результат рекомендаций
+// FormatResult форматирует результат рекомендаций с торговыми уровнями
 func (f *Formatter) FormatResult(
 	primarySignal string,
 	recommendations []string,
 	strength string,
+	tradingRecommendation string,
 ) string {
 	if primarySignal == "" || len(recommendations) == 0 {
 		return ""
@@ -26,8 +27,12 @@ func (f *Formatter) FormatResult(
 
 	var result strings.Builder
 
-	// Направление тренда
-	result.WriteString(fmt.Sprintf("📌 Направление: %s\n\n", primarySignal))
+	// Заголовок блока
+	result.WriteString("🎯 РЕКОМЕНДАЦИЯ:\n")
+
+	// Направление тренда с переносом строки
+	result.WriteString("📌 Направление:\n")
+	result.WriteString(fmt.Sprintf("%s\n\n", primarySignal))
 
 	// Заголовок анализа
 	result.WriteString("📊 Анализ сигналов:\n")
@@ -47,7 +52,57 @@ func (f *Formatter) FormatResult(
 		}
 	}
 
-	// Добавляем итоговую оценку
+	result.WriteString("\n")
+
+	// Добавляем торговую рекомендацию с уровнями (если есть)
+	if tradingRecommendation != "" {
+		result.WriteString(tradingRecommendation)
+		result.WriteString("\n\n")
+	}
+
+	// Итоговая строка (заключение)
+	result.WriteString(fmt.Sprintf("🎯 ЗАКЛЮЧЕНИЕ: %s движение с %s дельтой объемов",
+		strength,
+		f.getDeltaStrengthDescription(strength)))
+
+	return strings.TrimSpace(result.String())
+}
+
+// FormatResultLegacy сохраняет старый формат для обратной совместимости
+func (f *Formatter) FormatResultLegacy(
+	primarySignal string,
+	recommendations []string,
+	strength string,
+) string {
+	if primarySignal == "" || len(recommendations) == 0 {
+		return ""
+	}
+
+	var result strings.Builder
+
+	// Направление тренда
+	result.WriteString("📌 Направление:\n")
+	result.WriteString(fmt.Sprintf("%s\n\n", primarySignal))
+
+	// Заголовок анализа
+	result.WriteString("📊 Анализ сигналов:\n")
+
+	// Рекомендации
+	for i, rec := range recommendations {
+		cleanText := f.getCleanTextWithoutIcons(rec)
+		icon := f.getRecommendationIcon(rec)
+
+		// Форматируем строку с двумя табами
+		if icon != "" && cleanText != "" {
+			result.WriteString(fmt.Sprintf("%d.\t\t%s %s\n", i+1, icon, cleanText))
+		} else if icon != "" {
+			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, icon))
+		} else {
+			result.WriteString(fmt.Sprintf("%d.\t\t%s\n", i+1, cleanText))
+		}
+	}
+
+	// Итоговая строка (устаревшая)
 	result.WriteString(fmt.Sprintf("\n🎯 Итог: %s движение с %s дельтой объемов",
 		strength,
 		f.getDeltaStrengthDescription(strength)))

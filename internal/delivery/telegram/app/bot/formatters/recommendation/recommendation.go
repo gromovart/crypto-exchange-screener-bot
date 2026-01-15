@@ -32,8 +32,8 @@ func (f *RecommendationFormatter) GetEnhancedTradingRecommendation(
 	volumeDeltaPercent float64,
 	longLiqVolume float64,
 	shortLiqVolume float64,
-	currentPrice float64, // ДОБАВЛЕНО: текущая цена для уровней
-	changePercent float64, // ДОБАВЛЕНО: изменение цены для анализа
+	currentPrice float64,
+	changePercent float64,
 ) string {
 	// Анализируем данные
 	analysis := f.analyzer.AnalyzeData(
@@ -62,16 +62,53 @@ func (f *RecommendationFormatter) GetEnhancedTradingRecommendation(
 		currentPrice,
 	)
 
-	// Форматируем базовый результат
-	formattedResult := f.formatter.FormatResult(primarySignal, analysis.Recommendations, analysis.Strength)
+	// Форматируем результат с торговой рекомендацией
+	formattedResult := f.formatter.FormatResult(
+		primarySignal,
+		analysis.Recommendations,
+		analysis.Strength,
+		tradingRecommendation,
+	)
 
-	// Объединяем с торговой рекомендацией
-	var result strings.Builder
-	result.WriteString(formattedResult)
-	result.WriteString("\n\n")
-	result.WriteString(tradingRecommendation)
+	return strings.TrimSpace(formattedResult)
+}
 
-	return strings.TrimSpace(result.String())
+// GetEnhancedTradingRecommendationLegacy возвращает старый формат рекомендаций для обратной совместимости
+func (f *RecommendationFormatter) GetEnhancedTradingRecommendationLegacy(
+	direction string,
+	rsi float64,
+	macdSignal float64,
+	volumeDelta float64,
+	volumeDeltaPercent float64,
+	longLiqVolume float64,
+	shortLiqVolume float64,
+) string {
+	// Анализируем данные
+	analysis := f.analyzer.AnalyzeData(
+		direction, rsi, macdSignal,
+		volumeDelta, volumeDeltaPercent,
+		longLiqVolume, shortLiqVolume,
+	)
+
+	// Если рекомендаций нет
+	if len(analysis.Recommendations) == 0 {
+		return ""
+	}
+
+	// Подсчитываем баллы
+	scores := f.scorer.CalculateSignalScores(analysis.Recommendations)
+
+	// Определяем основной сигнал
+	primarySignal := f.scorer.DeterminePrimarySignal(scores, analysis.Recommendations)
+
+	// Форматируем результат в старом формате
+	formattedResult := f.formatter.FormatResultLegacy(
+		primarySignal,
+		analysis.Recommendations,
+		analysis.Strength,
+	)
+
+	return strings.TrimSpace(formattedResult)
 }
 
 // GetEnhancedTradingRecommendationWithFullDelta улучшенные рекомендации с полными данными дельты
@@ -177,8 +214,8 @@ func (f *RecommendationFormatter) GetCompactRecommendation(
 		return "⚪ Нет четких сигналов"
 	}
 
-	scores := f.scorer.CalculateSignalScores(analysis.Recommendations)
-	action := f.scorer.GetTradingAction(scores, analysis.Recommendations, rsi, changePercent, volumeDelta)
+	// УДАЛЕН НЕНУЖНЫЙ ВЫЗОВ CalculateSignalScores
+	action := f.scorer.GetEntryActionOnly(analysis.Recommendations, rsi, changePercent, volumeDelta)
 
 	// Компактный формат
 	var result strings.Builder
@@ -241,7 +278,7 @@ func (f *RecommendationFormatter) GetStructuredTradingRecommendation(
 	)
 
 	scores := f.scorer.CalculateSignalScores(analysis.Recommendations)
-	actionText := f.scorer.GetTradingAction(scores, analysis.Recommendations, rsi, changePercent, volumeDelta)
+	actionText := f.scorer.GetEntryActionOnly(analysis.Recommendations, rsi, changePercent, volumeDelta)
 
 	// Создаем структурированную рекомендацию
 	rec := TradingRecommendation{

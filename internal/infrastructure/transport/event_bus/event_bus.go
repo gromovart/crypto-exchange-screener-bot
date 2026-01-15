@@ -412,22 +412,22 @@ func (b *EventBus) startMetricsCollection() {
 func (b *EventBus) logMetrics() {
 	metrics := b.GetMetrics()
 
-	log.Printf("📊 EventBus метрики:")
-	log.Printf("   Опубликовано: %d событий", metrics.EventsPublished)
-	log.Printf("   Обработано: %d событий", metrics.EventsProcessed)
-	log.Printf("   Ошибок: %d событий", metrics.EventsFailed)
+	logger.Info("📊 EventBus метрики:")
+	logger.Info("   Опубликовано: %d событий", metrics.EventsPublished)
+	logger.Info("   Обработано: %d событий", metrics.EventsProcessed)
+	logger.Info("   Ошибок: %d событий", metrics.EventsFailed)
 
 	// ИСПРАВЛЕНИЕ: проверка деления на ноль
 	var avgProcessingTime time.Duration
 	if metrics.EventsProcessed > 0 {
 		avgProcessingTime = metrics.ProcessingTime / time.Duration(metrics.EventsProcessed)
-		log.Printf("   Среднее время обработки: %v", avgProcessingTime)
+		logger.Info("   Среднее время обработки: %v", avgProcessingTime)
 	} else {
-		log.Printf("   Среднее время обработки: нет данных (0 событий)")
+		logger.Info("   Среднее время обработки: нет данных (0 событий)")
 	}
 
 	for eventType, count := range metrics.SubscribersCount {
-		log.Printf("   %s: %d подписчиков", eventType, count)
+		logger.Info("   %s: %d подписчиков", eventType, count)
 	}
 }
 

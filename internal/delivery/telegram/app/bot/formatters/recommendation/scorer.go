@@ -120,7 +120,7 @@ func (s *Scorer) DeterminePrimarySignal(
 	// Применяем штрафы за предупреждения
 	if scores.WarningScore >= 3 {
 		// Сильные предупреждения доминируют
-		return "⚠️ ВЫСОКИЙ РИСК: ПРОТИВОРЕЧИВЫЕ СИГНАЛЫ"
+		return "⚠️ ВЫСОКИЙ РИСК\n🔄 ПРОТИВОРЕЧИВЫЕ СИГНАЛЫ"
 	}
 
 	totalScore := scores.BullishScore + scores.BearishScore + scores.NeutralScore
@@ -144,12 +144,12 @@ func (s *Scorer) DeterminePrimarySignal(
 
 	// RSI ПЕРЕКУПЛЕННОСТЬ = сильный медвежий сигнал (даже если MACD бычий)
 	if hasStrongBearishRSI && scores.BearishScore > scores.BullishScore {
-		return "🔴 ВЫСОКИЙ РИСК: ПЕРЕКУПЛЕННОСТЬ RSI"
+		return "🔴 ВЫСОКИЙ РИСК\n📈 ПЕРЕКУПЛЕННОСТЬ RSI"
 	}
 
 	// RSI ПЕРЕПРОДАННОСТЬ = сильный бычий сигнал
 	if hasStrongBullishRSI && scores.BullishScore > scores.BearishScore {
-		return "🟢 ВОЗМОЖЕН ОТСКОК: ПЕРЕПРОДАННОСТЬ RSI"
+		return "🟢 ВОЗМОЖЕН ОТСКОК\n📉 ПЕРЕПРОДАННОСТЬ RSI"
 	}
 
 	bullishRatio := float64(scores.BullishScore) / float64(totalScore)
@@ -159,45 +159,45 @@ func (s *Scorer) DeterminePrimarySignal(
 	// Логика определения с учетом предупреждений
 	switch {
 	case scores.WarningScore >= 2:
-		return "⚠️ ПРОТИВОРЕЧИВЫЕ СИГНАЛЫ - ОСТОРОЖНОСТЬ"
+		return "⚠️ ПРОТИВОРЕЧИВЫЕ СИГНАЛЫ\n🔄 ОСТОРОЖНОСТЬ"
 
 	case hasStrongBearishRSI:
 		// Перекупленность RSI имеет приоритет
 		if scores.BullishScore > 0 {
-			return "🟡 СМЕШАННЫЕ СИГНАЛЫ: RSI перекупленность"
+			return "🟡 СМЕШАННЫЕ СИГНАЛЫ\n📊 RSI перекупленность"
 		}
-		return "🔴 ПРЕДУПРЕЖДЕНИЕ: ПЕРЕКУПЛЕННОСТЬ"
+		return "🔴 ПРЕДУПРЕЖДЕНИЕ\n📈 ПЕРЕКУПЛЕННОСТЬ"
 
 	case hasStrongBullishRSI:
 		// Перепроданность RSI имеет приоритет
 		if scores.BearishScore > 0 {
-			return "🟡 СМЕШАННЫЕ СИГНАЛЫ: RSI перепроданность"
+			return "🟡 СМЕШАННЫЕ СИГНАЛЫ\n📊 RSI перепроданность"
 		}
-		return "🟢 ВОЗМОЖНОСТЬ: ПЕРЕПРОДАННОСТЬ"
+		return "🟢 ВОЗМОЖНОСТЬ\n📉 ПЕРЕПРОДАННОСТЬ"
 
 	case bullishRatio > 0.6 && scores.BullishScore >= 4:
-		return "🟢 БЫЧЬИ СИГНАЛЫ"
+		return "🟢 БЫЧЬИ СИГНАЛЫ\n📈 Преобладание"
 
 	case bearishRatio > 0.6 && scores.BearishScore >= 4:
-		return "🔴 МЕДВЕЖЬИ СИГНАЛЫ"
+		return "🔴 МЕДВЕЖЬИ СИГНАЛЫ\n📉 Преобладание"
 
 	case bullishRatio > bearishRatio && bullishRatio > 0.4:
 		if scores.BullishScore-scores.BearishScore >= 2 {
-			return "🟡 ПРЕОБЛАДАЮТ БЫЧЬИ СИГНАЛЫ"
+			return "🟡 ПРЕОБЛАДАЮТ\n📈 Бычьи сигналы"
 		}
-		return "🟡 СЛАБЫЙ БЫЧИЙ ПЕРЕВЕС"
+		return "🟡 СЛАБЫЙ\n📈 Бычий перевес"
 
 	case bearishRatio > bullishRatio && bearishRatio > 0.4:
 		if scores.BearishScore-scores.BullishScore >= 2 {
-			return "🟠 ПРЕОБЛАДАЮТ МЕДВЕЖЬИ СИГНАЛЫ"
+			return "🟠 ПРЕОБЛАДАЮТ\n📉 Медвежьи сигналы"
 		}
-		return "🟠 СЛАБЫЙ МЕДВЕЖИЙ ПЕРЕВЕС"
+		return "🟠 СЛАБЫЙ\n📉 Медвежий перевес"
 
 	case neutralRatio > 0.5 || math.Abs(float64(scores.BullishScore-scores.BearishScore)) <= 1:
-		return "⚪ СБАЛАНСИРОВАННЫЕ СИГНАЛЫ"
+		return "⚪ СБАЛАНСИРОВАННЫЕ\n📊 Сигналы"
 
 	default:
-		return "🟡 СМЕШАННЫЕ СИГНАЛЫ"
+		return "🟡 СМЕШАННЫЕ\n🔄 Сигналы"
 	}
 }
 
@@ -209,16 +209,104 @@ func (s *Scorer) GetTradingAction(
 	changePercent float64,
 	volumeDelta float64,
 ) string {
-	// 1. ПРОВЕРКА СИЛЬНЫХ ПРОТИВОПОКАЗАНИЙ
+	// 1. ОЧЕНЬ СИЛЬНЫЕ СИГНАЛЫ RSI (имеют высший приоритет)
 
-	// RSI перекупленность > 70 = НЕ открывать LONG
+	// RSI перекупленность > 70 = предлагаем ШОРТ при наличии медвежьих подтверждений
 	if rsi >= 70 {
-		return "❌ НЕ ОТКРЫВАТЬ LONG: RSI в перекупленности"
+		// Проверяем есть ли медвежьи подтверждения
+		hasBearishConfirmations := false
+		bearishConfirmationCount := 0
+
+		for _, rec := range recommendations {
+			lowerRec := strings.ToLower(rec)
+
+			// Медвежьи подтверждения:
+			// 1. Дельта продаж (но не при росте)
+			if strings.Contains(lowerRec, "дельта продаж") && !strings.Contains(lowerRec, "при росте") {
+				hasBearishConfirmations = true
+				bearishConfirmationCount++
+			}
+			// 2. MACD медвежий
+			if strings.Contains(lowerRec, "macd: медвежий") || strings.Contains(lowerRec, "macd: сильный медвежий") {
+				hasBearishConfirmations = true
+				bearishConfirmationCount++
+			}
+			// 3. Объемы подтверждают (если дельта продаж)
+			if strings.Contains(lowerRec, "объемы подтверждают") && volumeDelta < 0 {
+				hasBearishConfirmations = true
+				bearishConfirmationCount++
+			}
+			// 4. Длинные ликвидации (LONG ликвидации = медвежий сигнал)
+			if strings.Contains(lowerRec, "long ликвидации") {
+				hasBearishConfirmations = true
+				bearishConfirmationCount++
+			}
+			// 5. Противоречие объемов при росте
+			if strings.Contains(lowerRec, "дельта продаж при росте") {
+				hasBearishConfirmations = true
+				bearishConfirmationCount++
+			}
+		}
+
+		if hasBearishConfirmations && bearishConfirmationCount >= 2 {
+			// Есть достаточно медвежьих подтверждений для шорта
+			return "🔴 ОТКРЫТЬ ШОРТ: RSI перекупленность + медвежьи подтверждения"
+		} else if hasBearishConfirmations {
+			// Есть некоторые подтверждения
+			return "🟠 РАССМОТРЕТЬ ШОРТ: RSI перекупленность, но мало подтверждений"
+		} else {
+			// Нет медвежьих подтверждений
+			return "❌ НЕ ОТКРЫВАТЬ LONG: RSI в перекупленности (ждем подтверждений для шорта)"
+		}
 	}
 
-	// RSI перепроданность < 30 = НЕ открывать SHORT
+	// RSI перепроданность < 30 = предлагаем ЛОНГ при наличии бычьих подтверждений
 	if rsi <= 30 {
-		return "❌ НЕ ОТКРЫВАТЬ SHORT: RSI в перепроданности"
+		// Проверяем есть ли бычьи подтверждения
+		hasBullishConfirmations := false
+		bullishConfirmationCount := 0
+
+		for _, rec := range recommendations {
+			lowerRec := strings.ToLower(rec)
+
+			// Бычьи подтверждения:
+			// 1. Дельта покупок (но не при падении)
+			if strings.Contains(lowerRec, "дельта покупок") && !strings.Contains(lowerRec, "при падении") {
+				hasBullishConfirmations = true
+				bullishConfirmationCount++
+			}
+			// 2. MACD бычий
+			if strings.Contains(lowerRec, "macd: бычий") || strings.Contains(lowerRec, "macd: сильный бычий") {
+				hasBullishConfirmations = true
+				bullishConfirmationCount++
+			}
+			// 3. Объемы подтверждают (если дельта покупок)
+			if strings.Contains(lowerRec, "объемы подтверждают") && volumeDelta > 0 {
+				hasBullishConfirmations = true
+				bullishConfirmationCount++
+			}
+			// 4. Короткие ликвидации (SHORT ликвидации = бычий сигнал)
+			if strings.Contains(lowerRec, "short ликвидации") {
+				hasBullishConfirmations = true
+				bullishConfirmationCount++
+			}
+			// 5. Противоречие объемов при падении
+			if strings.Contains(lowerRec, "дельта покупок при падении") {
+				hasBullishConfirmations = true
+				bullishConfirmationCount++
+			}
+		}
+
+		if hasBullishConfirmations && bullishConfirmationCount >= 2 {
+			// Есть достаточно бычьих подтверждений для лонга
+			return "🟢 ОТКРЫТЬ ЛОНГ: RSI перепроданность + бычьи подтверждения"
+		} else if hasBullishConfirmations {
+			// Есть некоторые подтверждения
+			return "🟡 РАССМОТРЕТЬ ЛОНГ: RSI перепроданность, но мало подтверждений"
+		} else {
+			// Нет бычьих подтверждений
+			return "❌ НЕ ОТКРЫВАТЬ SHORT: RSI в перепроданности (ждем подтверждений для лонга)"
+		}
 	}
 
 	// Сильные противоречия в объемах
@@ -236,18 +324,12 @@ func (s *Scorer) GetTradingAction(
 		return "⏸️ ЖДАТЬ: противоречие объемов"
 	}
 
-	// 2. АНАЛИЗ СИГНАЛОВ ДЛЯ ЛОНГ
+	// 2. ОБЫЧНАЯ ЛОГИКА АНАЛИЗА (для RSI в нормальном диапазоне 30-70)
 
 	longConditions := 0
 	shortConditions := 0
 
 	// ЛОНГ условия:
-	// 1. Направление роста
-	// 2. RSI < 65 (не перекуплен)
-	// 3. MACD бычий
-	// 4. Дельта покупок > 0
-	// 5. Изменение > 0.5%
-
 	if changePercent > 0.5 {
 		longConditions++
 	}
@@ -268,15 +350,7 @@ func (s *Scorer) GetTradingAction(
 		}
 	}
 
-	// 3. АНАЛИЗ СИГНАЛОВ ДЛЯ ШОРТ
-
 	// ШОРТ условия:
-	// 1. Направление падения
-	// 2. RSI > 35 (не перепродан)
-	// 3. MACD медвежий
-	// 4. Дельта продаж > 0
-	// 5. Изменение < -0.5%
-
 	if changePercent < -0.5 {
 		shortConditions++
 	}
@@ -296,7 +370,7 @@ func (s *Scorer) GetTradingAction(
 		}
 	}
 
-	// 4. ПРИНЯТИЕ РЕШЕНИЯ
+	// 3. ПРИНЯТИЕ РЕШЕНИЯ
 
 	// СИЛЬНЫЙ ЛОНГ
 	if longConditions >= 4 && shortConditions <= 1 {
@@ -365,47 +439,96 @@ func (s *Scorer) GetEntryRecommendation(
 	action := s.GetTradingAction(scores, recommendations, rsi, changePercent, volumeDelta)
 
 	var result strings.Builder
-	result.WriteString("🎯 ТОРГОВАЯ РЕКОМЕНДАЦИЯ:\n")
+
+	// Добавляем торговое действие
 	result.WriteString(action + "\n\n")
 
-	// Добавляем уровни стоп-лосса и тейк-профита
-	if strings.Contains(action, "ЛОНГ") || strings.Contains(action, "ШОРТ") {
+	// Показываем уровни для ВСЕХ рекомендаций (даже предупреждений)
+	// Это будут потенциальные уровни для возможной сделки
+
+	showLevels := true
+	stopLossPercent := 2.0
+	takeProfitPercent := 4.0
+
+	// Определяем направление для уровней
+	isBullish := strings.Contains(action, "ЛОНГ") ||
+		strings.Contains(action, "РАССМОТРЕТЬ ЛОНГ") ||
+		(rsi <= 30 && strings.Contains(action, "перепроданности"))
+
+	isBearish := strings.Contains(action, "ШОРТ") ||
+		strings.Contains(action, "РАССМОТРЕТЬ ШОРТ") ||
+		(rsi >= 70 && strings.Contains(action, "перекупленности"))
+
+	if showLevels && (isBullish || isBearish) {
 		result.WriteString("📊 УРОВНИ:\n")
 
-		// Рассчитываем стоп-лосс на основе волатильности (примерно 2%)
-		stopLossPercent := 2.0
-		takeProfitPercent := 4.0 // Риск:прибыль = 1:2
-
-		if strings.Contains(action, "ЛОНГ") {
+		if isBullish {
+			// Уровни для лонга
 			stopPrice := currentPrice * (1 - stopLossPercent/100)
 			takeProfitPrice := currentPrice * (1 + takeProfitPercent/100)
 
-			result.WriteString(fmt.Sprintf("Стоп-лосс: $%.4f (%.1f%%)\n", stopPrice, stopLossPercent))
-			result.WriteString(fmt.Sprintf("Тейк-профит: $%.4f (%.1f%%)\n", takeProfitPrice, takeProfitPercent))
+			// Форматируем цену в зависимости от величины
+			priceFormat := "%.4f"
+			if currentPrice >= 1000 {
+				priceFormat = "%.2f"
+			} else if currentPrice >= 100 {
+				priceFormat = "%.3f"
+			}
+
+			result.WriteString(fmt.Sprintf("Стоп-лосс: $"+priceFormat+" (%.1f%%)\n", stopPrice, stopLossPercent))
+			result.WriteString(fmt.Sprintf("Тейк-профит: $"+priceFormat+" (%.1f%%)\n", takeProfitPrice, takeProfitPercent))
 			result.WriteString(fmt.Sprintf("Риск/Прибыль: 1:%.1f\n", takeProfitPercent/stopLossPercent))
 
-		} else if strings.Contains(action, "ШОРТ") {
+		} else if isBearish {
+			// Уровни для шорта
 			stopPrice := currentPrice * (1 + stopLossPercent/100)
 			takeProfitPrice := currentPrice * (1 - takeProfitPercent/100)
 
-			result.WriteString(fmt.Sprintf("Стоп-лосс: $%.4f (%.1f%%)\n", stopPrice, stopLossPercent))
-			result.WriteString(fmt.Sprintf("Тейк-профит: $%.4f (%.1f%%)\n", takeProfitPrice, takeProfitPercent))
+			// Форматируем цену в зависимости от величины
+			priceFormat := "%.4f"
+			if currentPrice >= 1000 {
+				priceFormat = "%.2f"
+			} else if currentPrice >= 100 {
+				priceFormat = "%.3f"
+			}
+
+			result.WriteString(fmt.Sprintf("Стоп-лосс: $"+priceFormat+" (%.1f%%)\n", stopPrice, stopLossPercent))
+			result.WriteString(fmt.Sprintf("Тейк-профит: $"+priceFormat+" (%.1f%%)\n", takeProfitPrice, takeProfitPercent))
 			result.WriteString(fmt.Sprintf("Риск/Прибыль: 1:%.1f\n", takeProfitPercent/stopLossPercent))
 		}
 
 		// Добавляем рекомендацию по размеру позиции
 		result.WriteString("\n📈 РАЗМЕР ПОЗИЦИИ:\n")
 
-		// Определяем агрессивность на основе баллов
-		totalConfidence := scores.BullishScore + scores.BearishScore
-		if strings.Contains(action, "сильные") || totalConfidence >= 6 {
+		// Определяем агрессивность на основе типа рекомендации
+		switch {
+		case strings.Contains(action, "✅ ОТКРЫТЬ"):
 			result.WriteString("Рекомендуемый размер: 2-3% капитала\n")
-		} else if strings.Contains(action, "умеренные") || totalConfidence >= 4 {
+		case strings.Contains(action, "🟢 ОТКРЫТЬ") || strings.Contains(action, "🔴 ОТКРЫТЬ"):
 			result.WriteString("Рекомендуемый размер: 1-2% капитала\n")
-		} else {
+		case strings.Contains(action, "🟡 РАССМОТРЕТЬ") || strings.Contains(action, "🟠 РАССМОТРЕТЬ"):
+			result.WriteString("Рекомендуемый размер: 0.5-1% капитала\n")
+		case strings.Contains(action, "малый размер"):
+			result.WriteString("Рекомендуемый размер: 0.5-1% капитала\n")
+		case strings.Contains(action, "очень малый размер"):
+			result.WriteString("Рекомендуемый размер: 0.2-0.5% капитала\n")
+		case strings.Contains(action, "❌ НЕ ОТКРЫВАТЬ"):
+			result.WriteString("Позиция не рекомендуется\n")
+		default:
 			result.WriteString("Рекомендуемый размер: 0.5-1% капитала\n")
 		}
 	}
 
-	return result.String()
+	return strings.TrimSpace(result.String())
+}
+
+// GetEntryActionOnly возвращает только торговое действие без уровней
+func (s *Scorer) GetEntryActionOnly(
+	recommendations []string,
+	rsi float64,
+	changePercent float64,
+	volumeDelta float64,
+) string {
+	scores := s.CalculateSignalScores(recommendations)
+	return s.GetTradingAction(scores, recommendations, rsi, changePercent, volumeDelta)
 }
