@@ -3,6 +3,7 @@ package signal_set_growth_threshold
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
@@ -34,7 +35,20 @@ func (h *signalSetGrowthThresholdHandler) Execute(params handlers.HandlerParams)
 		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
 	}
 
-	// Показываем меню выбора порога
+	// Проверяем, есть ли значение порога в data (формат: "signal_set_growth_threshold:1.0")
+	if strings.Contains(params.Data, ":") {
+		parts := strings.Split(params.Data, ":")
+		if len(parts) == 2 && parts[0] == constants.CallbackSignalSetGrowthThreshold {
+			return h.handleThresholdSelection(params, parts[1])
+		}
+	}
+
+	// Иначе показываем меню выбора
+	return h.showThresholdMenu(params)
+}
+
+// showThresholdMenu показывает меню выбора порога
+func (h *signalSetGrowthThresholdHandler) showThresholdMenu(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	message := fmt.Sprintf(
 		"📈 *Установка порога роста*\n\n"+
 			"Текущий порог: *%.1f%%*\n\n"+
@@ -51,14 +65,14 @@ func (h *signalSetGrowthThresholdHandler) Execute(params handlers.HandlerParams)
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "1.0%", "callback_data": "threshold_growth:1.0"},
-				{"text": "1.5%", "callback_data": "threshold_growth:1.5"},
-				{"text": "2.0%", "callback_data": "threshold_growth:2.0"},
+				{"text": "1.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.0"},
+				{"text": "1.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.5"},
+				{"text": "2.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.0"},
 			},
 			{
-				{"text": "2.5%", "callback_data": "threshold_growth:2.5"},
-				{"text": "3.0%", "callback_data": "threshold_growth:3.0"},
-				{"text": "5.0%", "callback_data": "threshold_growth:5.0"},
+				{"text": "2.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.5"},
+				{"text": "3.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":3.0"},
+				{"text": "5.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":5.0"},
 			},
 			{
 				{"text": "Ввести вручную", "callback_data": "threshold_growth_custom"},
@@ -73,10 +87,10 @@ func (h *signalSetGrowthThresholdHandler) Execute(params handlers.HandlerParams)
 		Message:  message,
 		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
-			"user_id":              params.User.ID,
-			"current_threshold":    params.User.MinGrowthThreshold,
-			"expecting_threshold":  true,
-			"threshold_type":       "growth",
+			"user_id":             params.User.ID,
+			"current_threshold":   params.User.MinGrowthThreshold,
+			"expecting_threshold": true,
+			"threshold_type":      "growth",
 		},
 	}, nil
 }
@@ -128,9 +142,9 @@ func (h *signalSetGrowthThresholdHandler) handleThresholdSelection(params handle
 		Message:  message,
 		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
-			"user_id":         params.User.ID,
-			"new_threshold":   threshold,
-			"updated_field":   result.UpdatedField,
+			"user_id":       params.User.ID,
+			"new_threshold": threshold,
+			"updated_field": result.UpdatedField,
 		},
 	}, nil
 }

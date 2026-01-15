@@ -31,6 +31,7 @@ import (
 	signals_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signals_menu"
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
 	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
+	with_params_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/with_params"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
 	periods_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/periods"
@@ -163,8 +164,12 @@ func InitHandlerFactory(
 		return notify_both_handler.NewHandler()
 	})
 
+	// Регистрируем универсальный обработчик для параметризованных callback-ов
+	factory.RegisterHandlerCreator("with_params", func() handlers.Handler {
+		return with_params_handler.NewHandler(signalSettingsService)
+	})
+
 	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (с сервисами)
-	// TODO: Раскомментировать после создания обработчиков
 	factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
 		return signal_toggle_growth_handler.NewHandler(signalSettingsService)
 	})

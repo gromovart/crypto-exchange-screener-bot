@@ -4,6 +4,7 @@ package router
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 // HandlerType тип хэндлера
@@ -88,21 +89,49 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 
 // Handle обрабатывает команду/callback
 func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult, error) {
+	// Пробуем найти точное совпадение
 	handler, exists := r.handlers[command]
-	if !exists {
-		// Пробуем найти команду без префикса /
-		if command[0] == '/' {
-			handler, exists = r.handlers[command[1:]]
-		} else {
-			handler, exists = r.handlers["/"+command]
-		}
+	if exists {
+		return r.executeHandler(handler, command, params)
+	}
 
-		if !exists {
-			return HandlerResult{},
-				fmt.Errorf("хэндлер для '%s' не найден", command)
+	// Проверяем, является ли command параметризованным callback (содержит :)
+	if strings.Contains(command, ":") {
+		// Перенаправляем в универсальный обработчик with_params
+		if handler, exists := r.handlers["with_params"]; exists {
+			// Сохраняем полный callback data для обработки
+			params.Data = command
+			log.Printf("🔀 Перенаправление параметризованного callback '%s' в with_params", command)
+			return r.executeHandler(handler, command, params)
 		}
 	}
 
+	// Пробуем найти обработчик по префиксу (для callback-ов с параметрами)
+	for key, h := range r.handlers {
+		if strings.HasPrefix(command, key+":") {
+			// Обновляем data в params для передачи параметров
+			params.Data = command
+			return r.executeHandler(h, command, params)
+		}
+	}
+
+	// Пробуем найти команду без префикса /
+	if command[0] == '/' {
+		handler, exists = r.handlers[command[1:]]
+	} else {
+		handler, exists = r.handlers["/"+command]
+	}
+
+	if exists {
+		return r.executeHandler(handler, command, params)
+	}
+
+	return HandlerResult{},
+		fmt.Errorf("хэндлер для '%s' не найден", command)
+}
+
+// executeHandler выполняет обработчик
+func (r *routerImpl) executeHandler(handler Handler, command string, params HandlerParams) (HandlerResult, error) {
 	log.Printf("🔍 Вызов хэндлера: %s для: %s",
 		handler.GetName(), command)
 

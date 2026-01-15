@@ -180,6 +180,7 @@ func (u *User) ShouldReceiveSignal(signalType string, changePercent float64) boo
 	if signalType == "growth" && changePercent < u.MinGrowthThreshold {
 		return false
 	}
+	// Для падения changePercent отрицательный, сравниваем модуль с порогом
 	if signalType == "fall" && math.Abs(changePercent) < u.MinFallThreshold {
 		return false
 	}

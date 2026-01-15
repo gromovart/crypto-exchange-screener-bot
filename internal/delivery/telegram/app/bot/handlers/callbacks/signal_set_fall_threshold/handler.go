@@ -3,6 +3,7 @@ package signal_set_fall_threshold
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
@@ -34,9 +35,28 @@ func (h *signalSetFallThresholdHandler) Execute(params handlers.HandlerParams) (
 		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
 	}
 
-	// Показываем меню выбора порога
+	// Проверяем, есть ли значение порога в data (формат: "signal_set_fall_threshold:2.0")
+	if strings.Contains(params.Data, ":") {
+		parts := strings.Split(params.Data, ":")
+		if len(parts) == 2 && parts[0] == constants.CallbackSignalSetFallThreshold {
+			return h.handleThresholdSelection(params, parts[1])
+		}
+	}
+
+	// Или старый формат "threshold_fall:2.0" для обратной совместимости
+	if strings.HasPrefix(params.Data, "threshold_fall:") {
+		thresholdStr := strings.TrimPrefix(params.Data, "threshold_fall:")
+		return h.handleThresholdSelection(params, thresholdStr)
+	}
+
+	// Иначе показываем меню выбора
+	return h.showThresholdMenu(params)
+}
+
+// showThresholdMenu показывает меню выбора порога
+func (h *signalSetFallThresholdHandler) showThresholdMenu(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	message := fmt.Sprintf(
-		"📉 *Установка порога падения*\n\n"+
+		"📈 *Установка порога роста*\n\n"+
 			"Текущий порог: *%.1f%%*\n\n"+
 			"Выберите новый порог или введите значение вручную.\n"+
 			"*Рекомендуемые значения:*\n"+
@@ -44,24 +64,24 @@ func (h *signalSetFallThresholdHandler) Execute(params handlers.HandlerParams) (
 			"• 2.0%% - средняя чувствительность\n"+
 			"• 3.0%% - низкая чувствительность\n\n"+
 			"*Допустимый диапазон:* 0.1%% - 50.0%%",
-		params.User.MinFallThreshold,
+		params.User.MinGrowthThreshold,
 	)
 
 	// Клавиатура с вариантами порогов
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "1.0%", "callback_data": "threshold_fall:1.0"},
-				{"text": "1.5%", "callback_data": "threshold_fall:1.5"},
-				{"text": "2.0%", "callback_data": "threshold_fall:2.0"},
+				{"text": "1.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.0"},
+				{"text": "1.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.5"},
+				{"text": "2.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.0"},
 			},
 			{
-				{"text": "2.5%", "callback_data": "threshold_fall:2.5"},
-				{"text": "3.0%", "callback_data": "threshold_fall:3.0"},
-				{"text": "5.0%", "callback_data": "threshold_fall:5.0"},
+				{"text": "2.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.5"},
+				{"text": "3.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":3.0"},
+				{"text": "5.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":5.0"},
 			},
 			{
-				{"text": "Ввести вручную", "callback_data": "threshold_fall_custom"},
+				{"text": "Ввести вручную", "callback_data": "threshold_growth_custom"},
 			},
 			{
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackSignalsMenu},
@@ -73,10 +93,10 @@ func (h *signalSetFallThresholdHandler) Execute(params handlers.HandlerParams) (
 		Message:  message,
 		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
-			"user_id":              params.User.ID,
-			"current_threshold":    params.User.MinFallThreshold,
-			"expecting_threshold":  true,
-			"threshold_type":       "fall",
+			"user_id":             params.User.ID,
+			"current_threshold":   params.User.MinGrowthThreshold,
+			"expecting_threshold": true,
+			"threshold_type":      "growth",
 		},
 	}, nil
 }
@@ -128,9 +148,9 @@ func (h *signalSetFallThresholdHandler) handleThresholdSelection(params handlers
 		Message:  message,
 		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
-			"user_id":         params.User.ID,
-			"new_threshold":   threshold,
-			"updated_field":   result.UpdatedField,
+			"user_id":       params.User.ID,
+			"new_threshold": threshold,
+			"updated_field": result.UpdatedField,
 		},
 	}, nil
 }
