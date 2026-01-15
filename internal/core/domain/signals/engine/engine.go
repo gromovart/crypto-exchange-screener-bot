@@ -3,7 +3,6 @@ package engine
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
@@ -129,8 +128,10 @@ func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, 
 		running:      false,
 	}
 
-	// Регистрируем стандартные анализаторы
-	engine.registerDefaultAnalyzers()
+	// НЕ регистрируем стандартные анализаторы здесь
+	// Они будут созданы через фабрику с реальными зависимостями
+	log.Printf("ℹ️ AnalysisEngine создан без анализаторов")
+	log.Printf("ℹ️ Анализаторы будут созданы через фабрику с реальными зависимостями")
 
 	// Настраиваем стандартные фильтры
 	engine.setupDefaultFilters()
@@ -589,76 +590,14 @@ func (e *AnalysisEngine) registerDefaultAnalyzers() {
 	e.stats.ActiveAnalyzers = 0
 	e.mu.Unlock()
 
-	// GrowthAnalyzer - анализатор роста
-	if e.config.AnalyzerConfigs.GrowthAnalyzer.Enabled {
-		growthConfig := common.AnalyzerConfig{
-			Enabled:       true,
-			Weight:        1.0,
-			MinConfidence: e.config.AnalyzerConfigs.GrowthAnalyzer.MinConfidence,
-			MinDataPoints: e.config.MinDataPoints,
-			CustomSettings: map[string]interface{}{
-				"min_growth":           e.config.AnalyzerConfigs.GrowthAnalyzer.MinGrowth,
-				"continuity_threshold": 0.7,
-				"volume_weight":        0.2,
-			},
-		}
-		growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
-		e.RegisterAnalyzer(growthAnalyzer)
-	}
+	// ВСЕ АНАЛИЗАТОРЫ ОТКЛЮЧЕНЫ
 
-	// FallAnalyzer - анализатор падения
-	if e.config.AnalyzerConfigs.FallAnalyzer.Enabled {
-		fallConfig := common.AnalyzerConfig{
-			Enabled:       true,
-			Weight:        1.0,
-			MinConfidence: e.config.AnalyzerConfigs.FallAnalyzer.MinConfidence,
-			MinDataPoints: e.config.MinDataPoints,
-			CustomSettings: map[string]interface{}{
-				"min_fall":             e.config.AnalyzerConfigs.FallAnalyzer.MinFall,
-				"continuity_threshold": 0.7,
-				"volume_weight":        0.2,
-			},
-		}
-		fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
-		e.RegisterAnalyzer(fallAnalyzer)
-	}
+	// CounterAnalyzer будет создан через фабрику с реальным marketFetcher
+	// Не создаем здесь CounterAnalyzer, чтобы избежать ошибок "MARKET FETCHER IS NIL"
+	// Фабрика создает CounterAnalyzer в методе configureCounterAnalyzer()
 
-	// VolumeAnalyzer - анализатор объема
-	if e.config.AnalyzerConfigs.VolumeAnalyzer.Enabled {
-		volumeConfig := analyzers.DefaultVolumeConfig
-		volumeConfig.MinDataPoints = e.config.MinDataPoints
-		volumeConfig.MinConfidence = e.config.AnalyzerConfigs.VolumeAnalyzer.MinConfidence
-		volumeAnalyzer := analyzers.NewVolumeAnalyzer(volumeConfig)
-		e.RegisterAnalyzer(volumeAnalyzer)
-	}
-
-	// ContinuousAnalyzer - анализатор непрерывности
-	if e.config.AnalyzerConfigs.ContinuousAnalyzer.Enabled {
-		continuousConfig := analyzers.DefaultContinuousConfig
-		continuousConfig.MinDataPoints = e.config.MinDataPoints
-		continuousConfig.MinConfidence = e.config.AnalyzerConfigs.ContinuousAnalyzer.MinConfidence
-		continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
-		e.RegisterAnalyzer(continuousAnalyzer)
-	}
-
-	// OpenInterestAnalyzer - анализатор открытого интереса (НОВЫЙ)
-	if e.config.AnalyzerConfigs.OpenInterestAnalyzer.Enabled {
-		openInterestConfig := analyzers.DefaultOpenInterestConfig
-		openInterestConfig.MinDataPoints = e.config.MinDataPoints
-		openInterestConfig.MinConfidence = e.config.AnalyzerConfigs.OpenInterestAnalyzer.MinConfidence
-
-		// Копируем пользовательские настройки если они есть
-		if e.config.AnalyzerConfigs.OpenInterestAnalyzer.CustomSettings != nil {
-			openInterestConfig.CustomSettings = make(map[string]interface{})
-			for k, v := range e.config.AnalyzerConfigs.OpenInterestAnalyzer.CustomSettings {
-				openInterestConfig.CustomSettings[k] = v
-			}
-		}
-
-		openInterestAnalyzer := analyzers.NewOpenInterestAnalyzer(openInterestConfig)
-		e.RegisterAnalyzer(openInterestAnalyzer)
-		log.Printf("✅ OpenInterestAnalyzer инициализирован")
-	}
+	log.Printf("ℹ️ Все анализаторы отключены в registerDefaultAnalyzers()")
+	log.Printf("ℹ️ CounterAnalyzer будет создан через фабрику с реальным marketFetcher")
 }
 
 // setupDefaultFilters настраивает стандартные фильтры

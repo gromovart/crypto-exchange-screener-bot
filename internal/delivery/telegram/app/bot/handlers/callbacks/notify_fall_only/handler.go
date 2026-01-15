@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only/handler.go
 package notify_fall_only
 
 import (

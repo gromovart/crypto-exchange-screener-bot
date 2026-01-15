@@ -1,3 +1,4 @@
+// /internal/delivery/telegram/app/bot/handlers/callbacks/signal_toggle_fall/handler.go
 package signal_toggle_fall
 
 import (

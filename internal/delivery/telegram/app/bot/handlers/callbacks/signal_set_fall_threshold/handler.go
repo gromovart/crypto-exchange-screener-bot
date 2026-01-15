@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/handlers/callbacks/signal_set_fall_threshold/handler.go
 package signal_set_fall_threshold
 
 import (

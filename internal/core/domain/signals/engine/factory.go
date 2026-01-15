@@ -3,7 +3,6 @@ package engine
 
 import (
 	"crypto-exchange-screener-bot/internal/adapters/notification"
-	analyzers "crypto-exchange-screener-bot/internal/core/domain/signals/detectors"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
@@ -147,99 +146,28 @@ func (f *Factory) configureAnalyzers(
 	cfg *config.Config,
 	notifier *notification.TelegramNotifier,
 ) {
-	minDataPoints := cfg.AnalysisEngine.MinDataPoints
+	// minDataPoints := cfg.AnalysisEngine.MinDataPoints
 	analyzerConfigs := cfg.AnalyzerConfigs
 
-	if analyzerConfigs.GrowthAnalyzer.Enabled {
-		growthConfig := common.AnalyzerConfig{
-			Enabled:       true,
-			Weight:        1.0,
-			MinConfidence: analyzerConfigs.GrowthAnalyzer.MinConfidence,
-			MinDataPoints: minDataPoints,
-			CustomSettings: map[string]interface{}{
-				"min_growth":           analyzerConfigs.GrowthAnalyzer.MinGrowth,
-				"continuity_threshold": getFloatFromCustomSettings(analyzerConfigs.GrowthAnalyzer.CustomSettings, "continuity_threshold", 0.7),
-				"volume_weight":        0.2,
-			},
-		}
-		growthAnalyzer := analyzers.NewGrowthAnalyzer(growthConfig)
-		engine.RegisterAnalyzer(growthAnalyzer)
-	}
+	// ОТКЛЮЧАЕМ АНАЛИЗАТОРЫ:
+	// GrowthAnalyzer - ОТКЛЮЧЕН
+	// FallAnalyzer - ОТКЛЮЧЕН
+	// ContinuousAnalyzer - ОТКЛЮЧЕН
+	// VolumeAnalyzer - ОТКЛЮЧЕН
+	// OpenInterestAnalyzer - ОТКЛЮЧЕН
 
-	if analyzerConfigs.FallAnalyzer.Enabled {
-		fallConfig := common.AnalyzerConfig{
-			Enabled:       true,
-			Weight:        1.0,
-			MinConfidence: analyzerConfigs.FallAnalyzer.MinConfidence,
-			MinDataPoints: minDataPoints,
-			CustomSettings: map[string]interface{}{
-				"min_fall":             analyzerConfigs.FallAnalyzer.MinFall,
-				"continuity_threshold": getFloatFromCustomSettings(analyzerConfigs.FallAnalyzer.CustomSettings, "continuity_threshold", 0.7),
-				"volume_weight":        0.2,
-			},
-		}
-		fallAnalyzer := analyzers.NewFallAnalyzer(fallConfig)
-		engine.RegisterAnalyzer(fallAnalyzer)
-	}
-
-	if analyzerConfigs.VolumeAnalyzer.Enabled {
-		volumeConfig := analyzers.DefaultVolumeConfig
-		volumeConfig.MinDataPoints = minDataPoints
-		volumeConfig.MinConfidence = analyzerConfigs.VolumeAnalyzer.MinConfidence
-		if minVolume := getFloatFromCustomSettings(analyzerConfigs.VolumeAnalyzer.CustomSettings, "min_volume", 100000.0); minVolume > 0 {
-			volumeConfig.CustomSettings["min_volume"] = minVolume
-		}
-		volumeAnalyzer := analyzers.NewVolumeAnalyzer(volumeConfig)
-		engine.RegisterAnalyzer(volumeAnalyzer)
-		log.Printf("✅ VolumeAnalyzer настроен (мин. уверенность: %.0f%%)", analyzerConfigs.VolumeAnalyzer.MinConfidence)
-	}
-
-	if analyzerConfigs.ContinuousAnalyzer.Enabled {
-		continuousConfig := common.AnalyzerConfig{
-			Enabled:       true,
-			Weight:        0.8,
-			MinConfidence: analyzerConfigs.GrowthAnalyzer.MinConfidence,
-			MinDataPoints: minDataPoints,
-			CustomSettings: map[string]interface{}{
-				"min_continuous_points": getIntFromCustomSettings(analyzerConfigs.ContinuousAnalyzer.CustomSettings, "min_continuous_points", 3),
-				"max_gap_ratio":         0.3,
-			},
-		}
-		continuousAnalyzer := analyzers.NewContinuousAnalyzer(continuousConfig)
-		engine.RegisterAnalyzer(continuousAnalyzer)
-		log.Printf("✅ ContinuousAnalyzer настроен")
-	}
-
-	if analyzerConfigs.OpenInterestAnalyzer.Enabled {
-		openInterestConfig := analyzers.DefaultOpenInterestConfig
-		openInterestConfig.MinDataPoints = minDataPoints
-		openInterestConfig.MinConfidence = analyzerConfigs.OpenInterestAnalyzer.MinConfidence
-		customSettings := analyzerConfigs.OpenInterestAnalyzer.CustomSettings
-		if customSettings != nil {
-			if minPriceChange := getFloatFromCustomSettings(customSettings, "min_price_change", 1.0); minPriceChange > 0 {
-				openInterestConfig.CustomSettings["min_price_change"] = minPriceChange
-			}
-			if minPriceFall := getFloatFromCustomSettings(customSettings, "min_price_fall", 1.0); minPriceFall > 0 {
-				openInterestConfig.CustomSettings["min_price_fall"] = minPriceFall
-			}
-			if minOIChange := getFloatFromCustomSettings(customSettings, "min_oi_change", 5.0); minOIChange > 0 {
-				openInterestConfig.CustomSettings["min_oi_change"] = minOIChange
-			}
-			if extremeOIThreshold := getFloatFromCustomSettings(customSettings, "extreme_oi_threshold", 1.5); extremeOIThreshold > 0 {
-				openInterestConfig.CustomSettings["extreme_oi_threshold"] = extremeOIThreshold
-			}
-			if analyzerWeight := getFloatFromCustomSettings(customSettings, "analyzer_weight", 0.6); analyzerWeight > 0 {
-				openInterestConfig.CustomSettings["analyzer_weight"] = analyzerWeight
-			}
-		}
-		openInterestAnalyzer := analyzers.NewOpenInterestAnalyzer(openInterestConfig)
-		engine.RegisterAnalyzer(openInterestAnalyzer)
-		log.Printf("✅ OpenInterestAnalyzer настроен")
-	}
-
+	// Оставляем только CounterAnalyzer если он включен
 	if analyzerConfigs.CounterAnalyzer.Enabled {
 		f.configureCounterAnalyzer(engine, cfg, notifier)
 	}
+
+	log.Printf("ℹ️ Анализаторы отключены через фабрику: Growth, Fall, Continuous, Volume, OpenInterest")
+	log.Printf("ℹ️ Активные анализаторы: %s", func() string {
+		if analyzerConfigs.CounterAnalyzer.Enabled {
+			return "CounterAnalyzer"
+		}
+		return "нет"
+	}())
 }
 
 func (f *Factory) configureCounterAnalyzer(
