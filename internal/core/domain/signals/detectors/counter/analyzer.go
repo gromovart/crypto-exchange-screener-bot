@@ -13,6 +13,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/manager"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/google/uuid"
 )
@@ -289,21 +290,13 @@ func (a *CounterAnalyzer) createRawSignal(
 // publishRawCounterSignal публикует сырой Counter сигнал в EventBus
 func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 	if a.eventBus == nil {
-		fmt.Printf("❌ EventBus НЕ ИНИЦИАЛИЗИРОВАН в CounterAnalyzer!\n")
+		logger.Error("❌ EventBus НЕ ИНИЦИАЛИЗИРОВАН в CounterAnalyzer!\n")
 		return
 	}
 
-	fmt.Printf("\n🔍 DEBUG CounterAnalyzer publishRawCounterSignal ДЕТАЛЬНО:\n")
-	fmt.Printf("   Символ: %s\n", signal.Symbol)
-	fmt.Printf("   Изменение: %.2f%% (сохранено в сигнале)\n", signal.ChangePercent)
-	fmt.Printf("   Period (int): %d\n", signal.Period)
-	fmt.Printf("   Metadata.Strategy: %s\n", signal.Metadata.Strategy)
-	fmt.Printf("   Metadata.Custom: %+v\n", signal.Metadata.Custom)
-	fmt.Printf("   Длина Custom: %d\n", len(signal.Metadata.Custom))
-
 	// Проверяем ToMap()
 	signalMap := signal.ToMap()
-	fmt.Printf("   ToMap() результат (важные поля):\n")
+	logger.Debug("   ToMap() результат (важные поля):\n")
 	for key, value := range signalMap {
 		if key == "change_percent" || key == "period" || key == "custom" ||
 			key == "period_string" || key == "symbol" || key == "direction" {
@@ -320,10 +313,10 @@ func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 	}
 
 	if err := a.eventBus.Publish(event); err != nil {
-		fmt.Printf("❌ Ошибка публикации сырого Counter сигнала для %s: %v\n",
+		logger.Error("❌ Ошибка публикации сырого Counter сигнала для %s: %v\n",
 			signal.Symbol, err)
 	} else {
-		fmt.Printf("✅ Сырой Counter сигнал опубликован: %s %s %.2f%% (период: %s)\n",
+		logger.Debug("✅ Сырой Counter сигнал опубликован: %s %s %.2f%% (период: %s)\n",
 			signal.Symbol, signal.Direction, signal.ChangePercent,
 			signal.Metadata.Custom["period_string"])
 	}
@@ -332,7 +325,7 @@ func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 // getDataForPeriod получает данные за указанный период
 func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.PriceData, error) {
 	if a.storage == nil {
-		fmt.Printf("⚠️ Storage не инициализирован для %s\n", symbol)
+		logger.Error("⚠️ Storage не инициализирован для %s\n", symbol)
 		return a.getFallbackData(symbol, period)
 	}
 
@@ -341,24 +334,24 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 	endTime := time.Now()
 	startTime := endTime.Add(-periodDuration)
 
-	fmt.Printf("🔍 getDataForPeriod: %s за %s (%s - %s)\n",
+	logger.Debug("🔍 getDataForPeriod: %s за %s (%s - %s)\n",
 		symbol, period, startTime.Format("15:04:05"), endTime.Format("15:04:05"))
 
 	// Пробуем получить историю цен за период
 	priceHistory, err := a.storage.GetPriceHistoryRange(symbol, startTime, endTime)
 	if err != nil {
-		fmt.Printf("⚠️ Ошибка получения истории для %s: %v\n", symbol, err)
+		logger.Warn("⚠️ Ошибка получения истории для %s: %v\n", symbol, err)
 
 		// Fallback: получаем последние N точек
 		priceHistory, err = a.storage.GetPriceHistory(symbol, 10)
 		if err != nil {
-			fmt.Printf("❌ Не удалось получить данные для %s: %v\n", symbol, err)
+			logger.Error("❌ Не удалось получить данные для %s: %v\n", symbol, err)
 			return a.getFallbackData(symbol, period)
 		}
 	}
 
 	if len(priceHistory) < 2 {
-		fmt.Printf("⚠️ Недостаточно данных для %s: %d точек\n", symbol, len(priceHistory))
+		logger.Warn("⚠️ Недостаточно данных для %s: %d точек\n", symbol, len(priceHistory))
 		return a.getFallbackData(symbol, period)
 	}
 
@@ -378,7 +371,7 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 		})
 	}
 
-	fmt.Printf("✅ Получено %d точек данных для %s за %s\n",
+	logger.Debug("✅ Получено %d точек данных для %s за %s\n",
 		len(result), symbol, period)
 
 	return result, nil
@@ -386,7 +379,7 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 
 // getFallbackData возвращает заглушку если нет реальных данных
 func (a *CounterAnalyzer) getFallbackData(symbol, period string) ([]types.PriceData, error) {
-	fmt.Printf("⚠️ Использую fallback данные для %s\n", symbol)
+	logger.Warn("⚠️ Использую fallback данные для %s\n", symbol)
 
 	// Пробуем получить текущий снапшот
 	var currentPrice, volume24h, openInterest, fundingRate float64
@@ -398,7 +391,7 @@ func (a *CounterAnalyzer) getFallbackData(symbol, period string) ([]types.PriceD
 			openInterest = snapshot.OpenInterest
 			fundingRate = snapshot.FundingRate
 
-			fmt.Printf("   Найден снапшот: цена=%.4f, объем=%.0f, OI=%.0f\n",
+			logger.Debug("   Найден снапшот: цена=%.4f, объем=%.0f, OI=%.0f\n",
 				currentPrice, volume24h, openInterest)
 		}
 	}

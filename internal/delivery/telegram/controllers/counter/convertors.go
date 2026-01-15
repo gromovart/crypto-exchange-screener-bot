@@ -5,17 +5,14 @@ import (
 	counterService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
-	"log"
 	"time"
 )
 
 // convertEventToParams преобразует событие в параметры сервиса
 func convertEventToParams(event types.Event) (counterService.CounterParams, error) {
-	log.Printf("🔍 convertEventToParams: преобразование события")
 
 	dataMap, ok := event.Data.(map[string]interface{})
 	if !ok {
-		log.Printf("❌ convertEventToParams: не map[string]interface{}, а %T", event.Data)
 		return counterService.CounterParams{}, fmt.Errorf("неверный формат данных события")
 	}
 
@@ -45,7 +42,6 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 
 	// Попробуем как map[string]float64
 	if indicators, ok := dataMap["indicators"].(map[string]float64); ok {
-		log.Printf("🔍 convertEventToParams: indicators тип: %T, значение: %v", indicators, indicators)
 		params.CurrentPrice = getFloat64FromFloatMap(indicators, "current_price")
 		params.Volume24h = getFloat64FromFloatMap(indicators, "volume_24h")
 		params.OpenInterest = getFloat64FromFloatMap(indicators, "open_interest")

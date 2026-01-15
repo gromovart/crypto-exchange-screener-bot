@@ -4,8 +4,8 @@ package counter
 import (
 	counterService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
-	"log"
 )
 
 // controllerImpl реализация CounterController
@@ -80,14 +80,12 @@ func NewController(service counterService.Service) Controller {
 //
 // 4. Результат возвращается в EventBus для метрик и мониторинга
 func (c *controllerImpl) HandleEvent(event types.Event) error {
-	log.Printf("🤖 CounterController: Событие %s от %s", event.Type, event.Source)
-	log.Printf("🔍 CounterController: Данные события: %+v", event.Data)
 
 	// [1] ВАЛИДАЦИЯ: проверяем структуру данных события
 	// Контракт Event: event.Data может быть любого типа (interface{})
 	// Наша ответственность: проверить ожидаемую структуру
 	if err := ValidateEventData(event.Data); err != nil {
-		log.Printf("❌ CounterController: Невалидные данные события: %v", err)
+		logger.Error("❌ CounterController: Невалидные данные события: %v", err)
 		return fmt.Errorf("валидация данных события: %w", err)
 	}
 
@@ -95,24 +93,21 @@ func (c *controllerImpl) HandleEvent(event types.Event) error {
 	// Адаптация: преобразуем универсальный формат EventBus в специфичный для Use Case
 	params, err := convertEventToParams(event)
 	if err != nil {
-		log.Printf("❌ CounterController: Ошибка преобразования данных: %v", err)
+		logger.Error("❌ CounterController: Ошибка преобразования данных: %v", err)
 		return fmt.Errorf("преобразование данных события: %w", err)
 	}
-
-	log.Printf("✅ CounterController: Преобразовано: %s %s %.2f%% (период: %s)",
-		params.Symbol, params.Direction, params.ChangePercent, params.Period)
 
 	// [3] ВЫЗОВ USE CASE (сервиса)
 	// Делегирование: контроллер не содержит бизнес-логику, только координирует
 	result, err := c.service.Exec(params)
 	if err != nil {
-		log.Printf("❌ CounterController: Ошибка обработки: %v", err)
+		logger.Error("❌ CounterController: Ошибка обработки: %v", err)
 		return fmt.Errorf("обработка сервисом: %w", err)
 	}
 
 	// [4] ЛОГИРОВАНИЕ РЕЗУЛЬТАТА
 	// Мониторинг: EventBus также собирает метрики о успешных/неуспешных обработках
-	log.Printf("✅ CounterController: Результат: %+v", result)
+	logger.Debug("✅ CounterController: Результат: %+v", result)
 	return nil
 }
 

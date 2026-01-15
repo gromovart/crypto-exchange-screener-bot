@@ -3,8 +3,8 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
-	"log"
 )
 
 // getUsersToNotify возвращает пользователей, которым нужно отправить уведомление
@@ -39,43 +39,43 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 
 	// Проверяем ChatID
 	if user.ChatID == "" {
-		log.Printf("⚠️ User %d (%s) skipped: empty chat_id", user.ID, user.Username)
+		logger.Debug("⚠️ User %d (%s) skipped: empty chat_id", user.ID, user.Username)
 		return false
 	}
 
 	// Проверяем активность
 	if !user.IsActive {
-		log.Printf("⚠️ User %d (%s) skipped: not active", user.ID, user.Username)
+		logger.Debug("⚠️ User %d (%s) skipped: not active", user.ID, user.Username)
 		return false
 	}
 
 	// Базовые проверки из модели User
 	if !user.CanReceiveNotifications() {
-		log.Printf("⚠️ User %d (%s) skipped: notifications disabled", user.ID, user.Username)
+		logger.Debug("⚠️ User %d (%s) skipped: notifications disabled", user.ID, user.Username)
 		return false
 	}
 
 	// Проверяем тип сигнала
 	if data.Direction == "growth" && !user.CanReceiveGrowthSignals() {
-		log.Printf("⚠️ User %d (%s) skipped: growth signals disabled", user.ID, user.Username)
+		logger.Debug("⚠️ User %d (%s) skipped: growth signals disabled", user.ID, user.Username)
 		return false
 	}
 
 	if data.Direction == "fall" && !user.CanReceiveFallSignals() {
-		log.Printf("⚠️ User %d (%s) skipped: fall signals disabled", user.ID, user.Username)
+		logger.Debug("⚠️ User %d (%s) skipped: fall signals disabled", user.ID, user.Username)
 		return false
 	}
 
 	// Проверяем тихие часы
 	if user.IsInQuietHours() {
-		log.Printf("⚠️ User %d (%s) skipped: in quiet hours (%d-%d)",
+		logger.Debug("⚠️ User %d (%s) skipped: in quiet hours (%d-%d)",
 			user.ID, user.Username, user.QuietHoursStart, user.QuietHoursEnd)
 		return false
 	}
 
 	// Проверяем лимиты
 	if user.HasReachedDailyLimit() {
-		log.Printf("⚠️ User %d (%s) skipped: daily limit reached (%d/%d)",
+		logger.Debug("⚠️ User %d (%s) skipped: daily limit reached (%d/%d)",
 			user.ID, user.Username, user.SignalsToday, user.MaxSignalsPerDay)
 		return false
 	}
@@ -90,7 +90,7 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	// Проверяем пороги роста
 	if data.Direction == "growth" {
 		if changePercent < user.MinGrowthThreshold {
-			log.Printf("⚠️ User %d (%s) skipped: growth threshold not met (%.2f%% < %.1f%%)",
+			logger.Debug("⚠️ User %d (%s) skipped: growth threshold not met (%.2f%% < %.1f%%)",
 				user.ID, user.Username, changePercent, user.MinGrowthThreshold)
 			return false
 		}
@@ -99,12 +99,12 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	// Проверяем пороги падения
 	if data.Direction == "fall" {
 		if changePercent < user.MinFallThreshold {
-			log.Printf("⚠️ User %d (%s) skipped: fall threshold not met (%.2f%% < %.1f%%)",
+			logger.Debug("⚠️ User %d (%s) skipped: fall threshold not met (%.2f%% < %.1f%%)",
 				user.ID, user.Username, changePercent, user.MinFallThreshold)
 			return false
 		}
 	}
 
-	log.Printf("✅ User %d (%s) passed all checks", user.ID, user.Username)
+	logger.Debug("✅ User %d (%s) passed all checks", user.ID, user.Username)
 	return true
 }

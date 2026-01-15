@@ -7,6 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 )
@@ -62,7 +63,7 @@ func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
 	sentCount := 0
 	for _, user := range usersToNotify {
 		if err := s.sendNotification(user, counterData); err != nil {
-			log.Printf("❌ Ошибка отправки уведомления пользователю %s: %v", user.Username, err)
+			logger.Error("❌ Ошибка отправки уведомления пользователю %s: %v", user.Username, err)
 		} else {
 			sentCount++
 		}
@@ -80,7 +81,7 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 	// Форматируем сообщение
 	formattedMessage := s.formatter.FormatCounterSignal(data)
 
-	log.Printf("📨 Отправка counter уведомления для %s пользователю %s",
+	logger.Debug("📨 Отправка counter уведомления для %s пользователю %s",
 		data.Symbol, user.Username)
 
 	// Проверяем chat_id
@@ -99,7 +100,7 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 	var keyboard interface{} = nil
 	if s.buttonBuilder != nil {
 		keyboard = s.buttonBuilder.CreateSignalKeyboard(data.Symbol)
-		log.Printf("🛠️ Создана клавиатура для %s", data.Symbol)
+		logger.Debug("🛠️ Создана клавиатура для %s", data.Symbol)
 	}
 
 	// Отправляем через message sender с клавиатурой
@@ -108,9 +109,9 @@ func (s *serviceImpl) sendNotification(user *models.User, data formatters.Counte
 		if err != nil {
 			return fmt.Errorf("ошибка отправки в Telegram: %w", err)
 		}
-		log.Printf("✅ Сообщение с клавиатурой отправлено пользователю %s", user.Username)
+		logger.Debug("✅ Сообщение с клавиатурой отправлено пользователю %s", user.Username)
 	} else {
-		log.Printf("⚠️ MessageSender не инициализирован, сообщение не отправлено")
+		logger.Error("⚠️ MessageSender не инициализирован, сообщение не отправлено")
 		return fmt.Errorf("message sender not initialized")
 	}
 
