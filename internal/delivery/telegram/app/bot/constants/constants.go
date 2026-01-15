@@ -254,3 +254,26 @@ var TestButtonTexts = struct {
 	ToggleTest: "🧪 Переключить тестовый режим",
 	Chart:      "📈 Графики",
 }
+
+// SignalButtonTexts содержит тексты для кнопок меню сигналов
+var SignalButtonTexts = struct {
+	ToggleGrowth    string
+	ToggleFall      string
+	GrowthThreshold string
+	FallThreshold   string
+	Sensitivity     string
+	QuietHours      string
+	History         string
+	TestSignal      string
+	ThresholdFormat string
+}{
+	ToggleGrowth:    "📈 Рост",
+	ToggleFall:      "📉 Падение",
+	GrowthThreshold: "📈 Порог роста",
+	FallThreshold:   "📉 Порог падения",
+	Sensitivity:     "🎯 Чувствительность",
+	QuietHours:      "⏱️ Тихие часы",
+	History:         "📊 История сигналов",
+	TestSignal:      "⚡ Тестовый сигнал",
+	ThresholdFormat: "%s Порог: %.1f%%",
+}

@@ -72,6 +72,16 @@ const (
 	CallbackSymbolXRPUSDT = "symbol_xrpusdt" // XRP/USDT
 	CallbackSymbolBack    = "symbol_back"    // 🔙 Назад к сбросу
 
+	// ============== SIGNALS MENU ==============
+	CallbackSignalToggleGrowth       = "signal_toggle_growth"        // 📈 Вкл/Выкл рост
+	CallbackSignalToggleFall         = "signal_toggle_fall"          // 📉 Вкл/Выкл падение
+	CallbackSignalSetGrowthThreshold = "signal_set_growth_threshold" // 📈 Установить порог роста
+	CallbackSignalSetFallThreshold   = "signal_set_fall_threshold"   // 📉 Установить порог падения
+	CallbackSignalSetSensitivity     = "signal_set_sensitivity"      // 🎯 Настроить чувствительность
+	CallbackSignalSetQuietHours      = "signal_set_quiet_hours"      // ⏱️ Настроить тихие часы
+	CallbackSignalHistory            = "signal_history"              // 📊 История сигналов
+	CallbackSignalTest               = "signal_test"                 // ⚡ Тестовый сигнал
+
 	// ============== TEST & DEBUG ==============
 	CallbackTest           = "test"             // 🧪 Тестовое сообщение
 	CallbackTestOK         = "test_ok"          // ✅ Тест OK
