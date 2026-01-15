@@ -1,0 +1,136 @@
+package signal_set_fall_threshold
+
+import (
+	"fmt"
+	"strconv"
+
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	signal_settings_svc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+)
+
+// signalSetFallThresholdHandler реализация обработчика установки порога падения
+type signalSetFallThresholdHandler struct {
+	*base.BaseHandler
+	service signal_settings_svc.Service
+}
+
+// NewHandler создает новый обработчик установки порога падения
+func NewHandler(service signal_settings_svc.Service) handlers.Handler {
+	return &signalSetFallThresholdHandler{
+		BaseHandler: &base.BaseHandler{
+			Name:    "signal_set_fall_threshold_handler",
+			Command: constants.CallbackSignalSetFallThreshold,
+			Type:    handlers.TypeCallback,
+		},
+		service: service,
+	}
+}
+
+// Execute выполняет обработку callback установки порога падения
+func (h *signalSetFallThresholdHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+	if params.User == nil {
+		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
+	}
+
+	// Показываем меню выбора порога
+	message := fmt.Sprintf(
+		"📉 *Установка порога падения*\n\n"+
+			"Текущий порог: *%.1f%%*\n\n"+
+			"Выберите новый порог или введите значение вручную.\n"+
+			"*Рекомендуемые значения:*\n"+
+			"• 1.0%% - высокая чувствительность\n"+
+			"• 2.0%% - средняя чувствительность\n"+
+			"• 3.0%% - низкая чувствительность\n\n"+
+			"*Допустимый диапазон:* 0.1%% - 50.0%%",
+		params.User.MinFallThreshold,
+	)
+
+	// Клавиатура с вариантами порогов
+	keyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{
+				{"text": "1.0%", "callback_data": "threshold_fall:1.0"},
+				{"text": "1.5%", "callback_data": "threshold_fall:1.5"},
+				{"text": "2.0%", "callback_data": "threshold_fall:2.0"},
+			},
+			{
+				{"text": "2.5%", "callback_data": "threshold_fall:2.5"},
+				{"text": "3.0%", "callback_data": "threshold_fall:3.0"},
+				{"text": "5.0%", "callback_data": "threshold_fall:5.0"},
+			},
+			{
+				{"text": "Ввести вручную", "callback_data": "threshold_fall_custom"},
+			},
+			{
+				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackSignalsMenu},
+			},
+		},
+	}
+
+	return handlers.HandlerResult{
+		Message:  message,
+		Keyboard: keyboard,
+		Metadata: map[string]interface{}{
+			"user_id":              params.User.ID,
+			"current_threshold":    params.User.MinFallThreshold,
+			"expecting_threshold":  true,
+			"threshold_type":       "fall",
+		},
+	}, nil
+}
+
+// handleThresholdSelection обрабатывает выбор порога
+func (h *signalSetFallThresholdHandler) handleThresholdSelection(params handlers.HandlerParams, thresholdStr string) (handlers.HandlerResult, error) {
+	threshold, err := strconv.ParseFloat(thresholdStr, 64)
+	if err != nil {
+		return handlers.HandlerResult{}, fmt.Errorf("неверное значение порога: %w", err)
+	}
+
+	// Проверяем диапазон
+	if threshold < 0.1 || threshold > 50.0 {
+		return handlers.HandlerResult{}, fmt.Errorf("порог должен быть от 0.1%% до 50%%")
+	}
+
+	// Подготавливаем параметры для сервиса
+	serviceParams := signal_settings_svc.SignalSettingsParams{
+		Action: "set_fall_threshold",
+		UserID: params.User.ID,
+		ChatID: params.ChatID,
+		Value:  threshold,
+	}
+
+	// Вызываем сервис
+	result, err := h.service.Exec(serviceParams)
+	if err != nil {
+		return handlers.HandlerResult{}, fmt.Errorf("ошибка в сервисе настройки сигналов: %w", err)
+	}
+
+	// Создаем сообщение с результатом
+	message := fmt.Sprintf(
+		"✅ *Порог падения обновлен*\n\n%s\n\n"+
+			"Теперь вы будете получать уведомления только при падении цены на %.1f%% и более.",
+		result.Message,
+		threshold,
+	)
+
+	// Создаем клавиатуру
+	keyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{
+				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackSignalsMenu},
+			},
+		},
+	}
+
+	return handlers.HandlerResult{
+		Message:  message,
+		Keyboard: keyboard,
+		Metadata: map[string]interface{}{
+			"user_id":         params.User.ID,
+			"new_threshold":   threshold,
+			"updated_field":   result.UpdatedField,
+		},
+	}, nil
+}

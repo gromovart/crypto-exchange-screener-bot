@@ -35,12 +35,14 @@ import (
 	thresholds_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/thresholds"
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 )
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
 func InitHandlerFactory(
 	factory *handlers.HandlerFactory,
 	notificationsToggleService notifications_toggle_service.Service,
+	signalSettingsService signal_settings_service.Service, // Добавляем
 ) {
 	log.Println("🔧 Инициализация создателей хэндлеров...")
 
@@ -156,6 +158,24 @@ func InitHandlerFactory(
 	factory.RegisterHandlerCreator(constants.CallbackNotifyBoth, func() handlers.Handler {
 		return notify_both_handler.NewHandler()
 	})
+
+	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (с сервисами)
+	// TODO: Раскомментировать после создания обработчиков
+	// factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
+	// 	return signal_toggle_growth_handler.NewHandler(signalSettingsService)
+	// })
+
+	// factory.RegisterHandlerCreator(constants.CallbackSignalToggleFall, func() handlers.Handler {
+	// 	return signal_toggle_fall_handler.NewHandler(signalSettingsService)
+	// })
+
+	// factory.RegisterHandlerCreator(constants.CallbackSignalSetGrowthThreshold, func() handlers.Handler {
+	// 	return signal_set_growth_threshold_handler.NewHandler(signalSettingsService)
+	// })
+
+	// factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
+	// 	return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
+	// })
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
 	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
