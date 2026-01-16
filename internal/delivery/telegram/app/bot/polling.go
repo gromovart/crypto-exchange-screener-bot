@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // PollingClient - клиент для polling обновлений
@@ -35,7 +36,7 @@ func (pc *PollingClient) Start() error {
 	}
 
 	pc.running = true
-	log.Println("🔄 Starting Telegram bot polling...")
+	logger.Warn("🔄 Starting Telegram bot polling...")
 
 	go pc.pollLoop()
 

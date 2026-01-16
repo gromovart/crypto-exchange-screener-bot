@@ -2,11 +2,11 @@ package middlewares
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // TelegramUpdate - обновление от Telegram (упрощенная версия)
@@ -74,6 +74,13 @@ func NewAuthMiddleware(userService *users.Service) *AuthMiddleware {
 
 // ProcessUpdate обрабатывает обновление и создает HandlerParams
 func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, error) {
+	// ЗАЩИТА ОТ NIL: проверяем userService
+	if m.userService == nil {
+		logger.Warn("❌ ProcessUpdate: userService is nil! Cannot process update")
+		// Возвращаем "технические работы" или базовый обработчик
+		return HandlerParams{}, fmt.Errorf("сервис пользователей временно недоступен")
+	}
+
 	var userID int64
 	var username, firstName, lastName string
 	var chatID int64
@@ -90,7 +97,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 		lastName = update.Message.From.LastName
 		chatID = update.Message.Chat.ID
 		text = update.Message.Text
-		log.Printf("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
+		logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
 	} else if update.CallbackQuery != nil && update.CallbackQuery.From != nil {
 		userID = update.CallbackQuery.From.ID
 		username = update.CallbackQuery.From.Username
@@ -101,30 +108,30 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 		// Для callback пытаемся получить chatID из Message
 		if update.CallbackQuery.Message != nil && update.CallbackQuery.Message.Chat != nil {
 			chatID = update.CallbackQuery.Message.Chat.ID
-			log.Printf("🔍 ProcessUpdate: Callback from user %d, chat %d (from Message), data: %s", userID, chatID, data)
+			logger.Info("🔍 ProcessUpdate: Callback from user %d, chat %d (from Message), data: %s", userID, chatID, data)
 		} else {
 			// Если нет Message, используем userID как chatID (для приватных чатов)
 			chatID = userID
-			log.Printf("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
+			logger.Warn("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
 		}
 	} else {
-		log.Printf("❌ ProcessUpdate: Не удалось получить информацию о пользователе")
+		logger.Warn("❌ ProcessUpdate: Не удалось получить информацию о пользователе")
 		return HandlerParams{}, fmt.Errorf("не удалось получить информацию о пользователе")
 	}
 
 	// Получаем или создаем пользователя
 	user, err := m.userService.GetOrCreateUser(userID, username, firstName, lastName)
 	if err != nil {
-		log.Printf("❌ ProcessUpdate: Ошибка получения пользователя %d: %v", userID, err)
+		logger.Error("❌ ProcessUpdate: Ошибка получения пользователя %d: %v", userID, err)
 		return HandlerParams{}, fmt.Errorf("ошибка получения пользователя: %w", err)
 	}
 
-	log.Printf("✅ ProcessUpdate: User found/created: ID=%d, TelegramID=%d, ChatID=%s",
+	logger.Info("✅ ProcessUpdate: User found/created: ID=%d, TelegramID=%d, ChatID=%s",
 		user.ID, user.TelegramID, user.ChatID)
 
 	// Проверяем активность пользователя
 	if !user.IsActive {
-		log.Printf("❌ ProcessUpdate: User %d is not active", user.ID)
+		logger.Warn("❌ ProcessUpdate: User %d is not active", user.ID)
 		return HandlerParams{}, fmt.Errorf("аккаунт деактивирован")
 	}
 
@@ -132,9 +139,9 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 	if user.ChatID == "" {
 		user.ChatID = strconv.FormatInt(chatID, 10)
 		if err := m.userService.UpdateUser(user); err != nil {
-			log.Printf("⚠️ ProcessUpdate: Не удалось обновить ChatID для user %d: %v", user.ID, err)
+			logger.Warn("⚠️ ProcessUpdate: Не удалось обновить ChatID для user %d: %v", user.ID, err)
 		} else {
-			log.Printf("📝 ProcessUpdate: Updated ChatID for user %d: %s", user.ID, user.ChatID)
+			logger.Info("📝 ProcessUpdate: Updated ChatID for user %d: %s", user.ID, user.ChatID)
 		}
 	}
 

@@ -2,6 +2,7 @@
 package router
 
 import (
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"log"
 	"strings"
@@ -63,7 +64,7 @@ func (r *routerImpl) RegisterHandler(handler Handler) {
 	}
 
 	r.handlers[command] = handler
-	log.Printf("✅ Зарегистрирован хэндлер: %s для %s: %s",
+	logger.Debug("✅ Зарегистрирован хэндлер: %s для %s: %s",
 		handler.GetName(), handler.GetType(), command)
 }
 
@@ -74,7 +75,7 @@ func (r *routerImpl) RegisterCommand(command string, handler Handler) {
 		command = "/" + command
 	}
 	r.handlers[command] = handler
-	log.Printf("✅ Зарегистрирована команда: %s → %s", command, handler.GetName())
+	logger.Debug("✅ Зарегистрирована команда: %s → %s", command, handler.GetName())
 }
 
 // RegisterCallback регистрирует callback (без префикса /)
@@ -84,7 +85,7 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 		callback = callback[1:]
 	}
 	r.handlers[callback] = handler
-	log.Printf("✅ Зарегистрирован callback: %s → %s", callback, handler.GetName())
+	logger.Debug("✅ Зарегистрирован callback: %s → %s", callback, handler.GetName())
 }
 
 // Handle обрабатывает команду/callback

@@ -257,3 +257,18 @@ func (rs *RedisService) GetCache() *Cache {
 	}
 	return NewCacheWithClient(rs.client)
 }
+
+// Name возвращает имя сервиса
+func (rs *RedisService) Name() string {
+	return "RedisService"
+}
+
+// IsRunning возвращает true если сервис запущен
+func (rs *RedisService) IsRunning() bool {
+	return rs.State() == StateRunning
+}
+
+// GetStatus возвращает подробный статус (алиас для GetStats для единообразия)
+func (rs *RedisService) GetStatus() map[string]interface{} {
+	return rs.GetStats()
+}

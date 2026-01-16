@@ -6,6 +6,8 @@ import (
 	errors "crypto-exchange-screener-bot/internal/core/errors"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -17,7 +19,10 @@ type SignalPipeline struct {
 	stages      []PipelineStage
 	rateLimiter *RateLimiter
 	stats       PipelineStats
+	running     bool // Добавляем поле
 	mu          sync.RWMutex
+	bufferSize  int // Добавляем поле
+	maxWorkers  int // Добавляем поле
 }
 
 // NewSignalPipeline создает новый пайплайн сигналов
@@ -29,7 +34,10 @@ func NewSignalPipeline(eventBus *events.EventBus) *SignalPipeline {
 			lastSent: make(map[string]time.Time),
 			minDelay: 30 * time.Second, // Не чаще чем раз в 30 секунд на символ
 		},
-		stats: PipelineStats{},
+		stats:      PipelineStats{},
+		running:    false, // Инициализируем
+		bufferSize: 1000,  // Значение по умолчанию
+		maxWorkers: 4,     // Значение по умолчанию
 	}
 }
 
@@ -48,7 +56,7 @@ func (p *SignalPipeline) Start() {
 	)
 	p.eventBus.Subscribe(types.EventSignalDetected, subscriber)
 
-	log.Println("🚀 SignalPipeline запущен")
+	logger.Info("🚀 SignalPipeline запущен")
 }
 
 // handleSignal обрабатывает сигнал
@@ -183,4 +191,84 @@ func (s *EnrichmentStage) Process(signal analysis.Signal) (analysis.Signal, erro
 	signal.Metadata.Indicators["processed_at"] = float64(time.Now().Unix())
 
 	return signal, nil
+}
+
+// Name возвращает имя сервиса
+func (p *SignalPipeline) Name() string {
+	return "SignalPipeline"
+}
+
+// Stop останавливает пайплайн
+func (p *SignalPipeline) Stop() error {
+	// SignalPipeline не требует явной остановки
+	// Просто сбрасываем состояние
+	p.running = false
+	return nil
+}
+
+// State возвращает состояние сервиса
+func (p *SignalPipeline) State() string {
+	if p.running {
+		return "running"
+	}
+	return "stopped"
+}
+
+// IsRunning возвращает true если сервис запущен
+func (p *SignalPipeline) IsRunning() bool {
+	return p.running
+}
+
+// HealthCheck проверяет здоровье сервиса
+func (p *SignalPipeline) HealthCheck() bool {
+	if !p.running {
+		return false
+	}
+
+	// Проверяем наличие EventBus
+	if p.eventBus == nil {
+		return false
+	}
+
+	// Проверяем наличие этапов
+	if len(p.stages) == 0 {
+		return false
+	}
+
+	return true
+}
+
+// GetStatus возвращает подробный статус
+func (p *SignalPipeline) GetStatus() map[string]interface{} {
+	stats := p.GetStats()
+
+	status := map[string]interface{}{
+		"name":        p.Name(),
+		"running":     p.running,
+		"state":       p.State(),
+		"healthy":     p.HealthCheck(),
+		"total_stats": stats,
+		"stages":      len(p.stages),
+		"stage_names": p.getStageNames(),
+	}
+
+	// Информация о конфигурации
+	status["config"] = map[string]interface{}{
+		"buffer_size":  p.bufferSize,
+		"max_workers":  p.maxWorkers,
+		"has_eventbus": p.eventBus != nil,
+	}
+
+	return status
+}
+
+// getStageNames возвращает имена всех этапов
+func (p *SignalPipeline) getStageNames() []string {
+	names := make([]string, len(p.stages))
+	for i, stage := range p.stages {
+		// Получаем имя типа этапа
+		stageType := fmt.Sprintf("%T", stage)
+		names[i] = stageType
+	}
+	return names
 }

@@ -1,10 +1,10 @@
+// internal/delivery/telegram/app/bot/factory_handlers.go
 package bot
 
 import (
-	"log"
-
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
+	"crypto-exchange-screener-bot/pkg/logger"
 
 	auth_login_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_login"
 	auth_logout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_logout"
@@ -49,7 +49,7 @@ func InitHandlerFactory(
 	notificationsToggleService notifications_toggle_service.Service,
 	signalSettingsService signal_settings_service.Service, // Добавляем
 ) {
-	log.Println("🔧 Инициализация создателей хэндлеров...")
+	logger.Info("🔧 Инициализация создателей хэндлеров...")
 
 	// Регистрируем создателей КОМАНД
 	factory.RegisterHandlerCreator("start", func() handlers.Handler {
@@ -191,5 +191,5 @@ func InitHandlerFactory(
 		return notifications_toggle_handler.NewHandler(notificationsToggleService)
 	})
 
-	log.Println("✅ Инициализация создателей хэндлеров завершена")
+	logger.Info("✅ Инициализация создателей хэндлеров завершена")
 }

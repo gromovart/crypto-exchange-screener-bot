@@ -68,15 +68,15 @@ func main() {
 		// Пробуем fallback на старый путь .env
 		if _, err := os.Stat(".env"); err == nil {
 			configFile = ".env"
-			log.Printf("⚠️  Using fallback config: .env (instead of %s)", filepath.Join("configs", env, ".env"))
+			logger.Warn("⚠️  Using fallback config: .env (instead of %s)", filepath.Join("configs", env, ".env"))
 		} else {
-			log.Fatalf("❌ Config file not found: %s and .env not found", configFile)
+			logger.Error("❌ Config file not found: %s and .env not found", configFile)
 		}
 	}
 
-	log.Printf("🎯 Environment: %s", env)
-	log.Printf("📁 Config file: %s", configFile)
-	log.Printf("🔧 Run mode: %s", mode)
+	logger.Warn("🎯 Environment: %s", env)
+	logger.Warn("📁 Config file: %s", configFile)
+	logger.Warn("🔧 Run mode: %s", mode)
 
 	// 2. Загружаем конфигурацию
 	cfg, err := config.LoadConfig(configFile)
@@ -102,14 +102,14 @@ func main() {
 	switch mode {
 	case "full":
 		// Запуск полной версии с DataManager
-		log.Println("🚀 Starting Crypto Exchange Screener Bot (FULL MODE)...")
-		log.Printf("🧪 Test mode: %v", testMode)
+		logger.Info("🚀 Starting Crypto Exchange Screener Bot (FULL MODE)...")
+		logger.Warn("🧪 Test mode: %v", testMode)
 		runFullMode(cfg, testMode)
 	case "simple":
 		fallthrough
 	default:
 		// Запуск простой версии с bootstrap
-		log.Println("🚀 Starting Crypto Exchange Screener Bot (SIMPLE MODE)...")
+		logger.Info("🚀 Starting Crypto Exchange Screener Bot (SIMPLE MODE)...")
 		runSimpleMode(cfg)
 	}
 }
@@ -426,7 +426,7 @@ func startSystem(dataManager *manager.DataManager, cfg *config.Config, testMode 
 	errors := dataManager.StartAllServices()
 	if len(errors) > 0 {
 		for service, err := range errors {
-			logger.Error("❌ Failed to start %s: %v", service, err)
+			logger.Warn("❌ Failed to start %s: %v", service, err)
 		}
 		return fmt.Errorf("failed to start one or more services")
 	}

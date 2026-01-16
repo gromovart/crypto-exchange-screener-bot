@@ -16,6 +16,7 @@ import (
 	activity_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/activity"
 	session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
 	users_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
+	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -69,7 +70,7 @@ func NewService(
 		config:       config,
 	}
 
-	log.Println("✅ User service initialized")
+	logger.Info("✅ User service initialized")
 	return service, nil
 }
 

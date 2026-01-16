@@ -471,3 +471,44 @@ func (b *EventBus) ClearMiddlewares() {
 		log.Println("✅ Все middleware удалены из EventBus")
 	}
 }
+
+// IsRunning возвращает true если EventBus запущен
+func (b *EventBus) IsRunning() bool {
+	return b.running
+}
+
+// Name возвращает имя сервиса
+func (b *EventBus) Name() string {
+	return "EventBus"
+}
+
+// HealthCheck проверяет здоровье сервиса
+func (b *EventBus) HealthCheck() bool {
+	// Базовые проверки
+	if !b.running {
+		return false
+	}
+	if b.eventBuffer == nil {
+		return false
+	}
+
+	// Проверяем что канал остановки не закрыт
+	select {
+	case <-b.stopChan:
+		return false
+	default:
+		return true
+	}
+}
+
+// GetMetricsMap возвращает метрики в виде map (для совместимости)
+func (b *EventBus) GetMetricsMap() map[string]interface{} {
+	metrics := b.GetMetrics()
+	return map[string]interface{}{
+		"events_published": metrics.EventsPublished,
+		"events_processed": metrics.EventsProcessed,
+		"events_failed":    metrics.EventsFailed,
+		"processing_time":  metrics.ProcessingTime.String(),
+		"subscribers":      metrics.SubscribersCount,
+	}
+}

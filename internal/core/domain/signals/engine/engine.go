@@ -130,8 +130,8 @@ func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, 
 
 	// НЕ регистрируем стандартные анализаторы здесь
 	// Они будут созданы через фабрику с реальными зависимостями
-	log.Printf("ℹ️ AnalysisEngine создан без анализаторов")
-	log.Printf("ℹ️ Анализаторы будут созданы через фабрику с реальными зависимостями")
+	logger.Warn("ℹ️ AnalysisEngine создан без анализаторов")
+	logger.Info("ℹ️ Анализаторы будут созданы через фабрику с реальными зависимостями")
 
 	// Настраиваем стандартные фильтры
 	engine.setupDefaultFilters()
@@ -154,7 +154,7 @@ func (e *AnalysisEngine) Start() error {
 	// Подписываемся на события
 	e.subscribeToEvents()
 
-	log.Printf("🚀 AnalysisEngine запущен с %d анализаторами", len(e.analyzers))
+	logger.Info("🚀 AnalysisEngine запущен с %d анализаторами", len(e.analyzers))
 	return nil
 }
 
@@ -171,7 +171,7 @@ func (e *AnalysisEngine) Stop() error {
 	// Сохраняем статистику
 	e.saveStats()
 
-	log.Println("🛑 AnalysisEngine остановлен")
+	logger.Info("🛑 AnalysisEngine остановлен")
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (e *AnalysisEngine) RegisterAnalyzer(analyzer common.Analyzer) error {
 	e.stats.AnalyzerStats[name] = common.AnalyzerStats{}
 	e.stats.ActiveAnalyzers++
 
-	log.Printf("✅ Зарегистрирован анализатор: %s v%s", name, analyzer.Version())
+	logger.Info("✅ Зарегистрирован анализатор: %s v%s", name, analyzer.Version())
 	return nil
 }
 
@@ -215,7 +215,7 @@ func (e *AnalysisEngine) UnregisterAnalyzer(name string) error {
 // AddFilter добавляет фильтр в цепочку
 func (e *AnalysisEngine) AddFilter(filter filters.Filter) {
 	e.filters.Add(filter)
-	log.Printf("➕ Добавлен фильтр: %s", filter.Name())
+	logger.Info("➕ Добавлен фильтр: %s", filter.Name())
 }
 
 // AnalyzeSymbol анализирует конкретный символ
@@ -579,7 +579,7 @@ func (e *AnalysisEngine) GetAnalyzers() []string {
 // saveStats сохраняет статистику (заглушка)
 func (e *AnalysisEngine) saveStats() {
 	// В будущем можно сохранять в файл или базу данных
-	log.Printf("💾 Сохранение статистики AnalysisEngine")
+	logger.Info("💾 Сохранение статистики AnalysisEngine")
 }
 
 // registerDefaultAnalyzers регистрирует стандартные анализаторы
@@ -709,4 +709,79 @@ func (e *AnalysisEngine) GetFilterStats() map[string]filters.FilterStats {
 	}
 
 	return stats
+}
+
+// Name возвращает имя сервиса
+func (e *AnalysisEngine) Name() string {
+	return "AnalysisEngine"
+}
+
+// State возвращает состояние сервиса
+func (e *AnalysisEngine) State() string {
+	if e.running {
+		return "running"
+	}
+	return "stopped"
+}
+
+// IsRunning возвращает true если сервис запущен
+func (e *AnalysisEngine) IsRunning() bool {
+	return e.running
+}
+
+// HealthCheck проверяет здоровье сервиса
+func (e *AnalysisEngine) HealthCheck() bool {
+	if !e.running {
+		return false
+	}
+
+	// Проверяем наличие хранилища
+	if e.storage == nil {
+		return false
+	}
+
+	// Проверяем наличие анализаторов
+	if len(e.analyzers) == 0 {
+		return false
+	}
+
+	return true
+}
+
+// GetStatus возвращает подробный статус
+func (e *AnalysisEngine) GetStatus() map[string]interface{} {
+	stats := e.GetStats()
+
+	status := map[string]interface{}{
+		"name":        e.Name(),
+		"running":     e.running,
+		"state":       e.State(),
+		"healthy":     e.HealthCheck(),
+		"analyzers":   e.GetAnalyzers(),
+		"total_stats": stats,
+	}
+
+	// Добавляем информацию о фильтрах
+	if filterStats := e.GetFilterStats(); filterStats != nil {
+		status["filter_stats"] = filterStats
+	}
+
+	// Информация о конфигурации
+	status["config"] = map[string]interface{}{
+		"parallel_analysis":   e.config.EnableParallel, // Исправлено
+		"max_workers":         e.config.MaxWorkers,
+		"analysis_interval":   e.config.UpdateInterval.String(), // Исправлено
+		"min_volume":          e.config.MinVolumeFilter,         // Исправлено
+		"sort_by_volume":      true,                             // Постоянно true, так как есть метод sortByVolume()
+		"enable_filter_stats": true,                             // Постоянно true, так как есть метод GetFilterStats()
+		"update_interval":     e.config.UpdateInterval.String(),
+		"analysis_periods":    e.config.AnalysisPeriods,
+		"max_symbols_per_run": e.config.MaxSymbolsPerRun,
+		"signal_threshold":    e.config.SignalThreshold,
+		"retention_period":    e.config.RetentionPeriod.String(),
+		"enable_cache":        e.config.EnableCache,
+		"min_data_points":     e.config.MinDataPoints,
+	}
+
+	return status
 }

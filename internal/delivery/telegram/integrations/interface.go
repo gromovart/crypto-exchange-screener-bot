@@ -1,7 +1,9 @@
+// internal/delivery/telegram/integrations/interface.go
 package integrations
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 )
@@ -13,7 +15,7 @@ type TelegramBotClient interface {
 	GetMessageSender() message_sender.MessageSender
 
 	// Методы для работы с обновлениями
-	HandleUpdate(update interface{}) error
+	HandleUpdate(update *middlewares.TelegramUpdate) error
 
 	// Информация о боте
 	IsRunning() bool

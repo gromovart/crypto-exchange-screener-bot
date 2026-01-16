@@ -3,10 +3,10 @@ package handlers
 
 import (
 	"fmt"
-	"log"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/router"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // HandlerAdapter адаптер для преобразования Handler в router.Handler
@@ -100,13 +100,13 @@ func NewHandlerFactory() *HandlerFactory {
 // RegisterHandlerCreator регистрирует создателя хэндлера
 func (f *HandlerFactory) RegisterHandlerCreator(name string, creator func() Handler) {
 	f.handlerCreators[name] = creator
-	log.Printf("✅ Зарегистрирован создатель хэндлера: %s", name)
+	logger.Debug("✅ Зарегистрирован создатель хэндлера: %s", name)
 }
 
 // RegisterHandler регистрирует хэндлер через адаптер
 func (f *HandlerFactory) RegisterHandler(handler Handler) {
 	adapter := NewHandlerAdapter(handler)
-	
+
 	switch handler.GetType() {
 	case TypeCommand:
 		f.router.RegisterCommand(handler.GetCommand(), adapter)
@@ -114,9 +114,9 @@ func (f *HandlerFactory) RegisterHandler(handler Handler) {
 		f.router.RegisterCallback(handler.GetCommand(), adapter)
 	case TypeMessage:
 		// Для текстовых сообщений пока не регистрируем
-		log.Printf("  ⚠️ Текстовый хэндлер пропущен: %s", handler.GetName())
+		logger.Warn("  ⚠️ Текстовый хэндлер пропущен: %s", handler.GetName())
 	default:
-		log.Printf("  ⚠️ Неизвестный тип хэндлера: %s", handler.GetName())
+		logger.Warn("  ⚠️ Неизвестный тип хэндлера: %s", handler.GetName())
 	}
 }
 
@@ -126,23 +126,23 @@ func (f *HandlerFactory) CreateAndRegisterHandler(name string) {
 		handler := creator()
 		if handler != nil {
 			f.RegisterHandler(handler)
-			log.Printf("  ✅ Хэндлер: %s → %s", handler.GetCommand(), name)
+			logger.Debug("  ✅ Хэндлер: %s → %s", handler.GetCommand(), name)
 		}
 	} else {
-		log.Printf("  ❌ Создатель хэндлера не найден: %s", name)
+		logger.Error("  ❌ Создатель хэндлера не найден: %s", name)
 	}
 }
 
 // RegisterAllHandlers создает и регистрирует все хэндлеры
 func (f *HandlerFactory) RegisterAllHandlers() router.Router {
-	log.Println("🔧 Регистрация всех хэндлеров...")
+	logger.Info("🔧 Регистрация всех хэндлеров...")
 
 	// Создаем и регистрируем все хэндлеры
 	for name := range f.handlerCreators {
 		f.CreateAndRegisterHandler(name)
 	}
 
-	log.Printf("✅ Зарегистрировано хэндлеров: %d", len(f.router.GetCommands()))
+	logger.Debug("✅ Зарегистрировано хэндлеров: %d", len(f.router.GetCommands()))
 	return f.router
 }
 

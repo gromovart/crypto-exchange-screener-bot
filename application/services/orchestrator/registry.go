@@ -1,4 +1,4 @@
-// internal/manager/registry.go
+// application/services/orchestrator/registry.go
 package orchestrator
 
 import (
@@ -9,20 +9,20 @@ import (
 // ServiceRegistry реестр сервисов
 type ServiceRegistry struct {
 	mu       sync.RWMutex
-	services map[string]Service
+	services map[string]Service // ИЗМЕНЕНО: Service вместо interface{}
 	info     map[string]ServiceInfo
 }
 
 // NewServiceRegistry создает новый реестр сервисов
 func NewServiceRegistry() *ServiceRegistry {
 	return &ServiceRegistry{
-		services: make(map[string]Service),
+		services: make(map[string]Service), // ИЗМЕНЕНО
 		info:     make(map[string]ServiceInfo),
 	}
 }
 
 // Register регистрирует сервис
-func (sr *ServiceRegistry) Register(name string, service Service) error {
+func (sr *ServiceRegistry) Register(name string, service Service) error { // ИЗМЕНЕНО
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -40,7 +40,7 @@ func (sr *ServiceRegistry) Register(name string, service Service) error {
 }
 
 // Get возвращает сервис по имени
-func (sr *ServiceRegistry) Get(name string) (Service, bool) {
+func (sr *ServiceRegistry) Get(name string) (Service, bool) { // ИЗМЕНЕНО
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
@@ -49,7 +49,7 @@ func (sr *ServiceRegistry) Get(name string) (Service, bool) {
 }
 
 // GetAll возвращает все сервисы
-func (sr *ServiceRegistry) GetAll() map[string]Service {
+func (sr *ServiceRegistry) GetAll() map[string]Service { // ИЗМЕНЕНО
 	sr.mu.RLock()
 	defer sr.mu.RUnlock()
 
@@ -205,8 +205,8 @@ func (sr *ServiceRegistry) CheckHealth() map[string]bool {
 
 // Ошибки реестра
 var (
-	ErrServiceAlreadyExists = ManagerError{"service already exists"}
-	ErrServiceNotFound      = ManagerError{"service not found"}
+	ErrServiceAlreadyExists = ManagerError{"сервис уже существует"}
+	ErrServiceNotFound      = ManagerError{"сервис не найден"}
 )
 
 // ManagerError ошибка менеджера

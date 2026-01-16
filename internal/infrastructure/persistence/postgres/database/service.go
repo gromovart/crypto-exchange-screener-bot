@@ -370,3 +370,18 @@ func (ds *DatabaseService) CreateMigration(name, description string) (string, er
 
 	return ds.migrator.CreateMigration(name, description)
 }
+
+// Name возвращает имя сервиса
+func (ds *DatabaseService) Name() string {
+	return "DatabaseService"
+}
+
+// IsRunning возвращает true если сервис запущен
+func (ds *DatabaseService) IsRunning() bool {
+	return ds.State() == StateRunning
+}
+
+// GetStatus возвращает подробный статус (алиас для GetStats для единообразия)
+func (ds *DatabaseService) GetStatus() map[string]interface{} {
+	return ds.GetStats()
+}

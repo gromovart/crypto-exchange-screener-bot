@@ -15,6 +15,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
+	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -80,7 +81,7 @@ func NewService(
 	// Запускаем планировщик проверки подписок
 	go service.startSubscriptionChecker()
 
-	log.Println("✅ Subscription service initialized")
+	logger.Info("✅ Subscription service initialized")
 	return service, nil
 }
 
@@ -96,7 +97,7 @@ func (s *Service) loadPlans() error {
 
 	for _, plan := range plans {
 		s.plans[plan.Code] = plan
-		log.Printf("📋 Loaded plan: %s (%s)", plan.Name, plan.Code)
+		logger.Info("📋 Loaded plan: %s (%s)", plan.Name, plan.Code)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
 	"sync"
 )
@@ -30,11 +31,11 @@ func GetOrCreateBotWithDeps(cfg *config.Config, deps *Dependencies) *TelegramBot
 		// Создаем бота с зависимостями или без них
 		if deps != nil {
 			globalBot = NewTelegramBot(cfg, deps)
-			log.Printf("✅ Telegram бот создан с зависимостями (Singleton)")
+			logger.Info("✅ Telegram бот создан с зависимостями (Singleton)")
 		} else {
 			// Создаем минимальные зависимости для совместимости
 			globalBot = NewTelegramBot(cfg, &Dependencies{})
-			log.Printf("✅ Telegram бот создан без зависимостей (Singleton)")
+			logger.Info("✅ Telegram бот создан без зависимостей (Singleton)")
 		}
 	})
 

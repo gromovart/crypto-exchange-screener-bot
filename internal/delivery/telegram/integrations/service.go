@@ -9,9 +9,11 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	counterctrl "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
 	countersvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	profilesvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
@@ -64,7 +66,7 @@ func NewTelegramPackageService(
 	botClient TelegramBotClient,
 ) (TelegramPackageService, error) {
 
-	log.Println("🤖 Creating Telegram package service...")
+	logger.Info("🤖 Creating Telegram package service...")
 
 	// 1. Проверяем обязательные зависимости
 	if config == nil {
@@ -83,29 +85,25 @@ func NewTelegramPackageService(
 		return nil, fmt.Errorf("botClient is required")
 	}
 
-	// 2. СОЗДАЕМ РЕАЛЬНЫЙ MESSAGE SENDER если Telegram включен
-	var messageSender message_sender.MessageSender
-
-	if config.TelegramEnabled && config.TelegramBotToken != "" {
-		// СОЗДАЕМ РЕАЛЬНЫЙ MESSAGE SENDER
-		messageSender = message_sender.NewMessageSender(config)
-		log.Printf("✅ Using REAL MessageSender for Telegram (Token: %s...)",
-			maskToken(config.TelegramBotToken))
+	// 2. ИСПОЛЬЗУЕМ MessageSender из botClient вместо создания нового
+	messageSender := botClient.GetMessageSender()
+	if messageSender == nil {
+		// Fallback: создаем реальный MessageSender только если у botClient его нет
+		if config.TelegramEnabled && config.TelegramBotToken != "" {
+			messageSender = message_sender.NewMessageSender(config)
+			logger.Warn("⚠️ Created MessageSender as fallback (botClient didn't provide one)")
+		} else {
+			// Используем stub
+			messageSender = &stubMessageSender{}
+			log.Println("⚠️ Using stub message sender (Telegram disabled or no token)")
+		}
 	} else {
-		// Используем stub
-		messageSender = &stubMessageSender{}
-		log.Println("⚠️ Using stub message sender (Telegram disabled or no token)")
-	}
-
-	// 2.1 Получаем MessageSender из бота (если не создали реальный)
-	botMessageSender := botClient.GetMessageSender()
-	if botMessageSender != nil && messageSender == nil {
-		messageSender = botMessageSender
+		logger.Info("✅ Using MessageSender from botClient")
 	}
 
 	// 3. СОЗДАЕМ BUTTON BUILDER
 	buttonBuilder := buttons.NewButtonBuilder()
-	log.Println("🛠️ ButtonBuilder created")
+	logger.Info("🛠️ ButtonBuilder created")
 
 	// 4. Создаем провайдер форматтеров
 	formatterProvider := formatters.NewFormatterProvider("BYBIT") // Можно брать из конфига
@@ -134,7 +132,7 @@ func NewTelegramPackageService(
 		},
 	}
 
-	log.Println("✅ Telegram package service created")
+	logger.Info("✅ Telegram package service created")
 	return service, nil
 }
 
@@ -384,7 +382,7 @@ func (s *stubTelegramBotClient) GetMessageSender() message_sender.MessageSender 
 	return nil
 }
 
-func (s *stubTelegramBotClient) HandleUpdate(update interface{}) error {
+func (s *stubTelegramBotClient) HandleUpdate(update *middlewares.TelegramUpdate) error {
 	log.Printf("[STUB BOT] Handle update")
 	return nil
 }
@@ -405,9 +403,26 @@ func NewTelegramPackageServiceWithDefaults(
 	eventBus types.EventBus,
 ) (TelegramPackageService, error) {
 
-	botClient := &stubTelegramBotClient{
-		config: config,
+	// Используем существующий TelegramBot из синглтона
+	existingBot := bot.GetBot()
+	if existingBot == nil {
+		// Если бот еще не создан, создаем stub
+		logger.Warn("⚠️ TelegramBot not available, using stub")
+		botClient := &stubTelegramBotClient{
+			config: config,
+		}
+
+		return NewTelegramPackageService(
+			config,
+			userService,
+			subscriptionService,
+			eventBus,
+			botClient,
+		)
 	}
+
+	// Используем существующий бот
+	botClient := existingBot // *bot.TelegramBot уже реализует TelegramBotClient
 
 	return NewTelegramPackageService(
 		config,
@@ -416,11 +431,4 @@ func NewTelegramPackageServiceWithDefaults(
 		eventBus,
 		botClient,
 	)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

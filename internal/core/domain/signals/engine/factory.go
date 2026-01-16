@@ -10,6 +10,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
 	"time"
 )
@@ -173,8 +174,8 @@ func (f *Factory) configureAnalyzers(
 		f.configureCounterAnalyzer(engine, cfg, notifier)
 	}
 
-	log.Printf("ℹ️ Анализаторы отключены через фабрику: Growth, Fall, Continuous, Volume, OpenInterest")
-	log.Printf("ℹ️ Активные анализаторы: %s", func() string {
+	logger.Warn("ℹ️ Анализаторы отключены через фабрику: Growth, Fall, Continuous, Volume, OpenInterest")
+	logger.Debug("ℹ️ Активные анализаторы: %s", func() string {
 		if analyzerConfigs.CounterAnalyzer.Enabled {
 			return "CounterAnalyzer"
 		}
@@ -187,7 +188,7 @@ func (f *Factory) configureCounterAnalyzer(
 	cfg *config.Config,
 	notifier *notification.TelegramNotifier,
 ) {
-	log.Println("🔧 Настройка CounterAnalyzer с TelegramNotifier...")
+	logger.Info("🔧 Настройка CounterAnalyzer с TelegramNotifier...")
 	analyzerConfigs := cfg.AnalyzerConfigs
 	customSettings := analyzerConfigs.CounterAnalyzer.CustomSettings
 
@@ -227,13 +228,13 @@ func (f *Factory) configureCounterAnalyzer(
 	)
 
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
-		log.Printf("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
+		logger.Warn("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {
-		log.Printf("✅ CounterAnalyzer успешно добавлен в AnalysisEngine")
-		log.Printf("   TelegramNotifier: %v", notifier != nil)
-		log.Printf("   Storage: %v", storage != nil)
-		log.Printf("   MarketFetcher: %v", f.priceFetcher != nil)
-		log.Printf("   CandleSystem: %v", f.candleSystem != nil)
+		logger.Info("✅ CounterAnalyzer успешно добавлен в AnalysisEngine")
+		logger.Info("   TelegramNotifier: %v", notifier != nil)
+		logger.Info("   Storage: %v", storage != nil)
+		logger.Info("   MarketFetcher: %v", f.priceFetcher != nil)
+		logger.Info("   CandleSystem: %v", f.candleSystem != nil)
 	}
 }
 

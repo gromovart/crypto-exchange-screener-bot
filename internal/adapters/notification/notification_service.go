@@ -3,6 +3,7 @@ package notification
 
 import (
 	"crypto-exchange-screener-bot/internal/types"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -174,4 +175,91 @@ func (c *CompositeNotificationService) RemoveNotifier(name string) {
 			break
 		}
 	}
+}
+
+// Start запускает сервис уведомлений
+func (c *CompositeNotificationService) Start() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.enabled = true
+	c.stats["started_at"] = time.Now()
+	c.stats["enabled"] = true
+
+	return nil
+}
+
+// Stop останавливает сервис уведомлений
+func (c *CompositeNotificationService) Stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.enabled = false
+	c.stats["stopped_at"] = time.Now()
+	c.stats["enabled"] = false
+
+	return nil
+}
+
+// State возвращает состояние сервиса
+func (c *CompositeNotificationService) State() string {
+	if c.enabled {
+		return "running"
+	}
+	return "stopped"
+}
+
+// IsRunning возвращает true если сервис запущен
+func (c *CompositeNotificationService) IsRunning() bool {
+	return c.enabled
+}
+
+// HealthCheck проверяет здоровье сервиса
+func (c *CompositeNotificationService) HealthCheck() bool {
+	// Базовые проверки
+	if !c.enabled {
+		return false
+	}
+
+	// Проверяем наличие нотификаторов
+	if len(c.notifiers) == 0 {
+		return false
+	}
+
+	// Проверяем что хотя бы один нотификатор работает
+	for _, notifier := range c.notifiers {
+		// Предполагаем, что нотификатор имеет метод IsEnabled или аналогичный
+		if enabled, ok := notifier.(interface{ IsEnabled() bool }); ok {
+			if enabled.IsEnabled() {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// GetStatus возвращает подробный статус
+func (c *CompositeNotificationService) GetStatus() map[string]interface{} {
+	stats := c.GetStats()
+
+	status := map[string]interface{}{
+		"name":        c.Name(),
+		"running":     c.enabled,
+		"state":       c.State(),
+		"healthy":     c.HealthCheck(),
+		"total_stats": stats,
+	}
+
+	// Информация о нотификаторах
+	notifierInfo := make(map[string]interface{})
+	for _, notifier := range c.notifiers {
+		notifierInfo[notifier.Name()] = map[string]interface{}{
+			"type": fmt.Sprintf("%T", notifier),
+		}
+	}
+	status["notifiers"] = notifierInfo
+	status["notifier_count"] = len(c.notifiers)
+
+	return status
 }
