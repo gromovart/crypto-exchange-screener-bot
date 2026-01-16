@@ -9,10 +9,6 @@ import (
 
 	fetcher "crypto-exchange-screener-bot/internal/adapters/market"
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
-	subscriptiontypes "crypto-exchange-screener-bot/internal/core/domain/subscription"
-	"crypto-exchange-screener-bot/internal/core/domain/users"
-	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
-	telegramintegrations "crypto-exchange-screener-bot/internal/delivery/telegram/integrations"
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	redis "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
@@ -94,123 +90,16 @@ func (dm *DataManager) initUsersAndAuth() error {
 	return nil
 }
 
-// initPostStartServices инициализирует сервисы, зависящие от запущенных БД/Redis
-func (dm *DataManager) initPostStartServices() error {
-	logger.Info("🔄 Инициализация сервисов, зависящих от БД/Redis...")
-
-	// 1. Создаем UserService если еще не создан и БД/Redis доступны
-	if dm.userService == nil && dm.databaseService != nil && dm.redisService != nil {
-		logger.Info("👤 Создание UserService...")
-		db := dm.databaseService.GetDB()
-		redisCache := dm.redisService.GetCache()
-
-		if db != nil && redisCache != nil {
-			userConfig := users.Config{
-				DefaultMinGrowthThreshold: 2.0,
-				DefaultMaxSignalsPerDay:   50,
-				SessionTTL:                24 * time.Hour,
-				MaxSessionsPerUser:        5,
-			}
-
-			var err error
-			dm.userService, err = users.NewService(db, redisCache, nil, userConfig)
-			if err != nil {
-				logger.Warn("Не удалось создать сервис пользователей: %v", err)
-			} else {
-				logger.Info("✅ Сервис пользователей создан")
-			}
-		} else {
-			logger.Warn("Подключение к базе данных или Redis недоступно для UserService")
-		}
-	}
-
-	// 2. Создаем SubscriptionService если еще не создан и БД/Redis доступны
-	if dm.subscriptionService == nil && dm.databaseService != nil && dm.redisService != nil {
-		logger.Info("💎 Создание SubscriptionService...")
-		db := dm.databaseService.GetDB()
-		if db != nil && dm.redisService != nil {
-			redisCache := dm.redisService.GetCache()
-			if redisCache != nil {
-				subscriptionConfig := subscriptiontypes.Config{
-					StripeSecretKey:  "",
-					StripeWebhookKey: "",
-					DefaultPlan:      "free",
-					TrialPeriodDays:  7,
-					GracePeriodDays:  3,
-					AutoRenew:        true,
-				}
-
-				subService, err := subscriptiontypes.NewService(
-					db,
-					redisCache,
-					nil,
-					nil,
-					subscriptionConfig,
-				)
-
-				if err != nil {
-					logger.Warn("Не удалось создать сервис подписок: %v", err)
-				} else {
-					dm.subscriptionService = subService
-					logger.Info("✅ Сервис подписок создан")
-				}
-			} else {
-				logger.Warn("Redis кэш недоступен для сервиса подписок")
-			}
-		} else {
-			logger.Warn("Подключение к базе данных или Redis недоступно для сервиса подписок")
-		}
-	}
-
-	// 3. Создаем TelegramPackageService если условия выполнены
-	if dm.telegramPackageService == nil && dm.config.TelegramEnabled && dm.userService != nil && dm.subscriptionService != nil && dm.eventBus != nil {
-		logger.Info("📦 Создание TelegramPackageService...")
-		telegramService, err := telegramintegrations.NewTelegramPackageServiceWithDefaults(
-			dm.config,
-			dm.userService,
-			dm.subscriptionService,
-			dm.eventBus,
-		)
-
-		if err != nil {
-			logger.Warn("Не удалось создать Telegram package service: %v", err)
-		} else {
-			dm.telegramPackageService = telegramService
-			logger.Info("✅ Telegram package service создан")
-		}
-	}
-
-	// 4. Создаем TelegramBot если еще не создан и UserService доступен
-	if dm.telegramBot == nil && dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" && dm.userService != nil {
-		logger.Info("🤖 Создание Telegram бота с UserService...")
-		dm.telegramBot = telegrambot.GetOrCreateBotWithDeps(dm.config, &telegrambot.Dependencies{
-			UserService: dm.userService,
-		})
-		logger.Info("✅ Telegram бот создан с аутентификацией (Singleton)")
-	} else if dm.telegramBot == nil && dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		logger.Info("🤖 Создание Telegram бота без UserService...")
-		dm.telegramBot = telegrambot.GetOrCreateBot(dm.config)
-		logger.Info("✅ Telegram бот создан без аутентификации (Singleton)")
-	}
-
-	return nil
-}
-
 // initTelegramAndNotifications инициализирует Telegram и уведомления (ТОЛЬКО СОЗДАНИЕ)
 func (dm *DataManager) initTelegramAndNotifications(testMode bool) error {
-	// 4.1 Telegram бот - БУДЕТ СОЗДАН ПОЗЖЕ в initPostStartServices()
-	if dm.config.TelegramEnabled && dm.config.TelegramBotToken != "" {
-		logger.Info("🤖 Telegram бот будет создан после инициализации UserService...")
-	} else {
-		logger.Info("🤖 Telegram бот отключен в конфигурации")
-	}
-
-	// 4.2 Telegram Package Service - будет создан в initPostStartServices()
+	// 4.1 Telegram Package Service - БУДЕТ СОЗДАН ПОЗЖЕ в initPostStartServices()
 	if dm.config.TelegramEnabled {
-		logger.Info("📦 TelegramPackageService будет создан при наличии всех зависимостей...")
+		logger.Info("📦 TelegramPackageService будет создан как единственная точка взаимодействия с Telegram...")
+	} else {
+		logger.Info("🤖 Telegram отключен в конфигурации")
 	}
 
-	// 4.3 Составной сервис уведомлений - ТОЛЬКО СОЗДАНИЕ
+	// 4.2 Составной сервис уведомлений - ТОЛЬКО СОЗДАНИЕ
 	logger.Info("📱 Создание CompositeNotificationService...")
 	notifierFactory := notifier.NewNotifierFactory(dm.eventBus)
 	dm.notification = notifierFactory.CreateCompositeNotifier(dm.config)

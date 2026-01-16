@@ -87,9 +87,6 @@ func NewDataManager(cfg *config.Config, testMode bool) (*DataManager, error) {
 		return nil, err
 	}
 
-	// Инициализируем сервисы, зависящие от запущенных БД/Redis
-	dm.initPostStartServices()
-
 	// Настраиваем зависимости
 	dm.setupDependencies()
 
@@ -283,4 +280,61 @@ func (dm *DataManager) Unsubscribe(eventType types.EventType, subscriber types.E
 // GetManagedService возвращает управляемый сервис по имени
 func (dm *DataManager) GetManagedService(name string) (Service, bool) {
 	return dm.registry.Get(name)
+}
+func (dm *DataManager) createTelegramPackageServiceIfReady() bool {
+	if dm.telegramPackageService != nil {
+		return true
+	}
+
+	if !dm.config.TelegramEnabled {
+		return false
+	}
+
+	// Проверяем все обязательные зависимости
+	if dm.userService == nil {
+		logger.Info("⏳ Ожидание UserService для TelegramPackageService...")
+		return false
+	}
+
+	if dm.subscriptionService == nil {
+		logger.Info("⏳ Ожидание SubscriptionService для TelegramPackageService...")
+		return false
+	}
+
+	if dm.eventBus == nil {
+		logger.Info("⏳ Ожидание EventBus для TelegramPackageService...")
+		return false
+	}
+
+	logger.Info("📦 Создание TelegramPackageService (все зависимости доступны)...")
+
+	telegramService, err := telegramintegrations.NewTelegramPackageServiceWithDefaults(
+		dm.config,
+		dm.userService,
+		dm.subscriptionService,
+		dm.eventBus,
+	)
+
+	if err != nil {
+		logger.Warn("Не удалось создать TelegramPackageService: %v", err)
+		return false
+	}
+
+	dm.telegramPackageService = telegramService
+	logger.Info("✅ TelegramPackageService создан как единственная точка взаимодействия с Telegram")
+
+	// Запускаем сервис
+	if err := dm.telegramPackageService.Start(); err != nil {
+		logger.Warn("Не удалось запустить TelegramPackageService: %v", err)
+		return false
+	}
+
+	// Регистрируем в реестре сервисов
+	if dm.registry != nil {
+		dm.registry.Register("TelegramPackageService",
+			NewUniversalServiceWrapper("TelegramPackageService", dm.telegramPackageService, true, true))
+		logger.Info("✅ TelegramPackageService зарегистрирован в реестре")
+	}
+
+	return true
 }
