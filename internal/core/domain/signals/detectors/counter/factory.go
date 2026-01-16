@@ -2,6 +2,7 @@
 package counter
 
 import (
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage" // ДОБАВИТЬ
 	"crypto-exchange-screener-bot/internal/types"
@@ -21,9 +22,10 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
 	eventBus types.EventBus,
 	marketFetcher interface{},
+	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
 	config := f.DefaultConfig()
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
 }
 
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
@@ -32,8 +34,9 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
 	eventBus types.EventBus,
 	marketFetcher interface{},
+	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
 }
 
 // CreateFromCustomSettings создает CounterAnalyzer из пользовательских настроек
@@ -42,6 +45,7 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
 	eventBus types.EventBus,
 	marketFetcher interface{},
+	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
 	config := common.AnalyzerConfig{
 		Enabled:        true,
@@ -50,7 +54,7 @@ func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 		MinDataPoints:  2,
 		CustomSettings: f.mergeWithDefaults(customSettings),
 	}
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher)
+	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
 }
 
 // CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
@@ -72,7 +76,7 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 		},
 	}
 	// Для тестов передаем nil storage
-	return NewCounterAnalyzer(config, nil, nil, nil)
+	return NewCounterAnalyzer(config, nil, nil, nil, nil)
 }
 
 // CreateMinimalAnalyzer создает минимальный анализатор
@@ -92,7 +96,7 @@ func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStor
 			"notify_on_signal":    false,
 		},
 	}
-	return NewCounterAnalyzer(config, storage, nil, nil)
+	return NewCounterAnalyzer(config, storage, nil, nil, nil)
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию

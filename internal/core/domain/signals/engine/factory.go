@@ -1,8 +1,9 @@
-// internal/core/domain/signals/engine/factory.go
+// internal/core/domain/signals/engine/factory.go (обновленный)
 package engine
 
 import (
 	"crypto-exchange-screener-bot/internal/adapters/notification"
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
@@ -15,11 +16,22 @@ import (
 
 type Factory struct {
 	priceFetcher interface{}
+	candleSystem *candle.CandleSystem // НОВОЕ: Свечная система
 }
 
-func NewFactory(priceFetcher interface{}) *Factory {
+// NewFactory создает фабрику (обновленный конструктор)
+func NewFactory(priceFetcher interface{}, candleSystem *candle.CandleSystem) *Factory {
 	return &Factory{
 		priceFetcher: priceFetcher,
+		candleSystem: candleSystem, // НОВОЕ
+	}
+}
+
+// NewFactoryWithoutCandleSystem создает фабрику без свечной системы (для обратной совместимости)
+func NewFactoryWithoutCandleSystem(priceFetcher interface{}) *Factory {
+	return &Factory{
+		priceFetcher: priceFetcher,
+		candleSystem: nil,
 	}
 }
 
@@ -204,7 +216,15 @@ func (f *Factory) configureCounterAnalyzer(
 	}
 
 	storage := engine.GetStorage()
-	counterAnalyzer := counter.NewCounterAnalyzer(counterConfig, storage, engine.eventBus, f.priceFetcher)
+
+	// Обновленный вызов с candleSystem
+	counterAnalyzer := counter.NewCounterAnalyzer(
+		counterConfig,
+		storage,
+		engine.eventBus,
+		f.priceFetcher,
+		f.candleSystem, // НОВЫЙ параметр
+	)
 
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
 		log.Printf("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
@@ -213,6 +233,7 @@ func (f *Factory) configureCounterAnalyzer(
 		log.Printf("   TelegramNotifier: %v", notifier != nil)
 		log.Printf("   Storage: %v", storage != nil)
 		log.Printf("   MarketFetcher: %v", f.priceFetcher != nil)
+		log.Printf("   CandleSystem: %v", f.candleSystem != nil)
 	}
 }
 
@@ -234,4 +255,10 @@ func (f *Factory) configureFilters(engine *AnalysisEngine, cfg *config.Config) {
 
 func (e *AnalysisEngine) GetStorage() storage.PriceStorage {
 	return e.storage
+}
+
+// SetCandleSystem устанавливает свечную систему (дополнительный метод)
+func (f *Factory) SetCandleSystem(candleSystem *candle.CandleSystem) {
+	f.candleSystem = candleSystem
+	log.Printf("✅ Factory: свечная система установлена")
 }

@@ -7,6 +7,7 @@ import (
 	fetcher "crypto-exchange-screener-bot/internal/adapters/market"
 	"crypto-exchange-screener-bot/internal/adapters/notification"
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
+	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
@@ -155,13 +156,29 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 	dm.storage = storage.NewInMemoryPriceStorage(storageConfig)
 	log.Println("✅ Price storage created")
 
+	// 2.2 Создаем свечную систему (НОВОЕ)
+	log.Println("🕯️ Creating candle system...")
+	candleSystem, err := candle.CreateSimpleSystem(dm.storage)
+	if err != nil {
+		log.Printf("⚠️ Failed to create candle system: %v", err)
+		candleSystem = nil
+		log.Println("⚠️ Application will run without candle system")
+	} else {
+		// Запускаем свечную систему
+		if err := candleSystem.Start(); err != nil {
+			log.Printf("⚠️ Failed to start candle system: %v", err)
+		} else {
+			log.Println("✅ Candle system started")
+		}
+	}
+
 	// 2.2 API клиент
 	log.Println("🌐 Creating API client...")
 	apiClient := bybit.NewBybitClient(dm.config)
 
 	// 2.3 Получение цен
 	log.Println("📡 Creating PriceFetcher...")
-	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus)
+	dm.priceFetcher = fetcher.NewPriceFetcher(apiClient, dm.storage, dm.eventBus, candleSystem)
 	log.Println("✅ PriceFetcher created")
 
 	// ==================== БЛОК 3: ПОЛЬЗОВАТЕЛИ И АВТОРИЗАЦИЯ ====================
@@ -303,7 +320,7 @@ func (dm *DataManager) InitializeComponents(testMode bool) error {
 
 	// 5.1 Движок анализа
 	log.Println("🔧 Creating AnalysisEngine...")
-	analysisFactory := engine.NewFactory(dm.priceFetcher)
+	analysisFactory := engine.NewFactory(dm.priceFetcher, candleSystem)
 
 	var telegramNotifier *notification.TelegramNotifier
 	if dm.notification != nil {

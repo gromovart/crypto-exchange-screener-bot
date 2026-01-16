@@ -54,10 +54,11 @@ func (h *signalSetFallThresholdHandler) Execute(params handlers.HandlerParams) (
 	return h.showThresholdMenu(params)
 }
 
-// showThresholdMenu показывает меню выбора порога
+// showThresholdMenu показывает меню выбора порога падения
 func (h *signalSetFallThresholdHandler) showThresholdMenu(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+	// ⚠️ ИСПРАВЛЕНО: Используем MinFallThreshold вместо MinGrowthThreshold
 	message := fmt.Sprintf(
-		"📈 *Установка порога роста*\n\n"+
+		"📉 *Установка порога падения*\n\n"+
 			"Текущий порог: *%.1f%%*\n\n"+
 			"Выберите новый порог или введите значение вручную.\n"+
 			"*Рекомендуемые значения:*\n"+
@@ -65,24 +66,24 @@ func (h *signalSetFallThresholdHandler) showThresholdMenu(params handlers.Handle
 			"• 2.0%% - средняя чувствительность\n"+
 			"• 3.0%% - низкая чувствительность\n\n"+
 			"*Допустимый диапазон:* 0.1%% - 50.0%%",
-		params.User.MinGrowthThreshold,
+		params.User.MinFallThreshold, // ⚠️ ИСПРАВЛЕНО: MinFallThreshold
 	)
 
-	// Клавиатура с вариантами порогов
+	// ⚠️ ИСПРАВЛЕНО: Callback-данные должны использовать CallbackSignalSetFallThreshold
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "1.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.0"},
-				{"text": "1.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":1.5"},
-				{"text": "2.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.0"},
+				{"text": "1.0%", "callback_data": constants.CallbackSignalSetFallThreshold + ":1.0"}, // ⚠️ ИСПРАВЛЕНО
+				{"text": "1.5%", "callback_data": constants.CallbackSignalSetFallThreshold + ":1.5"}, // ⚠️ ИСПРАВЛЕНО
+				{"text": "2.0%", "callback_data": constants.CallbackSignalSetFallThreshold + ":2.0"}, // ⚠️ ИСПРАВЛЕНО
 			},
 			{
-				{"text": "2.5%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":2.5"},
-				{"text": "3.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":3.0"},
-				{"text": "5.0%", "callback_data": constants.CallbackSignalSetGrowthThreshold + ":5.0"},
+				{"text": "2.5%", "callback_data": constants.CallbackSignalSetFallThreshold + ":2.5"}, // ⚠️ ИСПРАВЛЕНО
+				{"text": "3.0%", "callback_data": constants.CallbackSignalSetFallThreshold + ":3.0"}, // ⚠️ ИСПРАВЛЕНО
+				{"text": "5.0%", "callback_data": constants.CallbackSignalSetFallThreshold + ":5.0"}, // ⚠️ ИСПРАВЛЕНО
 			},
 			{
-				{"text": "Ввести вручную", "callback_data": "threshold_growth_custom"},
+				{"text": "Ввести вручную", "callback_data": "threshold_fall_custom"}, // ⚠️ ИСПРАВЛЕНО
 			},
 			{
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackSignalsMenu},
@@ -95,14 +96,14 @@ func (h *signalSetFallThresholdHandler) showThresholdMenu(params handlers.Handle
 		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
 			"user_id":             params.User.ID,
-			"current_threshold":   params.User.MinGrowthThreshold,
+			"current_threshold":   params.User.MinFallThreshold, // ⚠️ ИСПРАВЛЕНО
 			"expecting_threshold": true,
-			"threshold_type":      "growth",
+			"threshold_type":      "fall", // ⚠️ ИСПРАВЛЕНО
 		},
 	}, nil
 }
 
-// handleThresholdSelection обрабатывает выбор порога
+// handleThresholdSelection обрабатывает выбор порога падения
 func (h *signalSetFallThresholdHandler) handleThresholdSelection(params handlers.HandlerParams, thresholdStr string) (handlers.HandlerResult, error) {
 	threshold, err := strconv.ParseFloat(thresholdStr, 64)
 	if err != nil {

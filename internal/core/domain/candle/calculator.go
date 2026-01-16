@@ -1,0 +1,269 @@
+// internal/core/candle/calculator.go (исправленная строка 100)
+package candle
+
+import (
+	"sort"
+	"time"
+
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+)
+
+// CandleCalculator - калькулятор для свечей
+type CandleCalculator struct {
+	storage storage.PriceStorage
+}
+
+// NewCandleCalculator создает новый калькулятор свечей
+func NewCandleCalculator(priceStorage storage.PriceStorage) *CandleCalculator {
+	return &CandleCalculator{
+		storage: priceStorage,
+	}
+}
+
+// BuildCandleFromHistory строит свечу из истории цен
+func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*Candle, error) {
+	// Определяем период
+	duration := periodToDuration(period)
+	endTime := time.Now()
+	startTime := endTime.Add(-duration)
+
+	// Получаем цены за период
+	prices, err := cc.storage.GetPriceHistoryRange(symbol, startTime, endTime)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(prices) == 0 {
+		// Если нет данных, возвращаем пустую свечу
+		return &Candle{
+			Symbol:    symbol,
+			Period:    period,
+			StartTime: startTime,
+			EndTime:   endTime,
+			IsClosed:  true,
+			IsReal:    false,
+		}, nil
+	}
+
+	// Строим свечу
+	return cc.buildCandleFromPriceData(symbol, period, prices), nil
+}
+
+// buildCandleFromPriceData строит свечу из массива PriceData
+func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
+	prices []storage.PriceData) *Candle {
+
+	// Сортируем цены по времени
+	sortedPrices := sortPriceDataByTime(prices)
+
+	// Если после сортировки нет данных
+	if len(sortedPrices) == 0 {
+		return &Candle{
+			Symbol:   symbol,
+			Period:   period,
+			IsClosed: true,
+			IsReal:   false,
+		}
+	}
+
+	// Начальные значения
+	open := sortedPrices[0].Price
+	close := sortedPrices[len(sortedPrices)-1].Price
+	high := open
+	low := open
+
+	var volume, volumeUSD float64
+	startTime := sortedPrices[0].Timestamp
+	endTime := sortedPrices[len(sortedPrices)-1].Timestamp
+
+	// Рассчитываем OHLCV
+	for _, price := range sortedPrices {
+		if price.Price > high {
+			high = price.Price
+		}
+		if price.Price < low {
+			low = price.Price
+		}
+		volume += price.Volume24h
+		volumeUSD += price.VolumeUSD
+
+		// Обновляем временные границы
+		if price.Timestamp.Before(startTime) {
+			startTime = price.Timestamp
+		}
+		if price.Timestamp.After(endTime) {
+			endTime = price.Timestamp
+		}
+	}
+
+	// Проверяем, покрывает ли данные весь период
+	duration := periodToDuration(period)
+	minDuration := duration * 8 / 10 // 80% от периода
+	coversFullPeriod := endTime.Sub(startTime) >= minDuration
+
+	return &Candle{
+		Symbol:    symbol,
+		Period:    period,
+		Open:      open,
+		High:      high,
+		Low:       low,
+		Close:     close,
+		Volume:    volume,
+		VolumeUSD: volumeUSD,
+		Trades:    len(sortedPrices),
+		StartTime: startTime,
+		EndTime:   endTime,
+		IsClosed:  true,
+		IsReal:    coversFullPeriod,
+	}
+}
+
+// CalculateChangePercent рассчитывает процент изменения свечи
+func (cc *CandleCalculator) CalculateChangePercent(candle *Candle) float64 {
+	if candle.Open == 0 {
+		return 0
+	}
+	return ((candle.Close - candle.Open) / candle.Open) * 100
+}
+
+// CalculateAverageCandle строит среднюю свечу из массива свечей
+func (cc *CandleCalculator) CalculateAverageCandle(candles []*Candle) *Candle {
+	if len(candles) == 0 {
+		return nil
+	}
+
+	var totalOpen, totalHigh, totalLow, totalClose float64
+	var totalVolume, totalVolumeUSD float64
+	var totalTrades int
+
+	for _, candle := range candles {
+		totalOpen += candle.Open
+		totalHigh += candle.High
+		totalLow += candle.Low
+		totalClose += candle.Close
+		totalVolume += candle.Volume
+		totalVolumeUSD += candle.VolumeUSD
+		totalTrades += candle.Trades
+	}
+
+	count := float64(len(candles))
+
+	return &Candle{
+		Symbol:    candles[0].Symbol,
+		Period:    candles[0].Period,
+		Open:      totalOpen / count,
+		High:      totalHigh / count,
+		Low:       totalLow / count,
+		Close:     totalClose / count,
+		Volume:    totalVolume / count,
+		VolumeUSD: totalVolumeUSD / count,
+		Trades:    totalTrades / len(candles),
+		StartTime: candles[0].StartTime,
+		EndTime:   candles[len(candles)-1].EndTime,
+		IsClosed:  true,
+		IsReal:    true,
+	}
+}
+
+// MergeCandles объединяет свечи в более крупный период
+func (cc *CandleCalculator) MergeCandles(candles []*Candle, targetPeriod string) *Candle {
+	if len(candles) == 0 {
+		return nil
+	}
+
+	// Сортируем свечи по времени
+	sort.Slice(candles, func(i, j int) bool {
+		return candles[i].StartTime.Before(candles[j].StartTime)
+	})
+
+	// Определяем общие значения
+	open := candles[0].Open
+	close := candles[len(candles)-1].Close
+	high := candles[0].High
+	low := candles[0].Low
+
+	var volume, volumeUSD float64
+	var totalTrades int
+	startTime := candles[0].StartTime
+	endTime := candles[len(candles)-1].EndTime
+
+	// Находим экстремумы и суммируем объемы
+	for _, candle := range candles {
+		if candle.High > high {
+			high = candle.High
+		}
+		if candle.Low < low {
+			low = candle.Low
+		}
+		volume += candle.Volume
+		volumeUSD += candle.VolumeUSD
+		totalTrades += candle.Trades
+	}
+
+	return &Candle{
+		Symbol:    candles[0].Symbol,
+		Period:    targetPeriod,
+		Open:      open,
+		High:      high,
+		Low:       low,
+		Close:     close,
+		Volume:    volume,
+		VolumeUSD: volumeUSD,
+		Trades:    totalTrades,
+		StartTime: startTime,
+		EndTime:   endTime,
+		IsClosed:  true,
+		IsReal:    true,
+	}
+}
+
+// AnalyzeCandleTrend анализирует тренд свечи
+func (cc *CandleCalculator) AnalyzeCandleTrend(candle *Candle) string {
+	changePercent := cc.CalculateChangePercent(candle)
+
+	if changePercent > 5.0 {
+		return "strong_bullish"
+	} else if changePercent > 1.0 {
+		return "bullish"
+	} else if changePercent < -5.0 {
+		return "strong_bearish"
+	} else if changePercent < -1.0 {
+		return "bearish"
+	} else {
+		return "neutral"
+	}
+}
+
+// Helper functions
+
+// periodToDuration конвертирует период в длительность
+func periodToDuration(period string) time.Duration {
+	switch period {
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "30m":
+		return 30 * time.Minute
+	case "1h":
+		return 1 * time.Hour
+	case "4h":
+		return 4 * time.Hour
+	case "1d":
+		return 24 * time.Hour
+	default:
+		return 15 * time.Minute
+	}
+}
+
+// sortPriceDataByTime сортирует цены по времени
+func sortPriceDataByTime(prices []storage.PriceData) []storage.PriceData {
+	sorted := make([]storage.PriceData, len(prices))
+	copy(sorted, prices)
+
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
+	})
+
+	return sorted
+}

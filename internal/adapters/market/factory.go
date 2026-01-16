@@ -2,44 +2,80 @@
 package market
 
 import (
-	"crypto-exchange-screener-bot/internal/infrastructure/api"
-	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 )
 
-// Factory - фабрика для создания PriceFetcher
-type Factory struct{}
+// MarketFetcherFactory - фабрика для создания фетчеров
+type MarketFetcherFactory struct {
+	config *config.Config
+}
 
-// NewPriceFetcherFromConfig создает PriceFetcher из конфигурации
-func (f *Factory) NewPriceFetcherFromConfig(
-	apiClient api.ExchangeClient,
+// NewMarketFetcherFactory создает новую фабрику
+func NewMarketFetcherFactory(cfg *config.Config) *MarketFetcherFactory {
+	return &MarketFetcherFactory{
+		config: cfg,
+	}
+}
+
+// CreateBybitFetcher создает Bybit фетчер (обновленный)
+func (f *MarketFetcherFactory) CreateBybitFetcher(
 	storage storage.PriceStorage,
 	eventBus *events.EventBus,
-	cfg *config.Config,
-) PriceFetcher {
+) (*BybitPriceFetcher, error) {
+	// Создаем клиент Bybit
+	bybitClient := bybit.NewBybitClient(f.config)
 
-	// Определяем тип фетчера на основе конфигурации
-	switch cfg.FuturesCategory {
-	case "binance_spot", "binance_futures", "binance":
-		// Если клиент Binance
-		if binanceClient, ok := apiClient.(*binance.BinanceClient); ok {
-			return NewBinancePriceFetcher(binanceClient, storage, eventBus)
-		}
-	default:
-		// По умолчанию используем Bybit
-		if bybitClient, ok := apiClient.(*bybit.BybitClient); ok {
-			return NewPriceFetcher(bybitClient, storage, eventBus)
-		}
+	// Тестируем подключение
+	if err := bybitClient.TestConnection(); err != nil {
+		return nil, err
 	}
 
-	// Fallback: используем Bybit как дефолт
-	if bybitClient, ok := apiClient.(*bybit.BybitClient); ok {
-		return NewPriceFetcher(bybitClient, storage, eventBus)
+	// Создаем фетчер без свечной системы (для обратной совместимости)
+	fetcher := NewPriceFetcherWithoutCandleSystem(bybitClient, storage, eventBus)
+	return fetcher, nil
+}
+
+// CreateBybitFetcherWithCandleSystem создает Bybit фетчер со свечной системой
+func (f *MarketFetcherFactory) CreateBybitFetcherWithCandleSystem(
+	storage storage.PriceStorage,
+	eventBus *events.EventBus,
+	candleSystem *candle.CandleSystem,
+) (*BybitPriceFetcher, error) {
+	// Создаем клиент Bybit
+	bybitClient := bybit.NewBybitClient(f.config)
+
+	// Тестируем подключение
+	if err := bybitClient.TestConnection(); err != nil {
+		return nil, err
 	}
 
-	// Если не удалось определить тип, возвращаем nil
-	return nil
+	// Создаем фетчер со свечной системой
+	fetcher := NewPriceFetcher(bybitClient, storage, eventBus, candleSystem)
+	return fetcher, nil
+}
+
+// CreateBybitFetcherWithClient создает Bybit фетчер с готовым клиентом (обновленный)
+func (f *MarketFetcherFactory) CreateBybitFetcherWithClient(
+	client *bybit.BybitClient,
+	storage storage.PriceStorage,
+	eventBus *events.EventBus,
+	candleSystem *candle.CandleSystem,
+) *BybitPriceFetcher {
+	return NewPriceFetcher(client, storage, eventBus, candleSystem)
+}
+
+// CreateSimpleBybitFetcher создает простой Bybit фетчер
+func (f *MarketFetcherFactory) CreateSimpleBybitFetcher(
+	storage storage.PriceStorage,
+) (*BybitPriceFetcher, error) {
+	// Создаем клиент Bybit
+	bybitClient := bybit.NewBybitClient(f.config)
+
+	// Создаем фетчер без EventBus и без свечной системы
+	fetcher := NewPriceFetcherWithoutCandleSystem(bybitClient, storage, nil)
+	return fetcher, nil
 }
