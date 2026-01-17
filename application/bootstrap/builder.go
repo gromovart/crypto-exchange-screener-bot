@@ -1,8 +1,9 @@
-// application/bootstrap/app_builder.go
+// application/bootstrap/builder.go
 package bootstrap
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"errors"
 	"fmt"
 	"log"
@@ -62,18 +63,12 @@ func (app *Application) shutdown() error {
 
 	app.logger.Println("🛑 Останавливаем приложение...")
 
-	// 1. Останавливаем оркестратор
-	if app.orchestrator != nil {
-		if err := app.orchestrator.Stop(); err != nil {
-			app.logger.Printf("⚠️  Ошибка остановки оркестратора: %v", err)
+	// 1. Останавливаем LayerManager
+	if app.layerManager != nil {
+		if err := app.layerManager.Stop(); err != nil {
+			app.logger.Printf("⚠️  Ошибка остановки LayerManager: %v", err)
 		}
 	}
-
-	// 2. Останавливаем контейнер
-	// if app.container != nil {
-	// 	// Можно добавить cleanup для контейнера
-	// 	app.container.Cleanup()
-	// }
 
 	app.running = false
 	app.logger.Printf("✅ Приложение остановлено. Время работы: %v", time.Since(app.startTime))
@@ -91,25 +86,33 @@ func (app *Application) Run() error {
 	}
 
 	app.logger.Println("🚀 Запуск приложения...")
+	app.logger.Println("🔍 Проверка LayerManager...")
 
 	// Инициализируем если еще не инициализировано
-	// if app.container == nil {
-	// 	if err := app.Initialize(); err != nil {
-	// 		app.mu.Unlock()
-	// 		return fmt.Errorf("инициализация приложения: %w", err)
-	// 	}
-	// }
+	if app.layerManager == nil {
+		app.logger.Println("⚠️  LayerManager не инициализирован, инициализируем...")
+		if err := app.Initialize(); err != nil {
+			app.mu.Unlock()
+			app.logger.Printf("❌ Ошибка инициализации приложения: %v", err)
+			return fmt.Errorf("инициализация приложения: %w", err)
+		}
+	} else {
+		app.logger.Println("✅ LayerManager уже инициализирован")
+	}
 
 	app.running = true
 	app.startTime = time.Now()
 	app.mu.Unlock()
 
-	// Запускаем оркестратор
-	// if err := app.orchestrator.Start(); err != nil {
-	// 	return fmt.Errorf("запуск оркестратора: %w", err)
-	// }
+	app.logger.Println("🚀 Запуск LayerManager...")
+	// Запускаем LayerManager
+	if err := app.layerManager.Start(); err != nil {
+		app.logger.Printf("❌ Ошибка запуска LayerManager: %v", err)
+		return fmt.Errorf("запуск LayerManager: %w", err)
+	}
 
 	app.logger.Println("✅ Приложение запущено и работает")
+	app.logger.Println("⏳ Ожидание graceful shutdown...")
 
 	// Ждем завершения
 	<-app.waitForShutdown()
@@ -133,10 +136,10 @@ func (app *Application) Status() map[string]interface{} {
 		},
 	}
 
-	// Добавляем статус оркестратора если есть
-	// if app.orchestrator != nil {
-	// 	status["orchestrator"] = app.orchestrator.GetStatus()
-	// }
+	// Добавляем статус LayerManager если есть
+	if app.layerManager != nil {
+		status["layerManager"] = app.layerManager.GetHealthStatus()
+	}
 
 	return status
 }
@@ -146,9 +149,7 @@ func (app *Application) Cleanup() {
 	app.mu.Lock()
 	defer app.mu.Unlock()
 
-	// if app.container != nil {
-	// 	app.container.Cleanup()
-	// }
+	// LayerManager сам управляет своими ресурсами
 }
 
 // Stop останавливает приложение
@@ -208,8 +209,27 @@ func (b *AppBuilder) WithOption(option AppOption) *AppBuilder {
 }
 
 // WithLogger устанавливает логгер
-func (b *AppBuilder) WithLogger(logger *log.Logger) *AppBuilder {
-	b.logger = logger
+func (b *AppBuilder) WithLogger(loggerInstance *logger.Logger) *AppBuilder {
+	// Упрощаем - не устанавливаем кастомный логгер
+	// Application создаст свой собственный логгер
+	return b
+}
+
+// WithTestMode включает тестовый режим (fluent метод)
+func (b *AppBuilder) WithTestMode(enabled bool) *AppBuilder {
+	b.options = append(b.options, WithTestMode(enabled))
+	return b
+}
+
+// WithTelegramBot настраивает Telegram бота (fluent метод)
+func (b *AppBuilder) WithTelegramBot(enabled bool, chatID string) *AppBuilder {
+	b.options = append(b.options, WithTelegramBot(enabled, chatID))
+	return b
+}
+
+// WithTelegramBotToken устанавливает токен Telegram бота (fluent метод)
+func (b *AppBuilder) WithTelegramBotToken(token string) *AppBuilder {
+	b.options = append(b.options, WithTelegramBotToken(token))
 	return b
 }
 
@@ -232,11 +252,6 @@ func (b *AppBuilder) Build() (*Application, error) {
 		if err := option(app); err != nil {
 			return nil, fmt.Errorf("применение опции: %w", err)
 		}
-	}
-
-	// Инициализируем приложение
-	if err := app.Initialize(); err != nil {
-		return nil, fmt.Errorf("инициализация: %w", err)
 	}
 
 	return app, nil
@@ -268,7 +283,8 @@ func WithTestMode(enabled bool) AppOption {
 	return func(app *Application) error {
 		if enabled {
 			app.logger.Println("🧪 Тестовый режим включен")
-			// Можно установить флаги тестового режима
+			// Устанавливаем флаг тестового режима в конфигурации
+			app.config.MonitoringTestMode = true
 		}
 		return nil
 	}
@@ -279,6 +295,21 @@ func WithTelegramBot(enabled bool, chatID string) AppOption {
 	return func(app *Application) error {
 		if enabled {
 			app.logger.Printf("Telegram бот включен (чат: %s)", chatID)
+			app.config.TelegramEnabled = true
+			if chatID != "" {
+				app.config.TelegramChatID = chatID
+			}
+		}
+		return nil
+	}
+}
+
+// WithTelegramBotToken устанавливает токен Telegram бота
+func WithTelegramBotToken(token string) AppOption {
+	return func(app *Application) error {
+		if token != "" {
+			app.config.TelegramBotToken = token
+			app.logger.Println("Токен Telegram бота установлен")
 		}
 		return nil
 	}

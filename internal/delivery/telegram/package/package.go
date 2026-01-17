@@ -7,6 +7,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	components_factory "crypto-exchange-screener-bot/internal/delivery/telegram/components/factory"
 	controllers_factory "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/factory"
@@ -20,11 +21,14 @@ import (
 
 // TelegramDeliveryPackage основной пакет доставки через Telegram
 type TelegramDeliveryPackage struct {
-	mu                  sync.RWMutex
-	config              *config.Config
+	mu          sync.RWMutex
+	config      *config.Config
+	coreFactory *core_factory.CoreServiceFactory
+	eventBus    *events.EventBus
+
+	// Созданные сервисы ядра (ленивое создание)
 	userService         *users.Service
 	subscriptionService *subscription.Service
-	eventBus            *events.EventBus
 
 	// Подфабрики
 	componentFactory  *components_factory.ComponentFactory
@@ -34,7 +38,7 @@ type TelegramDeliveryPackage struct {
 	// Созданные компоненты
 	components  components_factory.ComponentSet
 	services    map[string]interface{}
-	controllers map[string]types.EventSubscriber // ИЗМЕНЕНО
+	controllers map[string]types.EventSubscriber
 
 	// Telegram бот
 	bot         *bot.TelegramBot
@@ -44,10 +48,9 @@ type TelegramDeliveryPackage struct {
 
 // TelegramDeliveryPackageDependencies зависимости для создания пакета
 type TelegramDeliveryPackageDependencies struct {
-	Config              *config.Config
-	UserService         *users.Service
-	SubscriptionService *subscription.Service
-	Exchange            string
+	Config      *config.Config
+	CoreFactory *core_factory.CoreServiceFactory
+	Exchange    string
 }
 
 // NewTelegramDeliveryPackage создает новый пакет доставки Telegram
@@ -59,11 +62,10 @@ func NewTelegramDeliveryPackage(deps TelegramDeliveryPackageDependencies) *Teleg
 	}
 
 	return &TelegramDeliveryPackage{
-		config:              deps.Config,
-		userService:         deps.UserService,
-		subscriptionService: deps.SubscriptionService,
-		services:            make(map[string]interface{}),
-		controllers:         make(map[string]types.EventSubscriber), // ИЗМЕНЕНО
+		config:      deps.Config,
+		coreFactory: deps.CoreFactory,
+		services:    make(map[string]interface{}),
+		controllers: make(map[string]types.EventSubscriber),
 	}
 }
 
@@ -85,43 +87,48 @@ func (p *TelegramDeliveryPackage) Initialize(eventBus *events.EventBus) error {
 
 	logger.Info("🔧 Инициализация TelegramDeliveryPackage...")
 
-	// 1. Создаем ComponentFactory
+	// 1. Создаем сервисы ядра через фабрику (лениво)
+	if err := p.createCoreServices(); err != nil {
+		return fmt.Errorf("ошибка создания сервисов ядра: %w", err)
+	}
+
+	// 2. Создаем ComponentFactory
 	if err := p.createComponentFactory(); err != nil {
 		return fmt.Errorf("ошибка создания ComponentFactory: %w", err)
 	}
 
-	// 2. Создаем ServiceFactory
+	// 3. Создаем ServiceFactory
 	if err := p.createServiceFactory(); err != nil {
 		return fmt.Errorf("ошибка создания ServiceFactory: %w", err)
 	}
 
-	// 3. Создаем сервисы
+	// 4. Создаем сервисы Telegram
 	if err := p.createServices(); err != nil {
 		return fmt.Errorf("ошибка создания сервисов: %w", err)
 	}
 
-	// 4. Создаем ControllerFactory
+	// 5. Создаем ControllerFactory
 	if err := p.createControllerFactory(); err != nil {
 		return fmt.Errorf("ошибка создания ControllerFactory: %w", err)
 	}
 
-	// 5. Создаем контроллеры
+	// 6. Создаем контроллеры
 	if err := p.createControllers(); err != nil {
 		return fmt.Errorf("ошибка создания контроллеров: %w", err)
 	}
 
-	// 6. Создаем Telegram бота
+	// 7. Создаем Telegram бота
 	if err := p.createBot(); err != nil {
 		return fmt.Errorf("ошибка создания бота: %w", err)
 	}
 
-	// 7. Подписываем контроллеры на EventBus
+	// 8. Подписываем контроллеры на EventBus
 	p.subscribeControllersToEventBus()
 
 	p.initialized = true
 	logger.Info("✅ TelegramDeliveryPackage инициализирован")
 
-	// 8. Автозапуск бота если Telegram включен
+	// 9. Автозапуск бота если Telegram включен
 	if p.config.TelegramEnabled && p.config.TelegramBotToken != "" && p.bot != nil {
 		go func() {
 			if err := p.Start(); err != nil {
@@ -130,6 +137,42 @@ func (p *TelegramDeliveryPackage) Initialize(eventBus *events.EventBus) error {
 		}()
 	}
 
+	return nil
+}
+
+// createCoreServices создает сервисы ядра через CoreServiceFactory
+func (p *TelegramDeliveryPackage) createCoreServices() error {
+	logger.Debug("🏗️  Создание сервисов ядра через CoreServiceFactory...")
+
+	if p.coreFactory == nil {
+		return fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	if !p.coreFactory.IsReady() {
+		return fmt.Errorf("CoreServiceFactory не готова")
+	}
+
+	// Создаем все сервисы ядра через фабрику
+	coreServices, err := p.coreFactory.CreateAllServices()
+	if err != nil {
+		return fmt.Errorf("не удалось создать сервисы ядра: %w", err)
+	}
+
+	// Приводим типы и сохраняем сервисы
+	if userService, ok := coreServices["UserService"].(*users.Service); ok {
+		p.userService = userService
+	} else {
+		return fmt.Errorf("UserService имеет неверный тип")
+	}
+
+	if subscriptionService, ok := coreServices["SubscriptionService"].(*subscription.Service); ok {
+		p.subscriptionService = subscriptionService
+	} else {
+		// SubscriptionService может быть nil (опциональный)
+		p.subscriptionService = nil
+	}
+
+	logger.Info("✅ Сервисы ядра созданы через CoreServiceFactory")
 	return nil
 }
 
@@ -153,15 +196,19 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 	return nil
 }
 
-// createServiceFactory создает фабрику сервисов
+// createServiceFactory создает фабрику сервисов Telegram
 func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	logger.Debug("🏭 Создание ServiceFactory...")
 
-	// Компоненты уже имеют правильные типы (определены в ComponentSet)
+	// Проверяем что UserService создан
+	if p.userService == nil {
+		return fmt.Errorf("UserService не создан")
+	}
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
 			UserService:         p.userService,
-			SubscriptionService: p.subscriptionService,
+			SubscriptionService: p.subscriptionService, // Может быть nil
 			MessageSender:       p.components.MessageSender,
 			ButtonBuilder:       p.components.ButtonBuilder,
 			FormatterProvider:   p.components.FormatterProvider,
@@ -176,9 +223,9 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	return nil
 }
 
-// createServices создает все сервисы
+// createServices создает все сервисы Telegram
 func (p *TelegramDeliveryPackage) createServices() error {
-	logger.Debug("🔧 Создание сервисов...")
+	logger.Debug("🔧 Создание сервисов Telegram...")
 
 	p.services["ProfileService"] = p.serviceFactory.CreateProfileService()
 	p.services["CounterService"] = p.serviceFactory.CreateCounterService()
@@ -192,7 +239,7 @@ func (p *TelegramDeliveryPackage) createServices() error {
 		}
 	}
 
-	logger.Info("✅ Создано %d сервисов", len(p.services))
+	logger.Info("✅ Создано %d сервисов Telegram", len(p.services))
 	return nil
 }
 
@@ -203,7 +250,7 @@ func (p *TelegramDeliveryPackage) createControllerFactory() error {
 	// Получаем CounterService
 	counterService, ok := p.services["CounterService"].(counter.Service)
 	if !ok {
-		return fmt.Errorf("невозможно привести CounterService")
+		return fmt.Errorf("невозможно привести CounterService к правильному типу")
 	}
 
 	p.controllerFactory = controllers_factory.NewControllerFactory(
@@ -246,6 +293,11 @@ func (p *TelegramDeliveryPackage) createBot() error {
 	if p.config.TelegramBotToken == "" {
 		logger.Warn("⚠️ Токен Telegram бота не указан")
 		return nil
+	}
+
+	// Проверяем что UserService создан
+	if p.userService == nil {
+		return fmt.Errorf("UserService не создан для бота")
 	}
 
 	// Зависимости для бота
@@ -349,12 +401,15 @@ func (p *TelegramDeliveryPackage) GetHealthStatus() map[string]interface{} {
 	defer p.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"initialized":       p.initialized,
-		"is_running":        p.isRunning,
-		"bot_status":        "stopped",
-		"services_count":    len(p.services),
-		"controllers_count": len(p.controllers),
-		"event_bus_linked":  p.eventBus != nil,
+		"initialized":          p.initialized,
+		"is_running":           p.isRunning,
+		"bot_status":           "stopped",
+		"services_count":       len(p.services),
+		"controllers_count":    len(p.controllers),
+		"event_bus_linked":     p.eventBus != nil,
+		"core_factory_ready":   p.coreFactory != nil && p.coreFactory.IsReady(),
+		"user_service":         p.userService != nil,
+		"subscription_service": p.subscriptionService != nil,
 	}
 
 	if p.bot != nil {
@@ -374,7 +429,7 @@ func (p *TelegramDeliveryPackage) GetService(name string) interface{} {
 	return p.services[name]
 }
 
-// GetAllServices возвращает все сервисы
+// GetAllServices возвращает все сервисы Telegram
 func (p *TelegramDeliveryPackage) GetAllServices() map[string]interface{} {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -412,6 +467,32 @@ func (p *TelegramDeliveryPackage) GetBot() *bot.TelegramBot {
 	return p.bot
 }
 
+// GetCoreFactory возвращает фабрику ядра
+func (p *TelegramDeliveryPackage) GetCoreFactory() *core_factory.CoreServiceFactory {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.coreFactory
+}
+
+// UpdateCoreFactory обновляет фабрику ядра
+func (p *TelegramDeliveryPackage) UpdateCoreFactory(newFactory *core_factory.CoreServiceFactory) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if newFactory == nil {
+		return fmt.Errorf("новая фабрика не может быть nil")
+	}
+
+	p.coreFactory = newFactory
+
+	// Сбрасываем созданные сервисы ядра, чтобы пересоздать с новой фабрикой
+	p.userService = nil
+	p.subscriptionService = nil
+
+	logger.Info("✅ Фабрика ядра обновлена")
+	return nil
+}
+
 // IsInitialized проверяет инициализацию пакета
 func (p *TelegramDeliveryPackage) IsInitialized() bool {
 	p.mu.RLock()
@@ -433,4 +514,18 @@ func (p *TelegramDeliveryPackage) UnsubscribeControllers() {
 
 	p.eventBus = nil
 	logger.Info("🛑 Контроллеры отписаны от EventBus")
+}
+
+// Reset сбрасывает состояние пакета
+func (p *TelegramDeliveryPackage) Reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.services = make(map[string]interface{})
+	p.controllers = make(map[string]types.EventSubscriber)
+	p.bot = nil
+	p.isRunning = false
+	p.initialized = false
+
+	logger.Info("🔄 TelegramDeliveryPackage сброшен")
 }

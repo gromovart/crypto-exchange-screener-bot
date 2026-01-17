@@ -27,6 +27,9 @@ type DatabaseConfig struct {
 	Name     string `mapstructure:"DB_NAME"`
 	SSLMode  string `mapstructure:"DB_SSLMODE"`
 
+	// Новое поле для включения/отключения БД
+	Enabled bool `mapstructure:"DB_ENABLED"`
+
 	// Настройки пула соединений
 	MaxOpenConns    int           `mapstructure:"DB_MAX_OPEN_CONNS"`
 	MaxIdleConns    int           `mapstructure:"DB_MAX_IDLE_CONNS"`
@@ -36,12 +39,6 @@ type DatabaseConfig struct {
 	// Настройки миграций
 	MigrationsPath    string `mapstructure:"DB_MIGRATIONS_PATH"`
 	EnableAutoMigrate bool   `mapstructure:"DB_ENABLE_AUTO_MIGRATE"`
-
-	// Настройки Redis
-	RedisHost     string `mapstructure:"REDIS_HOST"`
-	RedisPort     int    `mapstructure:"REDIS_PORT"`
-	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
-	RedisDB       int    `mapstructure:"REDIS_DB"`
 }
 
 // RedisConfig конфигурация Redis
@@ -51,6 +48,9 @@ type RedisConfig struct {
 	Port     int    `mapstructure:"REDIS_PORT"`     // 6379
 	Password string `mapstructure:"REDIS_PASSWORD"` // пустой или пароль
 	DB       int    `mapstructure:"REDIS_DB"`       // 0
+
+	// Новое поле для включения/отключения Redis
+	Enabled bool `mapstructure:"REDIS_ENABLED"`
 
 	// Настройки пула соединений
 	PoolSize        int           `mapstructure:"REDIS_POOL_SIZE"`         // 10
@@ -324,6 +324,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Database.MaxConnIdleTime = getEnvDuration("DB_MAX_CONN_IDLE_TIME", 10*time.Minute)
 	cfg.Database.MigrationsPath = getEnv("DB_MIGRATIONS_PATH", "./persistence/postgres/migrations")
 	cfg.Database.EnableAutoMigrate = getEnvBool("DB_ENABLE_AUTO_MIGRATE", true)
+	cfg.Database.Enabled = getEnvBool("DB_ENABLED", true)
 
 	// ======================
 	// REDIS
@@ -345,6 +346,7 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Redis.MaxConnAge = getEnvDuration("REDIS_MAX_CONN_AGE", 0)
 	cfg.Redis.DefaultTTL = getEnvDuration("REDIS_DEFAULT_TTL", 1*time.Hour)
 	cfg.Redis.UseTLS = getEnvBool("REDIS_USE_TLS", false)
+	cfg.Redis.Enabled = getEnvBool("REDIS_ENABLED", true)
 
 	// ======================
 	// БИРЖА И API КЛЮЧИ

@@ -1,9 +1,9 @@
-// application/bootstrap/application.go
+// application/bootstrap/app.go
 package bootstrap
 
 // Импорты для вспомогательных функций
 import (
-	services "crypto-exchange-screener-bot/application/services/orchestrator"
+	layer_manager "crypto-exchange-screener-bot/application/layer_manager"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"errors"
 	"fmt"
@@ -22,9 +22,8 @@ type Application struct {
 	mu sync.RWMutex
 
 	// Компоненты
-	config *config.Config
-	// container    *composition.Container
-	orchestrator *services.DataManager
+	config       *config.Config
+	layerManager *layer_manager.LayerManager
 
 	// Состояние
 	running   bool
@@ -65,47 +64,35 @@ func (app *Application) Initialize() error {
 	}
 
 	app.logger.Println("🚀 Инициализация приложения...")
+	app.logger.Printf("📋 Конфигурация: TelegramEnabled=%v, TestMode=%v",
+		app.config.TelegramEnabled, app.config.MonitoringTestMode)
 
-	// 1. Создаем контейнер зависимостей
-	// container, err := composition.NewContainer(app.config)
-	// if err != nil {
-	// 	return fmt.Errorf("не удалось создать контейнер: %w", err)
-	// }
-	// app.container = container
+	// Создаем LayerManager
+	app.logger.Println("🛠️  Создание LayerManager...")
+	layerManager := layer_manager.NewLayerManager(app.config)
 
-	app.logger.Println("✅ Контейнер зависимостей создан")
+	// Инициализируем LayerManager
+	app.logger.Println("🔧 Инициализация LayerManager...")
+	if err := layerManager.Initialize(); err != nil {
+		app.logger.Printf("❌ Ошибка инициализации LayerManager: %v", err)
+		return fmt.Errorf("не удалось инициализировать LayerManager: %w", err)
+	}
 
-	// 2. Получаем сервисы из контейнера
-	// marketService := container.GetMarketService()
-	// analysisService := container.GetAnalysisService()
-	// notificationService := container.GetNotificationService()
-	// monitoringService := container.GetMonitoringService()
+	app.layerManager = layerManager
+	app.logger.Println("✅ LayerManager создан и инициализирован")
 
-	// if marketService == nil || analysisService == nil {
-	// 	return errors.New("не удалось получить необходимые сервисы из контейнера")
-	// }
+	// Получаем статус для отладки
+	if status := layerManager.GetHealthStatus(); status != nil {
+		app.logger.Printf("📊 Статус LayerManager: initialized=%v", status["initialized"])
+		if layers, ok := status["layers"].(map[string]interface{}); ok {
+			app.logger.Printf("📊 Слои: %d", len(layers))
+			for name, layerStatus := range layers {
+				app.logger.Printf("   - %s: %v", name, layerStatus)
+			}
+		}
+	}
 
-	// 3. Создаем конфигурацию оркестратора
-	// orchConfig := services.OrchestratorConfig{
-	// 	MarketDataInterval:     time.Duration(app.config.UpdateInterval) * time.Second,
-	// 	AnalysisInterval:       time.Duration(app.config.AnalysisInterval) * time.Second,
-	// 	HealthCheckInterval:    30 * time.Second,
-	// 	MaxRestartAttempts:     3,
-	// 	EnableGracefulShutdown: true,
-	// 	LogLevel:               app.config.LogLevel,
-	// }
-
-	// 4. Создаем оркестратор
-	// app.orchestrator, err := orchestrator.NewDataManager(cfg, testMode)
-
-	// if app.orchestrator == nil {
-	// 	return errors.New("не удалось создать оркестратор")
-	// }
-
-	// app.logger.Println("✅ Оркестратор создан")
-	// app.logger.Printf("Конфигурация: обновление данных каждые %v, анализ каждые %v",
-	// 	orchConfig.MarketDataInterval, orchConfig.AnalysisInterval)
-
+	app.logger.Println("✅ Приложение инициализировано")
 	return nil
 }
 
@@ -116,18 +103,11 @@ func (app *Application) GetConfig() *config.Config {
 	return app.config
 }
 
-// GetContainer возвращает контейнер зависимостей
-// func (app *Application) GetContainer() *composition.Container {
-// 	app.mu.RLock()
-// 	defer app.mu.RUnlock()
-// 	return app.container
-// }
-
-// GetOrchestrator возвращает оркестратор
-func (app *Application) GetOrchestrator() *services.DataManager {
+// GetLayerManager возвращает менеджер слоев
+func (app *Application) GetLayerManager() *layer_manager.LayerManager {
 	app.mu.RLock()
 	defer app.mu.RUnlock()
-	return app.orchestrator
+	return app.layerManager
 }
 
 // IsRunning проверяет, запущено ли приложение

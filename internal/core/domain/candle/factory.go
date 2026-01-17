@@ -1,4 +1,4 @@
-// internal/core/candle/factory.go (исправленная)
+// internal/core/candle/factory.go
 package candle
 
 import (
