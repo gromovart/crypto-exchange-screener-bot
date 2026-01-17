@@ -4,7 +4,7 @@ package orchestrator
 import (
 	subscriptiontypes "crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
-	telegramintegrations "crypto-exchange-screener-bot/internal/delivery/telegram/integrations"
+	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"runtime"
@@ -100,7 +100,7 @@ func (dm *DataManager) startBackgroundTasks() {
 		}
 	}()
 
-	// Проверка и создание TelegramPackageService когда зависимости готовы
+	// Проверка и создание TelegramDeliveryPackage когда зависимости готовы
 	dm.wg.Add(1)
 	go func() {
 		defer dm.wg.Done()
@@ -113,10 +113,10 @@ func (dm *DataManager) startBackgroundTasks() {
 			select {
 			case <-ticker.C:
 				if !telegramServiceCreated && dm.config.TelegramEnabled {
-					created := dm.tryCreateTelegramPackageService()
+					created := dm.tryCreateTelegramDeliveryPackage()
 					if created {
 						telegramServiceCreated = true
-						logger.Info("✅ TelegramPackageService успешно создан и запущен")
+						logger.Info("✅ TelegramDeliveryPackage успешно создан и запущен")
 					}
 				}
 			case <-dm.stopChan:
@@ -213,63 +213,67 @@ func (dm *DataManager) tryCreateSubscriptionService() bool {
 	return true
 }
 
-// tryCreateTelegramPackageService пытается создать TelegramPackageService
-func (dm *DataManager) tryCreateTelegramPackageService() bool {
+// tryCreateTelegramDeliveryPackage пытается создать TelegramDeliveryPackage
+func (dm *DataManager) tryCreateTelegramDeliveryPackage() bool {
 	// Проверяем, не создан ли уже сервис
-	if dm.telegramPackageService != nil {
+	if dm.telegramDeliveryPackage != nil {
 		return true
 	}
 
 	// Проверяем все зависимости
 	if dm.userService == nil {
-		logger.Debug("⏳ Ожидание UserService для TelegramPackageService...")
+		logger.Debug("⏳ Ожидание UserService для TelegramDeliveryPackage...")
 		return false
 	}
 
 	if dm.subscriptionService == nil {
-		logger.Debug("⏳ Ожидание SubscriptionService для TelegramPackageService...")
+		logger.Debug("⏳ Ожидание SubscriptionService для TelegramDeliveryPackage...")
 		return false
 	}
 
 	if dm.eventBus == nil {
-		logger.Debug("⏳ Ожидание EventBus для TelegramPackageService...")
+		logger.Debug("⏳ Ожидание EventBus для TelegramDeliveryPackage...")
 		return false
 	}
 
-	logger.Info("📦 Создание TelegramPackageService (все зависимости доступны)...")
+	logger.Info("📦 Создание TelegramDeliveryPackage (все зависимости доступны)...")
 
-	telegramService, err := telegramintegrations.NewTelegramPackageServiceWithDefaults(
-		dm.config,
-		dm.userService,
-		dm.subscriptionService,
-		dm.eventBus,
+	// Создаем TelegramDeliveryPackage
+	telegramPackage := telegram_package.NewTelegramDeliveryPackage(
+		telegram_package.TelegramDeliveryPackageDependencies{
+			Config:              dm.config,
+			UserService:         dm.userService,
+			SubscriptionService: dm.subscriptionService,
+			Exchange:            "BYBIT",
+		},
 	)
 
-	if err != nil {
-		logger.Warn("Не удалось создать TelegramPackageService: %v", err)
+	// Инициализируем с EventBus
+	if err := telegramPackage.Initialize(dm.eventBus); err != nil {
+		logger.Warn("Не удалось инициализировать TelegramDeliveryPackage: %v", err)
 		return false
 	}
 
-	dm.telegramPackageService = telegramService
-	logger.Info("✅ TelegramPackageService создан как единственная точка взаимодействия с Telegram")
+	dm.telegramDeliveryPackage = telegramPackage
+	logger.Info("✅ TelegramDeliveryPackage создан и инициализирован")
 
 	// Запускаем сервис
-	if err := dm.telegramPackageService.Start(); err != nil {
-		logger.Warn("Не удалось запустить TelegramPackageService: %v", err)
+	if err := dm.telegramDeliveryPackage.Start(); err != nil {
+		logger.Warn("Не удалось запустить TelegramDeliveryPackage: %v", err)
 		return false
 	}
 
 	// Регистрируем в реестре сервисов
 	if dm.registry != nil {
-		dm.registry.Register("TelegramPackageService",
-			NewUniversalServiceWrapper("TelegramPackageService", dm.telegramPackageService, true, true))
-		logger.Info("✅ TelegramPackageService зарегистрирован в реестре")
+		dm.registry.Register("TelegramDeliveryPackage",
+			NewUniversalServiceWrapper("TelegramDeliveryPackage", dm.telegramDeliveryPackage, true, true))
+		logger.Info("✅ TelegramDeliveryPackage зарегистрирован в реестре")
 	}
 
 	// Обновляем зависимости в lifecycle
 	if dm.lifecycle != nil {
-		dm.lifecycle.AddDependency("TelegramPackageService", "EventBus")
-		logger.Info("✅ Зависимости TelegramPackageService обновлены")
+		dm.lifecycle.AddDependency("TelegramDeliveryPackage", "EventBus")
+		logger.Info("✅ Зависимости TelegramDeliveryPackage обновлены")
 	}
 
 	return true
@@ -325,4 +329,3 @@ func (dm *DataManager) checkHealth() {
 		logger.Info("⚠️ Проверка здоровья системы не пройдена: %s", health.Status)
 	}
 }
-	

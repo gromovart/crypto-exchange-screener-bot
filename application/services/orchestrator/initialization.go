@@ -92,9 +92,9 @@ func (dm *DataManager) initUsersAndAuth() error {
 
 // initTelegramAndNotifications инициализирует Telegram и уведомления (ТОЛЬКО СОЗДАНИЕ)
 func (dm *DataManager) initTelegramAndNotifications(testMode bool) error {
-	// 4.1 Telegram Package Service - БУДЕТ СОЗДАН ПОЗЖЕ в initPostStartServices()
+	// 4.1 Telegram Delivery Package - БУДЕТ СОЗДАН ПОЗЖЕ в tryCreateTelegramDeliveryPackage()
 	if dm.config.TelegramEnabled {
-		logger.Info("📦 TelegramPackageService будет создан как единственная точка взаимодействия с Telegram...")
+		logger.Info("📦 TelegramDeliveryPackage будет создан позже (после UserService и SubscriptionService)...")
 	} else {
 		logger.Info("🤖 Telegram отключен в конфигурации")
 	}

@@ -58,6 +58,11 @@ func (w *UniversalServiceWrapper) Start() error {
 		return nil
 	}
 
+	// Проверяем что сервис не nil
+	if w.service == nil {
+		return fmt.Errorf("сервис %s не инициализирован", w.name)
+	}
+
 	// Пытаемся вызвать Start() если есть
 	if starter, ok := w.service.(interface{ Start() error }); ok {
 		err := starter.Start()

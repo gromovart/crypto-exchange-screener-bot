@@ -1,15 +1,17 @@
-// internal/infrastructure/transport/event_bus/factory.go
 package events
 
 import (
 	notifier "crypto-exchange-screener-bot/internal/adapters/notification"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot" // ИЗМЕНЕНО
+	telegrambot "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
-	"log"
 	"time"
+
+	// ДОБАВЛЕНО: импорт контроллера счетчика
+	countercontroller "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
+	counterservice "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 )
 
 // Factory - фабрика для создания EventBus
@@ -42,11 +44,13 @@ func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 }
 
 // RegisterDefaultSubscribers регистрирует стандартных подписчиков
+// ДОБАВЛЕН параметр counterService
 func (f *Factory) RegisterDefaultSubscribers(
 	bus *EventBus,
 	cfg *config.Config,
-	telegramBot *telegrambot.TelegramBot, // ИЗМЕНЕНО тип
+	telegramBot *telegrambot.TelegramBot,
 	notificationService *notifier.CompositeNotificationService,
+	counterService counterservice.Service, // НОВЫЙ параметр
 ) {
 	// Консольный логгер (всегда включен)
 	consoleLogger := f.createConsoleLoggerSubscriber()
@@ -54,9 +58,26 @@ func (f *Factory) RegisterDefaultSubscribers(
 	bus.Subscribe(types.EventSignalDetected, consoleLogger)
 	bus.Subscribe(types.EventError, consoleLogger)
 
+	// Регистрация контроллера счетчика если есть сервис
+	if counterService != nil {
+		logger.Info("🔢 Регистрация CounterController подписчика...")
+
+		// Создаем контроллер счетчика
+		counterController := countercontroller.NewController(counterService)
+
+		// Создаем подписчика-обертку для контроллера
+		counterSubscriber := NewCounterControllerWrapper(counterController)
+
+		// Регистрируем в EventBus
+		bus.Subscribe(types.EventCounterSignalDetected, counterSubscriber)
+		logger.Info("✅ CounterController подписчик зарегистрирован")
+	} else {
+		logger.Warn("⚠️ CounterService не предоставлен, CounterController не будет зарегистрирован")
+	}
+
 	// Telegram нотификатор если включен
 	if cfg.TelegramEnabled && telegramBot != nil {
-		log.Println("📱 Регистрация TelegramNotifier подписчика...")
+		logger.Info("📱 Регистрация TelegramNotifier подписчика...")
 
 		// Ищем существующий TelegramNotifier в CompositeNotificationService
 		var telegramNotifier *notifier.TelegramNotifier
@@ -73,10 +94,10 @@ func (f *Factory) RegisterDefaultSubscribers(
 
 		// Если не нашли существующий, создаем новый с EventBus
 		if telegramNotifier == nil {
-			telegramNotifier = notifier.NewTelegramNotifier(cfg, bus) // ПЕРЕДАЕМ bus
+			telegramNotifier = notifier.NewTelegramNotifier(cfg, bus)
 			if telegramNotifier != nil && notificationService != nil {
 				notificationService.AddNotifier(telegramNotifier)
-				log.Println("✅ TelegramNotifier создан и добавлен")
+				logger.Info("✅ TelegramNotifier создан и добавлен")
 			}
 		}
 
@@ -100,12 +121,12 @@ func (f *Factory) RegisterDefaultSubscribers(
 				},
 			)
 			bus.Subscribe(types.EventSignalDetected, telegramSubscriber)
-			log.Println("✅ TelegramNotifier подписчик зарегистрирован")
+			logger.Info("✅ TelegramNotifier подписчик зарегистрирован")
 		} else {
-			log.Println("⚠️ Не удалось создать TelegramNotifier")
+			logger.Warn("⚠️ Не удалось создать TelegramNotifier")
 		}
 	} else if cfg.TelegramEnabled && telegramBot == nil {
-		log.Println("⚠️ Telegram включен в конфигурации, но бот не передан")
+		logger.Warn("⚠️ Telegram включен в конфигурации, но бот не передан")
 	}
 }
 
@@ -116,7 +137,7 @@ func (f *Factory) createConsoleLoggerSubscriber() *BaseSubscriber {
 		[]types.EventType{types.EventPriceUpdated, types.EventSignalDetected, types.EventError},
 		func(event types.Event) error {
 			// Реализация консольного логирования
-			logger.Debug("[Console Logger] Event: %v, Type: %v\n", event.Type, event.Timestamp)
+			logger.Debug("[Console Logger] Event: %v, Type: %v", event.Type, event.Timestamp)
 			return nil
 		},
 	)

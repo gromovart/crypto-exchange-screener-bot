@@ -97,19 +97,9 @@ func (dm *DataManager) registerBasicSubscribers() {
 	dm.eventBus.Subscribe(types.EventError, consoleSubscriber)
 	logger.Info("✅ Консольный логгер подписан")
 
-	// Telegram Package Service для обработки событий
-	if dm.telegramPackageService != nil {
-		// Создаем подписчика для событий счетчика
-		counterSignalSubscriber := events.NewBaseSubscriber(
-			"telegram_package_service_counter",
-			[]types.EventType{types.EventCounterSignalDetected},
-			func(event types.Event) error {
-				return dm.telegramPackageService.HandleCounterSignal(event)
-			},
-		)
-		dm.eventBus.Subscribe(types.EventCounterSignalDetected, counterSignalSubscriber)
-		logger.Info("✅ TelegramPackageService подписан на EventCounterSignalDetected")
-	}
+	// TelegramDeliveryPackage автоматически подписывает контроллеры в методе Initialize()
+	// Нет необходимости вручную подписывать здесь
+	logger.Info("ℹ️ TelegramDeliveryPackage автоматически подписывает контроллеры при инициализации")
 
 	logger.Info("🎯 Регистрация подписчиков завершена")
 }
@@ -170,9 +160,13 @@ func (dm *DataManager) registerServices() error {
 		"TelegramBot": &TelegramBotWrapper{TelegramBot: dm.telegramBot},
 
 		// Бизнес-сервисы (не требуют Start/Stop)
-		"UserService":            NewUniversalServiceWrapper("UserService", dm.userService, false, false),
-		"SubscriptionService":    NewUniversalServiceWrapper("SubscriptionService", dm.subscriptionService, false, false),
-		"TelegramPackageService": NewUniversalServiceWrapper("TelegramPackageService", dm.telegramPackageService, true, true),
+		"UserService":         NewUniversalServiceWrapper("UserService", dm.userService, false, false),
+		"SubscriptionService": NewUniversalServiceWrapper("SubscriptionService", dm.subscriptionService, false, false),
+	}
+
+	// TelegramDeliveryPackage добавляем только если создан
+	if dm.telegramDeliveryPackage != nil {
+		services["TelegramDeliveryPackage"] = NewUniversalServiceWrapper("TelegramDeliveryPackage", dm.telegramDeliveryPackage, true, true)
 	}
 
 	// WebhookServer добавляем только если он создан
@@ -280,8 +274,8 @@ func (dm *DataManager) setupDependencies() {
 		dm.lifecycle.AddDependency("WebhookServer", "TelegramBot")
 	}
 
-	// TelegramPackageService зависит от EventBus
-	if dm.telegramPackageService != nil {
-		dm.lifecycle.AddDependency("TelegramPackageService", "EventBus")
+	// TelegramDeliveryPackage зависит от EventBus
+	if dm.telegramDeliveryPackage != nil {
+		dm.lifecycle.AddDependency("TelegramDeliveryPackage", "EventBus")
 	}
 }

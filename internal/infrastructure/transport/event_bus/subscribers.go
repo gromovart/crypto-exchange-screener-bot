@@ -2,6 +2,7 @@
 package events
 
 import (
+	"crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
 	"crypto-exchange-screener-bot/internal/types"
 	"log"
 )
@@ -109,4 +110,53 @@ func NewStorageSubscriber(storage interface{}) *StorageSubscriber {
 		),
 		storage: storage,
 	}
+}
+
+// CounterControllerSubscriber - подписчик для контроллера счетчика
+type CounterControllerSubscriber struct {
+	BaseSubscriber
+	counterController counter.Controller
+}
+
+// NewCounterControllerSubscriber создает нового подписчика для контроллера счетчика
+func NewCounterControllerSubscriber(controller counter.Controller) *CounterControllerSubscriber {
+	return &CounterControllerSubscriber{
+		BaseSubscriber: *NewBaseSubscriber(
+			"counter_controller",
+			[]types.EventType{types.EventCounterSignalDetected},
+			func(event types.Event) error {
+				// Делегируем обработку контроллеру счетчика
+				return controller.HandleEvent(event)
+			},
+		),
+		counterController: controller,
+	}
+}
+
+// CounterControllerWrapper - обертка для контроллера счетчика как подписчика
+// (альтернативная реализация без BaseSubscriber)
+type CounterControllerWrapper struct {
+	controller counter.Controller
+}
+
+// NewCounterControllerWrapper создает обертку для контроллера счетчика
+func NewCounterControllerWrapper(controller counter.Controller) *CounterControllerWrapper {
+	return &CounterControllerWrapper{
+		controller: controller,
+	}
+}
+
+// HandleEvent обрабатывает событие
+func (w *CounterControllerWrapper) HandleEvent(event types.Event) error {
+	return w.controller.HandleEvent(event)
+}
+
+// GetName возвращает имя подписчика
+func (w *CounterControllerWrapper) GetName() string {
+	return w.controller.GetName()
+}
+
+// GetSubscribedEvents возвращает типы событий
+func (w *CounterControllerWrapper) GetSubscribedEvents() []types.EventType {
+	return w.controller.GetSubscribedEvents()
 }
