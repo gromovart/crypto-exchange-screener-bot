@@ -20,13 +20,23 @@ func (s *serviceImpl) getUsersToNotify(data RawCounterData) ([]*models.User, err
 		return nil, fmt.Errorf("failed to get users: %w", err)
 	}
 
+	logger.Warn("🔍 getUsersToNotify: symbol=%s, всего пользователей: %d",
+		data.Symbol, len(allUsers))
+
 	// Фильтруем пользователей
 	var filteredUsers []*models.User
+	filteredOut := 0
+
 	for _, user := range allUsers {
 		if s.shouldSendToUser(user, data) {
 			filteredUsers = append(filteredUsers, user)
+		} else {
+			filteredOut++
 		}
 	}
+
+	logger.Warn("🔍 getUsersToNotify результат: symbol=%s, отфильтровано: %d, пропущено: %d",
+		data.Symbol, len(filteredUsers), filteredOut)
 
 	return filteredUsers, nil
 }
@@ -35,18 +45,28 @@ func (s *serviceImpl) getUsersToNotify(data RawCounterData) ([]*models.User, err
 func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) bool {
 	// БАЗОВЫЕ ПРОВЕРКИ
 	if user == nil {
+		logger.Warn("🔍 shouldSendToUser: user=nil")
 		return false
 	}
 
+	logger.Warn("🔍 Проверка user=%d (%s), symbol=%s",
+		user.ID, user.Username, data.Symbol)
+
 	// Проверяем ChatID
 	if user.ChatID == "" {
-		logger.Debug("⚠️ User %d (%s) skipped: empty chat_id", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: пустой chat_id", user.ID)
 		return false
 	}
 
 	// Проверяем активность
 	if !user.IsActive {
-		logger.Debug("⚠️ User %d (%s) skipped: not active", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: не активен", user.ID)
+		return false
+	}
+
+	// Проверяем включены ли уведомления
+	if !user.NotificationsEnabled {
+		logger.Warn("🔍 Пропуск user=%d: уведомления отключены", user.ID)
 		return false
 	}
 
@@ -58,8 +78,18 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	case "fall":
 		signalType = "fall"
 	default:
-		logger.Debug("⚠️ User %d (%s) skipped: unknown direction %s",
-			user.ID, user.Username, data.Direction)
+		logger.Warn("🔍 Пропуск user=%d: неизвестный direction=%s",
+			user.ID, data.Direction)
+		return false
+	}
+
+	// Проверяем включен ли конкретный тип сигнала
+	if signalType == "growth" && !user.NotifyGrowth {
+		logger.Warn("🔍 Пропуск user=%d: рост отключен", user.ID)
+		return false
+	}
+	if signalType == "fall" && !user.NotifyFall {
+		logger.Warn("🔍 Пропуск user=%d: падение отключено", user.ID)
 		return false
 	}
 
@@ -74,71 +104,73 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	shouldReceive := user.ShouldReceiveSignal(signalType, changePercentForCheck)
 
 	if !shouldReceive {
+		// Детальное логирование почему не отправляем
 		s.logUserSkipReason(user, signalType, changePercentForCheck, data)
 		return false
 	}
 
-	// ПРИМЕНЯЕМ ДОПОЛНИТЕЛЬНЫЕ ФИЛЬТРЫ ПОЛЬЗОВАТЕЛЯ
+	// Применяем дополнительные фильтры пользователя
 	if !s.applyUserFilters(user, data) {
+		logger.Warn("🔍 Пропуск user=%d: дополнительные фильтры", user.ID)
 		return false
 	}
 
-	logger.Debug("✅ User %d (%s) passed all checks for %s signal (%.2f%%)",
+	logger.Warn("✅ shouldSendToUser ПРОШЕЛ: user=%d (%s) для %s signal (%.2f%%)",
 		user.ID, user.Username, signalType, changePercentForCheck)
 	return true
 }
 
 // logUserSkipReason логирует причину пропуска пользователя
 func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, changePercent float64, data RawCounterData) {
-	// Проверяем базовые условия в том же порядке, что и ShouldReceiveSignal
+	// Используем WARN для всех сообщений
 	if !user.IsActive {
-		logger.Debug("⚠️ User %d (%s) skipped: not active", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: не активен", user.ID)
 		return
 	}
 
 	if !user.CanReceiveNotifications() {
-		logger.Debug("⚠️ User %d (%s) skipped: notifications disabled", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: уведомления отключены", user.ID)
 		return
 	}
 
 	if signalType == "growth" && !user.CanReceiveGrowthSignals() {
-		logger.Debug("⚠️ User %d (%s) skipped: growth signals disabled", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: рост отключен", user.ID)
 		return
 	}
 
 	if signalType == "fall" && !user.CanReceiveFallSignals() {
-		logger.Debug("⚠️ User %d (%s) skipped: fall signals disabled", user.ID, user.Username)
+		logger.Warn("🔍 Пропуск user=%d: падение отключено", user.ID)
 		return
 	}
 
 	// Проверка порогов с учетом знака changePercent
 	if signalType == "growth" && changePercent < user.MinGrowthThreshold {
-		logger.Debug("⚠️ User %d (%s) skipped: growth threshold not met (%.2f%% < %.1f%%)",
-			user.ID, user.Username, changePercent, user.MinGrowthThreshold)
+		logger.Warn("🔍 Пропуск user=%d: порог роста не достигнут (%.2f%% < %.1f%%)",
+			user.ID, changePercent, user.MinGrowthThreshold)
 		return
 	}
 
 	if signalType == "fall" && math.Abs(changePercent) < user.MinFallThreshold {
-		logger.Debug("⚠️ User %d (%s) skipped: fall threshold not met (%.2f%% < %.1f%%)",
-			user.ID, user.Username, math.Abs(changePercent), user.MinFallThreshold)
+		logger.Warn("🔍 Пропуск user=%d: порог падения не достигнут (%.2f%% < %.1f%%)",
+			user.ID, math.Abs(changePercent), user.MinFallThreshold)
 		return
 	}
 
 	if user.IsInQuietHours() {
-		logger.Debug("⚠️ User %d (%s) skipped: in quiet hours (%d-%d)",
-			user.ID, user.Username, user.QuietHoursStart, user.QuietHoursEnd)
+		logger.Warn("🔍 Пропуск user=%d: тихие часы (%d-%d)",
+			user.ID, user.QuietHoursStart, user.QuietHoursEnd)
 		return
 	}
 
 	if user.HasReachedDailyLimit() {
-		logger.Debug("⚠️ User %d (%s) skipped: daily limit reached (%d/%d)",
-			user.ID, user.Username, user.SignalsToday, user.MaxSignalsPerDay)
+		logger.Warn("🔍 Пропуск user=%d: дневной лимит достигнут (%d/%d)",
+			user.ID, user.SignalsToday, user.MaxSignalsPerDay)
 		return
 	}
 
-	// Если все проверки прошли, но ShouldReceiveSignal вернул false, логируем общую причину
-	logger.Debug("⚠️ User %d (%s) skipped by ShouldReceiveSignal (type: %s, change: %.2f%%)",
-		user.ID, user.Username, signalType, changePercent)
+	// Если все проверки прошли, но ShouldReceiveSignal вернул false
+	logger.Warn("🔍 Пропуск user=%d: ShouldReceiveSignal вернул false (type: %s, change: %.2f%%)",
+		user.ID, signalType, changePercent)
 }
 
 // applyUserFilters применяет фильтры пользователя к данным счетчика

@@ -14,6 +14,8 @@ type MessageSender interface {
 	// Основные методы отправки
 	SendTextMessage(chatID int64, text string, keyboard interface{}) error
 	SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error
+	// НОВЫЙ МЕТОД: Отправка без rate limiting (для counter уведомлений)
+	SendCounterMessage(chatID int64, text string, keyboard interface{}) error
 
 	// Управление сообщениями
 	EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error
@@ -53,6 +55,52 @@ func NewMessageSender(cfg *config.Config) MessageSender {
 		enabled:      cfg.TelegramEnabled,
 		messageCache: NewMessageCache(10 * time.Minute),
 	}
+}
+
+// SendCounterMessage отправляет counter уведомление без rate limiting
+func (ms *MessageSenderImpl) SendCounterMessage(chatID int64, text string, keyboard interface{}) error {
+	return ms.sendMessageWithoutRateLimit(chatID, text, keyboard)
+}
+
+// sendMessageWithoutRateLimit внутренний метод без rate limiting
+func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text string, keyboard interface{}) error {
+	// Проверяем включен ли Telegram
+	if !ms.enabled {
+		log.Println("⚠️ Telegram отключен, пропуск отправки сообщения")
+		return nil
+	}
+
+	// Проверяем тестовый режим
+	if ms.testMode {
+		log.Printf("[TEST] Send counter to %d: %s", chatID, text[:min(50, len(text))])
+		return nil
+	}
+
+	// НЕ проверяем rate limiting для counter сообщений!
+
+	// Проверяем дубликаты (можно оставить для защиты от спама)
+	messageHash := ms.getMessageHash(chatID, text, keyboard)
+	if ms.messageCache.IsDuplicate(messageHash) {
+		log.Println("⚠️ Дубликат counter сообщения, пропуск")
+		return nil
+	}
+
+	// Отправляем запрос
+	request := map[string]interface{}{
+		"chat_id": chatID,
+		"text":    text,
+	}
+
+	if keyboard != nil {
+		request["reply_markup"] = keyboard
+	}
+
+	err := ms.sendTelegramRequest("sendMessage", request)
+	if err == nil {
+		ms.messageCache.Add(messageHash)
+	}
+
+	return err
 }
 
 // SendTextMessage отправляет текстовое сообщение

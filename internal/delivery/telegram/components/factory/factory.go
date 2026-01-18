@@ -95,6 +95,10 @@ func (s *stubMessageSender) SendTextMessage(chatID int64, text string, keyboard 
 	return nil
 }
 
+func (s *stubMessageSender) SendCounterMessage(chatID int64, text string, keyboard interface{}) error {
+	return nil
+}
+
 func (s *stubMessageSender) SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error {
 	logger.Debug("[STUB] Отправка сообщения с клавиатурой в %d: %s", chatID, text[:min(50, len(text))])
 	return nil
