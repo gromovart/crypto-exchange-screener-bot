@@ -573,7 +573,7 @@ func (a *CounterAnalyzer) calculateChangeOverPeriod(data []types.PriceData) floa
 	// Если данные покрывают менее 50% периода, результат ненадежен
 	coverageRatio := actualDuration.Seconds() / expectedDuration.Seconds()
 	if coverageRatio < 0.5 {
-		logger.Warn("⚠️ Малое покрытие данных для %s: %.0f%% периода",
+		logger.Debug("⚠️ Малое покрытие данных для %s: %.0f%% периода",
 			data[0].Symbol, coverageRatio*100)
 		// Можно скорректировать изменение пропорционально покрытию
 		change = change * coverageRatio

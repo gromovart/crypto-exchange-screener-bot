@@ -10,20 +10,38 @@ import (
 
 // convertEventToParams преобразует событие в параметры сервиса
 func convertEventToParams(event types.Event) (counterService.CounterParams, error) {
-
 	dataMap, ok := event.Data.(map[string]interface{})
 	if !ok {
 		return counterService.CounterParams{}, fmt.Errorf("неверный формат данных события")
 	}
 
+	// Получаем Timestamp из события, если есть
+	var timestamp time.Time
+	if ts, ok := dataMap["timestamp"]; ok {
+		switch v := ts.(type) {
+		case time.Time:
+			timestamp = v
+		case string:
+			// Пробуем распарсить строку
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				timestamp = t
+			} else {
+				timestamp = time.Now()
+			}
+		default:
+			timestamp = time.Now()
+		}
+	} else {
+		timestamp = time.Now()
+	}
+
 	params := counterService.CounterParams{
-		Event: event,
 		// Базовые поля
 		Symbol:        getString(dataMap, "symbol"),
 		Direction:     getString(dataMap, "direction"),
 		ChangePercent: getFloat64(dataMap, "change_percent"),
 		Period:        getString(dataMap, "period_string"),
-		Timestamp:     time.Now(),
+		Timestamp:     timestamp,
 	}
 
 	// Опциональные поля

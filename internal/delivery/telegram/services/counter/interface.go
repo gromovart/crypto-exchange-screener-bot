@@ -1,23 +1,16 @@
 // internal/delivery/telegram/services/counter/interface.go
 package counter
 
-import (
-	"crypto-exchange-screener-bot/internal/core/domain/users"
-	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
-	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
-	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
-	"crypto-exchange-screener-bot/internal/types" // <-- ДОБАВИТЬ!
-	"time"
-)
+import "time"
 
+// Service интерфейс сервиса счетчика
 type Service interface {
 	// Exec выполняет обработку параметров счетчика
-	Exec(params CounterParams) (CounterResult, error) // <-- ИСПРАВИТЬ!
+	Exec(params CounterParams) (CounterResult, error)
 }
 
 // CounterParams параметры для Exec
 type CounterParams struct {
-	Event types.Event // <-- Теперь types импортирован
 	// Базовые поля
 	Symbol        string
 	Direction     string
@@ -79,14 +72,4 @@ type RawCounterData struct {
 	NextAnalysis       time.Time `json:"next_analysis"`       // следующий анализ
 	NextSignal         time.Time `json:"next_signal"`         // следующий сигнал
 	ProgressPercentage float64   `json:"progress_percentage"` // процент прогресса (вычисляемое)
-}
-
-// NewServiceWithDependencies фабрика с зависимостями
-func NewServiceWithDependencies(
-	userService *users.Service,
-	formatter *formatters.FormatterProvider,
-	messageSender message_sender.MessageSender,
-	buttonBuilder *buttons.ButtonBuilder,
-) Service {
-	return NewService(userService, formatter, messageSender, buttonBuilder)
 }

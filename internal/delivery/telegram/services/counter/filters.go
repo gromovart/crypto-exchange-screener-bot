@@ -1,3 +1,4 @@
+// internal/delivery/telegram/services/counter/filters.go
 package counter
 
 import (
@@ -63,19 +64,22 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	}
 
 	// Используем метод ShouldReceiveSignal из модели User
-	// Для падения передаем отрицательное значение, для роста - положительное
 	var changePercentForCheck float64
 	if signalType == "fall" {
-		changePercentForCheck = -data.ChangePercent // отрицательное для падения
+		changePercentForCheck = -data.ChangePercent
 	} else {
-		changePercentForCheck = data.ChangePercent // положительное для роста
+		changePercentForCheck = data.ChangePercent
 	}
 
 	shouldReceive := user.ShouldReceiveSignal(signalType, changePercentForCheck)
 
 	if !shouldReceive {
-		// Детальное логирование почему не отправляем
 		s.logUserSkipReason(user, signalType, changePercentForCheck, data)
+		return false
+	}
+
+	// ПРИМЕНЯЕМ ДОПОЛНИТЕЛЬНЫЕ ФИЛЬТРЫ ПОЛЬЗОВАТЕЛЯ
+	if !s.applyUserFilters(user, data) {
 		return false
 	}
 

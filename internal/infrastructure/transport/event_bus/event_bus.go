@@ -1,4 +1,3 @@
-// internal/infrastructure/transport/event_bus/event_bus.go
 package events
 
 import (
@@ -15,6 +14,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// Константы для защиты от рекурсии
+const (
+	maxProcessingDepth = 15 // Максимальная глубина обработки
+	maxEventChainDepth = 3  // Максимальная глубина в цепочке событий
+)
+
 // EventBus - центральная шина событий
 type EventBus struct {
 	mu          sync.RWMutex
@@ -26,8 +31,11 @@ type EventBus struct {
 	running     bool
 	stopChan    chan struct{}
 	wg          sync.WaitGroup
-	// 🔴 ДОБАВИТЬ: защита от рекурсии
-	processingDepth int32 // атомарный счетчик глубины обработки
+
+	// 🔒 Защита от рекурсии
+	processingDepth int32          // атомарный счетчик глубины обработки
+	eventChain      map[string]int // трекинг цепочек событий (eventID -> глубина)
+	chainMu         sync.RWMutex   // для eventChain
 }
 
 // EventBusConfig - конфигурация EventBus
@@ -66,17 +74,17 @@ func NewEventBus(config ...EventBusConfig) *EventBus {
 		metrics: &types.EventBusMetrics{
 			SubscribersCount: make(map[types.EventType]int),
 		},
-		config:   cfg,
-		stopChan: make(chan struct{}),
-		running:  false,
+		config:     cfg,
+		stopChan:   make(chan struct{}),
+		running:    false,
+		eventChain: make(map[string]int), // Инициализация мапы для трекинга цепочек
 	}
 
 	if cfg.EnableMetrics {
 		bus.startMetricsCollection()
 	}
 
-	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
-	logger.Info("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v\n",
+	logger.Info("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v",
 		cfg.MaxRetries, cfg.RetryDelay)
 
 	return bus
@@ -112,9 +120,36 @@ func (b *EventBus) Stop() {
 	b.wg.Wait()
 	close(b.eventBuffer)
 
+	// Очищаем цепочки событий
+	b.chainMu.Lock()
+	b.eventChain = make(map[string]int)
+	b.chainMu.Unlock()
+
 	if b.config.EnableLogging {
 		log.Println("🛑 EventBus остановлен")
 	}
+}
+
+// isRecursiveEvent проверяет наличие рекурсии в обработке событий
+func (b *EventBus) isRecursiveEvent(event types.Event, currentDepth int32) bool {
+	// Проверка глубины обработки
+	if currentDepth > maxProcessingDepth {
+		logger.Warn("⚠️ Достигнута максимальная глубина обработки: %d", currentDepth)
+		return true
+	}
+
+	// Проверка циклических цепочек событий
+	b.chainMu.RLock()
+	chainDepth, exists := b.eventChain[event.ID]
+	b.chainMu.RUnlock()
+
+	if exists && chainDepth > maxEventChainDepth {
+		logger.Warn("⚠️ Обнаружена циклическая цепочка событий для ID: %s (глубина: %d)",
+			event.ID, chainDepth)
+		return true
+	}
+
+	return false
 }
 
 // Subscribe подписывает обработчик на тип события
@@ -183,7 +218,6 @@ func (b *EventBus) Publish(event types.Event) error {
 	}
 
 	logger.Debug("[EventBus.Publish] Публикую %s от %s", event.Type, event.Source)
-	logger.Debug("📤 Опубликовано событие: %s от %s", event.Type, event.Source)
 
 	// Устанавливаем ID и временную метку если они не установлены
 	if event.ID == "" {
@@ -204,7 +238,7 @@ func (b *EventBus) Publish(event types.Event) error {
 			logger.Debug("📤 Опубликовано событие: %s от %s",
 				event.Type, event.Source)
 		}
-		logger.Debug("✅ [EventBus.Publish] Событие %s добавлено в буфер\n", event.Type)
+		logger.Debug("✅ [EventBus.Publish] Событие %s добавлено в буфер", event.Type)
 		return nil
 	default:
 		// Буфер полен
@@ -236,15 +270,15 @@ func (b *EventBus) AddMiddleware(middleware Middleware) {
 func (b *EventBus) eventWorker(id int) {
 	defer b.wg.Done()
 
-	logger.Info("🔍 [EventWorker %d] Запущен\n", id)
+	logger.Info("🔍 [EventWorker %d] Запущен", id)
 
 	for {
 		select {
 		case event := <-b.eventBuffer:
-			logger.Debug("🔍 [EventWorker %d] Получил событие %s из буфера\n", id, event.Type)
+			logger.Debug("🔍 [EventWorker %d] Получил событие %s из буфера", id, event.Type)
 			b.processEvent(event)
 		case <-b.stopChan:
-			logger.Info("🔍 [EventWorker %d] Остановлен\n", id)
+			logger.Info("🔍 [EventWorker %d] Остановлен", id)
 			return
 		}
 	}
@@ -255,15 +289,36 @@ func (b *EventBus) processEvent(event types.Event) error {
 	depth := atomic.AddInt32(&b.processingDepth, 1)
 	defer atomic.AddInt32(&b.processingDepth, -1)
 
-	if depth > 10 { // Максимальная глубина рекурсии
-		logger.Warn("⚠️ Обнаружена возможная рекурсия в EventBus, глубина: %d", depth)
-		return fmt.Errorf("возможная рекурсия, максимальная глубина достигнута")
+	// 🔒 ПРОВЕРКА НА РЕКУРСИЮ ПЕРЕД ОБРАБОТКОЙ
+	if b.isRecursiveEvent(event, depth) {
+		logger.Error("❌ Обнаружена рекурсия, обработка события %s (ID: %s) прервана на глубине %d",
+			event.Type, event.ID, depth)
+		return fmt.Errorf("рекурсия обнаружена, обработка прервана")
 	}
+
+	// 🔒 ДОБАВЛЕНИЕ СОБЫТИЯ В ЦЕПОЧКУ
+	b.chainMu.Lock()
+	b.eventChain[event.ID] = b.eventChain[event.ID] + 1
+	currentChainDepth := b.eventChain[event.ID]
+	b.chainMu.Unlock()
+
+	// 🔒 УДАЛЕНИЕ СОБЫТИЯ ИЗ ЦЕПОЧКИ ПОСЛЕ ОБРАБОТКИ
+	defer func() {
+		b.chainMu.Lock()
+		if count, exists := b.eventChain[event.ID]; exists {
+			if count <= 1 {
+				delete(b.eventChain, event.ID)
+			} else {
+				b.eventChain[event.ID] = count - 1
+			}
+		}
+		b.chainMu.Unlock()
+	}()
 
 	startTime := time.Now()
 
-	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:
-	logger.Debug("🔍 EventBus.processEvent: обработка %s от %s\n", event.Type, event.Source)
+	logger.Debug("🔍 EventBus.processEvent: обработка %s (ID: %s) от %s, цепочка: %d",
+		event.Type, event.ID, event.Source, currentChainDepth)
 
 	defer func() {
 		// Обновляем метрики времени обработки
@@ -272,9 +327,8 @@ func (b *EventBus) processEvent(event types.Event) error {
 		b.metrics.EventsProcessed++
 		b.metrics.Mu.Unlock()
 
-		// 🔴 ДОБАВЬТЕ:
-		logger.Debug("✅ EventBus.processEvent: %s обработано за %v\n",
-			event.Type, time.Since(startTime))
+		logger.Debug("✅ EventBus.processEvent: %s обработано за %v, глубина: %d",
+			event.Type, time.Since(startTime), depth)
 	}()
 
 	// Получаем подписчиков для этого типа события
@@ -282,8 +336,8 @@ func (b *EventBus) processEvent(event types.Event) error {
 	subscribers, exists := b.subscribers[event.Type]
 	b.mu.RUnlock()
 
-	logger.Debug("🔍 EventBus.processEvent: найдено %d подписчиков для %s\n",
-		len(subscribers), event.Type) // 🔴 ДОБАВЬТЕ
+	logger.Debug("🔍 EventBus.processEvent: найдено %d подписчиков для %s",
+		len(subscribers), event.Type)
 
 	if !exists || len(subscribers) == 0 {
 		if b.config.EnableLogging {
@@ -291,6 +345,7 @@ func (b *EventBus) processEvent(event types.Event) error {
 		}
 		return nil
 	}
+
 	// Создаем цепочку middleware
 	handler := b.createHandlerChain(subscribers)
 
@@ -301,28 +356,28 @@ func (b *EventBus) processEvent(event types.Event) error {
 // createHandlerChain создает цепочку обработчиков
 func (b *EventBus) createHandlerChain(subscribers []types.EventSubscriber) HandlerFunc {
 	return func(event types.Event) error {
-		logger.Debug("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков\n",
+		logger.Debug("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков",
 			event.Type, len(subscribers))
 
 		var lastError error
 
 		for i, subscriber := range subscribers {
-			logger.Debug("🔍 [createHandlerChain] Обработка подписчика [%d] %s\n",
+			logger.Debug("🔍 [createHandlerChain] Обработка подписчика [%d] %s",
 				i, subscriber.GetName())
 
 			if err := b.handleEventWithRetry(event, subscriber); err != nil {
-				logger.Debug("❌ [createHandlerChain] Ошибка от %s: %v\n",
+				logger.Debug("❌ [createHandlerChain] Ошибка от %s: %v",
 					subscriber.GetName(), err)
 				lastError = err
 				log.Printf("❌ Ошибка обработки события %s подписчиком %s: %v",
 					event.Type, subscriber.GetName(), err)
 			} else {
-				logger.Debug("✅ [createHandlerChain] %s успешно обработал %s\n",
+				logger.Debug("✅ [createHandlerChain] %s успешно обработал %s",
 					subscriber.GetName(), event.Type)
 			}
 		}
 
-		logger.Debug("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v\n",
+		logger.Debug("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v",
 			event.Type, lastError)
 		return lastError
 	}
@@ -330,14 +385,14 @@ func (b *EventBus) createHandlerChain(subscribers []types.EventSubscriber) Handl
 
 // handleEventWithRetry обрабатывает событие с повторными попытками
 func (b *EventBus) handleEventWithRetry(event types.Event, subscriber types.EventSubscriber) error {
-	logger.Debug("🔍 [handleEventWithRetry] Вызов %s для события %s\n",
+	logger.Debug("🔍 [handleEventWithRetry] Вызов %s для события %s",
 		subscriber.GetName(), event.Type)
 
 	// Просто вызываем обработчик
 	err := subscriber.HandleEvent(event)
 
 	if err != nil {
-		logger.Info("❌ [handleEventWithRetry] Ошибка от %s: %v\n",
+		logger.Info("❌ [handleEventWithRetry] Ошибка от %s: %v",
 			subscriber.GetName(), err)
 		b.metrics.Mu.Lock()
 		b.metrics.EventsFailed++
@@ -345,7 +400,7 @@ func (b *EventBus) handleEventWithRetry(event types.Event, subscriber types.Even
 		return err
 	}
 
-	logger.Debug("✅ [handleEventWithRetry] %s успешно обработал %s\n",
+	logger.Debug("✅ [handleEventWithRetry] %s успешно обработал %s",
 		subscriber.GetName(), event.Type)
 	return nil
 }
@@ -358,12 +413,12 @@ func (b *EventBus) executeWithMiddleware(event types.Event, handler HandlerFunc)
 		mw := b.middlewares[i]
 		next := chain
 		chain = func(event types.Event) error {
-			logger.Debug("🔍 [executeWithMiddleware] Вызов middleware %T\n", mw)
+			logger.Debug("🔍 [executeWithMiddleware] Вызов middleware %T", mw)
 			return mw.Process(event, next)
 		}
 	}
 
-	logger.Debug("🔍 [executeWithMiddleware] Запуск цепочки для %s\n", event.Type)
+	logger.Debug("🔍 [executeWithMiddleware] Запуск цепочки для %s", event.Type)
 
 	// Запускаем цепочку
 	return chain(event)
@@ -436,6 +491,12 @@ func (b *EventBus) logMetrics() {
 	} else {
 		logger.Info("   Среднее время обработки: нет данных (0 событий)")
 	}
+
+	// 🔒 ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ О ЦЕПОЧКАХ СОБЫТИЙ
+	b.chainMu.RLock()
+	chainCount := len(b.eventChain)
+	b.chainMu.RUnlock()
+	logger.Info("   Активных цепочек событий: %d", chainCount)
 
 	for eventType, count := range metrics.SubscribersCount {
 		logger.Info("   %s: %d подписчиков", eventType, count)
@@ -521,5 +582,15 @@ func (b *EventBus) GetMetricsMap() map[string]interface{} {
 		"events_failed":    metrics.EventsFailed,
 		"processing_time":  metrics.ProcessingTime.String(),
 		"subscribers":      metrics.SubscribersCount,
+		"event_chain_size": len(b.eventChain), // Добавляем размер цепочки событий
 	}
+}
+
+// ClearEventChain очищает цепочку событий (для тестирования)
+func (b *EventBus) ClearEventChain() {
+	b.chainMu.Lock()
+	defer b.chainMu.Unlock()
+
+	b.eventChain = make(map[string]int)
+	logger.Info("✅ Цепочка событий очищена")
 }
