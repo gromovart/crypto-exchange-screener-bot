@@ -128,21 +128,12 @@ func (p *TelegramDeliveryPackage) Initialize(eventBus *events.EventBus) error {
 	p.initialized = true
 	logger.Info("✅ TelegramDeliveryPackage инициализирован")
 
-	// 9. Автозапуск бота если Telegram включен
-	if p.config.TelegramEnabled && p.config.TelegramBotToken != "" && p.bot != nil {
-		go func() {
-			if err := p.Start(); err != nil {
-				logger.Error("❌ Ошибка автозапуска Telegram бота: %v", err)
-			}
-		}()
-	}
-
 	return nil
 }
 
 // createCoreServices создает сервисы ядра через CoreServiceFactory
 func (p *TelegramDeliveryPackage) createCoreServices() error {
-	logger.Debug("🏗️  Создание сервисов ядра через CoreServiceFactory...")
+	logger.Debug("🏗️  Проверка готовности CoreServiceFactory...")
 
 	if p.coreFactory == nil {
 		return fmt.Errorf("CoreServiceFactory не установлена")
@@ -152,27 +143,9 @@ func (p *TelegramDeliveryPackage) createCoreServices() error {
 		return fmt.Errorf("CoreServiceFactory не готова")
 	}
 
-	// Создаем все сервисы ядра через фабрику
-	coreServices, err := p.coreFactory.CreateAllServices()
-	if err != nil {
-		return fmt.Errorf("не удалось создать сервисы ядра: %w", err)
-	}
-
-	// Приводим типы и сохраняем сервисы
-	if userService, ok := coreServices["UserService"].(*users.Service); ok {
-		p.userService = userService
-	} else {
-		return fmt.Errorf("UserService имеет неверный тип")
-	}
-
-	if subscriptionService, ok := coreServices["SubscriptionService"].(*subscription.Service); ok {
-		p.subscriptionService = subscriptionService
-	} else {
-		// SubscriptionService может быть nil (опциональный)
-		p.subscriptionService = nil
-	}
-
-	logger.Info("✅ Сервисы ядра созданы через CoreServiceFactory")
+	// НЕ создаем сервисы сейчас - только проверяем готовность
+	// Сервисы будут созданы лениво при первом обращении
+	logger.Info("✅ CoreServiceFactory готова (ленивое создание сервисов)")
 	return nil
 }
 
@@ -200,15 +173,11 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	logger.Debug("🏭 Создание ServiceFactory...")
 
-	// Проверяем что UserService создан
-	if p.userService == nil {
-		return fmt.Errorf("UserService не создан")
-	}
-
+	// Ленивое создание UserService при первом обращении
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
-			UserService:         p.userService,
-			SubscriptionService: p.subscriptionService, // Может быть nil
+			UserService:         nil, // Будет создан лениво
+			SubscriptionService: nil, // Может быть nil
 			MessageSender:       p.components.MessageSender,
 			ButtonBuilder:       p.components.ButtonBuilder,
 			FormatterProvider:   p.components.FormatterProvider,
@@ -219,7 +188,7 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 		return fmt.Errorf("ServiceFactory не валидна")
 	}
 
-	logger.Info("✅ ServiceFactory создана")
+	logger.Info("✅ ServiceFactory создана (ленивое создание UserService)")
 	return nil
 }
 

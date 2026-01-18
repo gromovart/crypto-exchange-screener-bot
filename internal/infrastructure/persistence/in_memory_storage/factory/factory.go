@@ -16,6 +16,9 @@ type StorageFactory struct {
 	config         *StorageFactoryConfig
 	mu             sync.RWMutex
 	initialized    bool
+	cleanupRunning bool
+	stopCleanup    chan struct{}
+	cleanupWg      sync.WaitGroup
 }
 
 // StorageFactoryConfig конфигурация фабрики хранилищ
@@ -65,7 +68,9 @@ func NewStorageFactory(deps StorageDependencies) (*StorageFactory, error) {
 	factory := &StorageFactory{
 		customStorages: make(map[string]storage.PriceStorage),
 		config:         config,
-		initialized:    true,
+		initialized:    false,
+		cleanupRunning: false,
+		stopCleanup:    make(chan struct{}),
 	}
 
 	logger.Info("✅ Фабрика in-memory хранилищ создана")
@@ -77,8 +82,8 @@ func (sf *StorageFactory) Initialize() error {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
 
-	if !sf.initialized {
-		return fmt.Errorf("фабрика хранилищ не инициализирована")
+	if sf.initialized {
+		return fmt.Errorf("фабрика хранилищ уже инициализирована")
 	}
 
 	logger.Info("🔧 Инициализация фабрики in-memory хранилищ...")
@@ -86,10 +91,7 @@ func (sf *StorageFactory) Initialize() error {
 	// Создаем хранилище по умолчанию
 	sf.defaultStorage = storage.NewInMemoryPriceStorage(sf.config.DefaultStorageConfig)
 
-	// Запускаем рутину очистки если включено
-	if sf.config.EnableCleanupRoutine {
-		go sf.startCleanupRoutine()
-	}
+	sf.initialized = true
 
 	logger.Info("✅ Фабрика in-memory хранилищ инициализирована")
 	logger.Info("   • Хранилище по умолчанию создано")
@@ -97,6 +99,57 @@ func (sf *StorageFactory) Initialize() error {
 	logger.Info("   • Макс. история: %d на символ", sf.config.DefaultStorageConfig.MaxHistoryPerSymbol)
 	logger.Info("   • Очистка включена: %v", sf.config.EnableCleanupRoutine)
 
+	return nil
+}
+
+// Start запускает фоновые задачи фабрики
+func (sf *StorageFactory) Start() error {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	if !sf.initialized {
+		return fmt.Errorf("фабрика хранилищ не инициализирована")
+	}
+
+	if sf.cleanupRunning {
+		return fmt.Errorf("фабрика хранилищ уже запущена")
+	}
+
+	logger.Info("🚀 Запуск фоновых задач фабрики хранилищ...")
+
+	// Запускаем рутину очистки если включено
+	if sf.config.EnableCleanupRoutine {
+		sf.cleanupRunning = true
+		sf.cleanupWg.Add(1)
+		go sf.startCleanupRoutine()
+		logger.Info("   • Фоновая очистка запущена")
+	}
+
+	logger.Info("✅ Фоновые задачи фабрики хранилищ запущены")
+	return nil
+}
+
+// Stop останавливает фоновые задачи фабрики
+func (sf *StorageFactory) Stop() error {
+	sf.mu.Lock()
+	defer sf.mu.Unlock()
+
+	if !sf.cleanupRunning {
+		return nil
+	}
+
+	logger.Info("🛑 Остановка фоновых задач фабрики хранилищ...")
+
+	// Останавливаем рутину очистки
+	if sf.cleanupRunning && sf.config.EnableCleanupRoutine {
+		close(sf.stopCleanup)
+		sf.cleanupWg.Wait()
+		sf.cleanupRunning = false
+		sf.stopCleanup = make(chan struct{}) // Создаем новый канал для возможного перезапуска
+		logger.Info("   • Фоновая очистка остановлена")
+	}
+
+	logger.Info("✅ Фоновые задачи фабрики хранилищ остановлены")
 	return nil
 }
 
@@ -271,10 +324,11 @@ func (sf *StorageFactory) GetHealthStatus() map[string]interface{} {
 
 	status := map[string]interface{}{
 		"initialized":           sf.initialized,
+		"cleanup_running":       sf.cleanupRunning,
 		"default_storage_ready": sf.defaultStorage != nil,
 		"custom_storages_count": len(sf.customStorages),
 		"max_custom_storages":   sf.config.MaxCustomStorages,
-		"cleanup_routine":       sf.config.EnableCleanupRoutine,
+		"cleanup_enabled":       sf.config.EnableCleanupRoutine,
 	}
 
 	// Добавляем статистику хранилища по умолчанию
@@ -325,10 +379,25 @@ func (sf *StorageFactory) IsReady() bool {
 	return sf.initialized && sf.config != nil
 }
 
+// IsRunning проверяет запущены ли фоновые задачи
+func (sf *StorageFactory) IsRunning() bool {
+	sf.mu.RLock()
+	defer sf.mu.RUnlock()
+	return sf.cleanupRunning
+}
+
 // Reset сбрасывает фабрику
 func (sf *StorageFactory) Reset() {
 	sf.mu.Lock()
 	defer sf.mu.Unlock()
+
+	// Останавливаем фоновые задачи если они запущены
+	if sf.cleanupRunning {
+		close(sf.stopCleanup)
+		sf.cleanupWg.Wait()
+		sf.cleanupRunning = false
+		sf.stopCleanup = make(chan struct{})
+	}
 
 	// Очищаем все хранилища
 	if sf.defaultStorage != nil {
@@ -349,6 +418,8 @@ func (sf *StorageFactory) Reset() {
 
 // startCleanupRoutine запускает рутину очистки старых данных
 func (sf *StorageFactory) startCleanupRoutine() {
+	defer sf.cleanupWg.Done()
+
 	if !sf.config.EnableCleanupRoutine {
 		return
 	}
@@ -362,6 +433,9 @@ func (sf *StorageFactory) startCleanupRoutine() {
 		select {
 		case <-ticker.C:
 			sf.cleanupOldData()
+		case <-sf.stopCleanup:
+			logger.Info("🛑 Рутина очистки хранилищ остановлена")
+			return
 		}
 	}
 }

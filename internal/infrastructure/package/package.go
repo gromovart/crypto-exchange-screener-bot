@@ -27,6 +27,7 @@ type InfrastructureFactory struct {
 	storageFactory    *storage_factory.StorageFactory
 	mu                sync.RWMutex
 	initialized       bool
+	running           bool
 }
 
 // InfrastructureDependencies зависимости для фабрики инфраструктуры
@@ -44,7 +45,8 @@ func NewInfrastructureFactory(deps InfrastructureDependencies) (*InfrastructureF
 
 	factory := &InfrastructureFactory{
 		config:      deps.Config,
-		initialized: true,
+		initialized: false,
+		running:     false,
 	}
 
 	logger.Info("✅ Главная фабрика инфраструктуры создана")
@@ -56,8 +58,8 @@ func (f *InfrastructureFactory) Initialize() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if !f.initialized {
-		return fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	if f.initialized {
+		return fmt.Errorf("фабрика инфраструктуры уже инициализирована")
 	}
 
 	logger.Info("🔧 Инициализация инфраструктурных компонентов...")
@@ -65,26 +67,13 @@ func (f *InfrastructureFactory) Initialize() error {
 	// 1. Создаем сервис базы данных
 	if f.config.Database.Enabled {
 		f.databaseService = database.NewDatabaseService(f.config)
-		if err := f.databaseService.Start(); err != nil {
-			logger.Warn("⚠️ Не удалось запустить DatabaseService: %v", err)
-		} else {
-			logger.Info("✅ DatabaseService инициализирован")
-		}
+		logger.Info("✅ DatabaseService создан (не запущен)")
 	}
 
-	// 2. Создаем Redis сервис и кэш
+	// 2. Создаем Redis сервис
 	if f.config.Redis.Enabled {
 		f.redisService = redis.NewRedisService(f.config)
-		if err := f.redisService.Start(); err != nil {
-			logger.Warn("⚠️ Не удалось запустить RedisService: %v", err)
-		} else {
-			logger.Info("✅ RedisService инициализирован")
-			// Создаем кэш после успешного запуска сервиса
-			f.redisCache = f.redisService.GetCache()
-			if f.redisCache != nil {
-				logger.Info("✅ Redis кэш создан")
-			}
-		}
+		logger.Info("✅ RedisService создан (не запущен)")
 	}
 
 	// 3. Создаем EventBus
@@ -129,7 +118,76 @@ func (f *InfrastructureFactory) Initialize() error {
 		}
 	}
 
+	f.initialized = true
 	logger.Info("✅ Все инфраструктурные компоненты инициализированы")
+	return nil
+}
+
+// Start запускает все инфраструктурные компоненты
+func (f *InfrastructureFactory) Start() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.initialized {
+		return fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.running {
+		return fmt.Errorf("фабрика инфраструктуры уже запущена")
+	}
+
+	logger.Info("🚀 Запуск инфраструктурных компонентов...")
+
+	// Запускаем компоненты
+	errors := []error{}
+
+	// 1. Запускаем DatabaseService
+	if f.config.Database.Enabled && f.databaseService != nil {
+		if err := f.databaseService.Start(); err != nil {
+			errors = append(errors, fmt.Errorf("ошибка запуска DatabaseService: %w", err))
+			logger.Warn("⚠️ Не удалось запустить DatabaseService: %v", err)
+		} else {
+			logger.Info("✅ DatabaseService запущен")
+		}
+	}
+
+	// 2. Запускаем RedisService
+	if f.config.Redis.Enabled && f.redisService != nil {
+		if err := f.redisService.Start(); err != nil {
+			errors = append(errors, fmt.Errorf("ошибка запуска RedisService: %w", err))
+			logger.Warn("⚠️ Не удалось запустить RedisService: %v", err)
+		} else {
+			logger.Info("✅ RedisService запущен")
+			// Создаем кэш после успешного запуска сервиса
+			f.redisCache = f.redisService.GetCache()
+			if f.redisCache != nil {
+				logger.Info("✅ Redis кэш создан")
+			}
+		}
+	}
+
+	// 3. Запускаем EventBus
+	if f.eventBus != nil {
+		f.eventBus.Start()
+		logger.Info("✅ EventBus запущен")
+	}
+
+	// 4. Запускаем StorageFactory
+	if f.storageFactory != nil {
+		if err := f.storageFactory.Start(); err != nil {
+			errors = append(errors, fmt.Errorf("ошибка запуска StorageFactory: %w", err))
+			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
+		} else {
+			logger.Info("✅ StorageFactory запущена")
+		}
+	}
+
+	if len(errors) > 0 {
+		return fmt.Errorf("ошибки при запуске: %v", errors)
+	}
+
+	f.running = true
+	logger.Info("✅ Все инфраструктурные компоненты запущены")
 	return nil
 }
 
@@ -148,10 +206,15 @@ func (f *InfrastructureFactory) CreateDatabaseService() (*database.DatabaseServi
 		}
 
 		f.databaseService = database.NewDatabaseService(f.config)
-		if err := f.databaseService.Start(); err != nil {
-			return nil, fmt.Errorf("не удалось создать DatabaseService: %w", err)
-		}
 		logger.Info("✅ DatabaseService создан")
+	}
+
+	// Запускаем если фабрика уже запущена
+	if f.running && !f.databaseService.IsRunning() {
+		if err := f.databaseService.Start(); err != nil {
+			return nil, fmt.Errorf("не удалось запустить DatabaseService: %w", err)
+		}
+		logger.Info("✅ DatabaseService запущен")
 	}
 
 	return f.databaseService, nil
@@ -172,10 +235,17 @@ func (f *InfrastructureFactory) CreateRedisService() (*redis.RedisService, error
 		}
 
 		f.redisService = redis.NewRedisService(f.config)
-		if err := f.redisService.Start(); err != nil {
-			return nil, fmt.Errorf("не удалось создать RedisService: %w", err)
-		}
 		logger.Info("✅ RedisService создан")
+	}
+
+	// Запускаем если фабрика уже запущена
+	if f.running && !f.redisService.IsRunning() {
+		if err := f.redisService.Start(); err != nil {
+			return nil, fmt.Errorf("не удалось запустить RedisService: %w", err)
+		}
+		logger.Info("✅ RedisService запущен")
+		// Создаем кэш после запуска
+		f.redisCache = f.redisService.GetCache()
 	}
 
 	return f.redisService, nil
@@ -225,6 +295,12 @@ func (f *InfrastructureFactory) CreateEventBus() (*events.EventBus, error) {
 		}
 		f.eventBus = events.NewEventBus(eventBusConfig)
 		logger.Info("✅ EventBus создан")
+	}
+
+	// Запускаем если фабрика уже запущена
+	if f.running && !f.eventBus.IsRunning() {
+		f.eventBus.Start()
+		logger.Info("✅ EventBus запущен")
 	}
 
 	return f.eventBus, nil
@@ -336,6 +412,14 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.Storage
 		}
 
 		logger.Info("✅ StorageFactory создана")
+	}
+
+	// Запускаем если фабрика уже запущена
+	if f.running && f.storageFactory != nil && !f.storageFactory.IsRunning() {
+		if err := f.storageFactory.Start(); err != nil {
+			return nil, fmt.Errorf("не удалось запустить StorageFactory: %w", err)
+		}
+		logger.Info("✅ StorageFactory запущена")
 	}
 
 	return f.storageFactory, nil
@@ -509,6 +593,7 @@ func (f *InfrastructureFactory) GetHealthStatus() map[string]interface{} {
 
 	status := map[string]interface{}{
 		"initialized":              f.initialized,
+		"running":                  f.running,
 		"config_available":         f.config != nil,
 		"database_service_ready":   f.databaseService != nil,
 		"redis_service_ready":      f.redisService != nil,
@@ -546,12 +631,16 @@ func (f *InfrastructureFactory) Stop() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if !f.running {
+		return nil
+	}
+
 	logger.Info("🛑 Остановка инфраструктурных компонентов...")
 
 	errors := []error{}
 
 	// Останавливаем DatabaseService
-	if f.databaseService != nil {
+	if f.databaseService != nil && f.databaseService.IsRunning() {
 		if err := f.databaseService.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("ошибка остановки DatabaseService: %w", err))
 		} else {
@@ -560,7 +649,7 @@ func (f *InfrastructureFactory) Stop() error {
 	}
 
 	// Останавливаем RedisService
-	if f.redisService != nil {
+	if f.redisService != nil && f.redisService.IsRunning() {
 		if err := f.redisService.Stop(); err != nil {
 			errors = append(errors, fmt.Errorf("ошибка остановки RedisService: %w", err))
 		} else {
@@ -569,9 +658,18 @@ func (f *InfrastructureFactory) Stop() error {
 	}
 
 	// Останавливаем EventBus
-	if f.eventBus != nil {
+	if f.eventBus != nil && f.eventBus.IsRunning() {
 		f.eventBus.Stop()
 		logger.Info("✅ EventBus остановлен")
+	}
+
+	// Останавливаем StorageFactory
+	if f.storageFactory != nil && f.storageFactory.IsRunning() {
+		if err := f.storageFactory.Stop(); err != nil {
+			errors = append(errors, fmt.Errorf("ошибка остановки StorageFactory: %w", err))
+		} else {
+			logger.Info("✅ StorageFactory остановлена")
+		}
 	}
 
 	// Сбрасываем фабрики
@@ -580,12 +678,7 @@ func (f *InfrastructureFactory) Stop() error {
 		logger.Info("✅ RepositoryFactory сброшена")
 	}
 
-	if f.storageFactory != nil {
-		f.storageFactory.Reset()
-		logger.Info("✅ StorageFactory сброшена")
-	}
-
-	f.initialized = false
+	f.running = false
 
 	if len(errors) > 0 {
 		return fmt.Errorf("ошибки при остановке: %v", errors)
@@ -600,6 +693,11 @@ func (f *InfrastructureFactory) Reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	// Останавливаем если запущена
+	if f.running {
+		f.Stop()
+	}
+
 	f.databaseService = nil
 	f.redisService = nil
 	f.redisCache = nil
@@ -608,6 +706,7 @@ func (f *InfrastructureFactory) Reset() {
 	f.repositoryFactory = nil
 	f.storageFactory = nil
 	f.initialized = false
+	f.running = false
 
 	logger.Info("🔄 Фабрика инфраструктуры сброшена")
 }
@@ -618,6 +717,13 @@ func (f *InfrastructureFactory) IsReady() bool {
 	defer f.mu.RUnlock()
 
 	return f.initialized && f.config != nil
+}
+
+// IsRunning проверяет запущена ли фабрика
+func (f *InfrastructureFactory) IsRunning() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.running
 }
 
 // GetConfig возвращает конфигурацию

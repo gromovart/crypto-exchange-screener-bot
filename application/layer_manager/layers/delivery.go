@@ -79,8 +79,41 @@ func (dl *DeliveryLayer) Initialize() error {
 		},
 	)
 
-	// Инициализация будет выполнена позже, когда будет доступен EventBus
-	// (EventBus предоставляется через InitializeWithEventBus)
+	// Получаем EventBus из InfrastructureLayer
+	// Для этого нужно получить доступ к InfrastructureLayer через CoreLayer
+	if dl.coreLayer.infraLayer == nil {
+		return fmt.Errorf("InfrastructureLayer не доступен")
+	}
+
+	// Получаем EventBus из InfrastructureLayer
+	eventBusComp, exists := dl.coreLayer.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден в InfrastructureLayer")
+	}
+
+	// Приводим к правильному типу
+	eventBus, ok := eventBusComp.(*events.EventBus)
+	if !ok {
+		// Если это LazyComponent, получаем его значение
+		if lc, ok := eventBusComp.(*LazyComponent); ok {
+			eventBusInterface, err := lc.Get()
+			if err != nil {
+				return fmt.Errorf("не удалось получить EventBus: %w", err)
+			}
+			eventBus, ok = eventBusInterface.(*events.EventBus)
+			if !ok {
+				return fmt.Errorf("неверный тип EventBus после получения из LazyComponent")
+			}
+		} else {
+			return fmt.Errorf("неверный тип компонента EventBus")
+		}
+	}
+
+	// Инициализируем TelegramDeliveryPackage с EventBus
+	if err := dl.telegramPackage.Initialize(eventBus); err != nil {
+		dl.setError(err)
+		return fmt.Errorf("не удалось инициализировать TelegramDeliveryPackage: %w", err)
+	}
 
 	// Регистрируем компоненты
 	dl.registerDeliveryComponents()

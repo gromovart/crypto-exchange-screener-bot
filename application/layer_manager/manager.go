@@ -76,31 +76,92 @@ func (lm *LayerManager) Start() error {
 	lm.mu.Lock()
 	defer lm.mu.Unlock()
 
-	if !lm.initialized {
-		return fmt.Errorf("LayerManager не инициализирован")
-	}
-
 	if lm.running {
 		return fmt.Errorf("LayerManager уже запущен")
 	}
 
 	logger.Info("🚀 Запуск LayerManager и всех слоев...")
 
-	// Запускаем фоновые задачи
-	lm.startBackgroundTasks()
+	// 1. Запускаем слой инфраструктуры первым
+	infraLayer, exists := lm.layerRegistry.Get("InfrastructureLayer")
+	if !exists {
+		return fmt.Errorf("InfrastructureLayer не найден")
+	}
 
-	// Запускаем слои
+	logger.Info("🏗️  Запуск InfrastructureLayer...")
+	if err := infraLayer.Start(); err != nil {
+		return fmt.Errorf("[manager.go]не удалось запустить InfrastructureLayer: %w", err)
+	}
+
+	// 2. Ждем готовности InfrastructureFactory
+	logger.Info("⏳ Ожидание готовности InfrastructureFactory...")
+	if !lm.waitForInfrastructureReady(30 * time.Second) {
+		return fmt.Errorf("таймаут ожидания готовности InfrastructureFactory")
+	}
+	logger.Info("✅ InfrastructureFactory готова")
+
+	// 3. Запускаем остальные слои через реестр (с учетом зависимостей)
+	logger.Info("🚦 Запуск остальных слоев...")
 	errors := lm.layerRegistry.StartAll()
+
+	// Проверяем ошибки запуска
 	if len(errors) > 0 {
+		// Логируем ошибки, но не останавливаемся
 		for layerName, err := range errors {
 			logger.Warn("⚠️ Ошибка запуска слоя %s: %v", layerName, err)
 		}
-		return fmt.Errorf("не удалось запустить один или несколько слоев")
 	}
 
+	// 4. Проверяем здоровье всех слоев
+	health := lm.layerRegistry.HealthCheck()
+	healthyCount := 0
+	for layerName, isHealthy := range health {
+		if isHealthy {
+			healthyCount++
+		} else {
+			logger.Warn("⚠️ Слой %s не здоров", layerName)
+		}
+	}
+
+	logger.Info("📊 Статус слоев: %d/%d здоровы", healthyCount, len(health))
+
 	lm.running = true
-	logger.Info("✅ LayerManager и все слои запущены")
+	lm.startTime = time.Now()
+	logger.Info("✅ LayerManager запущен, все слои запущены")
 	return nil
+}
+
+// waitForInfrastructureReady ожидает готовности InfrastructureFactory
+func (lm *LayerManager) waitForInfrastructureReady(timeout time.Duration) bool {
+	infraLayer, exists := lm.layerRegistry.Get("InfrastructureLayer")
+	if !exists {
+		return false
+	}
+
+	startTime := time.Now()
+	checkInterval := 500 * time.Millisecond
+
+	for {
+		// Проверяем слой инфраструктуры
+		if infraLayer.HealthCheck() {
+			// Получаем фабрику инфраструктуры
+			if infraInfra, ok := infraLayer.(*layers.InfrastructureLayer); ok {
+				factory := infraInfra.GetInfrastructureFactory()
+				if factory != nil && factory.IsReady() {
+					return true
+				}
+			}
+		}
+
+		// Проверяем таймаут
+		if time.Since(startTime) > timeout {
+			logger.Warn("⏰ Таймаут ожидания готовности InfrastructureFactory")
+			return false
+		}
+
+		// Ждем перед следующей проверкой
+		time.Sleep(checkInterval)
+	}
 }
 
 // Stop останавливает все слои

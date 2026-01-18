@@ -35,16 +35,17 @@ func (lf *LayerFactory) CreateLayers() (*layers.LayerRegistry, error) {
 	}
 
 	// 3. Инициализируем слой инфраструктуры
-	logger.Debug("Инициализация InfrastructureLayer...")
-	if err := infraLayer.Initialize(); err != nil {
-		return nil, fmt.Errorf("не удалось инициализировать InfrastructureLayer: %w", err)
-	}
+	// logger.Debug("Инициализация InfrastructureLayer...")
+	// if err := infraLayer.Initialize(); err != nil {
+	// 	return nil, fmt.Errorf("не удалось инициализировать InfrastructureLayer: %w", err)
+	// }
 
+	// УБИРАЕМ запуск здесь - только инициализация
 	// 4. Запускаем слой инфраструктуры
-	logger.Debug("Запуск InfrastructureLayer...")
-	if err := infraLayer.Start(); err != nil {
-		return nil, fmt.Errorf("не удалось запустить InfrastructureLayer: %w", err)
-	}
+	// logger.Debug("Запуск InfrastructureLayer...")
+	// if err := infraLayer.Start(); err != nil {
+	// 	return nil, fmt.Errorf("не удалось запустить InfrastructureLayer: %w", err)
+	// }
 
 	// 5. Создаем слой ядра (зависит от инфраструктуры)
 	logger.Debug("Создание CoreLayer...")
@@ -53,11 +54,11 @@ func (lf *LayerFactory) CreateLayers() (*layers.LayerRegistry, error) {
 		return nil, fmt.Errorf("не удалось зарегистрировать CoreLayer: %w", err)
 	}
 
-	// 6. Инициализируем слой ядра
-	logger.Debug("Инициализация CoreLayer...")
-	if err := coreLayer.Initialize(); err != nil {
-		return nil, fmt.Errorf("не удалось инициализировать CoreLayer: %w", err)
-	}
+	// // 6. Инициализируем слой ядра
+	// logger.Debug("Инициализация CoreLayer...")
+	// if err := coreLayer.Initialize(); err != nil {
+	// 	return nil, fmt.Errorf("не удалось инициализировать CoreLayer: %w", err)
+	// }
 
 	// 7. Создаем слой доставки (зависит от ядра)
 	logger.Debug("Создание DeliveryLayer...")
@@ -67,16 +68,16 @@ func (lf *LayerFactory) CreateLayers() (*layers.LayerRegistry, error) {
 	}
 
 	// 8. Инициализируем слой доставки
-	logger.Debug("Инициализация DeliveryLayer...")
-	if err := deliveryLayer.Initialize(); err != nil {
-		return nil, fmt.Errorf("не удалось инициализировать DeliveryLayer: %w", err)
-	}
+	// logger.Debug("Инициализация DeliveryLayer...")
+	// if err := deliveryLayer.Initialize(); err != nil {
+	// 	return nil, fmt.Errorf("не удалось инициализировать DeliveryLayer: %w", err)
+	// }
 
 	// 9. Настраиваем зависимости между слоями
-	logger.Debug("Валидация зависимостей слоев...")
-	if err := registry.ValidateDependencies(); err != nil {
-		return nil, fmt.Errorf("ошибка зависимостей слоев: %w", err)
-	}
+	// logger.Debug("Валидация зависимостей слоев...")
+	// if err := registry.ValidateDependencies(); err != nil {
+	// 	return nil, fmt.Errorf("ошибка зависимостей слоев: %w", err)
+	// }
 
 	logger.Info("✅ Все слои созданы и инициализированы")
 	return registry, nil

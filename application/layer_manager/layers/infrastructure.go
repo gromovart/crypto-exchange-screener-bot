@@ -6,6 +6,7 @@ import (
 	infrastructure_factory "crypto-exchange-screener-bot/internal/infrastructure/package"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"time"
 )
 
 // InfrastructureLayer слой инфраструктуры
@@ -51,13 +52,43 @@ func (il *InfrastructureLayer) Initialize() error {
 		return fmt.Errorf("не удалось инициализировать фабрику инфраструктуры: %w", err)
 	}
 
+	// ✅ ГАРАНТИЯ: ждем пока фабрика станет готовой
+	if !il.waitForFactoryReady(10 * time.Second) {
+		il.setError(fmt.Errorf("таймаут ожидания готовности фабрики инфраструктуры"))
+		return fmt.Errorf("фабрика инфраструктуры не стала готовой в течение 10 секунд")
+	}
+
 	// Регистрируем компоненты
 	il.registerInfrastructureComponents()
 
 	il.initialized = true
 	il.updateState(StateInitialized)
-	logger.Info("✅ Слой инфраструктуры инициализирован")
+	logger.Info("✅ Слой инфраструктуры инициализирован (фабрика готова)")
 	return nil
+}
+
+// waitForFactoryReady ожидает готовности фабрики инфраструктуры
+func (il *InfrastructureLayer) waitForFactoryReady(timeout time.Duration) bool {
+	if il.infraFactory == nil {
+		return false
+	}
+
+	startTime := time.Now()
+	checkInterval := 100 * time.Millisecond
+
+	for {
+		if il.infraFactory.IsReady() {
+			logger.Info("   ✅ Фабрика инфраструктуры готова")
+			return true
+		}
+
+		if time.Since(startTime) > timeout {
+			logger.Warn("   ⚠️ Таймаут ожидания готовности фабрики инфраструктуры")
+			return false
+		}
+
+		time.Sleep(checkInterval)
+	}
 }
 
 // Start запускает слой инфраструктуры
@@ -73,8 +104,14 @@ func (il *InfrastructureLayer) Start() error {
 	il.updateState(StateStarting)
 	logger.Info("🚀 Запуск слоя инфраструктуры...")
 
-	// Инфраструктурная фабрика уже запускает компоненты в Initialize()
-	// Дополнительный запуск не требуется
+	// Запускаем фабрику инфраструктуры
+	if il.infraFactory != nil {
+		if err := il.infraFactory.Start(); err != nil {
+			il.setError(err)
+			return fmt.Errorf("не удалось запустить фабрику инфраструктуры: %w", err)
+		}
+		logger.Info("   • Фабрика инфраструктуры запущена")
+	}
 
 	il.running = true
 	il.startTime = il.startTime // Используем время из BaseLayer
@@ -97,6 +134,7 @@ func (il *InfrastructureLayer) Stop() error {
 		if err := il.infraFactory.Stop(); err != nil {
 			logger.Warn("⚠️ Ошибка остановки фабрики инфраструктуры: %v", err)
 		}
+		logger.Info("   • Фабрика инфраструктуры остановлена")
 	}
 
 	il.running = false

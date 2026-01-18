@@ -419,10 +419,37 @@ func (f *CoreServiceFactory) IsReady() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	return f.initialized &&
-		f.validateDependencies() &&
-		f.userFactory != nil &&
-		f.userFactory.IsReady()
+	// Базовые проверки
+	if !f.initialized {
+		logger.Debug("⚠️ Фабрика ядра не инициализирована")
+		return false
+	}
+
+	if f.infrastructureFactory == nil {
+		logger.Warn("⚠️ InfrastructureFactory не доступна для фабрики ядра")
+		return false
+	}
+
+	// Проверяем что инфраструктурная фабрика хотя бы создана
+	// (полная готовность будет проверяться позже)
+	if !f.infrastructureFactory.IsReady() {
+		logger.Debug("⚠️ InfrastructureFactory не готова")
+		return false
+	}
+
+	// Проверяем вложенные фабрики
+	if f.userFactory == nil {
+		logger.Debug("⚠️ Фабрика UserService не создана")
+		return false
+	}
+
+	if !f.userFactory.IsReady() {
+		logger.Debug("⚠️ Фабрика UserService не готова")
+		return false
+	}
+
+	logger.Debug("✅ CoreServiceFactory готова к созданию сервисов")
+	return true
 }
 
 // UpdateDependencies обновляет зависимости фабрики

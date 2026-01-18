@@ -203,9 +203,23 @@ func (f *UserServiceFactory) IsReady() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	return f.initialized &&
-		f.database != nil &&
-		f.database.GetDB() != nil &&
-		f.redisService != nil &&
-		f.redisService.GetCache() != nil
+	if !f.initialized {
+		logger.Debug("⚠️ Фабрика UserService не инициализирована")
+		return false
+	}
+
+	// Проверяем что сервисы созданы (не обязательно подключены)
+	if f.database == nil {
+		logger.Debug("⚠️ DatabaseService не создан")
+		return false
+	}
+
+	if f.redisService == nil {
+		logger.Debug("⚠️ RedisService не создан")
+		return false
+	}
+
+	// Не проверяем GetDB() != nil, так как подключение может быть ленивым
+	logger.Debug("✅ Фабрика UserService готова (сервисы созданы)")
+	return true
 }

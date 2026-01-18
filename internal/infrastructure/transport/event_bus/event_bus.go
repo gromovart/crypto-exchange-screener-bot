@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +26,8 @@ type EventBus struct {
 	running     bool
 	stopChan    chan struct{}
 	wg          sync.WaitGroup
+	// 🔴 ДОБАВИТЬ: защита от рекурсии
+	processingDepth int32 // атомарный счетчик глубины обработки
 }
 
 // EventBusConfig - конфигурация EventBus
@@ -249,6 +252,14 @@ func (b *EventBus) eventWorker(id int) {
 
 // processEvent обрабатывает одно событие
 func (b *EventBus) processEvent(event types.Event) error {
+	depth := atomic.AddInt32(&b.processingDepth, 1)
+	defer atomic.AddInt32(&b.processingDepth, -1)
+
+	if depth > 10 { // Максимальная глубина рекурсии
+		logger.Warn("⚠️ Обнаружена возможная рекурсия в EventBus, глубина: %d", depth)
+		return fmt.Errorf("возможная рекурсия, максимальная глубина достигнута")
+	}
+
 	startTime := time.Now()
 
 	// 🔴 ДОБАВЬТЕ ОТЛАДОЧНЫЙ ВЫВОД:

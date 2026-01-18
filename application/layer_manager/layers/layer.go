@@ -2,6 +2,7 @@
 package layers
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -59,6 +60,8 @@ type Layer interface {
 	SetDependencies(deps map[string]Layer) error
 	GetDependencies() []string
 	ValidateDependencies() error
+	WaitForDependencies(deps map[string]Layer, timeout time.Duration) error
+	AreDependenciesReady(deps map[string]Layer) (bool, []string)
 
 	// Конфигурация
 	UpdateConfig(config interface{}) error
@@ -225,6 +228,70 @@ func (bl *BaseLayer) ValidateDependencies() error {
 		LayerName: bl.name,
 		Message:   "зависимости требуют реализации в конкретном слое",
 	}
+}
+
+// WaitForDependencies ожидает готовности всех зависимых слоев
+func (bl *BaseLayer) WaitForDependencies(deps map[string]Layer, timeout time.Duration) error {
+	if len(bl.dependencies) == 0 {
+		return nil
+	}
+
+	startTime := time.Now()
+	checkInterval := 100 * time.Millisecond
+
+	for {
+		ready, notReady := bl.AreDependenciesReady(deps)
+		if ready {
+			return nil
+		}
+
+		if time.Since(startTime) > timeout {
+			return &LayerError{
+				LayerName: bl.name,
+				Message:   fmt.Sprintf("таймаут ожидания зависимостей (%v). Не готовы: %v", timeout, notReady),
+			}
+		}
+
+		time.Sleep(checkInterval)
+	}
+}
+
+// AreDependenciesReady проверяет готовность всех зависимых слоев
+func (bl *BaseLayer) AreDependenciesReady(deps map[string]Layer) (bool, []string) {
+	if len(bl.dependencies) == 0 {
+		return true, nil
+	}
+
+	var notReady []string
+
+	for _, depName := range bl.dependencies {
+		dep, exists := deps[depName]
+		if !exists {
+			notReady = append(notReady, depName+" (не найден)")
+			continue
+		}
+
+		// Проверяем что зависимый слой инициализирован
+		if !dep.IsInitialized() {
+			notReady = append(notReady, depName+" (не инициализирован)")
+			continue
+		}
+
+		// Проверяем что зависимый слой запущен (если у него нет собственных зависимостей)
+		if !dep.IsRunning() {
+			// Рекурсивно проверяем зависимости зависимого слоя
+			if depDeps := dep.GetDependencies(); len(depDeps) > 0 {
+				depReady, _ := bl.AreDependenciesReady(deps)
+				if !depReady {
+					notReady = append(notReady, depName+" (зависимости не готовы)")
+				}
+			} else {
+				notReady = append(notReady, depName+" (не запущен)")
+			}
+		}
+	}
+
+	return len(notReady) == 0, notReady
 }
 
 // UpdateConfig обновляет конфигурацию
