@@ -2,13 +2,14 @@
 package layers
 
 import (
-	"crypto-exchange-screener-bot/internal/core/domain/fetchers" // НОВЫЙ импорт
+	"crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
+	"crypto-exchange-screener-bot/internal/core/domain/fetchers"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
-	"crypto-exchange-screener-bot/internal/infrastructure/config" // НОВЫЙ импорт
-	in_memory_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory"
-	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus" // НОВЫЙ импорт
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	in_memory_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory" // ДОБАВЛЕНО
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"time"
@@ -21,8 +22,9 @@ type CoreLayer struct {
 	infraLayer        *InfrastructureLayer
 	coreFactory       *core_factory.CoreServiceFactory
 	initialized       bool
-	bybitPriceFetcher *fetchers.BybitPriceFetcher    // НОВОЕ: правильное название
-	fetcherFactory    *fetchers.MarketFetcherFactory // НОВОЕ: фабрика фетчеров
+	bybitPriceFetcher *fetchers.BybitPriceFetcher
+	fetcherFactory    *fetchers.MarketFetcherFactory
+	candleSystem      *candle.CandleSystem // НОВОЕ: свечная система
 }
 
 // NewCoreLayer создает слой ядра
@@ -132,6 +134,9 @@ func (cl *CoreLayer) Initialize() error {
 	cl.fetcherFactory = fetchers.NewMarketFetcherFactory(cl.config)
 	logger.Info("🏭 Фабрика MarketFetcher создана")
 
+	// НОВОЕ: Создаем свечную систему (пока без priceStorage - создадим в Start)
+	logger.Info("🕯️ CoreLayer: подготовка свечной системы...")
+
 	// Регистрируем остальные компоненты
 	cl.registerCoreComponents()
 
@@ -154,6 +159,13 @@ func (cl *CoreLayer) Start() error {
 	cl.updateState(StateStarting)
 	logger.Info("🚀 Запуск слоя ядра...")
 
+	// НОВОЕ: Запускаем свечную систему
+	if cl.config.TelegramEnabled && cl.infraLayer != nil {
+		if err := cl.setupAndStartCandleSystem(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить свечную систему: %v", err)
+		}
+	}
+
 	// НОВОЕ: Запускаем BybitPriceFetcher если включен в конфигурации
 	if cl.config.TelegramEnabled && cl.infraLayer != nil {
 		cl.startBybitPriceFetcher()
@@ -165,6 +177,57 @@ func (cl *CoreLayer) Start() error {
 	cl.running = true
 	cl.updateState(StateRunning)
 	logger.Info("✅ Слой ядра запущен")
+	return nil
+}
+
+// НОВЫЙ МЕТОД: настройка и запуск свечной системы
+func (cl *CoreLayer) setupAndStartCandleSystem() error {
+	logger.Info("🕯️ CoreLayer: настройка свечной системы...")
+
+	// Получаем StorageFactory для создания priceStorage
+	storageFactoryComp, exists := cl.infraLayer.GetComponent("StorageFactory")
+	if !exists {
+		return fmt.Errorf("StorageFactory не найден")
+	}
+
+	// Получаем StorageFactory из LazyComponent
+	storageInterface, err := cl.getComponentValue(storageFactoryComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
+	}
+
+	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	if !ok {
+		return fmt.Errorf("неверный тип StorageFactory")
+	}
+
+	// Создаем хранилище цен для свечной системы
+	priceStorage, err := storageFactory.CreateDefaultStorage()
+	if err != nil {
+		return fmt.Errorf("ошибка создания хранилища цен: %w", err)
+	}
+
+	// Создаем свечную систему
+	candleFactory := candle.NewCandleSystemFactory().
+		WithSupportedPeriods([]string{"5m", "15m", "30m", "1h", "4h", "1d"}).
+		WithMaxHistory(1000).
+		WithCleanupInterval(5 * time.Minute).
+		WithAutoBuild(true)
+
+	cl.candleSystem, err = candleFactory.CreateSystem(priceStorage)
+	if err != nil {
+		return fmt.Errorf("ошибка создания свечной системы: %w", err)
+	}
+
+	// Запускаем свечную систему
+	if err := cl.candleSystem.Start(); err != nil {
+		return fmt.Errorf("ошибка запуска свечной системы: %w", err)
+	}
+
+	// Регистрируем компонент
+	cl.registerComponent("CandleSystem", cl.candleSystem)
+	logger.Info("✅ Свечная система создана и запущена")
+
 	return nil
 }
 
@@ -219,8 +282,23 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		return
 	}
 
-	// Создаем фетчер
-	fetcher, err := cl.fetcherFactory.CreateBybitFetcher(priceStorage, eventBus)
+	// Создаем фетчер с учетом наличия свечной системы
+	var fetcher *fetchers.BybitPriceFetcher
+	if cl.candleSystem != nil {
+		// Используем фабрику с поддержкой свечной системы
+		fetcher, err = cl.fetcherFactory.CreateBybitFetcherWithCandleSystem(
+			priceStorage,
+			eventBus,
+			cl.candleSystem,
+		)
+	} else {
+		// Создаем фетчер без свечной системы
+		fetcher, err = cl.fetcherFactory.CreateBybitFetcher(
+			priceStorage,
+			eventBus,
+		)
+	}
+
 	if err != nil {
 		logger.Error("❌ CoreLayer: ошибка создания BybitPriceFetcher: %v", err)
 		return
@@ -257,6 +335,15 @@ func (cl *CoreLayer) Stop() error {
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
 
+	// НОВОЕ: Останавливаем свечную систему если запущена
+	if cl.candleSystem != nil {
+		if err := cl.candleSystem.Stop(); err != nil {
+			logger.Warn("⚠️ Ошибка остановки свечной системы: %v", err)
+		} else {
+			logger.Info("🕯️ Свечная система остановлена")
+		}
+	}
+
 	// НОВОЕ: Останавливаем BybitPriceFetcher если запущен
 	if cl.bybitPriceFetcher != nil && cl.bybitPriceFetcher.IsRunning() {
 		if err := cl.bybitPriceFetcher.Stop(); err != nil {
@@ -287,6 +374,11 @@ func (cl *CoreLayer) Reset() error {
 	// Сбрасываем фабрику
 	if cl.coreFactory != nil {
 		cl.coreFactory.Reset()
+	}
+
+	// НОВОЕ: Сбрасываем свечную систему
+	if cl.candleSystem != nil {
+		cl.candleSystem = nil
 	}
 
 	// НОВОЕ: Сбрасываем фетчер
@@ -326,11 +418,18 @@ func (cl *CoreLayer) getComponentValue(component interface{}) (interface{}, erro
 	return nil, fmt.Errorf("компонент не является LazyComponent")
 }
 
-// GetBybitPriceFetcher возвращает BybitPriceFetcher (НОВОЕ)
+// GetBybitPriceFetcher возвращает BybitPriceFetcher
 func (cl *CoreLayer) GetBybitPriceFetcher() *fetchers.BybitPriceFetcher {
 	cl.mu.RLock()
 	defer cl.mu.RUnlock()
 	return cl.bybitPriceFetcher
+}
+
+// GetCandleSystem возвращает свечную систему
+func (cl *CoreLayer) GetCandleSystem() *candle.CandleSystem {
+	cl.mu.RLock()
+	defer cl.mu.RUnlock()
+	return cl.candleSystem
 }
 
 // registerCoreComponents регистрирует компоненты ядра
