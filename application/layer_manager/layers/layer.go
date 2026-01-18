@@ -288,39 +288,22 @@ func (bl *BaseLayer) areDependenciesReadyRecursive(deps map[string]Layer, visite
 			continue
 		}
 
-		// Проверяем что зависимый слой инициализирован
+		// ⚠️ ВАЖНОЕ ИЗМЕНЕНИЕ:
+		// При проверке зависимостей для инициализации или ожидания запуска
+		// достаточно, чтобы зависимый слой был ИНИЦИАЛИЗИРОВАН (IsInitialized())
+		// НЕ ТРЕБУЕТСЯ, чтобы он уже был ЗАПУЩЕН (IsRunning())
+		// Это позволяет слоям правильно ожидать друг друга при запуске
 		if !dep.IsInitialized() {
 			notReady = append(notReady, depName+" (не инициализирован)")
 			continue
 		}
 
-		// Если зависимый слой не запущен, проверяем его зависимости
-		if !dep.IsRunning() {
-			depDeps := dep.GetDependencies()
-			if len(depDeps) > 0 {
-				// Рекурсивно проверяем зависимости зависимого слоя
-				// Создаем новую карту посещений для этой ветки
-				newVisited := make(map[string]bool)
-				for k, v := range visited {
-					newVisited[k] = v
-				}
+		// ⚠️ ИЗМЕНЕНИЕ: Убираем проверку IsRunning() для зависимых слоев
+		// Слой может быть инициализирован, но еще не запущен - это нормально
+		// Проверка запуска будет позже, в WaitForDependencies()
 
-				if baseDep, ok := dep.(*BaseLayer); ok {
-					depReady, depNotReady := baseDep.areDependenciesReadyRecursive(deps, newVisited, depth+1)
-					if !depReady {
-						notReady = append(notReady, depName+" (зависимости не готовы: "+fmt.Sprintf("%v", depNotReady)+")")
-					}
-				} else {
-					// Если слой не BaseLayer, просто проверяем что он запущен
-					notReady = append(notReady, depName+" (не запущен и не BaseLayer для проверки зависимостей)")
-				}
-			} else {
-				// У зависимого слоя нет своих зависимостей, просто проверяем что он запущен
-				notReady = append(notReady, depName+" (не запущен)")
-			}
-		}
+		// ✅ ЗАВИСИМЫЙ СЛОЙ ИНИЦИАЛИЗИРОВАН - ЭТО ДОСТАТОЧНО
 	}
-
 	delete(visited, bl.name)
 	return len(notReady) == 0, notReady
 }
