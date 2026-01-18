@@ -1,5 +1,5 @@
-// internal/adapters/market/filter.go
-package market
+// internal/core/domain/fetchers/types.go
+package fetchers
 
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"

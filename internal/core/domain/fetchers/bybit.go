@@ -1,5 +1,5 @@
-// internal/adapters/market/bybit_fetcher.go
-package market
+// internal/core/domain/fetchers/bybit.go
+package fetchers
 
 import (
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт

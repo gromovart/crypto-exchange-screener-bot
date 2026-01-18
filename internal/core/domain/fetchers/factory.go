@@ -1,5 +1,5 @@
-// internal/adapters/market/factory.go
-package market
+// internal/core/domain/fetchers/factory.go
+package fetchers
 
 import (
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
