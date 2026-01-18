@@ -2,7 +2,7 @@
 package main
 
 import (
-	layer_manager "crypto-exchange-screener-bot/application/layer_manager"
+	"crypto-exchange-screener-bot/application/bootstrap"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"flag"
@@ -95,13 +95,13 @@ func main() {
 	// Выводим информацию о конфигурации
 	cfg.PrintSummary()
 
-	// Запускаем новую архитектуру со слоями
-	logger.Info("🚀 Starting Crypto Exchange Screener Bot (Layer-based Architecture)...")
-	runLayersMode(cfg, testMode)
+	// Запускаем приложение через Bootstrap
+	logger.Info("🚀 Starting Crypto Exchange Screener Bot (Bootstrap Architecture)...")
+	runBootstrapMode(cfg, testMode)
 }
 
-// runLayersMode запускает новую архитектуру со слоями
-func runLayersMode(cfg *config.Config, testMode bool) {
+// runBootstrapMode запускает приложение через Bootstrap
+func runBootstrapMode(cfg *config.Config, testMode bool) {
 	// Инициализация логгера
 	logPath := cfg.LogFile
 	if logPath == "" {
@@ -119,6 +119,7 @@ func runLayersMode(cfg *config.Config, testMode bool) {
 		logger.Info("🧪 ЗАПУСК В ТЕСТОВОМ РЕЖИМЕ")
 		logger.Info("• Приветственные сообщения Telegram отключены")
 		logger.Info("• Реальные уведомления не отправляются")
+		cfg.MonitoringTestMode = true
 	} else {
 		logger.Info("🚀 ЗАПУСК В РАБОЧЕМ РЕЖИМЕ")
 	}
@@ -127,7 +128,7 @@ func runLayersMode(cfg *config.Config, testMode bool) {
 	logger.Info("📅 Build time: %s", buildTime)
 	logger.Info("⚡ Exchange: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
 	logger.Info("📊 Log level: %s", cfg.LogLevel)
-	logger.Info("🏗️  Architecture: Layer-based")
+	logger.Info("🏗️  Architecture: Bootstrap-based")
 
 	// Валидация конфигурации
 	if err := validateConfig(cfg); err != nil {
@@ -135,56 +136,79 @@ func runLayersMode(cfg *config.Config, testMode bool) {
 		os.Exit(1)
 	}
 
-	// Создание LayerManager
-	logger.Info("🛠️ Creating LayerManager...")
-	layerManager := layer_manager.NewLayerManager(cfg)
+	// Создаем приложение через Bootstrap
+	logger.Info("🏗️  Building application via Bootstrap...")
 
-	// Инициализация LayerManager
-	logger.Info("🔧 Initializing LayerManager...")
-	if err := layerManager.Initialize(); err != nil {
-		logger.Error("❌ Failed to initialize LayerManager: %v", err)
+	// Создаем AppBuilder
+	builder := bootstrap.NewAppBuilder()
+
+	// Настраиваем через fluent API
+	builder = builder.
+		WithConfig(cfg).
+		WithTestMode(testMode).
+		WithTelegramBot(cfg.TelegramEnabled, cfg.TelegramChatID).
+		WithTelegramBotToken(cfg.TelegramBotToken)
+
+	// Собираем приложение
+	app, err := builder.Build()
+	if err != nil {
+		logger.Error("❌ Failed to build application: %v", err)
 		os.Exit(1)
 	}
 
-	// Graceful shutdown
+	// Инициализируем приложение
+	logger.Info("🔧 Initializing application...")
+	if err := app.Initialize(); err != nil {
+		logger.Error("❌ Failed to initialize application: %v", err)
+		os.Exit(1)
+	}
+
+	// Graceful shutdown handling
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	errChan := make(chan error, 1)
+	// Канал для ошибок запуска
+	runErrChan := make(chan error, 1)
 
-	// Запуск системы
+	// Запускаем приложение в отдельной горутине
 	go func() {
-		logger.Info("🚦 Starting system services via LayerManager...")
-		if err := startSystem(layerManager, cfg, testMode); err != nil {
-			errChan <- err
+		logger.Info("🚀 Starting application...")
+		if err := app.Run(); err != nil {
+			runErrChan <- err
 		}
 	}()
 
-	// Таймер для статуса
-	statusTicker := time.NewTicker(1 * time.Minute)
-	defer statusTicker.Stop()
-
-	// Главный цикл
-	logger.Info("✅ System initialized successfully!")
+	// Главный цикл ожидания
+	logger.Info("✅ Application initialized successfully!")
 	logger.Info("🛑 Press Ctrl+C to stop")
 
-	startTime := time.Now()
+	// Ждем сигнала завершения или ошибки
+	select {
+	case sig := <-sigChan:
+		logger.Info("📶 Received signal: %v", sig)
+		logger.Info("🛑 Stopping application...")
 
-	for {
-		select {
-		case sig := <-sigChan:
-			logger.Info("📶 Received signal: %v", sig)
-			shutdown(layerManager, startTime)
-			return
-
-		case err := <-errChan:
-			logger.Error("❌ System error: %v", err)
-			shutdown(layerManager, startTime)
-			os.Exit(1)
-
-		case <-statusTicker.C:
-			logStatus(layerManager, startTime)
+		// Останавливаем приложение
+		if err := app.Stop(); err != nil {
+			logger.Error("❌ Error stopping application: %v", err)
 		}
+
+		// Даем время на graceful shutdown (30 секунд как в bootstrap)
+		logger.Info("⏳ Waiting for graceful shutdown...")
+		time.Sleep(500 * time.Millisecond) // Краткая пауза для инициализации остановки
+
+		logger.Info("✅ Application stopped successfully")
+		return
+
+	case err := <-runErrChan:
+		logger.Error("❌ Application run error: %v", err)
+
+		// Останавливаем приложение при ошибке
+		if stopErr := app.Stop(); stopErr != nil {
+			logger.Error("❌ Error stopping application after run error: %v", stopErr)
+		}
+
+		os.Exit(1)
 	}
 }
 
@@ -217,98 +241,11 @@ func validateConfig(cfg *config.Config) error {
 	return nil
 }
 
-// startSystem запускает систему через LayerManager
-func startSystem(layerManager *layer_manager.LayerManager, cfg *config.Config, testMode bool) error {
-	logger.Info("🚀 Starting all layers...")
-
-	// Запускаем LayerManager
-	if err := layerManager.Start(); err != nil {
-		return fmt.Errorf("failed to start LayerManager: %w", err)
-	}
-
-	// Проверка работоспособности
-	time.Sleep(3 * time.Second)
-	if !checkSystemHealth(layerManager) {
-		return fmt.Errorf("system health check failed")
-	}
-
-	// Логируем символы для мониторинга
-	symbolList := cfg.GetSymbolList()
-	symbolCount := len(symbolList)
-	if symbolCount == 0 {
-		logger.Info("🎯 Monitoring ALL symbols with volume > %.0f USDT", cfg.MinVolumeFilter)
-	} else {
-		logger.Info("🎯 Monitoring %d symbols", symbolCount)
-		if symbolCount <= 15 {
-			logger.Info("📋 Symbols: %v", symbolList)
-		}
-	}
-
-	logger.Info("🎯 System is running and monitoring for growth signals")
-	return nil
-}
-
-// checkSystemHealth проверяет здоровье системы
-func checkSystemHealth(layerManager *layer_manager.LayerManager) bool {
-	healthStatus := layerManager.GetHealthStatus()
-
-	logger.Info("✅ System health check passed")
-	logger.Info("   • Initialized: %v", healthStatus["initialized"])
-	logger.Info("   • Running: %v", healthStatus["running"])
-	logger.Info("   • Uptime: %v", healthStatus["uptime"])
-
-	if layersStatus, ok := healthStatus["layers"].(map[string]interface{}); ok {
-		logger.Info("   • Layers: %d", len(layersStatus))
-		for layerName, status := range layersStatus {
-			logger.Info("     - %s: %v", layerName, status)
-		}
-	}
-
-	return true
-}
-
-// shutdown останавливает систему
-func shutdown(layerManager *layer_manager.LayerManager, startTime time.Time) {
-	logger.Info("🛑 Shutting down system...")
-
-	shutdownStart := time.Now()
-
-	if err := layerManager.Stop(); err != nil {
-		logger.Error("❌ Error during shutdown: %v", err)
-	} else {
-		logger.Info("✅ System stopped cleanly")
-	}
-
-	uptime := time.Since(startTime).Round(time.Second)
-	shutdownTime := time.Since(shutdownStart).Round(time.Millisecond)
-
-	logger.Info("📊 Session summary:")
-	logger.Info("   • Uptime: %v", uptime)
-	logger.Info("   • Shutdown time: %v", shutdownTime)
-}
-
-// logStatus логирует статус системы
-func logStatus(layerManager *layer_manager.LayerManager, startTime time.Time) {
-	healthStatus := layerManager.GetHealthStatus()
-
-	stats := map[string]string{
-		"Uptime":      time.Since(startTime).Round(time.Second).String(),
-		"Initialized": fmt.Sprintf("%v", healthStatus["initialized"]),
-		"Running":     fmt.Sprintf("%v", healthStatus["running"]),
-	}
-
-	if layersStatus, ok := healthStatus["layers"].(map[string]interface{}); ok {
-		stats["Layers"] = fmt.Sprintf("%d", len(layersStatus))
-	}
-
-	logger.Status(stats)
-}
-
 func printVersion() {
 	fmt.Printf("📈 Crypto Growth Monitor v%s\n", version)
 	fmt.Printf("📅 Build: %s\n", buildTime)
 	fmt.Printf("🚀 Exchange: Bybit Futures\n")
-	fmt.Printf("🏗️  Architecture: Layer-based\n")
+	fmt.Printf("🏗️  Architecture: Bootstrap-based\n")
 }
 
 func printHelp() {

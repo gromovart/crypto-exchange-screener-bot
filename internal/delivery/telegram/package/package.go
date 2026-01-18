@@ -173,11 +173,16 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	logger.Debug("🏭 Создание ServiceFactory...")
 
-	// Ленивое создание UserService при первом обращении
+	// ПОЛУЧАЕМ UserService из CoreFactory перед созданием ServiceFactory
+	userService, err := p.getUserService()
+	if err != nil {
+		return fmt.Errorf("не удалось получить UserService: %w", err)
+	}
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
-			UserService:         nil, // Будет создан лениво
-			SubscriptionService: nil, // Может быть nil
+			UserService:         userService, // ✅ Теперь не nil
+			SubscriptionService: nil,         // Может быть nil
 			MessageSender:       p.components.MessageSender,
 			ButtonBuilder:       p.components.ButtonBuilder,
 			FormatterProvider:   p.components.FormatterProvider,
@@ -188,8 +193,29 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 		return fmt.Errorf("ServiceFactory не валидна")
 	}
 
-	logger.Info("✅ ServiceFactory создана (ленивое создание UserService)")
+	logger.Info("✅ ServiceFactory создана")
 	return nil
+}
+
+// getUserService получает UserService из CoreFactory
+func (p *TelegramDeliveryPackage) getUserService() (*users.Service, error) {
+	if p.userService != nil {
+		return p.userService, nil
+	}
+
+	if p.coreFactory == nil {
+		return nil, fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	// Создаем UserService через фабрику
+	userService, err := p.coreFactory.CreateUserService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать UserService: %w", err)
+	}
+
+	p.userService = userService
+	logger.Info("✅ UserService создан и сохранен в пакете")
+	return p.userService, nil
 }
 
 // createServices создает все сервисы Telegram
@@ -264,14 +290,15 @@ func (p *TelegramDeliveryPackage) createBot() error {
 		return nil
 	}
 
-	// Проверяем что UserService создан
-	if p.userService == nil {
-		return fmt.Errorf("UserService не создан для бота")
+	// ПОЛУЧАЕМ UserService
+	userService, err := p.getUserService()
+	if err != nil {
+		return fmt.Errorf("UserService не создан для бота: %w", err)
 	}
 
 	// Зависимости для бота
 	deps := &bot.Dependencies{
-		UserService: p.userService,
+		UserService: userService,
 	}
 
 	p.bot = bot.NewTelegramBot(p.config, deps)

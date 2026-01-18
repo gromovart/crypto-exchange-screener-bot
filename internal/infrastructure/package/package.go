@@ -13,6 +13,7 @@ import (
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // InfrastructureFactory главная фабрика инфраструктурных компонентов
@@ -97,11 +98,11 @@ func (f *InfrastructureFactory) Initialize() error {
 		DefaultStorageConfig: &storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
-			CleanupInterval:     5 * 60,       // 5 минут в секундах
-			RetentionPeriod:     24 * 60 * 60, // 24 часа в секундах
+			CleanupInterval:     5 * 60 * time.Second,
+			RetentionPeriod:     24 * 60 * 60 * time.Second,
 		},
 		EnableCleanupRoutine: true,
-		CleanupInterval:      60, // 1 минута в секундах
+		CleanupInterval:      60 * time.Second,
 		MaxCustomStorages:    10,
 	}
 	storageFactory, err := storage_factory.NewStorageFactory(storage_factory.StorageDependencies{
@@ -141,45 +142,28 @@ func (f *InfrastructureFactory) Start() error {
 	// Запускаем компоненты
 	errors := []error{}
 
-	// 1. Запускаем DatabaseService
+	// 1. Запускаем DatabaseService (ЕСЛИ ЕЩЕ НЕ ЗАПУЩЕН)
 	if f.config.Database.Enabled && f.databaseService != nil {
-		if err := f.databaseService.Start(); err != nil {
-			errors = append(errors, fmt.Errorf("ошибка запуска DatabaseService: %w", err))
-			logger.Warn("⚠️ Не удалось запустить DatabaseService: %v", err)
-		} else {
-			logger.Info("✅ DatabaseService запущен")
+		if err := f.startDatabaseService(); err != nil {
+			errors = append(errors, err)
 		}
 	}
 
-	// 2. Запускаем RedisService
+	// 2. Запускаем RedisService (ЕСЛИ ЕЩЕ НЕ ЗАПУЩЕН)
 	if f.config.Redis.Enabled && f.redisService != nil {
-		if err := f.redisService.Start(); err != nil {
-			errors = append(errors, fmt.Errorf("ошибка запуска RedisService: %w", err))
-			logger.Warn("⚠️ Не удалось запустить RedisService: %v", err)
-		} else {
-			logger.Info("✅ RedisService запущен")
-			// Создаем кэш после успешного запуска сервиса
-			f.redisCache = f.redisService.GetCache()
-			if f.redisCache != nil {
-				logger.Info("✅ Redis кэш создан")
-			}
+		if err := f.startRedisService(); err != nil {
+			errors = append(errors, err)
 		}
 	}
 
-	// 3. Запускаем EventBus
-	if f.eventBus != nil {
-		f.eventBus.Start()
-		logger.Info("✅ EventBus запущен")
+	// 3. Запускаем EventBus (если еще не запущен)
+	if err := f.startEventBus(); err != nil {
+		errors = append(errors, err)
 	}
 
-	// 4. Запускаем StorageFactory
-	if f.storageFactory != nil {
-		if err := f.storageFactory.Start(); err != nil {
-			errors = append(errors, fmt.Errorf("ошибка запуска StorageFactory: %w", err))
-			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
-		} else {
-			logger.Info("✅ StorageFactory запущена")
-		}
+	// 4. Запускаем StorageFactory (если еще не запущена)
+	if err := f.startStorageFactory(); err != nil {
+		errors = append(errors, err)
 	}
 
 	if len(errors) > 0 {
@@ -188,6 +172,80 @@ func (f *InfrastructureFactory) Start() error {
 
 	f.running = true
 	logger.Info("✅ Все инфраструктурные компоненты запущены")
+	return nil
+}
+
+// startDatabaseService запускает DatabaseService если еще не запущен
+func (f *InfrastructureFactory) startDatabaseService() error {
+	if f.databaseService == nil {
+		return fmt.Errorf("DatabaseService не создан")
+	}
+
+	if !f.databaseService.IsRunning() {
+		if err := f.databaseService.Start(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить DatabaseService: %v", err)
+			return fmt.Errorf("ошибка запуска DatabaseService: %w", err)
+		}
+		logger.Info("✅ DatabaseService запущен")
+	} else {
+		logger.Info("✅ DatabaseService уже запущен, пропускаем")
+	}
+	return nil
+}
+
+// startRedisService запускает RedisService если еще не запущен
+func (f *InfrastructureFactory) startRedisService() error {
+	if f.redisService == nil {
+		return fmt.Errorf("RedisService не создан")
+	}
+
+	if !f.redisService.IsRunning() {
+		if err := f.redisService.Start(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить RedisService: %v", err)
+			return fmt.Errorf("ошибка запуска RedisService: %w", err)
+		}
+		logger.Info("✅ RedisService запущен")
+		// Создаем кэш после успешного запуска сервиса
+		f.redisCache = f.redisService.GetCache()
+		if f.redisCache != nil {
+			logger.Info("✅ Redis кэш создан")
+		}
+	} else {
+		logger.Info("✅ RedisService уже запущен, пропускаем")
+	}
+	return nil
+}
+
+// startEventBus запускает EventBus если еще не запущен
+func (f *InfrastructureFactory) startEventBus() error {
+	if f.eventBus == nil {
+		return fmt.Errorf("EventBus не создан")
+	}
+
+	if !f.eventBus.IsRunning() {
+		f.eventBus.Start()
+		logger.Info("✅ EventBus запущен")
+	} else {
+		logger.Info("✅ EventBus уже запущен, пропускаем")
+	}
+	return nil
+}
+
+// startStorageFactory запускает StorageFactory если еще не запущена
+func (f *InfrastructureFactory) startStorageFactory() error {
+	if f.storageFactory == nil {
+		return nil // StorageFactory может быть nil, это не ошибка
+	}
+
+	if !f.storageFactory.IsRunning() {
+		if err := f.storageFactory.Start(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
+			return fmt.Errorf("ошибка запуска StorageFactory: %w", err)
+		}
+		logger.Info("✅ StorageFactory запущена")
+	} else {
+		logger.Info("✅ StorageFactory уже запущена, пропускаем")
+	}
 	return nil
 }
 
@@ -209,8 +267,10 @@ func (f *InfrastructureFactory) CreateDatabaseService() (*database.DatabaseServi
 		logger.Info("✅ DatabaseService создан")
 	}
 
-	// Запускаем если фабрика уже запущена
-	if f.running && !f.databaseService.IsRunning() {
+	// ЗАПУСКАЕМ ДАЖЕ ЕСЛИ ФАБРИКА НЕ ЗАПУЩЕНА - ВАЖНО ДЛЯ CoreLayer
+	// Проблема: CoreLayer требует работающей БД для создания UserService
+	// Решение: Запускаем DatabaseService независимо от состояния фабрики
+	if !f.databaseService.IsRunning() {
 		if err := f.databaseService.Start(); err != nil {
 			return nil, fmt.Errorf("не удалось запустить DatabaseService: %w", err)
 		}
@@ -238,8 +298,10 @@ func (f *InfrastructureFactory) CreateRedisService() (*redis.RedisService, error
 		logger.Info("✅ RedisService создан")
 	}
 
-	// Запускаем если фабрика уже запущена
-	if f.running && !f.redisService.IsRunning() {
+	// ЗАПУСКАЕМ ДАЖЕ ЕСЛИ ФАБРИКА НЕ ЗАПУЩЕНА - ВАЖНО ДЛЯ CoreLayer
+	// Проблема: UserService требует Redis для кэширования
+	// Решение: Запускаем RedisService независимо от состояния фабрики
+	if !f.redisService.IsRunning() {
 		if err := f.redisService.Start(); err != nil {
 			return nil, fmt.Errorf("не удалось запустить RedisService: %w", err)
 		}
@@ -355,7 +417,6 @@ func (f *InfrastructureFactory) CreateRepositoryFactory() (*postgres_factory.Rep
 		}
 
 		// Получаем ключ шифрования из конфигурации
-		// TODO: Добавить поле encryptionKey в конфигурацию
 		encryptionKey := "default-encryption-key" // Временное значение
 
 		f.repositoryFactory, err = postgres_factory.NewRepositoryFactory(postgres_factory.RepositoryDependencies{
@@ -391,11 +452,11 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.Storage
 			DefaultStorageConfig: &storage.StorageConfig{
 				MaxHistoryPerSymbol: 10000,
 				MaxSymbols:          1000,
-				CleanupInterval:     5 * 60,       // 5 минут в секундах
-				RetentionPeriod:     24 * 60 * 60, // 24 часа в секундах
+				CleanupInterval:     5 * 60,
+				RetentionPeriod:     24 * 60 * 60,
 			},
 			EnableCleanupRoutine: true,
-			CleanupInterval:      60, // 1 минута в секундах
+			CleanupInterval:      60,
 			MaxCustomStorages:    10,
 		}
 

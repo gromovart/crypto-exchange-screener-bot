@@ -1,4 +1,4 @@
-// application/services/orchestrator/layers/layer.go
+// application/layer_manager/layers/layer.go
 package layers
 
 import (
@@ -258,13 +258,30 @@ func (bl *BaseLayer) WaitForDependencies(deps map[string]Layer, timeout time.Dur
 
 // AreDependenciesReady проверяет готовность всех зависимых слоев
 func (bl *BaseLayer) AreDependenciesReady(deps map[string]Layer) (bool, []string) {
+	return bl.areDependenciesReadyRecursive(deps, make(map[string]bool), 0)
+}
+
+// areDependenciesReadyRecursive рекурсивная проверка зависимостей с защитой от циклов
+func (bl *BaseLayer) areDependenciesReadyRecursive(deps map[string]Layer, visited map[string]bool, depth int) (bool, []string) {
+	// Защита от слишком глубокой рекурсии (макс 10 уровней)
+	if depth > 10 {
+		return false, []string{"превышена максимальная глубина рекурсии зависимостей"}
+	}
+
 	if len(bl.dependencies) == 0 {
 		return true, nil
 	}
 
 	var notReady []string
+	visited[bl.name] = true
 
 	for _, depName := range bl.dependencies {
+		// Проверяем циклическую зависимость
+		if visited[depName] {
+			notReady = append(notReady, depName+" (циклическая зависимость)")
+			continue
+		}
+
 		dep, exists := deps[depName]
 		if !exists {
 			notReady = append(notReady, depName+" (не найден)")
@@ -277,20 +294,34 @@ func (bl *BaseLayer) AreDependenciesReady(deps map[string]Layer) (bool, []string
 			continue
 		}
 
-		// Проверяем что зависимый слой запущен (если у него нет собственных зависимостей)
+		// Если зависимый слой не запущен, проверяем его зависимости
 		if !dep.IsRunning() {
-			// Рекурсивно проверяем зависимости зависимого слоя
-			if depDeps := dep.GetDependencies(); len(depDeps) > 0 {
-				depReady, _ := bl.AreDependenciesReady(deps)
-				if !depReady {
-					notReady = append(notReady, depName+" (зависимости не готовы)")
+			depDeps := dep.GetDependencies()
+			if len(depDeps) > 0 {
+				// Рекурсивно проверяем зависимости зависимого слоя
+				// Создаем новую карту посещений для этой ветки
+				newVisited := make(map[string]bool)
+				for k, v := range visited {
+					newVisited[k] = v
+				}
+
+				if baseDep, ok := dep.(*BaseLayer); ok {
+					depReady, depNotReady := baseDep.areDependenciesReadyRecursive(deps, newVisited, depth+1)
+					if !depReady {
+						notReady = append(notReady, depName+" (зависимости не готовы: "+fmt.Sprintf("%v", depNotReady)+")")
+					}
+				} else {
+					// Если слой не BaseLayer, просто проверяем что он запущен
+					notReady = append(notReady, depName+" (не запущен и не BaseLayer для проверки зависимостей)")
 				}
 			} else {
+				// У зависимого слоя нет своих зависимостей, просто проверяем что он запущен
 				notReady = append(notReady, depName+" (не запущен)")
 			}
 		}
 	}
 
+	delete(visited, bl.name)
 	return len(notReady) == 0, notReady
 }
 

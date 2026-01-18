@@ -112,7 +112,18 @@ func (cl *CoreLayer) Initialize() error {
 		return fmt.Errorf("не удалось инициализировать фабрику ядра: %w", err)
 	}
 
-	// Регистрируем компоненты
+	// СОЗДАЕМ UserService СРАЗУ (не лениво) для ServiceFactory
+	userService, err := cl.coreFactory.CreateUserService()
+	if err != nil {
+		cl.setError(err)
+		return fmt.Errorf("не удалось создать UserService: %w", err)
+	}
+
+	// Сохраняем UserService для быстрого доступа
+	cl.registerComponent("UserService", userService)
+	logger.Info("✅ UserService создан и зарегистрирован")
+
+	// Регистрируем остальные компоненты
 	cl.registerCoreComponents()
 
 	cl.initialized = true
@@ -227,6 +238,11 @@ func (cl *CoreLayer) getCoreComponent(name string) func() (interface{}, error) {
 
 		switch name {
 		case "UserService":
+			// Если UserService уже создан, возвращаем его
+			if userService, exists := cl.GetComponent("UserService"); exists {
+				return userService, nil
+			}
+			// Иначе создаем через фабрику
 			return cl.coreFactory.CreateUserService()
 		case "SubscriptionService":
 			return cl.coreFactory.CreateSubscriptionService()
