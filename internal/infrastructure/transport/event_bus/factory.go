@@ -75,59 +75,6 @@ func (f *Factory) RegisterDefaultSubscribers(
 		logger.Warn("⚠️ CounterService не предоставлен, CounterController не будет зарегистрирован")
 	}
 
-	// Telegram нотификатор если включен
-	if cfg.TelegramEnabled && telegramBot != nil {
-		logger.Info("📱 Регистрация TelegramNotifier подписчика...")
-
-		// Ищем существующий TelegramNotifier в CompositeNotificationService
-		var telegramNotifier *notifier.TelegramNotifier
-
-		if notificationService != nil {
-			// Пробуем получить существующий TelegramNotifier
-			for _, n := range notificationService.GetNotifiers() {
-				if tn, ok := n.(*notifier.TelegramNotifier); ok {
-					telegramNotifier = tn
-					break
-				}
-			}
-		}
-
-		// Если не нашли существующий, создаем новый с EventBus
-		if telegramNotifier == nil {
-			telegramNotifier = notifier.NewTelegramNotifier(cfg, bus)
-			if telegramNotifier != nil && notificationService != nil {
-				notificationService.AddNotifier(telegramNotifier)
-				logger.Info("✅ TelegramNotifier создан и добавлен")
-			}
-		}
-
-		if telegramNotifier != nil {
-			// Обертка в BaseSubscriber
-			telegramSubscriber := NewBaseSubscriber(
-				"telegram_notifier",
-				[]types.EventType{types.EventSignalDetected},
-				func(event types.Event) error {
-					// Получаем сигнал из события
-					if signal, ok := event.Data.(types.TrendSignal); ok {
-						return telegramNotifier.Send(signal)
-					}
-					// Если это другой тип сигнала (например, analysis.Signal), конвертируем
-					if analysisSignal, ok := event.Data.(analysis.Signal); ok {
-						// Конвертируем analysis.Signal в types.TrendSignal
-						trendSignal := convertAnalysisSignalToTrendSignal(analysisSignal)
-						return telegramNotifier.Send(trendSignal)
-					}
-					return nil
-				},
-			)
-			bus.Subscribe(types.EventSignalDetected, telegramSubscriber)
-			logger.Info("✅ TelegramNotifier подписчик зарегистрирован")
-		} else {
-			logger.Warn("⚠️ Не удалось создать TelegramNotifier")
-		}
-	} else if cfg.TelegramEnabled && telegramBot == nil {
-		logger.Warn("⚠️ Telegram включен в конфигурации, но бот не передан")
-	}
 }
 
 // createConsoleLoggerSubscriber создает подписчика для консольного логирования

@@ -1,14 +1,14 @@
-// application/layer_manager/layers/core.go
 package layers
 
 import (
-	"crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
+	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/fetchers"
+	engine "crypto-exchange-screener-bot/internal/core/domain/signals/engine" // НОВЫЙ импорт
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	in_memory_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory" // ДОБАВЛЕНО
+	in_memory_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -24,7 +24,8 @@ type CoreLayer struct {
 	initialized       bool
 	bybitPriceFetcher *fetchers.BybitPriceFetcher
 	fetcherFactory    *fetchers.MarketFetcherFactory
-	candleSystem      *candle.CandleSystem // НОВОЕ: свечная система
+	candleSystem      *candle.CandleSystem
+	analysisEngine    *engine.AnalysisEngine // НОВОЕ: движок анализа
 }
 
 // NewCoreLayer создает слой ядра
@@ -162,7 +163,7 @@ func (cl *CoreLayer) Start() error {
 	// НОВОЕ: Запускаем свечную систему
 	if cl.config.TelegramEnabled && cl.infraLayer != nil {
 		if err := cl.setupAndStartCandleSystem(); err != nil {
-			logger.Warn("⚠️ Не удалось запустить свечную систему: %v", err)
+			logger.Warn("⚠️ Не удалось запустить свечной системы: %v", err)
 		}
 	}
 
@@ -171,12 +172,185 @@ func (cl *CoreLayer) Start() error {
 		cl.startBybitPriceFetcher()
 	}
 
+	// НОВОЕ: Запускаем AnalysisEngine если CounterAnalyzer включен в конфигурации
+	// Вместо AnalysisEngine.Enabled используем AnalyzerConfigs.CounterAnalyzer.Enabled
+	if cl.config.TelegramEnabled && cl.infraLayer != nil {
+		logger.Info("🔧 Проверка условий запуска AnalysisEngine:")
+		logger.Info("   - TelegramEnabled: %v", cl.config.TelegramEnabled)
+		logger.Info("   - InfraLayer: %v", cl.infraLayer != nil)
+		logger.Info("   - CounterAnalyzer.Enabled: %v", cl.config.AnalyzerConfigs.CounterAnalyzer.Enabled)
+
+		if cl.config.AnalyzerConfigs.CounterAnalyzer.Enabled {
+			if err := cl.startAnalysisEngine(); err != nil {
+				logger.Warn("⚠️ Не удалось запустить AnalysisEngine: %v", err)
+			}
+		} else {
+			logger.Info("ℹ️ CounterAnalyzer отключен в конфигурации, AnalysisEngine не запускается")
+		}
+	}
+
 	// Фабрика ядра не требует отдельного запуска,
 	// так как сервисы создаются лениво
 
 	cl.running = true
 	cl.updateState(StateRunning)
 	logger.Info("✅ Слой ядра запущен")
+	return nil
+}
+
+// НОВЫЙ МЕТОД: запуск движка анализа
+func (cl *CoreLayer) startAnalysisEngine() error {
+	logger.Info("🔧 CoreLayer: запуск AnalysisEngine...")
+
+	// 1. Получаем EventBus
+	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден в инфраструктуре")
+	}
+
+	eventBusInterface, err := cl.getComponentValue(eventBusComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить EventBus: %w", err)
+	}
+
+	eventBus, ok := eventBusInterface.(*events.EventBus)
+	if !ok {
+		return fmt.Errorf("неверный тип EventBus")
+	}
+
+	// 2. Получаем StorageFactory для создания priceStorage
+	storageFactoryComp, exists := cl.infraLayer.GetComponent("StorageFactory")
+	if !exists {
+		return fmt.Errorf("StorageFactory не найден")
+	}
+
+	storageInterface, err := cl.getComponentValue(storageFactoryComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
+	}
+
+	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	if !ok {
+		return fmt.Errorf("неверный тип StorageFactory")
+	}
+
+	// 3. Создаем хранилище цен для AnalysisEngine
+	priceStorage, err := storageFactory.CreateDefaultStorage()
+	if err != nil {
+		return fmt.Errorf("ошибка создания хранилища цен: %w", err)
+	}
+
+	// 4. Проверяем наличие BybitPriceFetcher
+	var priceFetcher interface{}
+	if cl.bybitPriceFetcher != nil {
+		priceFetcher = cl.bybitPriceFetcher
+		logger.Info("✅ Используем существующий BybitPriceFetcher")
+	} else {
+		logger.Warn("⚠️ BybitPriceFetcher не создан, создаем новый...")
+		// Попробуем создать фетчер
+		if err := cl.ensureBybitPriceFetcher(); err != nil {
+			return fmt.Errorf("не удалось создать BybitPriceFetcher: %w", err)
+		}
+		priceFetcher = cl.bybitPriceFetcher
+	}
+
+	// 6. Создаем фабрику движка анализа
+	engineFactory := engine.NewFactory(priceFetcher, cl.candleSystem)
+
+	// 7. Создаем движок анализа через фабрику
+	analysisEngine := engineFactory.NewAnalysisEngineFromConfig(
+		priceStorage,
+		eventBus,
+		cl.config,
+	)
+
+	if analysisEngine == nil {
+		return fmt.Errorf("не удалось создать AnalysisEngine")
+	}
+
+	// Сохраняем движок
+	cl.analysisEngine = analysisEngine
+
+	// 8. Регистрируем компонент
+	cl.registerComponent("AnalysisEngine", cl.analysisEngine)
+	logger.Info("✅ AnalysisEngine создан и зарегистрирован")
+
+	// 9. Запускаем движок анализа
+	if err := cl.analysisEngine.Start(); err != nil {
+		return fmt.Errorf("ошибка запуска AnalysisEngine: %w", err)
+	}
+
+	logger.Info("🚀 AnalysisEngine запущен")
+	return nil
+}
+
+// Вспомогательный метод: создает BybitPriceFetcher если не создан
+func (cl *CoreLayer) ensureBybitPriceFetcher() error {
+	if cl.bybitPriceFetcher != nil {
+		return nil
+	}
+
+	logger.Info("🔄 Создание BybitPriceFetcher для AnalysisEngine...")
+
+	// Получаем EventBus
+	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден")
+	}
+
+	eventBusInterface, err := cl.getComponentValue(eventBusComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить EventBus: %w", err)
+	}
+
+	eventBus, ok := eventBusInterface.(*events.EventBus)
+	if !ok {
+		return fmt.Errorf("неверный тип EventBus")
+	}
+
+	// Получаем StorageFactory
+	storageFactoryComp, exists := cl.infraLayer.GetComponent("StorageFactory")
+	if !exists {
+		return fmt.Errorf("StorageFactory не найден")
+	}
+
+	storageInterface, err := cl.getComponentValue(storageFactoryComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
+	}
+
+	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	if !ok {
+		return fmt.Errorf("неверный тип StorageFactory")
+	}
+
+	// Создаем хранилище цен
+	priceStorage, err := storageFactory.CreateDefaultStorage()
+	if err != nil {
+		return fmt.Errorf("ошибка создания хранилища цен: %w", err)
+	}
+
+	// Создаем фетчер
+	var fetcher *fetchers.BybitPriceFetcher
+	if cl.candleSystem != nil {
+		fetcher, err = cl.fetcherFactory.CreateBybitFetcherWithCandleSystem(
+			priceStorage,
+			eventBus,
+			cl.candleSystem,
+		)
+	} else {
+		fetcher, err = cl.fetcherFactory.CreateBybitFetcher(
+			priceStorage,
+			eventBus,
+		)
+	}
+
+	if err != nil {
+		return fmt.Errorf("ошибка создания BybitPriceFetcher: %w", err)
+	}
+
+	cl.bybitPriceFetcher = fetcher
+	logger.Info("✅ BybitPriceFetcher создан для AnalysisEngine")
 	return nil
 }
 
@@ -335,6 +509,15 @@ func (cl *CoreLayer) Stop() error {
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
 
+	// НОВОЕ: Останавливаем AnalysisEngine если запущен
+	if cl.analysisEngine != nil && cl.analysisEngine.IsRunning() {
+		if err := cl.analysisEngine.Stop(); err != nil {
+			logger.Warn("⚠️ Ошибка остановки AnalysisEngine: %v", err)
+		} else {
+			logger.Info("🛑 AnalysisEngine остановлен")
+		}
+	}
+
 	// НОВОЕ: Останавливаем свечную систему если запущена
 	if cl.candleSystem != nil {
 		if err := cl.candleSystem.Stop(); err != nil {
@@ -374,6 +557,11 @@ func (cl *CoreLayer) Reset() error {
 	// Сбрасываем фабрику
 	if cl.coreFactory != nil {
 		cl.coreFactory.Reset()
+	}
+
+	// НОВОЕ: Сбрасываем AnalysisEngine
+	if cl.analysisEngine != nil {
+		cl.analysisEngine = nil
 	}
 
 	// НОВОЕ: Сбрасываем свечную систему
@@ -432,6 +620,13 @@ func (cl *CoreLayer) GetCandleSystem() *candle.CandleSystem {
 	return cl.candleSystem
 }
 
+// GetAnalysisEngine возвращает AnalysisEngine
+func (cl *CoreLayer) GetAnalysisEngine() *engine.AnalysisEngine {
+	cl.mu.RLock()
+	defer cl.mu.RUnlock()
+	return cl.analysisEngine
+}
+
 // registerCoreComponents регистрирует компоненты ядра
 func (cl *CoreLayer) registerCoreComponents() {
 	if cl.coreFactory == nil {
@@ -442,9 +637,15 @@ func (cl *CoreLayer) registerCoreComponents() {
 	components := map[string]string{
 		"UserService":         "сервис пользователей",
 		"SubscriptionService": "сервис подписок",
+		"AnalysisEngine":      "движок анализа сигналов", // НОВОЕ
 	}
 
 	for name, description := range components {
+		// Пропускаем AnalysisEngine - он создается в Start()
+		if name == "AnalysisEngine" {
+			continue
+		}
+
 		cl.registerComponent(name, &LazyComponent{
 			name:        name,
 			description: description,
@@ -471,6 +672,8 @@ func (cl *CoreLayer) getCoreComponent(name string) func() (interface{}, error) {
 			return cl.coreFactory.CreateUserService()
 		case "SubscriptionService":
 			return cl.coreFactory.CreateSubscriptionService()
+		case "AnalysisEngine":
+			return cl.analysisEngine, nil
 		default:
 			return nil, fmt.Errorf("неизвестный компонент ядра: %s", name)
 		}

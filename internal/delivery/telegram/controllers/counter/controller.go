@@ -107,7 +107,7 @@ func (c *controllerImpl) HandleEvent(event types.Event) error {
 
 	// [4] ЛОГИРОВАНИЕ РЕЗУЛЬТАТА
 	// Мониторинг: EventBus также собирает метрики о успешных/неуспешных обработках
-	logger.Error("✅ CounterController: Результат: %+v", result)
+	logger.Info("✅ CounterController: Результат: %+v", result)
 	return nil
 }
 

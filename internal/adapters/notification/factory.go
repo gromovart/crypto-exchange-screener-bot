@@ -25,15 +25,6 @@ func (nf *NotifierFactory) CreateNotifier(cfg *config.Config) Notifier {
 		return nil
 	}
 
-	// Если включен Telegram, создаем TelegramNotifier
-	if cfg.Telegram.Enabled {
-		notifier := NewTelegramNotifier(cfg, nf.eventBus)
-		if notifier != nil {
-			log.Println("✅ Создан TelegramNotifier с EventBus")
-			return notifier
-		}
-	}
-
 	// Fallback на консольный нотификатор
 	log.Println("⚠️ Telegram не настроен, использую консольный нотификатор")
 	return NewConsoleNotifier(cfg.Display.Mode == "compact")
@@ -46,15 +37,6 @@ func (nf *NotifierFactory) CreateCompositeNotifier(cfg *config.Config) *Composit
 	// Всегда добавляем консольный нотификатор
 	consoleNotifier := NewConsoleNotifier(cfg.Display.Mode == "compact")
 	service.AddNotifier(consoleNotifier)
-
-	// Добавляем Telegram нотификатор если включен
-	if cfg.Telegram.Enabled {
-		telegramNotifier := NewTelegramNotifier(cfg, nf.eventBus)
-		if telegramNotifier != nil {
-			service.AddNotifier(telegramNotifier)
-
-		}
-	}
 
 	return service
 }

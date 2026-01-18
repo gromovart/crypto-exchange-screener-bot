@@ -2,7 +2,6 @@
 package engine
 
 import (
-	"crypto-exchange-screener-bot/internal/adapters/notification"
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
@@ -40,7 +39,6 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 	storage storage.PriceStorage,
 	eventBus *events.EventBus,
 	cfg *config.Config,
-	notifier *notification.TelegramNotifier,
 ) *AnalysisEngine {
 
 	var periods []time.Duration
@@ -103,7 +101,7 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 	}
 
 	engine := NewAnalysisEngine(storage, eventBus, engineConfig)
-	f.configureAnalyzers(engine, cfg, notifier)
+	f.configureAnalyzers(engine, cfg)
 	f.configureFilters(engine, cfg)
 	return engine
 }
@@ -157,7 +155,6 @@ func getIntFromCustomSettings(customSettings map[string]interface{}, key string,
 func (f *Factory) configureAnalyzers(
 	engine *AnalysisEngine,
 	cfg *config.Config,
-	notifier *notification.TelegramNotifier,
 ) {
 	// minDataPoints := cfg.AnalysisEngine.MinDataPoints
 	analyzerConfigs := cfg.AnalyzerConfigs
@@ -171,7 +168,7 @@ func (f *Factory) configureAnalyzers(
 
 	// Оставляем только CounterAnalyzer если он включен
 	if analyzerConfigs.CounterAnalyzer.Enabled {
-		f.configureCounterAnalyzer(engine, cfg, notifier)
+		f.configureCounterAnalyzer(engine, cfg)
 	}
 
 	logger.Warn("ℹ️ Анализаторы отключены через фабрику: Growth, Fall, Continuous, Volume, OpenInterest")
@@ -186,7 +183,6 @@ func (f *Factory) configureAnalyzers(
 func (f *Factory) configureCounterAnalyzer(
 	engine *AnalysisEngine,
 	cfg *config.Config,
-	notifier *notification.TelegramNotifier,
 ) {
 	logger.Info("🔧 Настройка CounterAnalyzer с TelegramNotifier...")
 	analyzerConfigs := cfg.AnalyzerConfigs
@@ -231,7 +227,6 @@ func (f *Factory) configureCounterAnalyzer(
 		logger.Warn("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {
 		logger.Info("✅ CounterAnalyzer успешно добавлен в AnalysisEngine")
-		logger.Info("   TelegramNotifier: %v", notifier != nil)
 		logger.Info("   Storage: %v", storage != nil)
 		logger.Info("   MarketFetcher: %v", f.priceFetcher != nil)
 		logger.Info("   CandleSystem: %v", f.candleSystem != nil)
