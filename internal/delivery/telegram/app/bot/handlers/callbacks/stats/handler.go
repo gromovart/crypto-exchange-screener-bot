@@ -70,10 +70,10 @@ func (h *statsHandler) createStatusMessage() string {
 func (h *statsHandler) createStatusKeyboard() interface{} {
 	return map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": "🔄 Проверить обновления", "callback_data": constants.CallbackTestOK},
-				{"text": "📊 Детальная статистика", "callback_data": "detailed_stats"},
-			},
+			// {
+			// 	{"text": "🔄 Проверить обновления", "callback_data": constants.CallbackTestOK},
+			// 	{"text": "📊 Детальная статистика", "callback_data": "detailed_stats"},
+			// },
 			{
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
 			},
