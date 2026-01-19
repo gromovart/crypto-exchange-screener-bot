@@ -49,14 +49,21 @@ func main() {
 		return
 	}
 
+	// === ИСПРАВЛЕНИЕ: Устанавливаем переменную окружения ДО загрузки конфигурации ===
+	// Это важно, потому что config.LoadConfig() может использовать os.Getenv()
+	os.Setenv("APP_ENV", env)
+	logger.Warn("🎯 Установлено окружение: %s", env)
+
 	// 1. Определяем путь к конфигурации
 	var configFile string
 	if cfgPath != "" {
 		// Используем явно указанный путь
 		configFile = cfgPath
+		logger.Warn("📁 Используется явный конфиг файл: %s", configFile)
 	} else {
-		// Используем окружение по умолчанию
+		// Используем окружение из флага --env
 		configFile = filepath.Join("configs", env, ".env")
+		logger.Warn("📁 Используется конфиг файл для окружения %s: %s", env, configFile)
 	}
 
 	// Проверяем существование файла
@@ -64,22 +71,32 @@ func main() {
 		// Пробуем fallback на старый путь .env
 		if _, err := os.Stat(".env"); err == nil {
 			configFile = ".env"
-			logger.Warn("⚠️  Using fallback config: .env (instead of %s)", filepath.Join("configs", env, ".env"))
+			logger.Warn("⚠️  Используется fallback конфиг: .env (вместо %s)", filepath.Join("configs", env, ".env"))
 		} else {
-			logger.Error("❌ Config file not found: %s and .env not found", configFile)
-			os.Exit(1)
+			// Пробуем найти configs/dev/.env как последний fallback
+			fallbackPath := filepath.Join("configs", "dev", ".env")
+			if _, err := os.Stat(fallbackPath); err == nil {
+				configFile = fallbackPath
+				logger.Warn("⚠️  Используется fallback конфиг: %s", fallbackPath)
+			} else {
+				logger.Error("❌ Конфиг файл не найден: %s и .env не найден", configFile)
+				os.Exit(1)
+			}
 		}
 	}
 
-	logger.Warn("🎯 Environment: %s", env)
-	logger.Warn("📁 Config file: %s", configFile)
+	logger.Warn("📁 Используемый конфиг файл: %s", configFile)
 
 	// 2. Загружаем конфигурацию
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
-		logger.Error("❌ Failed to load config: %v", err)
+		logger.Error("❌ Не удалось загрузить конфигурацию: %v", err)
 		os.Exit(1)
 	}
+
+	// === ИСПРАВЛЕНИЕ: Устанавливаем окружение в конфигурацию ===
+	// Это нужно для последующего использования в приложении
+	cfg.Environment = env
 
 	// Переопределяем уровень логирования, если указан в аргументах
 	if logLevel != "" {
@@ -93,7 +110,13 @@ func main() {
 	}
 
 	// Выводим информацию о конфигурации
-	cfg.PrintSummary()
+	logger.Warn("📋 Конфигурация приложения:")
+	logger.Warn("   • Окружение: %s", cfg.Environment)
+	logger.Warn("   • Биржа: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
+	logger.Warn("   • Уровень логирования: %s", cfg.LogLevel)
+	logger.Warn("   • Telegram включен: %v", cfg.TelegramEnabled)
+	logger.Warn("   • PostgreSQL: %s:%d/%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
+	logger.Warn("   • Redis: %s:%d (DB: %d, Pool: %d)", cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.DB, cfg.Redis.PoolSize)
 
 	// Запускаем приложение через Bootstrap
 	logger.Info("🚀 Starting Crypto Exchange Screener Bot (Bootstrap Architecture)...")
@@ -193,9 +216,9 @@ func runBootstrapMode(cfg *config.Config, testMode bool) {
 			logger.Error("❌ Error stopping application: %v", err)
 		}
 
-		// Даем время на graceful shutdown (30 секунд как в bootstrap)
+		// Даем время на graceful shutdown
 		logger.Info("⏳ Waiting for graceful shutdown...")
-		time.Sleep(500 * time.Millisecond) // Краткая пауза для инициализации остановки
+		time.Sleep(500 * time.Millisecond)
 
 		logger.Info("✅ Application stopped successfully")
 		return
