@@ -1,0 +1,861 @@
+#!/bin/bash
+# Скрипт управления службой Crypto Screener Bot
+# Использование: ./service.sh [COMMAND] [OPTIONS]
+
+set -e  # Выход при ошибке
+
+# Цвета для вывода
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Параметры по умолчанию
+SERVER_IP="95.142.40.244"
+SERVER_USER="root"
+SSH_KEY="${HOME}/.ssh/id_rsa"
+SERVICE_NAME="crypto-screener"
+APP_NAME="crypto-screener-bot"
+LINES=50  # Количество строк по умолчанию
+
+# Функции для вывода
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Показать помощь
+show_help() {
+    echo "Использование: $0 [COMMAND] [OPTIONS]"
+    echo ""
+    echo "Команды:"
+    echo "  start               Запустить службу"
+    echo "  stop                Остановить службу"
+    echo "  restart             Перезапустить службу"
+    echo "  status              Показать статус службы"
+    echo "  logs [N]            Показать N строк логов (по умолчанию: 50)"
+    echo "  logs-follow         Показать логи в реальном времени"
+    echo "  logs-error          Показать только ошибки"
+    echo "  monitor             Мониторинг состояния системы"
+    echo "  backup              Создать резервную копию"
+    echo "  cleanup             Очистка старых логов и резервных копий"
+    echo "  config-show         Показать текущую конфигурацию"
+    echo "  config-check        Проверить конфигурацию"
+    echo "  health              Проверить здоровье системы"
+    echo ""
+    echo "Опции:"
+    echo "  --ip=IP_ADDRESS     IP адрес сервера (по умолчанию: 95.142.40.244)"
+    echo "  --user=USERNAME     Имя пользователя (по умолчанию: root)"
+    echo "  --key=PATH          Путь к SSH ключу (по умолчанию: ~/.ssh/id_rsa)"
+    echo "  --help              Показать эту справку"
+    echo ""
+    echo "Примеры:"
+    echo "  $0 status --ip=95.142.40.244"
+    echo "  $0 logs 100                   # 100 строк логов"
+    echo "  $0 logs                       # 50 строк логов (по умолчанию)"
+    echo "  $0 logs-follow"
+    echo "  $0 monitor"
+    echo "  $0 health"
+}
+
+# Проверка SSH подключения
+check_ssh_connection() {
+    if ! ssh -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no \
+        -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "echo 'connected'" &> /dev/null; then
+        log_error "Не удалось подключиться к серверу"
+        echo "Проверьте:"
+        echo "1. SSH ключ авторизован: ssh-copy-id -i ${SSH_KEY} ${SERVER_USER}@${SERVER_IP}"
+        echo "2. Сервер доступен: ping ${SERVER_IP}"
+        echo "3. Используйте диагностику: ./check-connection.sh"
+        exit 1
+    fi
+}
+
+# Управление службой
+service_start() {
+    log_info "Запуск службы ${SERVICE_NAME}..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl start ${SERVICE_NAME}.service"
+    sleep 2
+    service_status
+}
+
+service_stop() {
+    log_info "Остановка службы ${SERVICE_NAME}..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl stop ${SERVICE_NAME}.service"
+    sleep 1
+    service_status
+}
+
+service_restart() {
+    log_info "Перезапуск службы ${SERVICE_NAME}..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl restart ${SERVICE_NAME}.service"
+    sleep 3
+    service_status
+}
+
+service_status() {
+    echo "Статус службы ${SERVICE_NAME}:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl status ${SERVICE_NAME}.service --no-pager"
+}
+
+service_logs() {
+    local lines=${1:-50}
+    echo "Последние ${lines} строк логов:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "journalctl -u ${SERVICE_NAME}.service -n ${lines} --no-pager"
+}
+
+service_logs_follow() {
+    echo "Логи в реальном времени (Ctrl+C для выхода):"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "journalctl -u ${SERVICE_NAME}.service -f"
+}
+
+service_logs_error() {
+    echo "Ошибки в логах (последний час):"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+echo "=== ОШИБКИ В ЛОГАХ ==="
+echo "Период: последний час"
+echo ""
+
+ERRORS=$(journalctl -u crypto-screener.service --since "1 hour ago" 2>/dev/null | \
+    grep -i "error\|fail\|panic\|fatal" | head -20)
+
+if [ -n "${ERRORS}" ]; then
+    echo "${ERRORS}"
+    echo ""
+    echo "Всего ошибок: $(echo "${ERRORS}" | wc -l)"
+else
+    echo "✅ Ошибок не обнаружено"
+fi
+EOF
+}
+
+service_monitor() {
+    echo "Мониторинг системы:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+echo "=== СИСТЕМНЫЙ МОНИТОРИНГ ==="
+echo "Время: $(date)"
+echo ""
+
+# 1. Загрузка системы
+echo "1. Загрузка системы:"
+uptime
+echo ""
+
+# 2. Использование памяти
+echo "2. Использование памяти:"
+free -h
+echo ""
+
+# 3. Использование диска
+echo "3. Использование диска:"
+df -h /opt /var/log
+echo ""
+
+# 4. Статус служб
+echo "4. Статус служб:"
+services=("crypto-screener" "postgresql" "redis-server")
+for service in "${services[@]}"; do
+    status=$(systemctl is-active "${service}.service" 2>/dev/null || echo "unknown")
+    case "$status" in
+        active) echo "  ✅ ${service}: активен" ;;
+        inactive) echo "  ⏸️  ${service}: не активен" ;;
+        failed) echo "  ❌ ${service}: ошибка" ;;
+        *) echo "  ❓ ${service}: ${status}" ;;
+    esac
+done
+echo ""
+
+# 5. Процессы приложения
+echo "5. Процессы приложения:"
+if pgrep -f "crypto-screener-bot" > /dev/null; then
+    echo "  ✅ Приложение работает"
+    echo "  PID: $(pgrep -f "crypto-screener-bot")"
+else
+    echo "  ❌ Приложение не работает"
+fi
+echo ""
+
+# 6. Сетевые порты
+echo "6. Сетевые порты:"
+echo "  PostgreSQL (5432): $(ss -tln | grep ':5432' > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
+echo "  Redis (6379): $(ss -tln | grep ':6379' > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
+echo ""
+
+# 7. Логи (последние ошибки)
+echo "7. Последние ошибки в логах:"
+journalctl -u crypto-screener.service --since "10 minutes ago" 2>/dev/null | \
+    grep -i "error\|warn\|fail" | tail -5 | while read line; do
+    echo "  📝 $line"
+done || echo "  ✅ Ошибок не найдено"
+echo ""
+
+# 8. Проверка конфигурации
+echo "8. Основные настройки конфигурации:"
+if [ -f "/opt/crypto-screener-bot/.env" ]; then
+    echo "  ✅ Конфиг найден: /opt/crypto-screener-bot/.env"
+    # Показываем только основные настройки без секретов
+    grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE)=" \
+        "/opt/crypto-screener-bot/.env" 2>/dev/null | head -5 | while read line; do
+        echo "  ⚙️  $line"
+    done
+else
+    echo "  ❌ Конфиг не найден"
+fi
+echo ""
+
+echo "=== МОНИТОРИНГ ЗАВЕРШЕН ==="
+EOF
+}
+
+service_backup() {
+    echo "Создание резервной копии..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+set -e
+
+APP_NAME="crypto-screener-bot"
+INSTALL_DIR="/opt/${APP_NAME}"
+BACKUP_DIR="/opt/${APP_NAME}_backups"
+SERVICE_NAME="crypto-screener"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+BACKUP_PATH="${BACKUP_DIR}/manual_backup_${TIMESTAMP}"
+
+# Создание директории
+mkdir -p "${BACKUP_PATH}"
+
+echo "Создание резервной копии системы..."
+
+# Останавливаем сервис для консистентной резервной копии
+echo "Остановка сервиса..."
+systemctl stop ${SERVICE_NAME}.service 2>/dev/null || echo "⚠️  Сервис уже остановлен"
+
+# Резервное копирование
+echo "Копирование файлов приложения..."
+cp -r "${INSTALL_DIR}/bin" "${BACKUP_PATH}/" 2>/dev/null || echo "⚠️  Не удалось скопировать bin"
+cp -r "${INSTALL_DIR}/configs" "${BACKUP_PATH}/" 2>/dev/null || echo "⚠️  Не удалось скопировать configs"
+
+# Создание дампа базы данных
+echo "Создание дампа базы данных..."
+if command -v pg_dump >/dev/null 2>&1; then
+    # Читаем настройки БД из конфига
+    if [ -f "${INSTALL_DIR}/.env" ]; then
+        DB_HOST=$(grep "^DB_HOST=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_PORT=$(grep "^DB_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_NAME=$(grep "^DB_NAME=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_USER=$(grep "^DB_USER=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_PASSWORD=$(grep "^DB_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+
+        export PGPASSWORD="${DB_PASSWORD}"
+        pg_dump -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-crypto_screener}" \
+            "${DB_NAME:-crypto_screener_db}" > "${BACKUP_PATH}/database_dump.sql" 2>/dev/null && \
+            echo "✅ Дамп БД создан" || echo "⚠️  Не удалось создать дамп БД"
+    else
+        echo "⚠️  Конфиг не найден, пропускаем дамп БД"
+    fi
+else
+    echo "⚠️  pg_dump не установлен, пропускаем дамп БД"
+fi
+
+# Архивирование
+echo "Архивирование резервной копии..."
+cd "${BACKUP_DIR}"
+tar -czf "manual_backup_${TIMESTAMP}.tar.gz" "manual_backup_${TIMESTAMP}"
+rm -rf "manual_backup_${TIMESTAMP}"
+
+# Запуск сервиса обратно
+echo "Запуск сервиса..."
+systemctl start ${SERVICE_NAME}.service 2>/dev/null || echo "⚠️  Не удалось запустить сервис"
+
+echo ""
+echo "✅ Резервная копия создана: ${BACKUP_DIR}/manual_backup_${TIMESTAMP}.tar.gz"
+echo "📊 Размер: $(du -h "${BACKUP_DIR}/manual_backup_${TIMESTAMP}.tar.gz" | cut -f1)"
+echo ""
+echo "Список резервных копий:"
+ls -la "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | tail -5 || echo "Резервных копий нет"
+EOF
+}
+
+service_cleanup() {
+    echo "Очистка старых файлов..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+set -e
+
+APP_NAME="crypto-screener-bot"
+LOG_DIR="/var/log/${APP_NAME}"
+BACKUP_DIR="/opt/${APP_NAME}_backups"
+
+echo "🧹 ОЧИСТКА СИСТЕМЫ"
+echo "================="
+echo ""
+
+# 1. Очистка старых логов
+echo "1. Очистка старых логов (старше 30 дней):"
+if [ -d "${LOG_DIR}" ]; then
+    OLD_LOGS=$(find "${LOG_DIR}" -name "*.log" -mtime +30 -type f | wc -l)
+    if [ "${OLD_LOGS}" -gt 0 ]; then
+        echo "   Найдено файлов для удаления: ${OLD_LOGS}"
+        find "${LOG_DIR}" -name "*.log" -mtime +30 -type f -delete
+        echo "   ✅ Логи очищены"
+    else
+        echo "   ✅ Старых логов не найдено"
+    fi
+else
+    echo "   ⚠️  Директория логов не существует"
+fi
+echo ""
+
+# 2. Очистка старых резервных копий
+echo "2. Очистка старых резервных копий (оставить последние 10):"
+if [ -d "${BACKUP_DIR}" ]; then
+    BACKUP_COUNT=$(ls -1 "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | wc -l)
+    echo "   Всего резервных копий: ${BACKUP_COUNT}"
+
+    if [ "${BACKUP_COUNT}" -gt 10 ]; then
+        REMOVE_COUNT=$((BACKUP_COUNT - 10))
+        echo "   Удаляем старых: ${REMOVE_COUNT}"
+
+        ls -t "${BACKUP_DIR}"/*.tar.gz | tail -${REMOVE_COUNT} | while read -r file; do
+            echo "   Удаляем: $(basename "$file")"
+            rm -f "$file"
+        done
+        echo "   ✅ Старые копии удалены"
+    else
+        echo "   ✅ Копий меньше 10, удаление не требуется"
+    fi
+else
+    echo "   ⚠️  Директория резервных копий не существует"
+fi
+echo ""
+
+# 3. Очистка кэша сборки Go
+echo "3. Очистка кэша сборки Go:"
+if command -v go >/dev/null 2>&1; then
+    go clean -cache 2>/dev/null && echo "   ✅ Кэш Go очищен" || echo "   ⚠️  Не удалось очистить кэш Go"
+else
+    echo "   ⚠️  Go не установлен"
+fi
+echo ""
+
+# 4. Очистка журналов systemd
+echo "4. Очистка старых журналов systemd:"
+journalctl --vacuum-time=7d 2>/dev/null && echo "   ✅ Журналы systemd очищены" || echo "   ⚠️  Не удалось очистить журналы"
+echo ""
+
+# 5. Проверка свободного места
+echo "5. Свободное место на дисках:"
+df -h /opt /var/log | grep -v Filesystem | while read line; do
+    echo "   💾 $line"
+done
+echo ""
+
+echo "✅ Очистка завершена"
+EOF
+}
+
+service_config_show() {
+    echo "Текущая конфигурация:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+if [ -f "${CONFIG_FILE}" ]; then
+    echo "Файл конфигурации: ${CONFIG_FILE}"
+    echo "Размер: $(du -h "${CONFIG_FILE}" | cut -f1)"
+    echo "Изменен: $(stat -c %y "${CONFIG_FILE}" | cut -d' ' -f1)"
+    echo ""
+    echo "Основные настройки:"
+    echo "=================="
+
+    # Показываем настройки по категориям
+
+    echo "1. ОСНОВНЫЕ НАСТРОЙКИ:"
+    grep -E "^(APP_ENV|APP_NAME|APP_VERSION|LOG_LEVEL)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    echo ""
+
+    echo "2. БАЗА ДАННЫХ:"
+    grep -E "^(DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_ENABLE_AUTO_MIGRATE)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    echo ""
+
+    echo "3. REDIS:"
+    grep -E "^(REDIS_HOST|REDIS_PORT|REDIS_ENABLED)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    echo ""
+
+    echo "4. TELEGRAM:"
+    grep -E "^(TELEGRAM_ENABLED|TELEGRAM_ADMIN_IDS)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    if grep -q "TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
+        echo "  ✅ Telegram включен"
+    else
+        echo "  ⚠️  Telegram отключен"
+    fi
+    echo ""
+
+    echo "5. БИРЖА:"
+    grep -E "^(EXCHANGE|EXCHANGE_TYPE|UPDATE_INTERVAL|MAX_SYMBOLS_TO_MONITOR)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    echo ""
+
+    echo "6. API КЛЮЧИ (проверка наличия):"
+    if grep -q "BINANCE_API_KEY=" "${CONFIG_FILE}" || grep -q "BYBIT_API_KEY=" "${CONFIG_FILE}"; then
+        echo "  ✅ API ключи настроены"
+    else
+        echo "  ❌ API ключи не настроены"
+    fi
+    echo ""
+
+    echo "7. ПРОВЕРКА СЕКРЕТНЫХ КЛЮЧЕЙ:"
+    if grep -q "JWT_SECRET=" "${CONFIG_FILE}"; then
+        echo "  ✅ JWT секрет настроен"
+    else
+        echo "  ⚠️  JWT секрет не настроен"
+    fi
+    if grep -q "ENCRYPTION_KEY=" "${CONFIG_FILE}"; then
+        echo "  ✅ Ключ шифрования настроен"
+    else
+        echo "  ⚠️  Ключ шифрования не настроен"
+    fi
+
+else
+    echo "❌ Файл конфигурации не найден: ${CONFIG_FILE}"
+    echo "Создайте конфиг: cp /opt/crypto-screener-bot/configs/prod/.env /opt/crypto-screener-bot/.env"
+fi
+EOF
+}
+
+service_config_check() {
+    echo "Проверка конфигурации:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+ERRORS=0
+WARNINGS=0
+
+echo "🔍 ПРОВЕРКА КОНФИГУРАЦИИ"
+echo "======================="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+echo "✅ Файл конфигурации найден: ${CONFIG_FILE}"
+echo ""
+
+# Проверка обязательных настроек
+echo "1. ОБЯЗАТЕЛЬНЫЕ НАСТРОЙКИ:"
+echo "-------------------------"
+
+# База данных
+if grep -q "^DB_HOST=" "${CONFIG_FILE}"; then
+    echo "  ✅ DB_HOST: настроен"
+else
+    echo "  ❌ DB_HOST: не настроен"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if grep -q "^DB_NAME=" "${CONFIG_FILE}"; then
+    echo "  ✅ DB_NAME: настроен"
+else
+    echo "  ❌ DB_NAME: не настроен"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if grep -q "^DB_USER=" "${CONFIG_FILE}"; then
+    echo "  ✅ DB_USER: настроен"
+else
+    echo "  ❌ DB_USER: не настроен"
+    ERRORS=$((ERRORS + 1))
+fi
+
+if grep -q "^DB_PASSWORD=" "${CONFIG_FILE}"; then
+    DB_PASS=$(grep "^DB_PASSWORD=" "${CONFIG_FILE}" | cut -d= -f2)
+    if [ "${DB_PASS}" == "SecurePass123!" ] || [ "${DB_PASS}" == "" ]; then
+        echo "  ⚠️  DB_PASSWORD: используется стандартный или пустой пароль"
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✅ DB_PASSWORD: настроен"
+    fi
+else
+    echo "  ❌ DB_PASSWORD: не настроен"
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
+
+# Проверка API ключей
+echo "2. API КЛЮЧИ БИРЖ:"
+echo "-----------------"
+
+EXCHANGE=$(grep "^EXCHANGE=" "${CONFIG_FILE}" | cut -d= -f2)
+
+if [ "${EXCHANGE}" == "bybit" ]; then
+    if grep -q "^BYBIT_API_KEY=" "${CONFIG_FILE}"; then
+        API_KEY=$(grep "^BYBIT_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [[ "${API_KEY}" == *"your_bybit_api_key"* ]] || [ "${API_KEY}" == "" ]; then
+            echo "  ⚠️  BYBIT_API_KEY: не настроен или шаблонный"
+            WARNINGS=$((WARNINGS + 1))
+        else
+            echo "  ✅ BYBIT_API_KEY: настроен"
+        fi
+    else
+        echo "  ⚠️  BYBIT_API_KEY: не настроен"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+elif [ "${EXCHANGE}" == "binance" ]; then
+    if grep -q "^BINANCE_API_KEY=" "${CONFIG_FILE}"; then
+        API_KEY=$(grep "^BINANCE_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [[ "${API_KEY}" == *"your_binance_api_key"* ]] || [ "${API_KEY}" == "" ]; then
+            echo "  ⚠️  BINANCE_API_KEY: не настроен или шаблонный"
+            WARNINGS=$((WARNINGS + 1))
+        else
+            echo "  ✅ BINANCE_API_KEY: настроен"
+        fi
+    else
+        echo "  ⚠️  BINANCE_API_KEY: не настроен"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  ⚠️  EXCHANGE: неизвестная биржа '${EXCHANGE}'"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
+
+# Проверка Telegram
+echo "3. TELEGRAM НАСТРОЙКИ:"
+echo "---------------------"
+
+if grep -q "^TELEGRAM_ENABLED=" "${CONFIG_FILE}" && grep -q "^TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
+    echo "  ✅ TELEGRAM_ENABLED: включен"
+
+    if grep -q "^TELEGRAM_BOT_TOKEN=" "${CONFIG_FILE}"; then
+        TOKEN=$(grep "^TELEGRAM_BOT_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [[ "${TOKEN}" == *"your_telegram_bot_token"* ]] || [ "${TOKEN}" == "" ]; then
+            echo "  ❌ TELEGRAM_BOT_TOKEN: не настроен или шаблонный"
+            ERRORS=$((ERRORS + 1))
+        else
+            echo "  ✅ TELEGRAM_BOT_TOKEN: настроен"
+        fi
+    else
+        echo "  ❌ TELEGRAM_BOT_TOKEN: не настроен"
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    if grep -q "^TELEGRAM_ADMIN_IDS=" "${CONFIG_FILE}"; then
+        ADMIN_ID=$(grep "^TELEGRAM_ADMIN_IDS=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [[ "${ADMIN_ID}" == *"your_telegram_id"* ]] || [ "${ADMIN_ID}" == "" ]; then
+            echo "  ❌ TELEGRAM_ADMIN_IDS: не настроен или шаблонный"
+            ERRORS=$((ERRORS + 1))
+        else
+            echo "  ✅ TELEGRAM_ADMIN_IDS: настроен"
+        fi
+    else
+        echo "  ❌ TELEGRAM_ADMIN_IDS: не настроен"
+        ERRORS=$((ERRORS + 1))
+    fi
+else
+    echo "  ⚠️  TELEGRAM_ENABLED: отключен"
+fi
+
+echo ""
+
+# Проверка безопасности
+echo "4. БЕЗОПАСНОСТЬ:"
+echo "---------------"
+
+if grep -q "^JWT_SECRET=" "${CONFIG_FILE}"; then
+    JWT_SECRET=$(grep "^JWT_SECRET=" "${CONFIG_FILE}" | cut -d= -f2)
+    if [[ "${JWT_SECRET}" == *"ваш_секретный_ключ"* ]] || [ "${JWT_SECRET}" == "" ]; then
+        echo "  ⚠️  JWT_SECRET: не настроен или шаблонный"
+        WARNINGS=$((WARNINGS + 1))
+    else
+        echo "  ✅ JWT_SECRET: настроен"
+    fi
+else
+    echo "  ⚠️  JWT_SECRET: не настроен"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
+
+# Итог
+echo "📊 ИТОГ ПРОВЕРКИ:"
+echo "---------------"
+echo "Ошибок: ${ERRORS}"
+echo "Предупреждений: ${WARNINGS}"
+echo ""
+
+if [ "${ERRORS}" -eq 0 ] && [ "${WARNINGS}" -eq 0 ]; then
+    echo "🎉 Конфигурация в полном порядке!"
+elif [ "${ERRORS}" -eq 0 ]; then
+    echo "⚠️  Конфигурация работает, но есть предупреждения"
+else
+    echo "❌ В конфигурации есть критические ошибки"
+    echo ""
+    echo "Рекомендации:"
+    echo "1. Отредактируйте конфиг: nano ${CONFIG_FILE}"
+    echo "2. Проверьте настройки выше"
+    echo "3. Перезапустите сервис: systemctl restart crypto-screener"
+fi
+EOF
+}
+
+service_health() {
+    echo "Проверка здоровья системы:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+echo "🏥 ПРОВЕРКА ЗДОРОВЬЯ СИСТЕМЫ"
+echo "==========================="
+echo "Время: $(date)"
+echo ""
+
+HEALTH_OK=true
+
+# 1. Проверка служб
+echo "1. 🚀 ПРОВЕРКА СЛУЖБ:"
+services=("crypto-screener" "postgresql" "redis-server")
+for service in "${services[@]}"; do
+    status=$(systemctl is-active "${service}.service" 2>/dev/null || echo "unknown")
+    case "$status" in
+        active) echo "   ✅ ${service}: активен" ;;
+        inactive)
+            echo "   ❌ ${service}: не активен"
+            HEALTH_OK=false
+            ;;
+        failed)
+            echo "   ❌ ${service}: ошибка"
+            HEALTH_OK=false
+            ;;
+        *)
+            echo "   ⚠️  ${service}: статус неизвестен (${status})"
+            HEALTH_OK=false
+            ;;
+    esac
+done
+echo ""
+
+# 2. Проверка портов
+echo "2. 🔌 ПРОВЕРКА ПОРТОВ:"
+if ss -tln | grep -q ':5432'; then
+    echo "   ✅ PostgreSQL (5432): доступен"
+else
+    echo "   ❌ PostgreSQL (5432): недоступен"
+    HEALTH_OK=false
+fi
+
+if ss -tln | grep -q ':6379'; then
+    echo "   ✅ Redis (6379): доступен"
+else
+    echo "   ❌ Redis (6379): недоступен"
+    HEALTH_OK=false
+fi
+echo ""
+
+# 3. Проверка процессов
+echo "3. 🔄 ПРОВЕРКА ПРОЦЕССОВ:"
+if pgrep -f "crypto-screener-bot" > /dev/null; then
+    echo "   ✅ Приложение: работает"
+    echo "   📊 PID: $(pgrep -f "crypto-screener-bot")"
+else
+    echo "   ❌ Приложение: не работает"
+    HEALTH_OK=false
+fi
+echo ""
+
+# 4. Проверка ресурсов
+echo "4. 📊 ПРОВЕРКА РЕСУРСОВ:"
+
+# Память
+MEM_FREE=$(free -m | awk '/^Mem:/ {print $4}')
+if [ "${MEM_FREE}" -lt 100 ]; then
+    echo "   ⚠️  Память: мало свободной памяти (${MEM_FREE} MB)"
+    HEALTH_OK=false
+else
+    echo "   ✅ Память: свободно ${MEM_FREE} MB"
+fi
+
+# Диск
+DISK_USAGE=$(df /opt --output=pcent | tail -1 | tr -d ' %')
+if [ "${DISK_USAGE}" -gt 90 ]; then
+    echo "   ⚠️  Диск: мало свободного места (используется ${DISK_USAGE}%)"
+    HEALTH_OK=false
+else
+    echo "   ✅ Диск: используется ${DISK_USAGE}%"
+fi
+echo ""
+
+# 5. Проверка логов на ошибки
+echo "5. 📝 ПРОВЕРКА ЛОГОВ (последние 5 минут):"
+RECENT_ERRORS=$(journalctl -u crypto-screener.service --since "5 minutes ago" 2>/dev/null | \
+    grep -i -c "error\|fail\|panic\|fatal")
+if [ "${RECENT_ERRORS}" -gt 0 ]; then
+    echo "   ⚠️  Найдено ошибок: ${RECENT_ERRORS}"
+    echo "   Последние ошибки:"
+    journalctl -u crypto-screener.service --since "5 минут назад" 2>/dev/null | \
+        grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
+        echo "     📛 $(echo "$line" | cut -d' ' -f6-)"
+    done
+    HEALTH_OK=false
+else
+    echo "   ✅ Ошибок не найдено"
+fi
+echo ""
+
+# 6. Проверка подключения к БД
+echo "6. 🗄️  ПРОВЕРКА БАЗЫ ДАННЫХ:"
+if command -v psql >/dev/null 2>&1 && [ -f "/opt/crypto-screener-bot/.env" ]; then
+    DB_HOST=$(grep "^DB_HOST=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+    DB_PORT=$(grep "^DB_PORT=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+    DB_NAME=$(grep "^DB_NAME=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+    DB_USER=$(grep "^DB_USER=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+    DB_PASSWORD=$(grep "^DB_PASSWORD=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+
+    export PGPASSWORD="${DB_PASSWORD}"
+    if psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-crypto_screener}" \
+        "${DB_NAME:-crypto_screener_db}" -c "SELECT 1" >/dev/null 2>&1; then
+        echo "   ✅ База данных: доступна"
+    else
+        echo "   ❌ База данных: недоступна"
+        HEALTH_OK=false
+    fi
+else
+    echo "   ⚠️  Проверка БД: инструменты не установлены"
+fi
+echo ""
+
+# Итог
+echo "🎯 ИТОГ ПРОВЕРКИ:"
+echo "================"
+if $HEALTH_OK; then
+    echo "✅ СИСТЕМА ЗДОРОВА"
+    echo "Все компоненты работают корректно"
+else
+    echo "⚠️  В СИСТЕМЕ ЕСТЬ ПРОБЛЕМЫ"
+    echo "Проверьте сообщения выше для диагностики"
+fi
+echo ""
+echo "📋 Рекомендации:"
+if ! $HEALTH_OK; then
+    echo "1. Проверьте логи: journalctl -u crypto-screener.service -n 50"
+    echo "2. Перезапустите сервис: systemctl restart crypto-screener"
+    echo "3. Проверьте конфигурацию: nano /opt/crypto-screener-bot/.env"
+fi
+echo "4. Мониторинг: ./service.sh monitor"
+EOF
+}
+
+# Парсинг аргументов
+parse_args() {
+    command=""
+
+    for arg in "$@"; do
+        case $arg in
+            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health)
+                command="$arg"
+                shift
+                ;;
+            --ip=*)
+                SERVER_IP="${arg#*=}"
+                shift
+                ;;
+            --user=*)
+                SERVER_USER="${arg#*=}"
+                shift
+                ;;
+            --key=*)
+                SSH_KEY="${arg#*=}"
+                shift
+                ;;
+            --help)
+                show_help
+                exit 0
+                ;;
+            *)
+                # Проверяем, является ли аргумент числом (для количества строк)
+                if [[ $arg =~ ^[0-9]+$ ]] && [ "$command" = "logs" ]; then
+                    LINES="$arg"
+                    shift
+                else
+                    log_error "Неизвестный аргумент: $arg"
+                    show_help
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+
+    if [ -z "$command" ]; then
+        log_error "Не указана команда"
+        show_help
+        exit 1
+    fi
+}
+
+# Основная функция
+main() {
+    parse_args "$@"
+
+    # Проверка подключения
+    check_ssh_connection
+
+    # Выполнение команды
+    case "$command" in
+        start)
+            service_start
+            ;;
+        stop)
+            service_stop
+            ;;
+        restart)
+            service_restart
+            ;;
+        status)
+            service_status
+            ;;
+        logs)
+            service_logs "$LINES"
+            ;;
+        logs-follow)
+            service_logs_follow
+            ;;
+        logs-error)
+            service_logs_error
+            ;;
+        monitor)
+            service_monitor
+            ;;
+        backup)
+            service_backup
+            ;;
+        cleanup)
+            service_cleanup
+            ;;
+        config-show)
+            service_config_show
+            ;;
+        config-check)
+            service_config_check
+            ;;
+        health)
+            service_health
+            ;;
+        *)
+            log_error "Неизвестная команда: $command"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Запуск скрипта
+main "$@"
