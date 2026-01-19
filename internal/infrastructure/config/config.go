@@ -314,9 +314,9 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Database.Host = getEnv("DB_HOST", "localhost")
 	cfg.Database.Port = getEnvInt("DB_PORT", 5432)
-	cfg.Database.User = getEnv("DB_USER", "bot")
-	cfg.Database.Password = getEnv("DB_PASSWORD", "bot123")
-	cfg.Database.Name = getEnv("DB_NAME", "cryptobot")
+	cfg.Database.User = getEnv("DB_USER", "")
+	cfg.Database.Password = getEnv("DB_PASSWORD", "")
+	cfg.Database.Name = getEnv("DB_NAME", "")
 	cfg.Database.SSLMode = getEnv("DB_SSLMODE", "disable")
 	cfg.Database.MaxOpenConns = getEnvInt("DB_MAX_OPEN_CONNS", 25)
 	cfg.Database.MaxIdleConns = getEnvInt("DB_MAX_IDLE_CONNS", 10)
