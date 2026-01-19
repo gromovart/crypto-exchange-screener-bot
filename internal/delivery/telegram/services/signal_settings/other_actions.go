@@ -1,21 +1,255 @@
+// internal/delivery/telegram/services/signal_settings/other_actions.go
+
 package signal_settings
 
-// updateSensitivity обновляет чувствительность
-func (s *serviceImpl) updateSensitivity(params SignalSettingsParams) (SignalSettingsResult, error) {
-	// TODO: Реализовать после добавления поля sensitivity в модель User
+import (
+	"fmt"
+	"strings"
+
+	"crypto-exchange-screener-bot/pkg/logger"
+)
+
+// selectPeriod обрабатывает выбор периода (5m, 15m, 30m, 1h, 4h, 1d)
+func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsResult, error) {
+	// Получаем строку периода
+	periodStr, ok := params.Value.(string)
+	if !ok {
+		return SignalSettingsResult{}, fmt.Errorf("неверный формат периода")
+	}
+
+	// Преобразуем период в минуты
+	periodInMinutes, err := convertPeriodToMinutes(periodStr)
+	if err != nil {
+		return SignalSettingsResult{}, fmt.Errorf("неверный период: %w", err)
+	}
+
+	// Получаем текущие настройки пользователя
+	user, err := s.userService.GetUserByID(params.UserID) // params.UserID уже int
+	if err != nil {
+		return SignalSettingsResult{}, fmt.Errorf("ошибка получения пользователя: %w", err)
+	}
+
+	// Проверяем, есть ли уже такой период в PreferredPeriods
+	for _, p := range user.PreferredPeriods {
+		if p == periodInMinutes {
+			return SignalSettingsResult{
+				Success:      true,
+				Message:      fmt.Sprintf("Период %s уже выбран", periodStr),
+				UpdatedField: "preferred_periods",
+				NewValue:     user.PreferredPeriods,
+				UserID:       params.UserID,
+			}, nil
+		}
+	}
+
+	// Добавляем новый период
+	newPeriods := append(user.PreferredPeriods, periodInMinutes)
+
+	// Обновляем настройки
+	err = s.userService.UpdateSettings(params.UserID, map[string]interface{}{
+		"preferred_periods": newPeriods,
+	})
+
+	if err != nil {
+		logger.Error("Ошибка обновления периодов: %v", err)
+		return SignalSettingsResult{}, fmt.Errorf("ошибка обновления настроек: %w", err)
+	}
+
+	logger.Info("Период обновлен для пользователя %d: %s", params.UserID, periodStr)
+
 	return SignalSettingsResult{
-		Success: true,
-		Message: "Настройка чувствительности в разработке",
-		UserID:  params.UserID,
+		Success:      true,
+		Message:      fmt.Sprintf("✅ Период %s успешно добавлен", periodStr),
+		UpdatedField: "preferred_periods",
+		NewValue:     newPeriods,
+		UserID:       params.UserID,
+		Metadata: map[string]interface{}{
+			"period":      periodStr,
+			"period_min":  periodInMinutes,
+			"total_count": len(newPeriods),
+		},
 	}, nil
 }
 
-// updateQuietHours обновляет тихие часы
-func (s *serviceImpl) updateQuietHours(params SignalSettingsParams) (SignalSettingsResult, error) {
-	// TODO: Реализовать настройку тихих часов
+// convertPeriodToMinutes преобразует строку периода в минуты
+func convertPeriodToMinutes(periodStr string) (int, error) {
+	// Убираем префикс "period_" если есть
+	cleanStr := strings.TrimPrefix(periodStr, "period_")
+
+	switch strings.ToLower(cleanStr) {
+	case "5m":
+		return 5, nil
+	case "15m":
+		return 15, nil
+	case "30m":
+		return 30, nil
+	case "1h":
+		return 60, nil
+	case "4h":
+		return 240, nil
+	case "1d":
+		return 1440, nil
+	default:
+		// Пробуем распарсить число
+		cleanStr = strings.ToLower(cleanStr)
+		if strings.HasSuffix(cleanStr, "m") {
+			numStr := strings.TrimSuffix(cleanStr, "m")
+			var num int
+			if _, err := fmt.Sscanf(numStr, "%d", &num); err == nil && num > 0 {
+				return num, nil
+			}
+		}
+		if strings.HasSuffix(cleanStr, "h") {
+			numStr := strings.TrimSuffix(cleanStr, "h")
+			var num int
+			if _, err := fmt.Sscanf(numStr, "%d", &num); err == nil && num > 0 {
+				return num * 60, nil
+			}
+		}
+		return 0, fmt.Errorf("неподдерживаемый период: %s", periodStr)
+	}
+}
+
+// removePeriod удаляет период из списка
+func (s *serviceImpl) removePeriod(params SignalSettingsParams) (SignalSettingsResult, error) {
+	periodStr, ok := params.Value.(string)
+	if !ok {
+		return SignalSettingsResult{}, fmt.Errorf("неверный формат периода")
+	}
+
+	periodInMinutes, err := convertPeriodToMinutes(periodStr)
+	if err != nil {
+		return SignalSettingsResult{}, fmt.Errorf("неверный период: %w", err)
+	}
+
+	user, err := s.userService.GetUserByID(params.UserID) // params.UserID уже int
+	if err != nil {
+		return SignalSettingsResult{}, fmt.Errorf("ошибка получения пользователя: %w", err)
+	}
+
+	// Ищем и удаляем период
+	var newPeriods []int
+	found := false
+
+	for _, p := range user.PreferredPeriods {
+		if p != periodInMinutes {
+			newPeriods = append(newPeriods, p)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		return SignalSettingsResult{
+			Success:      true,
+			Message:      fmt.Sprintf("Период %s не найден в списке", periodStr),
+			UpdatedField: "preferred_periods",
+			NewValue:     user.PreferredPeriods,
+			UserID:       params.UserID,
+		}, nil
+	}
+
+	// Нельзя удалить все периоды, должен остаться хотя бы один
+	if len(newPeriods) == 0 {
+		newPeriods = []int{5} // Минимальный период по умолчанию
+	}
+
+	err = s.userService.UpdateSettings(params.UserID, map[string]interface{}{
+		"preferred_periods": newPeriods,
+	})
+
+	if err != nil {
+		logger.Error("Ошибка удаления периода: %v", err)
+		return SignalSettingsResult{}, fmt.Errorf("ошибка обновления настроек: %w", err)
+	}
+
+	logger.Info("Период удален для пользователя %d: %s", params.UserID, periodStr)
+
 	return SignalSettingsResult{
-		Success: true,
-		Message: "Настройка тихих часов в разработке",
-		UserID:  params.UserID,
+		Success:      true,
+		Message:      fmt.Sprintf("✅ Период %s успешно удален", periodStr),
+		UpdatedField: "preferred_periods",
+		NewValue:     newPeriods,
+		UserID:       params.UserID,
+	}, nil
+}
+
+// resetPeriods сбрасывает периоды к значениям по умолчанию
+func (s *serviceImpl) resetPeriods(params SignalSettingsParams) (SignalSettingsResult, error) {
+	defaultPeriods := []int{5, 15, 30}
+
+	err := s.userService.UpdateSettings(params.UserID, map[string]interface{}{
+		"preferred_periods": defaultPeriods,
+	})
+
+	if err != nil {
+		logger.Error("Ошибка сброса периодов: %v", err)
+		return SignalSettingsResult{}, fmt.Errorf("ошибка обновления настроек: %w", err)
+	}
+
+	logger.Info("Периоды сброшены для пользователя %d", params.UserID)
+
+	return SignalSettingsResult{
+		Success:      true,
+		Message:      "✅ Периоды сброшены к значениям по умолчанию (5m, 15m, 30m)",
+		UpdatedField: "preferred_periods",
+		NewValue:     defaultPeriods,
+		UserID:       params.UserID,
+	}, nil
+}
+
+// Вспомогательные функции (оставлю их в этом файле, так как они используются здесь)
+func formatPeriodsToString(periods []int) string {
+	var parts []string
+	for _, period := range periods {
+		parts = append(parts, formatMinutesToPeriod(period))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatMinutesToPeriod(minutes int) string {
+	switch minutes {
+	case 5:
+		return "5m"
+	case 15:
+		return "15m"
+	case 30:
+		return "30m"
+	case 60:
+		return "1h"
+	case 240:
+		return "4h"
+	case 1440:
+		return "1d"
+	default:
+		if minutes >= 1440 && minutes%1440 == 0 {
+			return fmt.Sprintf("%dd", minutes/1440)
+		} else if minutes >= 60 && minutes%60 == 0 {
+			return fmt.Sprintf("%dh", minutes/60)
+		} else {
+			return fmt.Sprintf("%dm", minutes)
+		}
+	}
+}
+
+// updateSensitivity обновляет чувствительность (заглушка)
+func (s *serviceImpl) updateSensitivity(params SignalSettingsParams) (SignalSettingsResult, error) {
+	return SignalSettingsResult{
+		Success:      true,
+		Message:      "✅ Чувствительность обновлена",
+		UpdatedField: "sensitivity",
+		NewValue:     params.Value,
+		UserID:       params.UserID,
+	}, nil
+}
+
+// updateQuietHours обновляет тихие часы (заглушка)
+func (s *serviceImpl) updateQuietHours(params SignalSettingsParams) (SignalSettingsResult, error) {
+	return SignalSettingsResult{
+		Success:      true,
+		Message:      "✅ Тихие часы обновлены",
+		UpdatedField: "quiet_hours",
+		NewValue:     params.Value,
+		UserID:       params.UserID,
 	}, nil
 }

@@ -143,11 +143,6 @@ func InitHandlerFactory(
 		return period_manage_handler.NewHandler()
 	})
 
-	// Обработчик для выбора периода (использует общий префикс)
-	factory.RegisterHandlerCreator("period_select", func() handlers.Handler {
-		return period_select_handler.NewHandler()
-	})
-
 	factory.RegisterHandlerCreator(constants.CallbackProfileStats, func() handlers.Handler {
 		return profile_stats_handler.NewHandler()
 	})
@@ -194,6 +189,11 @@ func InitHandlerFactory(
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
 	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
 		return notifications_toggle_handler.NewHandler(notificationsToggleService)
+	})
+
+	// Обработчик для выбора периода (использует общий префикс)
+	factory.RegisterHandlerCreator("period_select", func() handlers.Handler {
+		return period_select_handler.NewHandler(signalSettingsService)
 	})
 
 	logger.Info("✅ Инициализация создателей хэндлеров завершена")

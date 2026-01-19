@@ -1,3 +1,4 @@
+// internal/delivery/telegram/services/signal_settings/service.go
 package signal_settings
 
 import (
@@ -33,6 +34,12 @@ func (s *serviceImpl) Exec(params SignalSettingsParams) (SignalSettingsResult, e
 		return s.updateSensitivity(params)
 	case "set_quiet_hours":
 		return s.updateQuietHours(params)
+	case "select_period":
+		return s.selectPeriod(params)
+	case "remove_period":
+		return s.removePeriod(params)
+	case "reset_periods":
+		return s.resetPeriods(params)
 	default:
 		return SignalSettingsResult{}, fmt.Errorf("неподдерживаемое действие: %s", params.Action)
 	}

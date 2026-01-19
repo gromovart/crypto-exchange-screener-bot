@@ -4,7 +4,6 @@ package router
 import (
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -64,7 +63,7 @@ func (r *routerImpl) RegisterHandler(handler Handler) {
 	}
 
 	r.handlers[command] = handler
-	logger.Debug("✅ Зарегистрирован хэндлер: %s для %s: %s",
+	logger.Debug("Зарегистрирован хэндлер: %s для %s: %s",
 		handler.GetName(), handler.GetType(), command)
 }
 
@@ -75,7 +74,7 @@ func (r *routerImpl) RegisterCommand(command string, handler Handler) {
 		command = "/" + command
 	}
 	r.handlers[command] = handler
-	logger.Debug("✅ Зарегистрирована команда: %s → %s", command, handler.GetName())
+	logger.Debug("Зарегистрирована команда: %s → %s", command, handler.GetName())
 }
 
 // RegisterCallback регистрирует callback (без префикса /)
@@ -85,7 +84,7 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 		callback = callback[1:]
 	}
 	r.handlers[callback] = handler
-	logger.Debug("✅ Зарегистрирован callback: %s → %s", callback, handler.GetName())
+	logger.Debug("Зарегистрирован callback: %s → %s", callback, handler.GetName())
 }
 
 // Handle обрабатывает команду/callback
@@ -102,8 +101,26 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 		if handler, exists := r.handlers["with_params"]; exists {
 			// Сохраняем полный callback data для обработки
 			params.Data = command
-			log.Printf("🔀 Перенаправление параметризованного callback '%s' в with_params", command)
+			logger.Debug("Перенаправление параметризованного callback '%s' в with_params", command)
 			return r.executeHandler(handler, command, params)
+		}
+	}
+
+	// Проверяем префиксы для периодов (period_5m, period_15m и т.д.)
+	if strings.HasPrefix(command, "period_") {
+		// Пробуем найти обработчик period_select
+		if handler, exists := r.handlers["period_select"]; exists {
+			params.Data = command
+			logger.Debug("Перенаправление периода '%s' в period_select", command)
+			return r.executeHandler(handler, command, params)
+		}
+		// Или пробуем найти обработчик с префиксом period_
+		for key, h := range r.handlers {
+			if strings.HasPrefix(key, "period_") && strings.HasPrefix(command, key) {
+				params.Data = command
+				logger.Debug("Перенаправление периода '%s' в %s", command, key)
+				return r.executeHandler(h, command, params)
+			}
 		}
 	}
 
@@ -112,6 +129,7 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 		if strings.HasPrefix(command, key+":") {
 			// Обновляем data в params для передачи параметров
 			params.Data = command
+			logger.Debug("Перенаправление по префиксу '%s' в %s", command, key)
 			return r.executeHandler(h, command, params)
 		}
 	}
@@ -133,20 +151,26 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 
 // executeHandler выполняет обработчик
 func (r *routerImpl) executeHandler(handler Handler, command string, params HandlerParams) (HandlerResult, error) {
-	log.Printf("🔍 Вызов хэндлера: %s для: %s",
+	logger.Debug("Вызов хэндлера: %s для: %s",
 		handler.GetName(), command)
 
 	result, err := handler.Execute(params)
 	if err != nil {
+		logger.Error("Ошибка в хэндлере %s для %s: %v",
+			handler.GetName(), command, err)
 		return HandlerResult{}, err
 	}
 
 	// Приводим тип результата
 	handlerResult, ok := result.(HandlerResult)
 	if !ok {
-		return HandlerResult{}, fmt.Errorf("неверный тип результата от хэндлера")
+		err := fmt.Errorf("неверный тип результата от хэндлера")
+		logger.Error("%s для %s: %v", handler.GetName(), command, err)
+		return HandlerResult{}, err
 	}
 
+	logger.Debug("Хэндлер %s для %s выполнен успешно",
+		handler.GetName(), command)
 	return handlerResult, nil
 }
 

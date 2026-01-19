@@ -1,3 +1,4 @@
+// internal/delivery/telegram/services/signal_settings/interface.go
 package signal_settings
 
 import "crypto-exchange-screener-bot/internal/core/domain/users"
@@ -19,11 +20,12 @@ type SignalSettingsParams struct {
 
 // SignalSettingsResult результат Exec
 type SignalSettingsResult struct {
-	Success      bool        `json:"success"`
-	Message      string      `json:"message,omitempty"`
-	UpdatedField string      `json:"updated_field,omitempty"`
-	NewValue     interface{} `json:"new_value,omitempty"`
-	UserID       int         `json:"user_id"`
+	Success      bool                   `json:"success"`
+	Message      string                 `json:"message,omitempty"`
+	UpdatedField string                 `json:"updated_field,omitempty"`
+	NewValue     interface{}            `json:"new_value,omitempty"`
+	UserID       int                    `json:"user_id"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // NewServiceWithDependencies фабрика с зависимостями
