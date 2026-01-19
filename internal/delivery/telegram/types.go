@@ -78,3 +78,28 @@ func (rl *RateLimiter) CanSend(key string) bool {
 	rl.lastSent[key] = now
 	return true
 }
+
+// BotCommand представляет команду в меню бота
+type BotCommand struct {
+	Command     string `json:"command"`     // Команда (1-32 символа)
+	Description string `json:"description"` // Описание (1-256 символов)
+}
+
+// SetMyCommandsParams параметры для установки команд
+type SetMyCommandsParams struct {
+	Commands []BotCommand     `json:"commands"`                // Список команд
+	Scope    *BotCommandScope `json:"scope,omitempty"`         // Область видимости
+	Language string           `json:"language_code,omitempty"` // Язык
+}
+
+// BotCommandScope - область видимости команд
+type BotCommandScope struct {
+	Type string `json:"type"` // Тип области: "default", "all_private_chats", "all_group_chats", "all_chat_administrators"
+}
+
+// SetMyCommandsResponse - ответ на установку команд
+type SetMyCommandsResponse struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description,omitempty"`
+	ErrorCode   int    `json:"error_code,omitempty"`
+}

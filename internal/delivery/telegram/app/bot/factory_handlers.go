@@ -4,8 +4,6 @@ package bot
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
-	"crypto-exchange-screener-bot/pkg/logger"
-
 	auth_login_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_login"
 	auth_logout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/auth_logout"
 	help_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/help"
@@ -32,6 +30,7 @@ import (
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
 	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
 	with_params_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/with_params"
+	commands_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/commands"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
 	periods_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/periods"
@@ -41,6 +40,7 @@ import (
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -52,6 +52,11 @@ func InitHandlerFactory(
 	logger.Info("🔧 Инициализация создателей хэндлеров...")
 
 	// Регистрируем создателей КОМАНД
+	// Добавляю регистрацию команды /commands
+	factory.RegisterHandlerCreator("commands", func() handlers.Handler {
+		return commands_command.NewHandler()
+	})
+
 	factory.RegisterHandlerCreator("start", func() handlers.Handler {
 		return start_command.NewHandler()
 	})

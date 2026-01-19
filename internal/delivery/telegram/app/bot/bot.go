@@ -2,10 +2,9 @@
 package bot
 
 import (
-	"time"
-
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/router"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
@@ -14,7 +13,10 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/pkg/logger"
+	"fmt"
 	"sync"
+	"time"
 )
 
 // TelegramBot - бот для отправки уведомлений в Telegram
@@ -86,6 +88,12 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 
 	// Создаем polling handler
 	bot.pollingHandler = NewPollingClient(bot)
+
+	// Устанавливаем меню команд Telegram
+	if err := bot.SetMyCommands(); err != nil {
+		logger.Warn("Не удалось установить меню команд: %v", err)
+		logger.Info("Бот будет работать, но меню команд в Telegram может не отображаться")
+	}
 
 	return bot
 }
@@ -238,4 +246,39 @@ func (b *TelegramBot) StopPolling() error {
 
 func (b *TelegramBot) IsPolling() bool {
 	return b.pollingHandler != nil && b.pollingHandler.running
+}
+
+// SetMyCommands устанавливает меню команд в Telegram
+func (b *TelegramBot) SetMyCommands() error {
+	logger.Info("Установка меню команд в Telegram API")
+
+	// Список команд для меню (используем константы)
+	commands := []telegram.BotCommand{
+		{Command: "/start", Description: constants.CommandDescriptions.Start},
+		{Command: "/help", Description: constants.CommandDescriptions.Help},
+		{Command: "/profile", Description: constants.CommandDescriptions.Profile},
+		{Command: "/settings", Description: constants.CommandDescriptions.Settings},
+		{Command: "/notifications", Description: constants.CommandDescriptions.Notifications},
+		{Command: "/periods", Description: constants.CommandDescriptions.Periods},
+		{Command: "/thresholds", Description: constants.CommandDescriptions.Thresholds},
+		{Command: "/commands", Description: constants.CommandDescriptions.Commands},
+		{Command: "/stats", Description: constants.CommandDescriptions.Stats},
+	}
+
+	logger.Debug("Подготовлено %d команд для отправки", len(commands))
+
+	// Устанавливаем команды
+	if err := b.telegramClient.SetMyCommands(commands); err != nil {
+		logger.Error("Ошибка установки меню команд: %v", err)
+		return fmt.Errorf("ошибка настройки меню команд: %v", err)
+	}
+
+	logger.Info("Меню команд успешно отправлено в Telegram API")
+
+	// Логируем список команд только на уровне debug
+	for _, cmd := range commands {
+		logger.Debug("   • %s - %s", cmd.Command, cmd.Description)
+	}
+
+	return nil
 }

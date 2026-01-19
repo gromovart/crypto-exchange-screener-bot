@@ -277,3 +277,51 @@ var SignalButtonTexts = struct {
 	TestSignal:      "⚡ Тестовый сигнал",
 	ThresholdFormat: "%s Порог: %.1f%%",
 }
+
+// CommandButtonTexts содержит тексты для кнопок команд
+var CommandButtonTexts = struct {
+	Start         string
+	Help          string
+	Profile       string
+	Settings      string
+	Notifications string
+	Periods       string
+	Thresholds    string
+	Commands      string
+	Stats         string
+	Back          string
+}{
+	Start:         "🚀 /start",
+	Help:          "📋 /help",
+	Profile:       "👤 /profile",
+	Settings:      "⚙️ /settings",
+	Notifications: "🔔 /notifications",
+	Periods:       "⏱️ /periods",
+	Thresholds:    "🎯 /thresholds",
+	Commands:      "📜 /commands",
+	Stats:         "📊 /stats",
+	Back:          "🔙 Назад",
+}
+
+// CommandDescriptions содержит описания для команд меню
+var CommandDescriptions = struct {
+	Start         string
+	Help          string
+	Profile       string
+	Settings      string
+	Notifications string
+	Periods       string
+	Thresholds    string
+	Commands      string
+	Stats         string
+}{
+	Start:         "Запустить бота",
+	Help:          "Помощь и инструкции",
+	Profile:       "Мой профиль",
+	Settings:      "Настройки",
+	Notifications: "Управление уведомлениями",
+	Periods:       "Периоды анализа",
+	Thresholds:    "Пороги сигналов",
+	Commands:      "Список всех команд",
+	Stats:         "Статистика системы",
+}
