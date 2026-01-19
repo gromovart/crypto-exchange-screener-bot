@@ -1,3 +1,4 @@
+// internal/infrastructure/persistence/postgres/connection.go
 package postgres
 
 import (
@@ -27,9 +28,9 @@ func DefaultConfig() *Config {
 	return &Config{
 		Host:           "localhost",
 		Port:           5432,
-		User:           "cryptobot",
-		Password:       "password",
-		Database:       "cryptobot_db",
+		User:           "", // ← Убрал хардкод, будет браться из конфига
+		Password:       "", // ← Убрал хардкод, будет браться из конфига
+		Database:       "", // ← Убрал хардкод, будет браться из конфига
 		SSLMode:        "disable",
 		MaxConns:       25,
 		MaxIdle:        10,
@@ -38,6 +39,17 @@ func DefaultConfig() *Config {
 }
 
 func Connect(cfg *Config) (*sqlx.DB, error) {
+	// Валидация обязательных параметров
+	if cfg.User == "" {
+		return nil, fmt.Errorf("DB_USER не указан в конфигурации")
+	}
+	if cfg.Password == "" {
+		return nil, fmt.Errorf("DB_PASSWORD не указан в конфигурации")
+	}
+	if cfg.Database == "" {
+		return nil, fmt.Errorf("DB_NAME не указан в конфигурации")
+	}
+
 	dsn := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode,
@@ -59,7 +71,8 @@ func Connect(cfg *Config) (*sqlx.DB, error) {
 		return nil, fmt.Errorf("failed to ping postgres: %w", err)
 	}
 
-	log.Println("✅ Connected to PostgreSQL")
+	log.Printf("✅ Connected to PostgreSQL: %s@%s:%d/%s",
+		cfg.User, cfg.Host, cfg.Port, cfg.Database)
 
 	// Выполняем миграции
 	if cfg.MigrationsPath != "" {
