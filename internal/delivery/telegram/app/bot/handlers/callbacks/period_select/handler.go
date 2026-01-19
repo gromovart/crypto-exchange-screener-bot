@@ -71,9 +71,21 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 	periodsStr := formatPeriodsToString(periods)
 
 	// Создаем сообщение с результатом
+	var emoji string
+	if actionResult, ok := result.Metadata["action"].(string); ok {
+		if actionResult == "added" {
+			emoji = "✅"
+		} else {
+			emoji = "❌"
+		}
+	} else {
+		emoji = "✅"
+	}
+
 	message := fmt.Sprintf(
-		"✅ *Период обновлен*\n\n%s\n\n"+
+		"%s *Период обновлен*\n\n%s\n\n"+
 			"Текущие периоды анализа: %s",
+		emoji,
 		result.Message,
 		periodsStr,
 	)

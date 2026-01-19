@@ -10,6 +10,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // periodsMenuHandler реализация обработчика меню периодов
@@ -30,6 +31,9 @@ func NewHandler() handlers.Handler {
 
 // Execute выполняет обработку callback меню периодов
 func (h *periodsMenuHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+
+	logger.Warn("Пользователь ID: %d, Периоды: %v",
+		params.User.ID, params.User.PreferredPeriods)
 	// Периоды доступны всем
 	message := h.createPeriodsMessage(params.User)
 	keyboard := h.createPeriodsKeyboard(params.User)
@@ -45,47 +49,83 @@ func (h *periodsMenuHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 
 // createPeriodsMessage создает сообщение для меню периодов
 func (h *periodsMenuHandler) createPeriodsMessage(user *models.User) string {
-	// Преобразуем периоды в строку
-	periodsStr := "Не настроены"
-	if user != nil && len(user.PreferredPeriods) > 0 {
-		var periods []string
-		for _, p := range user.PreferredPeriods {
-			periods = append(periods, fmt.Sprintf("%dм", p))
-		}
-		periodsStr = strings.Join(periods, ", ")
-	}
+	// Форматируем текущие периоды
+	periodsDisplay := h.formatPeriodsForDisplay(user)
 
 	return fmt.Sprintf(
-		"%s\n\n"+
-			"Текущие периоды: %s\n\n"+
-			"Периоды определяют, за какие временные интервалы\n"+
-			"бот анализирует движение цены.\n\n"+
-			"Выберите периоды для отслеживания:",
-		constants.MenuButtonTexts.Periods,
-		periodsStr,
+		"⏱️ *Периоды анализа*\n\n"+
+			"*Текущие периоды:* %s\n\n"+
+			"*Как работают периоды:*\n"+
+			"• 5m - краткосрочные движения\n"+
+			"• 15m - среднесрочные тренды\n"+
+			"• 30m - долгосрочные тенденции\n"+
+			"• 1h - анализ по часам\n"+
+			"• 4h - внутридневной анализ\n"+
+			"• 1d - дневной анализ\n\n"+
+			"*Инструкция:*\n"+
+			"Нажмите на период, чтобы добавить/удалить его.\n"+
+			"✅ - период выбран\n"+
+			"⏱️ - период не выбран",
+		periodsDisplay,
 	)
+}
+
+// formatPeriodsForDisplay форматирует периоды для отображения
+func (h *periodsMenuHandler) formatPeriodsForDisplay(user *models.User) string {
+	if user == nil || len(user.PreferredPeriods) == 0 {
+		return "не настроены"
+	}
+
+	var periods []string
+	for _, p := range user.PreferredPeriods {
+		periods = append(periods, formatMinutesToPeriod(p))
+	}
+
+	return strings.Join(periods, ", ")
+}
+
+// formatMinutesToPeriod форматирует минуты в читаемый период
+func formatMinutesToPeriod(minutes int) string {
+	switch minutes {
+	case 5:
+		return "5m"
+	case 15:
+		return "15m"
+	case 30:
+		return "30m"
+	case 60:
+		return "1h"
+	case 240:
+		return "4h"
+	case 1440:
+		return "1d"
+	default:
+		if minutes >= 1440 && minutes%1440 == 0 {
+			return fmt.Sprintf("%dd", minutes/1440)
+		} else if minutes >= 60 && minutes%60 == 0 {
+			return fmt.Sprintf("%dh", minutes/60)
+		} else {
+			return fmt.Sprintf("%dm", minutes)
+		}
+	}
 }
 
 // createPeriodsKeyboard создает клавиатуру для меню периодов
 func (h *periodsMenuHandler) createPeriodsKeyboard(user *models.User) interface{} {
-	// Базовые кнопки периодов (доступны всем)
+	// Создаем кнопки с индикаторами выбора
 	buttons := [][]map[string]string{
-		{
-			{"text": constants.PeriodButtonTexts.Period5m, "callback_data": constants.CallbackPeriod5m},
-			{"text": constants.PeriodButtonTexts.Period15m, "callback_data": constants.CallbackPeriod15m},
-			{"text": constants.PeriodButtonTexts.Period30m, "callback_data": constants.CallbackPeriod30m},
-		},
-		{
-			{"text": constants.PeriodButtonTexts.Period1h, "callback_data": constants.CallbackPeriod1h},
-			{"text": constants.PeriodButtonTexts.Period4h, "callback_data": constants.CallbackPeriod4h},
-		},
+		h.createPeriodButtonRow(user, "5m", constants.CallbackPeriod5m, "5 минут"),
+		h.createPeriodButtonRow(user, "15m", constants.CallbackPeriod15m, "15 минут"),
+		h.createPeriodButtonRow(user, "30m", constants.CallbackPeriod30m, "30 минут"),
+		h.createPeriodButtonRow(user, "1h", constants.CallbackPeriod1h, "1 час"),
+		h.createPeriodButtonRow(user, "4h", constants.CallbackPeriod4h, "4 часа"),
 	}
 
 	// Добавляем кнопку "1 день" для авторизованных
 	if user != nil && user.ID > 0 {
-		buttons = append(buttons, []map[string]string{
-			{"text": constants.PeriodButtonTexts.Period1d, "callback_data": constants.CallbackPeriod1d},
-		})
+		buttons = append(buttons,
+			h.createPeriodButtonRow(user, "1d", constants.CallbackPeriod1d, "1 день"),
+		)
 	}
 
 	// Кнопка "Назад"
@@ -117,4 +157,66 @@ func (h *periodsMenuHandler) isPeriodSelected(user *models.User, period string) 
 		}
 	}
 	return false
+}
+
+// createPeriodButtonRow создает строку кнопки периода с индикатором
+func (h *periodsMenuHandler) createPeriodButtonRow(user *models.User, periodStr, callback, buttonText string) []map[string]string {
+	isSelected := false
+	if user != nil {
+		periodMinutes := convertPeriodStrToMinutes(periodStr)
+		for _, p := range user.PreferredPeriods {
+			if p == periodMinutes {
+				isSelected = true
+				break
+			}
+		}
+	}
+
+	// Обновленные индикаторы
+	var indicator string
+	if isSelected {
+		indicator = "✅ "
+	} else {
+		indicator = "⏱️ "
+	}
+
+	return []map[string]string{
+		{"text": indicator + buttonText, "callback_data": callback},
+	}
+}
+
+// convertPeriodStrToMinutes конвертирует строку периода в минуты
+func convertPeriodStrToMinutes(periodStr string) int {
+	switch periodStr {
+	case "5m":
+		return 5
+	case "15m":
+		return 15
+	case "30m":
+		return 30
+	case "1h":
+		return 60
+	case "4h":
+		return 240
+	case "1d":
+		return 1440
+	default:
+		// Пробуем распарсить
+		if strings.HasSuffix(periodStr, "m") {
+			numStr := strings.TrimSuffix(periodStr, "m")
+			num, _ := strconv.Atoi(numStr)
+			return num
+		}
+		if strings.HasSuffix(periodStr, "h") {
+			numStr := strings.TrimSuffix(periodStr, "h")
+			num, _ := strconv.Atoi(numStr)
+			return num * 60
+		}
+		if strings.HasSuffix(periodStr, "d") {
+			numStr := strings.TrimSuffix(periodStr, "d")
+			num, _ := strconv.Atoi(numStr)
+			return num * 1440
+		}
+		return 0
+	}
 }

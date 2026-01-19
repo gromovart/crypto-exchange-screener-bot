@@ -220,11 +220,12 @@ func (s *Service) UpdateSettings(userID int, settings map[string]interface{}) er
 	// Сохраняем старые настройки для логирования
 	oldSettings := map[string]interface{}{
 		"min_growth_threshold":  user.MinGrowthThreshold,
-		"min_fall_threshold":    user.MinFallThreshold, // Добавлено
+		"min_fall_threshold":    user.MinFallThreshold,
 		"max_signals_per_day":   user.MaxSignalsPerDay,
 		"notifications_enabled": user.NotificationsEnabled,
-		"notify_growth":         user.NotifyGrowth, // Добавлено
-		"notify_fall":           user.NotifyFall,   // Добавлено
+		"notify_growth":         user.NotifyGrowth,
+		"notify_fall":           user.NotifyFall,
+		"preferred_periods":     user.PreferredPeriods, // ← ДОБАВЛЯЕМ
 	}
 
 	// Применяем новые настройки
@@ -234,7 +235,7 @@ func (s *Service) UpdateSettings(userID int, settings map[string]interface{}) er
 			if val, ok := value.(float64); ok {
 				user.MinGrowthThreshold = val
 			}
-		case "min_fall_threshold": // Добавлено
+		case "min_fall_threshold":
 			if val, ok := value.(float64); ok {
 				user.MinFallThreshold = val
 			}
@@ -246,13 +247,17 @@ func (s *Service) UpdateSettings(userID int, settings map[string]interface{}) er
 			if val, ok := value.(bool); ok {
 				user.NotificationsEnabled = val
 			}
-		case "notify_growth": // Добавлено
+		case "notify_growth":
 			if val, ok := value.(bool); ok {
 				user.NotifyGrowth = val
 			}
-		case "notify_fall": // Добавлено
+		case "notify_fall":
 			if val, ok := value.(bool); ok {
 				user.NotifyFall = val
+			}
+		case "preferred_periods": // ← ДОБАВЛЯЕМ
+			if val, ok := value.([]int); ok {
+				user.PreferredPeriods = val
 			}
 		}
 	}

@@ -24,26 +24,43 @@ func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsR
 	}
 
 	// Получаем текущие настройки пользователя
-	user, err := s.userService.GetUserByID(params.UserID) // params.UserID уже int
+	user, err := s.userService.GetUserByID(params.UserID)
 	if err != nil {
 		return SignalSettingsResult{}, fmt.Errorf("ошибка получения пользователя: %w", err)
 	}
 
 	// Проверяем, есть ли уже такой период в PreferredPeriods
+	var newPeriods []int
+	var found bool
+	var action string // "added" или "removed"
+
 	for _, p := range user.PreferredPeriods {
 		if p == periodInMinutes {
-			return SignalSettingsResult{
-				Success:      true,
-				Message:      fmt.Sprintf("Период %s уже выбран", periodStr),
-				UpdatedField: "preferred_periods",
-				NewValue:     user.PreferredPeriods,
-				UserID:       params.UserID,
-			}, nil
+			found = true
+			action = "removed"
+			// Пропускаем - удаляем период
+		} else {
+			newPeriods = append(newPeriods, p)
 		}
 	}
 
-	// Добавляем новый период
-	newPeriods := append(user.PreferredPeriods, periodInMinutes)
+	// Если период не найден - добавляем
+	if !found {
+		newPeriods = append(user.PreferredPeriods, periodInMinutes)
+		action = "added"
+	}
+
+	// Нельзя удалить все периоды, должен остаться хотя бы один
+	if len(newPeriods) == 0 {
+		newPeriods = []int{5} // Минимальный период по умолчанию
+		return SignalSettingsResult{
+			Success:      true,
+			Message:      "⚠️ Нельзя удалить все периоды. Оставлен период 5m.",
+			UpdatedField: "preferred_periods",
+			NewValue:     newPeriods,
+			UserID:       params.UserID,
+		}, nil
+	}
 
 	// Обновляем настройки
 	err = s.userService.UpdateSettings(params.UserID, map[string]interface{}{
@@ -55,17 +72,26 @@ func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsR
 		return SignalSettingsResult{}, fmt.Errorf("ошибка обновления настроек: %w", err)
 	}
 
-	logger.Info("Период обновлен для пользователя %d: %s", params.UserID, periodStr)
+	// Сообщение в зависимости от действия
+	var message string
+	if action == "added" {
+		message = fmt.Sprintf("✅ Период %s добавлен", periodStr)
+	} else {
+		message = fmt.Sprintf("❌ Период %s удален", periodStr)
+	}
+
+	logger.Info("Период %s для пользователя %d: %s", action, params.UserID, periodStr)
 
 	return SignalSettingsResult{
 		Success:      true,
-		Message:      fmt.Sprintf("✅ Период %s успешно добавлен", periodStr),
+		Message:      message,
 		UpdatedField: "preferred_periods",
 		NewValue:     newPeriods,
 		UserID:       params.UserID,
 		Metadata: map[string]interface{}{
 			"period":      periodStr,
 			"period_min":  periodInMinutes,
+			"action":      action,
 			"total_count": len(newPeriods),
 		},
 	}, nil
