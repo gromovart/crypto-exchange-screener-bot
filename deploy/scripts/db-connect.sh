@@ -6,7 +6,10 @@
 #   stop      - Остановить SSH туннель
 #   status    - Проверить статус туннеля
 #   config    - Показать конфигурацию для DataGrip
+#   datagrip  - Показать готовую конфигурацию для DataGrip (без SSH)
 #   test      - Проверить подключение через туннель
+#   info      - Показать полную информацию о подключении
+#   psql      - Запустить psql через туннель
 
 set -e
 
@@ -15,6 +18,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Конфигурация
@@ -46,6 +50,10 @@ log_error() {
 
 log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+log_config() {
+    echo -e "${CYAN}[CONFIG]${NC} $1"
 }
 
 # Проверка занят ли порт (кросс-платформенная)
@@ -143,6 +151,11 @@ read_config() {
         log_info "Использую $DB_HOST для SSH туннеля"
         SERVER_IP="$DB_HOST"
     fi
+
+    # Устанавливаем значения по умолчанию если не заданы
+    DB_NAME="${DB_NAME:-cryptobot}"
+    DB_USER="${DB_USER:-cryptobot}"
+    DB_PASSWORD="${DB_PASSWORD:-SecurePass123!}"
 }
 
 # Проверка SSH ключа
@@ -185,25 +198,61 @@ check_tunnel_status() {
     if [ -f "$TUNNEL_PID_FILE" ]; then
         PID=$(cat "$TUNNEL_PID_FILE")
         if ps -p "$PID" > /dev/null 2>&1; then
-            log_info "✅ SSH туннель запущен (PID: $PID)"
-
-            # Проверяем, слушает ли порт
-            if is_port_listening "$LOCAL_PORT"; then
-                log_info "✅ Локальный порт $LOCAL_PORT слушает"
-                return 0
-            else
-                log_warn "Порт $LOCAL_PORT не слушает, но процесс есть"
-                return 1
-            fi
+            echo "running:$PID"
+            return 0
         else
-            log_warn "Процесс туннеля не найден, очистка PID файла"
             rm -f "$TUNNEL_PID_FILE"
+            echo "not_running"
             return 1
         fi
     else
-        log_info "SSH туннель не запущен"
+        echo "not_running"
         return 1
     fi
+}
+
+# Показать детальный статус
+show_detailed_status() {
+    log_step "Детальный статус SSH туннеля"
+    echo ""
+
+    TUNNEL_STATUS=$(check_tunnel_status)
+    case $TUNNEL_STATUS in
+        running:*)
+            PID=${TUNNEL_STATUS#running:}
+            log_info "✅ SSH туннель запущен:"
+            echo "   PID: $PID"
+            echo "   Лог: $LOG_FILE"
+
+            # Проверяем порт
+            if is_port_listening "$LOCAL_PORT"; then
+                log_info "✅ Локальный порт $LOCAL_PORT слушает"
+
+                # Показываем информацию о процессе
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                    echo "   Команда:"
+                    ps -p "$PID" -o command= | sed 's/^/     /'
+                else
+                    echo "   Команда:"
+                    ps -p "$PID" -o cmd= | sed 's/^/     /'
+                fi
+
+                echo ""
+                log_info "📡 Схема подключения:"
+                echo "   localhost:$LOCAL_PORT → $SERVER_USER@$SERVER_IP → localhost:$REMOTE_PORT"
+                echo ""
+
+                return 0
+            else
+                log_warn "⚠️  Порт $LOCAL_PORT не слушает"
+                return 1
+            fi
+            ;;
+        not_running)
+            log_info "SSH туннель не запущен"
+            return 1
+            ;;
+    esac
 }
 
 # Запуск SSH туннеля
@@ -211,7 +260,7 @@ start_tunnel() {
     log_step "Запуск SSH туннеля к БД..."
 
     # Проверяем, не запущен ли уже
-    if check_tunnel_status; then
+    if show_detailed_status; then
         log_info "Туннель уже запущен, используйте 'stop' чтобы остановить"
         return 0
     fi
@@ -219,11 +268,17 @@ start_tunnel() {
     # Проверяем, свободен ли локальный порт
     if is_port_listening "$LOCAL_PORT"; then
         log_error "Локальный порт $LOCAL_PORT уже занят"
+        log_info "Занявший процесс:"
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            lsof -ti:"$LOCAL_PORT" | xargs ps -p 2>/dev/null | tail -n +2 || true
+        fi
         log_info "Используйте другой порт:"
         log_info "  export LOCAL_PORT=15433"
         log_info "  или укажите в .env: LOCAL_PORT=15433"
         exit 1
     fi
+
+    check_ssh_key
 
     log_info "Создание туннеля:"
     log_info "  Локально: localhost:$LOCAL_PORT"
@@ -248,19 +303,12 @@ start_tunnel() {
     sleep 3
 
     # Проверяем запуск
-    if check_tunnel_status; then
+    if show_detailed_status; then
         log_info "✅ SSH туннель успешно запущен"
-        log_info "   PID: $TUNNEL_PID"
-        log_info "   Лог: $LOG_FILE"
 
-        # Показываем команду для подключения
-        echo ""
-        log_info "Теперь можно подключиться к БД через:"
-        log_info "  Host: localhost"
-        log_info "  Port: $LOCAL_PORT"
-        log_info "  Database: ${DB_NAME:-cryptobot}"
-        log_info "  User: ${DB_USER:-bot}"
-        log_info "  Password: ${DB_PASSWORD:-SecurePass123!}"
+        # Показываем информацию для подключения
+        show_connection_info
+
     else
         log_error "Не удалось запустить SSH туннель"
         log_info "Проверьте лог: tail -20 $LOG_FILE"
@@ -312,9 +360,45 @@ stop_tunnel() {
     fi
 }
 
-# Показать конфигурацию для DataGrip
+# Показать информацию для подключения
+show_connection_info() {
+    log_step "Информация для подключения:"
+    echo ""
+
+    echo "📊 Параметры БД:"
+    echo "   Хост: localhost"
+    echo "   Порт: $LOCAL_PORT"
+    echo "   База: $DB_NAME"
+    echo "   Пользователь: $DB_USER"
+    echo "   Пароль: $(echo "$DB_PASSWORD" | sed 's/./*/g')"
+    echo ""
+
+    echo "🔧 Для DataGrip/IntelliJ IDEA:"
+    echo "   1. Database → New → Data Source → PostgreSQL"
+    echo "   2. Host: localhost"
+    echo "   3. Port: $LOCAL_PORT"
+    echo "   4. Database: $DB_NAME"
+    echo "   5. User: $DB_USER"
+    echo "   6. Password: $DB_PASSWORD"
+    echo "   7. SSL: disable"
+    echo "   8. SSH tunnel: НЕ ИСПОЛЬЗОВАТЬ (туннель уже создан)"
+    echo ""
+
+    echo "💻 Команда для psql:"
+    echo "   PGPASSWORD='$DB_PASSWORD' psql -h localhost -p $LOCAL_PORT -U $DB_USER -d $DB_NAME"
+    echo ""
+
+    echo "📁 Конфигурационный файл:"
+    echo "   $CONFIG_FILE"
+}
+
+# Показать конфигурацию для DataGrip (старый стиль с SSH)
 show_config() {
-    log_step "Конфигурация для DataGrip/IntelliJ IDEA:"
+    log_step "Конфигурация для DataGrip/IntelliJ IDEA (со встроенным SSH):"
+    echo ""
+
+    echo "⚠️  ВНИМАНИЕ: Эта конфигурация использует встроенный SSH туннель DataGrip"
+    echo "   Лучше использовать наш туннель (команда 'datagrip' или 'info')"
     echo ""
 
     echo "1. Создайте новое подключение PostgreSQL:"
@@ -324,12 +408,12 @@ show_config() {
     echo "2. Основные настройки:"
     echo "   Host: localhost"
     echo "   Port: $LOCAL_PORT"
-    echo "   Database: ${DB_NAME:-cryptobot}"
-    echo "   User: ${DB_USER:-bot}"
-    echo "   Password: ${DB_PASSWORD:-SecurePass123!}"
+    echo "   Database: $DB_NAME"
+    echo "   User: $DB_USER"
+    echo "   Password: $DB_PASSWORD"
     echo ""
 
-    echo "3. SSH/SSL вкладка (ВАЖНО!):"
+    echo "3. SSH/SSL вкладка:"
     echo "   ☑ Use SSH tunnel"
     echo "   Host: $SERVER_IP"
     echo "   Port: 22"
@@ -340,11 +424,39 @@ show_config() {
 
     echo "4. Тестовые команды:"
     echo "   Подключиться через psql:"
-    echo "   PGPASSWORD='${DB_PASSWORD:-SecurePass123!}' psql -h localhost -p $LOCAL_PORT -U ${DB_USER:-bot} -d ${DB_NAME:-cryptobot}"
+    echo "   PGPASSWORD='$DB_PASSWORD' psql -h localhost -p $LOCAL_PORT -U $DB_USER -d $DB_NAME"
+}
+
+# Показать конфигурацию для DataGrip (без SSH)
+show_datagrip_config() {
+    log_step "Конфигурация для DataGrip (без SSH туннеля):"
     echo ""
 
-    echo "5. Файл конфигурации:"
-    echo "   $CONFIG_FILE"
+    echo "✅ SSH туннель уже запущен на порту $LOCAL_PORT"
+    echo "   Подключайтесь напрямую к localhost:$LOCAL_PORT"
+    echo ""
+
+    echo "⚙️ Настройки DataGrip:"
+    echo ""
+    echo "1. Database → New → Data Source → PostgreSQL"
+    echo ""
+    echo "2. Основные настройки:"
+    echo "   Host: localhost"
+    echo "   Port: $LOCAL_PORT"
+    echo "   Database: $DB_NAME"
+    echo "   User: $DB_USER"
+    echo "   Password: $DB_PASSWORD"
+    echo ""
+    echo "3. Важно:"
+    echo "   ❌ НЕ включайте 'Use SSH tunnel'"
+    echo "   Туннель уже работает через наш скрипт"
+    echo ""
+    echo "4. Дополнительно (Advanced tab):"
+    echo "   sslmode=disable"
+    echo ""
+
+    echo "📋 Команда для быстрой проверки:"
+    echo "   make db-tunnel-test"
 }
 
 # Тестирование подключения через туннель
@@ -352,7 +464,7 @@ test_connection() {
     log_step "Тестирование подключения к БД..."
 
     # Проверяем туннель
-    if ! check_tunnel_status; then
+    if ! show_detailed_status; then
         log_error "SSH туннель не запущен"
         log_info "Запустите сначала: ./deploy/scripts/db-connect.sh start"
         exit 1
@@ -371,12 +483,12 @@ test_connection() {
     # Пробуем подключиться
     log_info "Подключение к БД через туннель..."
 
-    export PGPASSWORD="${DB_PASSWORD:-SecurePass123!}"
+    export PGPASSWORD="$DB_PASSWORD"
 
     if psql -h localhost \
             -p "$LOCAL_PORT" \
-            -U "${DB_USER:-bot}" \
-            -d "${DB_NAME:-cryptobot}" \
+            -U "$DB_USER" \
+            -d "$DB_NAME" \
             -c "SELECT version();" 2>/dev/null; then
         log_info "✅ Подключение к БД успешно!"
 
@@ -385,25 +497,75 @@ test_connection() {
         log_info "Информация о БД:"
         psql -h localhost \
              -p "$LOCAL_PORT" \
-             -U "${DB_USER:-bot}" \
-             -d "${DB_NAME:-cryptobot}" \
+             -U "$DB_USER" \
+             -d "$DB_NAME" \
              -c "SELECT current_database(), current_user, inet_server_addr(), inet_server_port();" 2>/dev/null
 
         echo ""
         log_info "Таблицы в БД:"
         psql -h localhost \
              -p "$LOCAL_PORT" \
-             -U "${DB_USER:-bot}" \
-             -d "${DB_NAME:-cryptobot}" \
+             -U "$DB_USER" \
+             -d "$DB_NAME" \
              -c "SELECT schemaname, tablename FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema') ORDER BY tablename;" 2>/dev/null | head -20
     else
         log_error "Не удалось подключиться к БД"
         log_info "Проверьте:"
         log_info "  1. Запущен ли SSH туннель"
         log_info "  2. Правильность параметров БД"
-        log_info "  3. Существует ли база данных ${DB_NAME:-cryptobot}"
+        log_info "  3. Существует ли база данных $DB_NAME"
         exit 1
     fi
+}
+
+# Запустить psql через туннель
+run_psql() {
+    log_step "Запуск psql через SSH туннель..."
+
+    # Проверяем туннель
+    if ! show_detailed_status; then
+        log_error "SSH туннель не запущен"
+        log_info "Запустите сначала: ./deploy/scripts/db-connect.sh start"
+        exit 1
+    fi
+
+    # Проверяем, установлен ли psql
+    if ! command -v psql &> /dev/null; then
+        log_error "psql не установлен"
+        log_info "Установите:"
+        log_info "  macOS: brew install postgresql"
+        log_info "  Ubuntu: sudo apt-get install postgresql-client"
+        log_info "  Fedora: sudo dnf install postgresql"
+        exit 1
+    fi
+
+    log_info "Подключение к БД через туннель..."
+    echo "Параметры:"
+    echo "  Host: localhost"
+    echo "  Port: $LOCAL_PORT"
+    echo "  Database: $DB_NAME"
+    echo "  User: $DB_USER"
+    echo ""
+
+    export PGPASSWORD="$DB_PASSWORD"
+    psql -h localhost -p "$LOCAL_PORT" -U "$DB_USER" -d "$DB_NAME"
+}
+
+# Показать полную информацию
+show_info() {
+    log_step "Полная информация о подключении"
+    echo ""
+
+    # Статус туннеля
+    show_detailed_status
+    echo ""
+
+    # Информация для подключения
+    show_connection_info
+    echo ""
+
+    # Конфигурация DataGrip
+    show_datagrip_config
 }
 
 # Показать справку
@@ -414,8 +576,11 @@ show_help() {
     echo "  start           - Запустить SSH туннель к БД"
     echo "  stop            - Остановить SSH туннель"
     echo "  status          - Показать статус туннеля"
-    echo "  config          - Показать конфигурацию для DataGrip"
+    echo "  config          - Показать конфигурацию для DataGrip (со встроенным SSH)"
+    echo "  datagrip        - Показать конфигурацию для DataGrip (без SSH, наш туннель)"
     echo "  test            - Протестировать подключение к БД"
+    echo "  info            - Показать полную информацию о подключении"
+    echo "  psql            - Запустить psql через туннель"
     echo "  help            - Показать эту справку"
     echo ""
     echo "Опции:"
@@ -424,16 +589,20 @@ show_help() {
     echo ""
     echo "Примеры:"
     echo "  $0 start                     # Запустить туннель"
-    echo "  $0 start --local-port=15433  # Запустить на порту 15433"
     echo "  $0 status                    # Проверить статус"
-    echo "  $0 config                    # Конфигурация для DataGrip"
+    echo "  $0 info                      # Полная информация"
+    echo "  $0 datagrip                  # Конфигурация для DataGrip"
     echo "  $0 test                      # Тест подключения"
+    echo "  $0 psql                      # Запустить psql"
     echo "  $0 stop                      # Остановить туннель"
     echo ""
     echo "Интеграция с Makefile:"
     echo "  make db-tunnel-start        # Запустить через Makefile"
     echo "  make db-tunnel-stop         # Остановить через Makefile"
     echo "  make db-tunnel-status       # Статус через Makefile"
+    echo "  make db-tunnel-info         # Полная информация"
+    echo "  make db-tunnel-datagrip     # Конфигурация DataGrip"
+    echo "  make db-tunnel-psql         # Запустить psql"
     echo ""
 }
 
@@ -470,20 +639,28 @@ main() {
     # Выполняем команду
     case "$COMMAND" in
         start)
-            check_ssh_key
             start_tunnel
             ;;
         stop)
             stop_tunnel
             ;;
         status)
-            check_tunnel_status
+            show_detailed_status
             ;;
         config)
             show_config
             ;;
+        datagrip)
+            show_datagrip_config
+            ;;
         test)
             test_connection
+            ;;
+        info)
+            show_info
+            ;;
+        psql)
+            run_psql
             ;;
         help|"")
             show_help
