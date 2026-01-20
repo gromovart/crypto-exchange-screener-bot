@@ -1,6 +1,6 @@
 #!/bin/bash
 # Скрипт обновления приложения на Ubuntu 22.04
-# Использование: ./update.sh [OPTIONS]
+# Использование: ./deploy/scripts/update.sh [OPTIONS]
 
 set -e  # Выход при ошибке
 
@@ -19,6 +19,12 @@ APP_NAME="crypto-screener-bot"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="crypto-screener"
 BACKUP_DIR="/opt/${APP_NAME}_backups"
+
+# Переменные состояния
+backup_only=false
+rollback=false
+no_backup=false
+force=false
 
 # Функции для вывода
 log_info() {
@@ -72,6 +78,11 @@ parse_args() {
             --help)
                 show_help
                 exit 0
+                ;;
+            *)
+                log_error "Неизвестный аргумент: $arg"
+                show_help
+                exit 1
                 ;;
         esac
     done
@@ -142,8 +153,9 @@ echo ""
 
 # 3. Версия приложения
 echo "3. Версия приложения:"
-if [ -f "/opt/crypto-screener-bot/bin/crypto-screener-bot" ]; then
-    /opt/crypto-screener-bot/bin/crypto-screener-bot --version 2>&1 | head -1 || echo "  Не удалось определить версию"
+INSTALL_DIR="/opt/crypto-screener-bot"
+if [ -f "${INSTALL_DIR}/bin/crypto-screener-bot" ]; then
+    "${INSTALL_DIR}/bin/crypto-screener-bot" --version 2>&1 | head -1 || echo "  Не удалось определить версию"
 else
     echo "  ❌ Приложение не установлено"
 fi
@@ -152,6 +164,24 @@ echo ""
 # 4. Дисковое пространство
 echo "4. Дисковое пространство:"
 df -h /opt /var/log | grep -v Filesystem
+echo ""
+
+# 5. Проверка Redis
+echo "5. Статус Redis:"
+if systemctl is-active redis-server >/dev/null 2>&1; then
+    echo "  ✅ Redis: активен"
+
+    # Проверка подключения к Redis
+    if command -v redis-cli >/dev/null 2>&1; then
+        if redis-cli ping | grep -q "PONG"; then
+            echo "  ✅ Redis: доступен для подключения"
+        else
+            echo "  ⚠️  Redis: не отвечает на ping"
+        fi
+    fi
+else
+    echo "  ⚠️  Redis: не активен"
+fi
 echo ""
 
 echo "=== ПРОВЕРКА ЗАВЕРШЕНА ==="
@@ -171,6 +201,7 @@ set -e
 
 APP_NAME="${APP_NAME}"
 INSTALL_DIR="${INSTALL_DIR}"
+BACKUP_DIR="${BACKUP_DIR}"
 BACKUP_PATH="${backup_path}"
 SERVICE_NAME="${SERVICE_NAME}"
 
@@ -206,12 +237,10 @@ else
     echo "  ⚠️  Конфигурация не найдена"
 fi
 
-# Копирование исходного кода
-if [ -d "\${INSTALL_DIR}/src" ]; then
-    cp -r "\${INSTALL_DIR}/src" "\${BACKUP_PATH}/"
-    echo "  ✅ Исходный код скопирован"
-else
-    echo "  ⚠️  Исходный код не найден"
+# Копирование .env файла
+if [ -f "\${INSTALL_DIR}/.env" ]; then
+    cp "\${INSTALL_DIR}/.env" "\${BACKUP_PATH}/"
+    echo "  ✅ Конфиг .env скопирован"
 fi
 
 # Создание дампа базы данных
@@ -225,9 +254,10 @@ if command -v pg_dump >/dev/null 2>&1 && [ -f "\${INSTALL_DIR}/.env" ]; then
     DB_PASSWORD=\$(grep "^DB_PASSWORD=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
 
     export PGPASSWORD="\${DB_PASSWORD}"
-    if pg_dump -h "\${DB_HOST:-localhost}" -p "\${DB_PORT:-5432}" -U "\${DB_USER:-crypto_screener}" \
-        "\${DB_NAME:-crypto_screener_db}" > "\${BACKUP_PATH}/database_dump.sql" 2>/dev/null; then
-        echo "  ✅ Дамп БД создан"
+    DUMP_FILE="\${BACKUP_PATH}/database_dump.sql"
+    if pg_dump -h "\${DB_HOST:-localhost}" -p "\${DB_PORT:-5432}" -U "\${DB_USER:-bot}" \
+        "\${DB_NAME:-cryptobot}" > "\${DUMP_FILE}" 2>/dev/null; then
+        echo "  ✅ Дамп БД создан (\$(wc -l < "\${DUMP_FILE}") строк)"
     else
         echo "  ⚠️  Не удалось создать дамп БД"
     fi
@@ -238,16 +268,16 @@ fi
 # Архивирование
 echo "4. Архивирование резервной копии..."
 cd "\${BACKUP_DIR}"
-tar -czf "backup_\${timestamp}.tar.gz" "backup_\${timestamp}"
-rm -rf "backup_\${timestamp}"
+tar -czf "backup_${timestamp}.tar.gz" "backup_${timestamp}"
+rm -rf "backup_${timestamp}"
 
 # Запуск сервиса обратно
 echo "5. Запуск сервиса..."
 systemctl start \${SERVICE_NAME}.service 2>/dev/null || echo "  ⚠️  Не удалось запустить сервис"
 
 echo ""
-echo "✅ Резервная копия создана: \${BACKUP_DIR}/backup_\${timestamp}.tar.gz"
-echo "📊 Размер: \$(du -h "\${BACKUP_DIR}/backup_\${timestamp}.tar.gz" | cut -f1)"
+echo "✅ Резервная копия создана: \${BACKUP_DIR}/backup_${timestamp}.tar.gz"
+echo "📊 Размер: \$(du -h "\${BACKUP_DIR}/backup_${timestamp}.tar.gz" | cut -f1)"
 echo "🕐 Время создания: \$(date)"
 EOF
 
@@ -258,32 +288,32 @@ EOF
 list_backups() {
     log_step "Список доступных резервных копий:"
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
-BACKUP_DIR="/opt/crypto-screener-bot_backups"
+BACKUP_DIR="${BACKUP_DIR}"
 
-if [ -d "${BACKUP_DIR}" ]; then
-    echo "Резервные копии в ${BACKUP_DIR}:"
+if [ -d "\${BACKUP_DIR}" ]; then
+    echo "Резервные копии в \${BACKUP_DIR}:"
     echo ""
 
     # Подсчитываем общее количество
-    TOTAL_COUNT=$(ls "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | wc -l)
-    echo "Всего копий: ${TOTAL_COUNT}"
+    TOTAL_COUNT=\$(ls "\${BACKUP_DIR}"/*.tar.gz 2>/dev/null | wc -l)
+    echo "Всего копий: \${TOTAL_COUNT}"
     echo ""
 
-    if [ "${TOTAL_COUNT}" -gt 0 ]; then
+    if [ "\${TOTAL_COUNT}" -gt 0 ]; then
         echo "Последние 5 копий:"
-        ls -lt "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | head -5 | while read -r line; do
-            filename=$(echo "$line" | awk '{print $NF}')
-            size=$(echo "$line" | awk '{print $5}')
-            date=$(echo "$line" | awk '{print $6, $7, $8}')
-            echo "  📁 $(basename "$filename") (${size}, ${date})"
+        ls -lt "\${BACKUP_DIR}"/*.tar.gz 2>/dev/null | head -5 | while read -r line; do
+            filename=\$(echo "\$line" | awk '{print \$NF}')
+            size=\$(echo "\$line" | awk '{print \$5}')
+            date=\$(echo "\$line" | awk '{print \$6, \$7, \$8}')
+            echo "  📁 \$(basename "\$filename") (\${size}, \${date})"
         done
 
         # Общий размер
-        TOTAL_SIZE=$(du -sh "${BACKUP_DIR}" | cut -f1)
+        TOTAL_SIZE=\$(du -sh "\${BACKUP_DIR}" | cut -f1)
         echo ""
-        echo "Общий размер резервных копий: ${TOTAL_SIZE}"
+        echo "Общий размер резервных копий: \${TOTAL_SIZE}"
     else
         echo "  📭 Резервных копий нет"
     fi
@@ -300,33 +330,33 @@ rollback_backup() {
     # Показываем список резервных копий
     list_backups
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-APP_NAME="crypto-screener-bot"
-INSTALL_DIR="/opt/crypto-screener-bot"
-BACKUP_DIR="/opt/crypto-screener-bot_backups"
-SERVICE_NAME="crypto-screener"
+APP_NAME="${APP_NAME}"
+INSTALL_DIR="${INSTALL_DIR}"
+BACKUP_DIR="${BACKUP_DIR}"
+SERVICE_NAME="${SERVICE_NAME}"
 
 # Поиск последней резервной копии
-latest_backup=$(ls -t "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | head -1)
+latest_backup=\$(ls -t "\${BACKUP_DIR}"/*.tar.gz 2>/dev/null | head -1)
 
-if [ -z "${latest_backup}" ]; then
+if [ -z "\${latest_backup}" ]; then
     echo "❌ Резервные копии не найдены"
     exit 1
 fi
 
 echo ""
-echo "Последняя резервная копия: $(basename "${latest_backup}")"
-echo "Размер: $(du -h "${latest_backup}" | cut -f1)"
-echo "Создана: $(stat -c %y "${latest_backup}" | cut -d'.' -f1)"
+echo "Последняя резервная копия: \$(basename "\${latest_backup}")"
+echo "Размер: \$(du -h "\${latest_backup}" | cut -f1)"
+echo "Создана: \$(stat -c %y "\${latest_backup}" | cut -d'.' -f1)"
 echo ""
 
-if [ "${force:-false}" != "true" ]; then
+if [ "${force}" != "true" ]; then
     read -p "Вы уверены, что хотите восстановить эту копию? (y/N): " -n 1 -r
     echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [[ ! \$REPLY =~ ^[Yy]$ ]]; then
         echo "Отмена отката"
         exit 0
     fi
@@ -336,49 +366,64 @@ echo "🔄 Начало отката..."
 
 # Остановка сервиса
 echo "1. Остановка сервиса..."
-systemctl stop ${SERVICE_NAME}.service 2>/dev/null || echo "  ⚠️  Сервис уже остановлен"
+systemctl stop \${SERVICE_NAME}.service 2>/dev/null || echo "  ⚠️  Сервис уже остановлен"
 
 # Восстановление из резервной копии
-echo "2. Восстановление из ${latest_backup}..."
-temp_dir=$(mktemp -d)
-tar -xzf "${latest_backup}" -C "${temp_dir}"
+echo "2. Восстановление из \${latest_backup}..."
+temp_dir=\$(mktemp -d)
+tar -xzf "\${latest_backup}" -C "\${temp_dir}"
 
 # Восстановление бинарника
-backup_subdir=$(find "${temp_dir}" -type d -name "backup_*" | head -1)
-if [ -n "${backup_subdir}" ]; then
-    if [ -f "${backup_subdir}/${APP_NAME}" ]; then
+backup_subdir=\$(find "\${temp_dir}" -type d -name "backup_*" | head -1)
+if [ -n "\${backup_subdir}" ]; then
+    if [ -f "\${backup_subdir}/\${APP_NAME}" ]; then
         echo "  📦 Восстановление бинарника..."
-        cp "${backup_subdir}/${APP_NAME}" "${INSTALL_DIR}/bin/"
-        chown cryptoapp:cryptoapp "${INSTALL_DIR}/bin/${APP_NAME}"
-        chmod +x "${INSTALL_DIR}/bin/${APP_NAME}"
+        # Обеспечиваем существование директории bin
+        mkdir -p "\${INSTALL_DIR}/bin"
+        cp "\${backup_subdir}/\${APP_NAME}" "\${INSTALL_DIR}/bin/"
+        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/bin/\${APP_NAME}"
+        chmod +x "\${INSTALL_DIR}/bin/\${APP_NAME}"
         echo "  ✅ Бинарник восстановлен"
     fi
 
-    # Восстановление конфигурации (если существует в бэкапе)
-    if [ -d "${backup_subdir}/configs" ]; then
+    # Восстановление конфигурации
+    if [ -d "\${backup_subdir}/configs" ]; then
         echo "  ⚙️  Восстановление конфигурации..."
-        rm -rf "${INSTALL_DIR}/configs"
-        cp -r "${backup_subdir}/configs" "${INSTALL_DIR}/"
-        chown -R cryptoapp:cryptoapp "${INSTALL_DIR}/configs"
+        # Удаляем старую конфигурацию
+        rm -rf "\${INSTALL_DIR}/configs" 2>/dev/null || true
+        cp -r "\${backup_subdir}/configs" "\${INSTALL_DIR}/"
+        chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/configs"
 
-        # Обновляем симлинк
-        ln -sf "${INSTALL_DIR}/configs/prod/.env" "${INSTALL_DIR}/.env" 2>/dev/null || true
+        # Обновляем симлинк .env
+        if [ -f "\${INSTALL_DIR}/configs/prod/.env" ]; then
+            ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env" 2>/dev/null || true
+            chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env" 2>/dev/null || true
+        fi
         echo "  ✅ Конфигурация восстановлена"
     fi
 
-    # Восстановление дампа БД (опционально)
-    if [ -f "${backup_subdir}/database_dump.sql" ] && command -v psql >/dev/null 2>&1; then
-        echo "  🗄️  Восстановление базы данных..."
-        if [ -f "${INSTALL_DIR}/.env" ]; then
-            DB_HOST=$(grep "^DB_HOST=" "${INSTALL_DIR}/.env" | cut -d= -f2)
-            DB_PORT=$(grep "^DB_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2)
-            DB_NAME=$(grep "^DB_NAME=" "${INSTALL_DIR}/.env" | cut -d= -f2)
-            DB_USER=$(grep "^DB_USER=" "${INSTALL_DIR}/.env" | cut -d= -f2)
-            DB_PASSWORD=$(grep "^DB_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+    # Восстановление .env файла если есть
+    if [ -f "\${backup_subdir}/.env" ]; then
+        echo "  ⚙️  Восстановление .env файла..."
+        cp "\${backup_subdir}/.env" "\${INSTALL_DIR}/.env"
+        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+        chmod 600 "\${INSTALL_DIR}/.env"
+        echo "  ✅ .env файл восстановлен"
+    fi
 
-            export PGPASSWORD="${DB_PASSWORD}"
-            psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-crypto_screener}" \
-                "${DB_NAME:-crypto_screener_db}" < "${backup_subdir}/database_dump.sql" 2>/dev/null && \
+    # Восстановление дампа БД (опционально)
+    if [ -f "\${backup_subdir}/database_dump.sql" ] && command -v psql >/dev/null 2>&1; then
+        echo "  🗄️  Восстановление базы данных..."
+        if [ -f "\${INSTALL_DIR}/.env" ]; then
+            DB_HOST=\$(grep "^DB_HOST=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+            DB_PORT=\$(grep "^DB_PORT=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+            DB_NAME=\$(grep "^DB_NAME=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+            DB_USER=\$(grep "^DB_USER=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+            DB_PASSWORD=\$(grep "^DB_PASSWORD=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+
+            export PGPASSWORD="\${DB_PASSWORD}"
+            psql -h "\${DB_HOST:-localhost}" -p "\${DB_PORT:-5432}" -U "\${DB_USER:-bot}" \
+                "\${DB_NAME:-cryptobot}" < "\${backup_subdir}/database_dump.sql" 2>/dev/null && \
                 echo "  ✅ База данных восстановлена" || echo "  ⚠️  Не удалось восстановить БД"
         fi
     fi
@@ -387,31 +432,70 @@ else
 fi
 
 # Очистка
-rm -rf "${temp_dir}"
+rm -rf "\${temp_dir}"
 
 # Запуск сервиса
 echo "3. Запуск сервиса..."
-systemctl start ${SERVICE_NAME}.service
+systemctl start \${SERVICE_NAME}.service
 
 echo ""
 echo "✅ Откат выполнен успешно!"
-echo "Версия восстановлена из: $(basename "${latest_backup}")"
+echo "Версия восстановлена из: \$(basename "\${latest_backup}")"
 EOF
 
     log_info "Откат завершен"
+}
+
+# Определение корневой директории проекта
+find_project_root() {
+    local script_dir
+    script_dir=$(dirname "$(realpath "$0")")
+
+    # Проверяем разные возможные пути к корню проекта
+    local possible_paths=(
+        "${script_dir}/../.."  # deploy/scripts -> корень
+        "${script_dir}/.."     # scripts -> корень
+        "."                    # текущая директория
+        ".."                   # родительская директория
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [ -f "${path}/go.mod" ] && [ -f "${path}/application/cmd/bot/main.go" ]; then
+            echo "$(realpath "${path}")"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # Обновление исходного кода
 update_source_code() {
     log_step "Обновление исходного кода..."
 
-    # Проверяем, что мы в корне репозитория
-    if [ ! -f "go.mod" ] || [ ! -f "application/cmd/bot/main.go" ]; then
-        log_error "Скрипт должен запускаться из корневой директории репозитория!"
+    # Находим корневую директорию проекта
+    local project_root
+    project_root=$(find_project_root)
+
+    if [ $? -ne 0 ] || [ -z "${project_root}" ]; then
+        log_error "Не удалось найти корневую директорию проекта (go.mod)"
+        log_info "Запустите скрипт из корневой директории проекта"
         exit 1
     fi
 
-    # Создание архива с обновлениями
+    log_info "Корень проекта: ${project_root}"
+
+    # Переходим в корень проекта
+    cd "${project_root}"
+
+    # Проверяем структуру
+    if [ ! -f "go.mod" ] || [ ! -f "application/cmd/bot/main.go" ]; then
+        log_error "Неправильная структура проекта!"
+        log_info "Ожидается наличие: go.mod и application/cmd/bot/main.go"
+        exit 1
+    fi
+
+    # Создание архива с обновлениями (вся структура, кроме ненужных файлов)
     log_info "Создание архива с обновлениями..."
     tar -czf /tmp/app_update.tar.gz \
         --exclude=.git \
@@ -420,13 +504,17 @@ update_source_code() {
         --exclude=*.tar.gz \
         --exclude=bin \
         --exclude=coverage \
+        --exclude=tests \
+        --exclude=Makefile \
+        --exclude=README.md \
+        --exclude=LICENSE \
         .
 
     # Копирование на сервер
     log_info "Копирование обновлений на сервер..."
     scp -i "${SSH_KEY}" /tmp/app_update.tar.gz "${SERVER_USER}@${SERVER_IP}:/tmp/app_update.tar.gz"
 
-    # Обновление на сервере
+    # Обновление на сервере - ЗАМЕНЯЕМ ВСЮ СТРУКТУРУ
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
@@ -444,25 +532,74 @@ sleep 2
 
 # Создание быстрой резервной копии текущей версии
 echo "2. Создание быстрой резервной копии..."
-quick_backup_dir="\${INSTALL_DIR}_backups/quick_backup_\$(date +%Y%m%d_%H%M%S)"
+quick_backup_dir="${BACKUP_DIR}/quick_backup_\$(date +%Y%m%d_%H%M%S)"
 mkdir -p "\${quick_backup_dir}"
+
+# Копируем только самое важное
 cp -r "\${INSTALL_DIR}/bin" "\${quick_backup_dir}/" 2>/dev/null || echo "  ⚠️  Не удалось скопировать bin"
-echo "  ✅ Быстрая резервная копия создана"
+cp -r "\${INSTALL_DIR}/configs" "\${quick_backup_dir}/" 2>/dev/null || echo "  ⚠️  Не удалось скопировать configs"
+cp "\${INSTALL_DIR}/.env" "\${quick_backup_dir}/" 2>/dev/null || echo "  ⚠️  Не удалось скопировать .env"
+echo "  ✅ Быстрая резервная копия создана в \${quick_backup_dir}"
 
-# Очистка старого исходного кода
-echo "3. Очистка старого исходного кода..."
-rm -rf "\${INSTALL_DIR}/src"
+# Сохраняем старые файлы перед удалением
+echo "3. Сохранение конфигурации и данных..."
+# Сохраняем configs если они есть
+if [ -d "\${INSTALL_DIR}/configs" ]; then
+    mv "\${INSTALL_DIR}/configs" "\${INSTALL_DIR}/configs_backup_\$(date +%s)"
+    echo "  ✅ Конфиги сохранены для восстановления"
+fi
 
-# Распаковка нового кода
-echo "4. Распаковка нового кода..."
-mkdir -p "\${INSTALL_DIR}/src"
-tar -xzf /tmp/app_update.tar.gz -C "\${INSTALL_DIR}/src"
-chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/src"
+# Сохраняем .env если он есть
+if [ -f "\${INSTALL_DIR}/.env" ]; then
+    cp "\${INSTALL_DIR}/.env" "\${INSTALL_DIR}/.env_backup_\$(date +%s)"
+    echo "  ✅ .env сохранен для восстановления"
+fi
+
+# Очистка директории установки (кроме bin и logs)
+echo "4. Очистка директории установки..."
+# Удаляем всё, кроме bin, logs, configs_backup* и .env_backup*
+find "\${INSTALL_DIR}" -maxdepth 1 ! -name "bin" ! -name "logs" ! -name "configs_backup_*" ! -name ".env_backup_*" ! -name "crypto-screener-bot" -exec rm -rf {} + 2>/dev/null || true
+
+# Распаковка нового кода (в корень установки)
+echo "5. Распаковка нового кода..."
+tar -xzf /tmp/app_update.tar.gz -C "\${INSTALL_DIR}"
+chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}"
+
+# Восстановление конфигурации
+echo "6. Восстановление конфигурации..."
+# Ищем последний backup configs
+LATEST_CONFIGS_BACKUP=\$(find "\${INSTALL_DIR}" -type d -name "configs_backup_*" | sort -r | head -1)
+if [ -n "\${LATEST_CONFIGS_BACKUP}" ] && [ -d "\${LATEST_CONFIGS_BACKUP}" ]; then
+    # Восстанавливаем configs
+    rm -rf "\${INSTALL_DIR}/configs" 2>/dev/null || true
+    mv "\${LATEST_CONFIGS_BACKUP}" "\${INSTALL_DIR}/configs"
+    echo "  ✅ Конфиги восстановлены из backup"
+fi
+
+# Ищем последний backup .env
+LATEST_ENV_BACKUP=\$(find "\${INSTALL_DIR}" -type f -name ".env_backup_*" | sort -r | head -1)
+if [ -n "\${LATEST_ENV_BACKUP}" ] && [ -f "\${LATEST_ENV_BACKUP}" ]; then
+    # Восстанавливаем .env симлинк
+    if [ -f "\${INSTALL_DIR}/configs/prod/.env" ]; then
+        ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
+        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+    else
+        # Используем backup .env
+        cp "\${LATEST_ENV_BACKUP}" "\${INSTALL_DIR}/.env"
+        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+        chmod 600 "\${INSTALL_DIR}/.env"
+    fi
+    echo "  ✅ .env восстановлен из backup"
+fi
+
+# Удаляем backup файлы
+rm -rf "\${INSTALL_DIR}/configs_backup_*" 2>/dev/null || true
+rm -f "\${INSTALL_DIR}/.env_backup_*" 2>/dev/null || true
 
 # Очистка
 rm -f /tmp/app_update.tar.gz
 
-echo "✅ Исходный код обновлен"
+echo "✅ Исходный код обновлен и конфигурация восстановлена"
 EOF
 
     # Очистка локального архива
@@ -475,40 +612,50 @@ EOF
 rebuild_application() {
     log_step "Пересборка приложения..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-INSTALL_DIR="/opt/crypto-screener-bot"
-APP_NAME="crypto-screener-bot"
-SRC_DIR="${INSTALL_DIR}/src"
+INSTALL_DIR="${INSTALL_DIR}"
+APP_NAME="${APP_NAME}"
 
-cd "${SRC_DIR}"
+cd "\${INSTALL_DIR}"
 
 echo "🔨 Пересборка приложения..."
 
 # Обновление зависимостей
 echo "1. Обновление зависимостей Go..."
+if [ ! -f "go.mod" ]; then
+    echo "  ❌ go.mod не найден в \${INSTALL_DIR}"
+    echo "  Проверка содержимого директории:"
+    ls -la "\${INSTALL_DIR}/" | head -10
+    exit 1
+fi
+
 /usr/local/go/bin/go mod download
 echo "  ✅ Зависимости обновлены"
 
 # Пересборка приложения
 echo "2. Пересборка основного приложения..."
 if [ -f "./application/cmd/bot/main.go" ]; then
-    /usr/local/go/bin/go build -o "${INSTALL_DIR}/bin/${APP_NAME}" ./application/cmd/bot/main.go
+    /usr/local/go/bin/go build -o "\${INSTALL_DIR}/bin/\${APP_NAME}" ./application/cmd/bot/main.go
 
-    if [ -f "${INSTALL_DIR}/bin/${APP_NAME}" ]; then
+    if [ -f "\${INSTALL_DIR}/bin/\${APP_NAME}" ]; then
         echo "  ✅ Приложение успешно пересобрано"
 
         # Проверка версии
         echo "  🔍 Проверка версии:"
-        "${INSTALL_DIR}/bin/${APP_NAME}" --version 2>&1 | head -1 || echo "  ⚠️  Не удалось получить версию"
+        "\${INSTALL_DIR}/bin/\${APP_NAME}" --version 2>&1 | head -1 || echo "  ⚠️  Не удалось получить версию"
     else
         echo "  ❌ Ошибка: бинарный файл не создан"
+        echo "  Проверка ошибок сборки..."
+        /usr/local/go/bin/go build -o "\${INSTALL_DIR}/bin/\${APP_NAME}" ./application/cmd/bot/main.go 2>&1 | tail -20
         exit 1
     fi
 else
-    echo "  ❌ Файл основного приложения не найден"
+    echo "  ❌ Файл основного приложения не найден: ./application/cmd/bot/main.go"
+    echo "  Поиск файлов application..."
+    find . -name "main.go" -type f | head -10
     exit 1
 fi
 
@@ -517,8 +664,8 @@ echo "3. Проверка миграций..."
 if [ -f "./internal/infrastructure/persistence/postgres/migrator.go" ]; then
     echo "  ✅ Мигратор найден"
     if [ -d "./internal/infrastructure/persistence/postgres/migrations" ]; then
-        MIGRATION_COUNT=$(ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
-        echo "  📊 Количество миграций: ${MIGRATION_COUNT}"
+        MIGRATION_COUNT=\$(ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
+        echo "  📊 Количество миграций: \${MIGRATION_COUNT}"
     fi
 else
     echo "  ⚠️  Мигратор не найден"
@@ -526,7 +673,7 @@ fi
 
 # Проверка запуска
 echo "4. Проверка запуска приложения..."
-timeout 3 "${INSTALL_DIR}/bin/${APP_NAME}" --help 2>&1 | grep -i "usage\|help\|version" | head -2 || echo "  ⚠️  Быстрый тест не прошел"
+timeout 3 "\${INSTALL_DIR}/bin/\${APP_NAME}" --help 2>&1 | grep -i "usage\|help\|version" | head -2 || echo "  ⚠️  Быстрый тест не прошел"
 
 echo "✅ Пересборка завершена"
 EOF
@@ -538,23 +685,22 @@ EOF
 check_database_migrations() {
     log_step "Проверка миграций базы данных..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-INSTALL_DIR="/opt/crypto-screener-bot"
-APP_NAME="crypto-screener-bot"
+INSTALL_DIR="${INSTALL_DIR}"
 
 echo "🗄️  Проверка состояния базы данных..."
 
 # Проверяем существование папки миграций
-if [ -d "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations" ]; then
-    MIGRATION_COUNT=$(ls "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
-    echo "✅ Найдено миграций: ${MIGRATION_COUNT}"
+if [ -d "\${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations" ]; then
+    MIGRATION_COUNT=\$(ls "\${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
+    echo "✅ Найдено миграций: \${MIGRATION_COUNT}"
 
-    if [ "${MIGRATION_COUNT}" -gt 0 ]; then
+    if [ "\${MIGRATION_COUNT}" -gt 0 ]; then
         echo "📋 Последние 3 миграции:"
-        ls -t "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations/"*.sql | head -3
+        ls -t "\${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations/"*.sql | head -3
     fi
 else
     echo "⚠️  Папка миграций не найдена"
@@ -562,7 +708,7 @@ fi
 
 echo ""
 echo "ℹ️  Миграции будут автоматически применены при запуске приложения"
-echo "   Проверка будет выполнена при следующем запуске сервиса"
+echo "   (если DB_ENABLE_AUTO_MIGRATE=true в .env файле)"
 EOF
 
     log_info "Миграции проверены"
@@ -572,19 +718,19 @@ EOF
 start_updated_application() {
     log_step "Запуск обновленного приложения..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-SERVICE_NAME="crypto-screener"
-APP_NAME="crypto-screener-bot"
-INSTALL_DIR="/opt/crypto-screener-bot"
+SERVICE_NAME="${SERVICE_NAME}"
+APP_NAME="${APP_NAME}"
+INSTALL_DIR="${INSTALL_DIR}"
 
 echo "🚀 Запуск обновленного приложения..."
 
 # Запуск сервиса
-echo "1. Запуск сервиса ${SERVICE_NAME}..."
-systemctl start ${SERVICE_NAME}.service
+echo "1. Запуск сервиса \${SERVICE_NAME}..."
+systemctl start \${SERVICE_NAME}.service
 
 # Даем время на запуск
 echo "2. Ожидание запуска (5 секунд)..."
@@ -592,20 +738,20 @@ sleep 5
 
 # Проверка статуса
 echo "3. Статус сервиса:"
-systemctl status ${SERVICE_NAME}.service --no-pager | head -10
+systemctl status \${SERVICE_NAME}.service --no-pager | head -10
 
 # Проверка процесса
 echo "4. Проверка процесса:"
-if pgrep -f "${APP_NAME}" > /dev/null; then
+if pgrep -f "\${APP_NAME}" > /dev/null; then
     echo "  ✅ Приложение запущено"
-    echo "  PID: $(pgrep -f "${APP_NAME}")"
+    echo "  PID: \$(pgrep -f "\${APP_NAME}")"
 else
     echo "  ❌ Приложение не запущено"
 fi
 
 # Просмотр логов
 echo "5. Последние 10 строк лога:"
-journalctl -u ${SERVICE_NAME}.service -n 10 --no-pager | grep -v "^--" | tail -10 || echo "  Логи пока пусты"
+journalctl -u \${SERVICE_NAME}.service -n 10 --no-pager | grep -v "^--" | tail -10 || echo "  Логи пока пусты"
 
 echo ""
 echo "✅ Обновленное приложение запущено"
@@ -618,13 +764,13 @@ EOF
 verify_update() {
     log_step "Проверка обновления..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-APP_NAME="crypto-screener-bot"
-SERVICE_NAME="crypto-screener"
-INSTALL_DIR="/opt/crypto-screener-bot"
+APP_NAME="${APP_NAME}"
+SERVICE_NAME="${SERVICE_NAME}"
+INSTALL_DIR="${INSTALL_DIR}"
 
 echo "🔍 ПРОВЕРКА ОБНОВЛЕНИЯ"
 echo "===================="
@@ -687,6 +833,38 @@ else
 fi
 echo ""
 
+# 6. Проверка Redis
+echo "6. Статус Redis:"
+if systemctl is-active redis-server >/dev/null 2>&1; then
+    echo "  ✅ Redis: активен"
+
+    if command -v redis-cli >/dev/null 2>&1; then
+        if redis-cli ping | grep -q "PONG"; then
+            echo "  ✅ Redis: доступен для подключения"
+        else
+            echo "  ⚠️  Redis: не отвечает на ping"
+        fi
+    fi
+else
+    echo "  ⚠️  Redis: не активен"
+fi
+echo ""
+
+# 7. Проверка конфигурации
+echo "7. Проверка конфигурации:"
+if [ -f "\${INSTALL_DIR}/.env" ]; then
+    echo "  ✅ Конфиг найден"
+    # Проверка основных настроек
+    echo "  Основные настройки:"
+    grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_ENABLED)=" \
+        "\${INSTALL_DIR}/.env" 2>/dev/null | head -6 | while read line; do
+        echo "    ⚙️  \$line"
+    done
+else
+    echo "  ❌ Конфиг не найден"
+fi
+echo ""
+
 echo "🎯 ИТОГ ПРОВЕРКИ:"
 if [ "\${SERVICE_STATUS}" = "active" ] && pgrep -f "\${APP_NAME}" > /dev/null && [ "\${ERROR_COUNT}" -eq 0 ]; then
     echo "✅ ОБНОВЛЕНИЕ УСПЕШНО!"
@@ -714,20 +892,20 @@ main() {
     check_server_status
 
     # Если запрошен только бэкап
-    if [ "${backup_only:-false}" = "true" ]; then
+    if [ "${backup_only}" = "true" ]; then
         create_backup
         list_backups
         exit 0
     fi
 
     # Если запрошен откат
-    if [ "${rollback:-false}" = "true" ]; then
+    if [ "${rollback}" = "true" ]; then
         rollback_backup
         exit 0
     fi
 
     # Подтверждение обновления
-    if [ "${force:-false}" != "true" ]; then
+    if [ "${force}" != "true" ]; then
         echo ""
         log_warn "⚠️  ВНИМАНИЕ: Выполнение обновления приложения"
         log_info "Сервер: ${SERVER_IP}"
@@ -745,7 +923,7 @@ main() {
     # Полный процесс обновления
     echo ""
     log_step "1. Создание резервной копии..."
-    if [ "${no_backup:-false}" != "true" ]; then
+    if [ "${no_backup}" != "true" ]; then
         create_backup
     else
         log_warn "⚠️  Пропуск создания резервной копии (опция --no-backup)"
@@ -770,7 +948,9 @@ main() {
     log_step "Обновление успешно завершено!"
     echo ""
     log_info "📋 ИТОГ:"
-    log_info "  ✅ Резервная копия создана (если не отключена)"
+    if [ "${no_backup}" != "true" ]; then
+        log_info "  ✅ Резервная копия создана"
+    fi
     log_info "  ✅ Исходный код обновлен"
     log_info "  ✅ Приложение пересобрано"
     log_info "  ✅ База данных проверена"

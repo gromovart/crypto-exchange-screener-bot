@@ -1,10 +1,11 @@
 #!/bin/bash
 # Скрипт первичного развертывания приложения на Ubuntu 22.04
-# Использование: ./deploy.sh [OPTIONS]
+# Использование: ./deploy/scripts/deploy.sh [OPTIONS]
 # Опции:
 #   --ip=95.142.40.244    IP адрес сервера
 #   --user=root          Пользователь для подключения
 #   --key=~/.ssh/id_rsa  SSH ключ
+
 
 set -e  # Выход при ошибке
 
@@ -22,6 +23,18 @@ SSH_KEY="${HOME}/.ssh/id_rsa"
 APP_NAME="crypto-screener-bot"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="crypto-screener"
+
+# Переменные для настроек БД (будут заполнены из .env)
+DB_HOST="localhost"
+DB_PORT="5432"
+DB_NAME="cryptobot"
+DB_USER="bot"
+DB_PASSWORD="SecurePass123!"
+DB_ENABLE_AUTO_MIGRATE="true"
+REDIS_HOST="localhost"
+REDIS_PORT="6379"
+REDIS_PASSWORD=""  # Добавляем переменную для пароля Redis
+REDIS_ENABLED="true"  # Добавляем флаг включения Redis
 
 # Функции для вывода
 log_info() {
@@ -77,6 +90,85 @@ show_help() {
     echo "Примеры:"
     echo "  $0 --ip=95.142.40.244 --user=root"
     echo "  $0 --ip=192.168.1.100 --user=ubuntu --key=~/.ssh/my_key"
+}
+
+# Чтение настроек из .env файла
+read_env_config() {
+    log_step "Чтение настроек из конфигурации..."
+
+    # Находим корень проекта
+    local project_root
+    project_root=$(find_project_root)
+    if [ $? -ne 0 ] || [ -z "${project_root}" ]; then
+        log_error "Не удалось найти корневую директорию проекта"
+        exit 1
+    fi
+
+    local env_file="${project_root}/configs/prod/.env"
+
+    if [ -f "${env_file}" ]; then
+        log_info "✅ Чтение настроек из: ${env_file}"
+
+        # Читаем настройки БД
+        if grep -q "^DB_HOST=" "${env_file}"; then
+            DB_HOST=$(grep "^DB_HOST=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_HOST: ${DB_HOST}"
+        fi
+
+        if grep -q "^DB_PORT=" "${env_file}"; then
+            DB_PORT=$(grep "^DB_PORT=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_PORT: ${DB_PORT}"
+        fi
+
+        if grep -q "^DB_NAME=" "${env_file}"; then
+            DB_NAME=$(grep "^DB_NAME=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_NAME: ${DB_NAME}"
+        fi
+
+        if grep -q "^DB_USER=" "${env_file}"; then
+            DB_USER=$(grep "^DB_USER=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_USER: ${DB_USER}"
+        fi
+
+        if grep -q "^DB_PASSWORD=" "${env_file}"; then
+            DB_PASSWORD=$(grep "^DB_PASSWORD=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_PASSWORD: [скрыто]"
+        fi
+
+        if grep -q "^DB_ENABLE_AUTO_MIGRATE=" "${env_file}"; then
+            DB_ENABLE_AUTO_MIGRATE=$(grep "^DB_ENABLE_AUTO_MIGRATE=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   DB_ENABLE_AUTO_MIGRATE: ${DB_ENABLE_AUTO_MIGRATE}"
+        fi
+
+        # Читаем настройки Redis
+        if grep -q "^REDIS_HOST=" "${env_file}"; then
+            REDIS_HOST=$(grep "^REDIS_HOST=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   REDIS_HOST: ${REDIS_HOST}"
+        fi
+
+        if grep -q "^REDIS_PORT=" "${env_file}"; then
+            REDIS_PORT=$(grep "^REDIS_PORT=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   REDIS_PORT: ${REDIS_PORT}"
+        fi
+
+        if grep -q "^REDIS_PASSWORD=" "${env_file}"; then
+            REDIS_PASSWORD=$(grep "^REDIS_PASSWORD=" "${env_file}" | cut -d= -f2- | xargs)
+            if [ -n "${REDIS_PASSWORD}" ]; then
+                log_info "   REDIS_PASSWORD: [скрыто]"
+            fi
+        fi
+
+        if grep -q "^REDIS_ENABLED=" "${env_file}"; then
+            REDIS_ENABLED=$(grep "^REDIS_ENABLED=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   REDIS_ENABLED: ${REDIS_ENABLED}"
+        fi
+
+        log_info "✅ Настройки прочитаны из конфига"
+    else
+        log_warn "⚠️  Конфиг не найден, будут использованы значения по умолчанию"
+        log_info "   DB: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+        log_info "   Redis: ${REDIS_HOST}:${REDIS_PORT}"
+    fi
 }
 
 # Создание SSH ключа
@@ -218,15 +310,53 @@ check_ssh_connection() {
     fi
 }
 
+# Находим корневую директорию проекта
+find_project_root() {
+    local script_dir
+    script_dir=$(dirname "$(realpath "$0")")
+
+    # Проверяем разные возможные пути к корню проекта
+    local possible_paths=(
+        "${script_dir}/../.."  # deploy/scripts -> корень
+        "${script_dir}/.."     # scripts -> корень
+        "."                    # текущая директория
+        ".."                   # родительская директория
+    )
+
+    for path in "${possible_paths[@]}"; do
+        if [ -f "${path}/go.mod" ] && [ -f "${path}/application/cmd/bot/main.go" ]; then
+            echo "$(realpath "${path}")"
+            return 0
+        fi
+    done
+
+    log_error "Не удалось найти корневую директорию проекта"
+    log_info "Запустите скрипт из директории проекта или укажите правильный путь"
+    return 1
+}
+
 # Проверка локального конфига
 check_local_config() {
     log_step "Проверка локальной конфигурации..."
 
-    if [ ! -f "./configs/prod/.env" ]; then
-        log_warn "Продакшен конфиг не найден: ./configs/prod/.env"
+    # Находим корень проекта
+    local project_root
+    project_root=$(find_project_root)
+    if [ $? -ne 0 ] || [ -z "${project_root}" ]; then
+        log_error "Не удалось найти корневую директорию проекта"
+        exit 1
+    fi
+
+    # Проверяем конфиг
+    local config_path="${project_root}/configs/prod/.env"
+
+    if [ -f "${config_path}" ]; then
+        log_info "✅ Продакшен конфиг найден: ${config_path}"
+    else
+        log_warn "Продакшен конфиг не найден: ${config_path}"
         log_info "Убедитесь, что файл существует в репозитории"
         log_info "Текущая структура configs/:"
-        ls -la ./configs/ 2>/dev/null || echo "Директория configs/ не найдена"
+        ls -la "${project_root}/configs/" 2>/dev/null || echo "Директория configs/ не найдена"
         echo ""
         log_info "Продолжить с минимальной конфигурацией? (y/N)"
         read -n 1 -r
@@ -235,24 +365,6 @@ check_local_config() {
             log_error "Прерывание: требуется продакшен конфиг"
             exit 1
         fi
-    else
-        log_info "✅ Продакшен конфиг найден: ./configs/prod/.env"
-
-        # Проверяем наличие критических настроек
-        CRITICAL_SETTINGS=("DB_HOST" "DB_NAME" "DB_USER" "LOG_LEVEL")
-        MISSING_SETTINGS=()
-
-        for setting in "${CRITICAL_SETTINGS[@]}"; do
-            if ! grep -q "^${setting}=" "./configs/prod/.env"; then
-                MISSING_SETTINGS+=("$setting")
-            fi
-        done
-
-        if [ ${#MISSING_SETTINGS[@]} -gt 0 ]; then
-            log_warn "⚠️  В конфиге отсутствуют настройки: ${MISSING_SETTINGS[*]}"
-        else
-            log_info "✅ Критические настройки присутствуют"
-        fi
     fi
 }
 
@@ -260,7 +372,7 @@ check_local_config() {
 install_dependencies() {
     log_step "Установка системных зависимостей..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
@@ -293,17 +405,43 @@ if ! command -v go &> /dev/null; then
     rm go1.21.6.linux-amd64.tar.gz
 
     # Добавление в PATH
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
-    echo 'export PATH=$PATH:/usr/local/go/bin' >> /root/.bashrc
+    echo 'export PATH=\$PATH:/usr/local/go/bin' >> /etc/profile
+    echo 'export PATH=\$PATH:/usr/local/go/bin' >> /root/.bashrc
     source /etc/profile
 fi
+
+echo "✅ Системные зависимости установлены"
+EOF
+
+    log_info "Системные зависимости установлены"
+}
+
+# Настройка PostgreSQL с использованием данных из конфига
+setup_postgresql() {
+    log_step "Настройка PostgreSQL..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+DB_HOST="${DB_HOST}"
+DB_PORT="${DB_PORT}"
+DB_NAME="${DB_NAME}"
+DB_USER="${DB_USER}"
+DB_PASSWORD="${DB_PASSWORD}"
+
+echo "Настройка PostgreSQL с параметрами из конфига:"
+echo "  Хост: \${DB_HOST}"
+echo "  Порт: \${DB_PORT}"
+echo "  База: \${DB_NAME}"
+echo "  Пользователь: \${DB_USER}"
 
 # Установка PostgreSQL 15
 if ! systemctl is-active --quiet postgresql; then
     echo "Установка PostgreSQL 15..."
 
     # Добавление репозитория
-    sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+    sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt \$(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
     wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/pgdg.gpg
     apt-get update
 
@@ -316,30 +454,165 @@ if ! systemctl is-active --quiet postgresql; then
     sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/g" /etc/postgresql/15/main/postgresql.conf
     systemctl restart postgresql
 
-    # Создание пользователя и базы данных
-    sudo -u postgres psql -c "CREATE USER crypto_screener WITH PASSWORD 'SecurePass123!';"
-    sudo -u postgres psql -c "CREATE DATABASE crypto_screener_db OWNER crypto_screener;"
-    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE crypto_screener_db TO crypto_screener;"
+    # Создание пользователя и базы данных из конфига
+    echo "Создание пользователя и базы данных..."
+    sudo -u postgres psql -c "CREATE USER \${DB_USER} WITH PASSWORD '\${DB_PASSWORD}';" || echo "Пользователь уже существует"
+    sudo -u postgres psql -c "CREATE DATABASE \${DB_NAME} OWNER \${DB_USER};" || echo "База данных уже существует"
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \${DB_NAME} TO \${DB_USER};"
+
+    # Если база уже существует, даем права
+    sudo -u postgres psql -c "ALTER DATABASE \${DB_NAME} OWNER TO \${DB_USER};" 2>/dev/null || true
+    sudo -u postgres psql -d \${DB_NAME} -c "GRANT ALL ON SCHEMA public TO \${DB_USER};" 2>/dev/null || true
+
+    echo "✅ PostgreSQL настроен с пользователем \${DB_USER} и базой \${DB_NAME}"
+else
+    echo "✅ PostgreSQL уже установлен"
+
+    # Проверяем и создаем пользователя/базу если нужно
+    echo "Проверка пользователя и базы данных..."
+    if ! sudo -u postgres psql -c "\du" | grep -q "\${DB_USER}"; then
+        echo "Создание пользователя \${DB_USER}..."
+        sudo -u postgres psql -c "CREATE USER \${DB_USER} WITH PASSWORD '\${DB_PASSWORD}';"
+    fi
+
+    if ! sudo -u postgres psql -c "\l" | grep -q "\${DB_NAME}"; then
+        echo "Создание базы данных \${DB_NAME}..."
+        sudo -u postgres psql -c "CREATE DATABASE \${DB_NAME} OWNER \${DB_USER};"
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \${DB_NAME} TO \${DB_USER};"
+    else
+        echo "База \${DB_NAME} уже существует"
+        sudo -u postgres psql -c "ALTER DATABASE \${DB_NAME} OWNER TO \${DB_USER};" 2>/dev/null || true
+        sudo -u postgres psql -d \${DB_NAME} -c "GRANT ALL ON SCHEMA public TO \${DB_USER};" 2>/dev/null || true
+    fi
+fi
+EOF
+
+    log_info "PostgreSQL настроен"
+}
+
+# Настройка Redis с использованием данных из конфига
+setup_redis() {
+    log_step "Настройка Redis..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+REDIS_HOST="${REDIS_HOST}"
+REDIS_PORT="${REDIS_PORT}"
+REDIS_PASSWORD="${REDIS_PASSWORD}"
+REDIS_ENABLED="${REDIS_ENABLED}"
+
+echo "Настройка Redis с параметрами из конфига:"
+echo "  Хост: \${REDIS_HOST}"
+echo "  Порт: \${REDIS_PORT}"
+echo "  Пароль: \$(if [ -n "\${REDIS_PASSWORD}" ]; then echo '[установлен]'; else echo '[нет]'; fi)"
+echo "  Включен: \${REDIS_ENABLED}"
+
+# Если Redis отключен в конфиге, просто выходим
+if [ "\${REDIS_ENABLED}" = "false" ]; then
+    echo "⚠️  Redis отключен в конфиге (REDIS_ENABLED=false)"
+    echo "Redis не будет установлен и настроен"
+    exit 0
 fi
 
-# Установка Redis
+# Установка Redis только если он не установлен
 if ! systemctl is-active --quiet redis-server; then
     echo "Установка Redis..."
     apt-get install -y redis-server
 
-    # Настройка Redis
-    sed -i "s/bind 127.0.0.1 ::1/bind 127.0.0.1/g" /etc/redis/redis.conf
+    # Настройка Redis с использованием значений из конфига
+    echo "Настройка Redis с параметрами из конфига..."
+
+    # Если указан нестандартный порт, настраиваем его
+    if [ "\${REDIS_PORT}" != "6379" ]; then
+        echo "Настройка Redis на порт \${REDIS_PORT}..."
+        sed -i "s/port 6379/port \${REDIS_PORT}/g" /etc/redis/redis.conf
+    fi
+
+    # Настройка привязки к хосту из конфига
+    if [ "\${REDIS_HOST}" != "localhost" ] && [ "\${REDIS_HOST}" != "127.0.0.1" ]; then
+        echo "Настройка Redis для работы с хостом: \${REDIS_HOST}"
+
+        # Если хост - IP адрес, добавляем его в bind
+        if echo "\${REDIS_HOST}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+            sed -i "s/bind 127.0.0.1 ::1/bind 127.0.0.1 \${REDIS_HOST}/g" /etc/redis/redis.conf
+        fi
+    else
+        # По умолчанию только localhost
+        sed -i "s/bind 127.0.0.1 ::1/bind 127.0.0.1/g" /etc/redis/redis.conf
+    fi
+
+    # Настройка пароля если указан
+    if [ -n "\${REDIS_PASSWORD}" ]; then
+        echo "Настройка пароля для Redis..."
+
+        # Комментируем существующий requirepass если есть
+        sed -i "s/^requirepass/#requirepass/g" /etc/redis/redis.conf
+
+        # Добавляем новый requirepass
+        echo "requirepass \${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+
+        # Также настраиваем в настройках клиента
+        echo "masterauth \${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+    fi
+
+    # Настройка памяти
     sed -i "s/# maxmemory <bytes>/maxmemory 256mb/g" /etc/redis/redis.conf
     sed -i "s/# maxmemory-policy noeviction/maxmemory-policy allkeys-lru/g" /etc/redis/redis.conf
 
+    # Отключаем защищенный режим если хост не localhost
+    if [ "\${REDIS_HOST}" != "localhost" ] && [ "\${REDIS_HOST}" != "127.0.0.1" ]; then
+        echo "Отключение защищенного режима для удаленного доступа..."
+        sed -i "s/protected-mode yes/protected-mode no/g" /etc/redis/redis.conf
+    fi
+
     systemctl restart redis-server
     systemctl enable redis-server
+
+    echo "✅ Redis установлен и настроен с параметрами из конфига"
+else
+    echo "✅ Redis уже установлен"
+
+    # Проверяем настройки и при необходимости обновляем их
+    echo "Проверка настроек Redis..."
+
+    # Проверяем порт
+    CURRENT_PORT=\$(grep "^port" /etc/redis/redis.conf | head -1 | cut -d' ' -f2)
+    if [ "\${CURRENT_PORT}" != "\${REDIS_PORT}" ]; then
+        echo "Обновление порта Redis с \${CURRENT_PORT} на \${REDIS_PORT}..."
+        sed -i "s/port \${CURRENT_PORT}/port \${REDIS_PORT}/g" /etc/redis/redis.conf
+    fi
+
+    # Обновляем пароль если указан
+    if [ -n "\${REDIS_PASSWORD}" ]; then
+        echo "Обновление пароля Redis..."
+
+        # Удаляем старые настройки пароля
+        sed -i "/^requirepass/d" /etc/redis/redis.conf
+        sed -i "/^masterauth/d" /etc/redis/redis.conf
+
+        # Добавляем новые
+        echo "requirepass \${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+        echo "masterauth \${REDIS_PASSWORD}" >> /etc/redis/redis.conf
+    fi
+
+    # Перезапускаем Redis если были изменения
+    systemctl restart redis-server
+    echo "✅ Настройки Redis обновлены"
 fi
 
-echo "Зависимости установлены успешно"
+# Проверяем доступность Redis
+echo "Проверка доступности Redis..."
+if redis-cli -h "\${REDIS_HOST}" -p "\${REDIS_PORT}" \$(if [ -n "\${REDIS_PASSWORD}" ]; then echo "-a \${REDIS_PASSWORD}"; fi) ping | grep -q "PONG"; then
+    echo "✅ Redis доступен на \${REDIS_HOST}:\${REDIS_PORT}"
+else
+    echo "⚠️  Redis не отвечает по адресу \${REDIS_HOST}:\${REDIS_PORT}"
+    echo "Проверьте настройки и перезапустите сервис: systemctl restart redis-server"
+fi
 EOF
 
-    log_info "Системные зависимости установлены"
+    log_info "Redis настроен"
 }
 
 # Настройка брандмауэра
@@ -351,31 +624,29 @@ setup_firewall() {
 set -e
 
 # Настройка UFW
-ufw --force reset
+ufw --force reset 2>/dev/null || true
 ufw default deny incoming
 ufw default allow outgoing
 
 # Разрешить SSH
 ufw allow 22/tcp
 
-# Разрешить порты для мониторинга
-ufw allow 5432/tcp  # PostgreSQL (только localhost)
-ufw allow 6379/tcp  # Redis (только localhost)
-ufw allow 8080/tcp  # HTTP мониторинг (опционально)
+# Разрешить порты PostgreSQL и Redis (только localhost)
+# Эти порты не открываем наружу, только для локального доступа
 
 # Включить брандмауэр
-ufw --force enable
+echo "y" | ufw enable
 ufw status verbose
 
-echo "Брандмауэр настроен"
+echo "✅ Брандмауэр настроен"
 EOF
 
     log_info "Брандмауэр настроен"
 }
 
-# Создание системного пользователя
-create_app_user() {
-    log_step "Создание системного пользователя для приложения..."
+# Создание правильной структуры директорий
+create_directory_structure() {
+    log_step "Создание правильной структуры директорий..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
@@ -390,12 +661,16 @@ if ! id "cryptoapp" &>/dev/null; then
     echo "Пользователь cryptoapp создан"
 fi
 
-# Создание директорий
+# Удаление старой структуры если существует
+if [ -d "\${INSTALL_DIR}" ]; then
+    echo "Удаление старой структуры директорий..."
+    rm -rf "\${INSTALL_DIR}"
+fi
+
+# Создание новой правильной структуры
+echo "Создание структуры директорий..."
 mkdir -p "\${INSTALL_DIR}"
 mkdir -p "\${INSTALL_DIR}/bin"
-mkdir -p "\${INSTALL_DIR}/configs"
-mkdir -p "\${INSTALL_DIR}/logs"
-mkdir -p "\${INSTALL_DIR}/data"
 mkdir -p "/var/log/\${APP_NAME}"
 
 # Настройка прав
@@ -404,10 +679,13 @@ chown -R cryptoapp:cryptoapp "/var/log/\${APP_NAME}"
 chmod 755 "\${INSTALL_DIR}"
 chmod 755 "/var/log/\${APP_NAME}"
 
-echo "Структура директорий создана"
+echo "✅ Структура директорий создана:"
+echo "   \${INSTALL_DIR}/"
+echo "   ├── bin/"
+echo "   /var/log/\${APP_NAME}/"
 EOF
 
-    log_info "Пользователь и директории созданы"
+    log_info "Структура директорий создана"
 }
 
 # Настройка логирования
@@ -419,7 +697,6 @@ setup_logging() {
 set -e
 
 APP_NAME="${APP_NAME}"
-INSTALL_DIR="${INSTALL_DIR}"
 
 # Конфигурация logrotate
 cat > /etc/logrotate.d/\${APP_NAME} << 'LOGROTATE'
@@ -444,25 +721,37 @@ touch "/var/log/\${APP_NAME}/error.log"
 chown -R cryptoapp:cryptoapp "/var/log/\${APP_NAME}"
 chmod 644 "/var/log/\${APP_NAME}"/*.log
 
-echo "Логирование настроено"
+echo "✅ Логирование настроено"
 EOF
 
     log_info "Система логирования настроена"
 }
 
-# Копирование исходного кода
+# Копирование исходного кода - ИСПРАВЛЕННАЯ ФУНКЦИЯ
 copy_source_code() {
     log_step "Копирование исходного кода приложения..."
 
-    # ВАЖНО: Скрипт должен запускаться из корня репозитория
-    if [ ! -f "go.mod" ] || [ ! -f "application/cmd/bot/main.go" ]; then
-        log_error "Скрипт должен запускаться из корневой директории репозитория!"
-        log_info "Текущая директория: $(pwd)"
-        log_info "Ожидается наличие файлов: go.mod и application/cmd/bot/main.go"
+    # Определяем корневую директорию проекта
+    local project_root
+    project_root=$(find_project_root)
+    if [ $? -ne 0 ] || [ -z "${project_root}" ]; then
+        log_error "Не удалось найти корневую директорию проекта"
         exit 1
     fi
 
-    # Создание архива с исходным кодом
+    log_info "Корневая директория проекта: ${project_root}"
+
+    # Переходим в корень проекта
+    cd "${project_root}"
+
+    # Проверяем структуру проекта
+    if [ ! -f "go.mod" ] || [ ! -d "application" ]; then
+        log_error "Неправильная структура проекта!"
+        log_info "Ожидается наличие: go.mod и application/"
+        exit 1
+    fi
+
+    # Создание архива с исходным кодом (сохраняем всю структуру)
     log_info "Создание архива с исходным кодом..."
     tar -czf /tmp/app_source.tar.gz \
         --exclude=.git \
@@ -471,33 +760,48 @@ copy_source_code() {
         --exclude=*.tar.gz \
         --exclude=bin \
         --exclude=coverage \
+        --exclude=tests \
+        --exclude=Makefile \
+        --exclude=README.md \
+        --exclude=LICENSE \
         .
 
     # Копирование на сервер
     log_info "Копирование архива на сервер..."
     scp -i "${SSH_KEY}" /tmp/app_source.tar.gz "${SERVER_USER}@${SERVER_IP}:/tmp/app_source.tar.gz"
 
-    # Распаковка на сервере
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+    # Распаковка на сервере - ИСПРАВЛЕННЫЙ БЛОК
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
 set -e
 
-INSTALL_DIR="${INSTALL_DIR}"
+INSTALL_DIR="/opt/crypto-screener-bot"
 
-# Удаление старой версии если существует
-if [ -d "\${INSTALL_DIR}/src" ]; then
-    rm -rf "\${INSTALL_DIR}/src"
-fi
+echo "Распаковка исходного кода..."
 
-# Распаковка архива
-mkdir -p "\${INSTALL_DIR}/src"
-tar -xzf /tmp/app_source.tar.gz -C "\${INSTALL_DIR}/src"
-chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/src"
+# Распаковка в корень установки
+echo "1. Распаковка исходного кода..."
+tar -xzf /tmp/app_source.tar.gz -C "${INSTALL_DIR}"
 
-# Очистка
+# Создаем необходимые директории если их нет
+echo "2. Создание необходимых директорий..."
+mkdir -p "${INSTALL_DIR}/bin"
+mkdir -p "${INSTALL_DIR}/logs"
+mkdir -p "${INSTALL_DIR}/configs/prod" 2>/dev/null || true
+
+# Настройка прав
+echo "3. Настройка прав доступа..."
+chown -R cryptoapp:cryptoapp "${INSTALL_DIR}"
+chmod 755 "${INSTALL_DIR}"
+chmod 755 "${INSTALL_DIR}/bin"
+
+# Очистка временных файлов
+echo "4. Очистка временных файлов..."
 rm -f /tmp/app_source.tar.gz
 
-echo "Исходный код скопирован"
+echo "✅ Исходный код скопирован"
+echo "Структура директории ${INSTALL_DIR}:"
+ls -la "${INSTALL_DIR}/" | head -10
 EOF
 
     # Очистка локального архива
@@ -506,9 +810,9 @@ EOF
     log_info "Исходный код скопирован на сервер"
 }
 
-# Установка приложения
-install_application() {
-    log_step "Установка и сборка приложения..."
+# Сборка приложения
+build_application() {
+    log_step "Сборка приложения..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
@@ -516,58 +820,74 @@ set -e
 
 INSTALL_DIR="/opt/crypto-screener-bot"
 APP_NAME="crypto-screener-bot"
-SRC_DIR="${INSTALL_DIR}/src"
 
-cd "${SRC_DIR}"
+cd "${INSTALL_DIR}"
+
+echo "Текущая директория: $(pwd)"
+echo "Содержимое:"
+ls -la
+
+# Проверка структуры
+if [ ! -f "go.mod" ]; then
+    echo "❌ go.mod не найден!"
+    echo "Содержимое директории:"
+    ls -la
+    exit 1
+fi
 
 # Установка зависимостей Go
 echo "Установка зависимостей Go..."
 /usr/local/go/bin/go mod download
 
-# Сборка приложения
+# Сборка основного приложения
 echo "Сборка основного приложения..."
 if [ -f "./application/cmd/bot/main.go" ]; then
+    echo "✅ Найден main.go: ./application/cmd/bot/main.go"
     /usr/local/go/bin/go build -o "${INSTALL_DIR}/bin/${APP_NAME}" ./application/cmd/bot/main.go
-    echo "✅ Основное приложение собрано"
 
-    # Тестовый запуск для проверки версии
-    echo "Проверка версии приложения..."
-    "${INSTALL_DIR}/bin/${APP_NAME}" --version 2>&1 | head -1 || echo "⚠️  Не удалось получить версию"
+    if [ $? -eq 0 ]; then
+        echo "✅ Основное приложение собрано"
+
+        # Проверка бинарника
+        echo "Проверка версии приложения..."
+        "${INSTALL_DIR}/bin/${APP_NAME}" --version 2>&1 | head -1 || echo "⚠️  Не удалось получить версию"
+
+        # Настройка прав бинарника
+        chown cryptoapp:cryptoapp "${INSTALL_DIR}/bin/${APP_NAME}"
+        chmod +x "${INSTALL_DIR}/bin/${APP_NAME}"
+    else
+        echo "❌ Ошибка сборки приложения"
+        exit 1
+    fi
 else
     echo "❌ Файл основного приложения не найден: ./application/cmd/bot/main.go"
+    echo "Поиск файлов application..."
+    find . -name "main.go" -type f | head -10
     exit 1
 fi
 
-# Проверка существования мигратора
-echo "Проверка файла миграций..."
+# Проверка наличия мигратора
+echo "Проверка миграций..."
 if [ -f "./internal/infrastructure/persistence/postgres/migrator.go" ]; then
-    echo "✅ Файл migrator.go найден"
-
-    # Проверяем, есть ли папка с миграциями
-    if [ -d "./internal/infrastructure/persistence/postgres/migrations" ]; then
-        echo "✅ Папка миграций найдена"
-        MIGRATION_COUNT=$(ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
-        echo "Количество SQL файлов миграций: ${MIGRATION_COUNT}"
-
-        if [ "${MIGRATION_COUNT}" -gt 0 ]; then
-            echo "Первые 5 файлов миграций:"
-            ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql | head -5
-        fi
-    else
-        echo "⚠️  Папка миграций не найдена"
-    fi
-
-    echo "ℹ️  Мигратор встроен в основное приложение и запускается автоматически"
-
+    echo "✅ Мигратор найден"
 else
-    echo "⚠️  Файл migrator.go не найден"
+    echo "⚠️  Мигратор не найден"
 fi
 
-# Проверяем, что приложение может запуститься
-echo "Проверка запуска приложения (быстрый тест)..."
-timeout 5 "${INSTALL_DIR}/bin/${APP_NAME}" --help 2>&1 | grep -i "usage\|help\|version" | head -3 || echo "⚠️  Быстрый тест не прошел"
+# Проверка SQL файлов миграций
+if [ -d "./internal/infrastructure/persistence/postgres/migrations" ]; then
+    MIGRATION_COUNT=$(ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
+    echo "✅ Найдено SQL файлов миграций: ${MIGRATION_COUNT}"
 
-echo "✅ Установка приложения завершена"
+    if [ "${MIGRATION_COUNT}" -gt 0 ]; then
+        echo "Первые 5 файлов миграций:"
+        ls "./internal/infrastructure/persistence/postgres/migrations/"*.sql | head -5
+    fi
+else
+    echo "⚠️  Директория миграций не найдена"
+fi
+
+echo "✅ Сборка приложения завершена"
 EOF
 
     log_info "Приложение собрано"
@@ -577,65 +897,100 @@ EOF
 setup_configuration() {
     log_step "Настройка конфигурации приложения..."
 
-    # Проверяем, существует ли продакшен конфиг локально
-    if [ ! -f "./configs/prod/.env" ]; then
-        log_error "Файл конфигурации не найден: ./configs/prod/.env"
-        log_info "Убедитесь, что продакшен конфиг существует в репозитории"
+    # Определяем корневую директорию проекта
+    local project_root
+    project_root=$(find_project_root)
+    if [ $? -ne 0 ] || [ -z "${project_root}" ]; then
+        log_error "Не удалось найти корневую директорию проекта"
         exit 1
     fi
 
-    log_info "Используется существующий продакшен конфиг"
+    # Проверяем наличие конфига
+    local config_path="${project_root}/configs/prod/.env"
 
-    # Копирование конфигурации
-    scp -i "${SSH_KEY}" -r ./configs/ "${SERVER_USER}@${SERVER_IP}:${INSTALL_DIR}/configs/"
+    if [ -f "${config_path}" ]; then
+        log_info "✅ Найден конфиг: ${config_path}"
 
-    # Настройка на сервере
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+        # Копируем только .env файл на сервер
+        log_info "Копирование конфига на сервер..."
+        scp -i "${SSH_KEY}" "${config_path}" "${SERVER_USER}@${SERVER_IP}:/tmp/prod.env"
+
+        # Настраиваем на сервере
+        ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
-INSTALL_DIR="/opt/crypto-screener-bot"
+INSTALL_DIR="${INSTALL_DIR}"
 
-# Проверяем, что конфиг скопировался
-if [ -f "${INSTALL_DIR}/configs/prod/.env" ]; then
-    echo "✅ Продакшен конфиг найден: ${INSTALL_DIR}/configs/prod/.env"
+echo "Настройка конфигурации на сервере..."
 
-    # Симлинк для текущего окружения
-    ln -sf "${INSTALL_DIR}/configs/prod/.env" "${INSTALL_DIR}/.env"
-    echo "✅ Создан симлинк: ${INSTALL_DIR}/.env -> ${INSTALL_DIR}/configs/prod/.env"
+# Копируем конфиг из временного места
+if [ -f "/tmp/prod.env" ]; then
+    echo "Копирование конфига..."
 
-    # Проверяем права
-    chown cryptoapp:cryptoapp "${INSTALL_DIR}/.env"
-    chown -R cryptoapp:cryptoapp "${INSTALL_DIR}/configs"
-    chmod 600 "${INSTALL_DIR}/.env"
+    # Создаем папку configs/prod если ее нет
+    mkdir -p "\${INSTALL_DIR}/configs/prod"
 
-    # Показываем основные настройки (без секретов)
-    echo "📋 Основные настройки из конфига:"
-    grep -E "^(APP_ENV|DB_HOST|DB_PORT|DB_NAME|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE)=" \
-        "${INSTALL_DIR}/.env" | head -10
+    # Копируем конфиг
+    cp "/tmp/prod.env" "\${INSTALL_DIR}/configs/prod/.env"
 
+    # Создаем симлинк в корне для обратной совместимости
+    ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
+
+    # Настройка прав
+    chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+    chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/configs"
+    chmod 600 "\${INSTALL_DIR}/.env"
+    chmod 600 "\${INSTALL_DIR}/configs/prod/.env"
+
+    # Очистка
+    rm -f /tmp/prod.env
+
+    echo "✅ Конфигурация настроена"
+    echo "📋 Основные настройки:"
+    grep -E "^(APP_ENV|DB_HOST|DB_PORT|DB_NAME|DB_USER|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_ENABLED)=" \
+        "\${INSTALL_DIR}/.env" | head -15
 else
-    echo "❌ Продакшен конфиг не найден после копирования"
-    echo "Создаем минимальный конфиг..."
+    echo "❌ Конфиг не найден после копирования"
+    exit 1
+fi
+EOF
 
-    # Создание минимального конфига
-    cat > "${INSTALL_DIR}/.env" << 'CONFIG'
+    else
+        log_warn "Конфиг не найден, создаем минимальный..."
+
+        # Создаем минимальный конфиг на сервере
+        ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+INSTALL_DIR="${INSTALL_DIR}"
+
+echo "Создание минимальной конфигурации..."
+
+# Создаем папку configs/prod
+mkdir -p "\${INSTALL_DIR}/configs/prod"
+
+# Создаем минимальный конфиг с настройками из переменных
+cat > "\${INSTALL_DIR}/configs/prod/.env" << 'CONFIG'
 # Минимальная конфигурация
 APP_ENV=production
 LOG_LEVEL=info
 
 # База данных
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=crypto_screener_db
-DB_USER=crypto_screener
-DB_PASSWORD=SecurePass123!
+DB_HOST=${DB_HOST}
+DB_PORT=${DB_PORT}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
 DB_SSL_MODE=disable
-DB_ENABLE_AUTO_MIGRATE=true
+DB_ENABLE_AUTO_MIGRATE=${DB_ENABLE_AUTO_MIGRATE}
 
 # Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
+REDIS_HOST=${REDIS_HOST}
+REDIS_PORT=${REDIS_PORT}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+REDIS_ENABLED=${REDIS_ENABLED}
 
 # Отключить Telegram до настройки
 TELEGRAM_ENABLED=false
@@ -646,31 +1001,73 @@ EXCHANGE_TYPE=futures
 UPDATE_INTERVAL=30
 CONFIG
 
-    chown cryptoapp:cryptoapp "${INSTALL_DIR}/.env"
-    chmod 600 "${INSTALL_DIR}/.env"
-    echo "⚠️  Создан минимальный конфиг, требуется настройка"
-fi
+# Создаем симлинк в корне для обратной совместимости
+ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
 
-echo "Конфигурация настроена"
+# Настройка прав
+chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/configs"
+chmod 600 "\${INSTALL_DIR}/.env"
+chmod 600 "\${INSTALL_DIR}/configs/prod/.env"
+
+echo "✅ Минимальная конфигурация создана"
+echo "⚠️  Требуется настройка: nano \${INSTALL_DIR}/.env"
 EOF
+
+    fi
 
     log_info "Конфигурация настроена"
 }
 
-# Настройка systemd сервиса
+# Настройка systemd сервиса - ИСПРАВЛЕННЫЙ БЛОК
 setup_systemd_service() {
     log_step "Настройка systemd сервиса..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
 set -e
 
-APP_NAME="${APP_NAME}"
-SERVICE_NAME="${SERVICE_NAME}"
-INSTALL_DIR="${INSTALL_DIR}"
+APP_NAME="crypto-screener-bot"
+SERVICE_NAME="crypto-screener"
+INSTALL_DIR="/opt/${APP_NAME}"
 
-# Создание файла сервиса
-cat > /etc/systemd/system/\${SERVICE_NAME}.service << 'SERVICE'
+echo "🔧 Настройка systemd сервиса ${SERVICE_NAME}..."
+
+# Создание пользователя если не существует
+if ! id "cryptoapp" &>/dev/null; then
+    echo "👤 Создание пользователя cryptoapp..."
+    useradd -m -s /bin/bash -r cryptoapp
+    echo "✅ Пользователь cryptoapp создан"
+fi
+
+# Проверка существования бинарника
+BINARY_PATH="${INSTALL_DIR}/bin/${APP_NAME}"
+if [ ! -f "${BINARY_PATH}" ]; then
+    echo "❌ КРИТИЧЕСКАЯ ОШИБКА: Бинарник не найден: ${BINARY_PATH}"
+    echo "   Проверка содержимого:"
+    ls -la "${INSTALL_DIR}/" 2>/dev/null | head -10
+    echo "   Попытка найти бинарник:"
+    find "${INSTALL_DIR}" -name "*crypto*" -type f -executable 2>/dev/null || echo "   Исполняемые файлы не найдены"
+    exit 1
+fi
+
+echo "✅ Бинарник найден: ${BINARY_PATH}"
+echo "   Размер: $(du -h "${BINARY_PATH}" | cut -f1)"
+echo "   Права: $(ls -la "${BINARY_PATH}" | awk '{print $1 " " $3 ":" $4}')"
+
+# Остановка и удаление старого сервиса если существует
+if [ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]; then
+    echo "🔄 Остановка и удаление старого сервиса..."
+    systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || echo "   ⚠️  Сервис не был запущен"
+    systemctl disable "${SERVICE_NAME}.service" 2>/dev/null || echo "   ⚠️  Сервис не был включен"
+    rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+    rm -rf "/etc/systemd/system/${SERVICE_NAME}.service.d" 2>/dev/null || true
+    echo "✅ Старый сервис удален"
+fi
+
+# Создание нового правильного сервиса
+echo "📄 Создание нового systemd сервиса..."
+cat > /etc/systemd/system/${SERVICE_NAME}.service << SERVICE
 [Unit]
 Description=Crypto Exchange Screener Bot
 After=network.target postgresql.service redis-server.service
@@ -684,7 +1081,8 @@ WorkingDirectory=${INSTALL_DIR}
 Environment="APP_ENV=production"
 EnvironmentFile=${INSTALL_DIR}/.env
 
-ExecStart=${INSTALL_DIR}/bin/${APP_NAME} --config=${INSTALL_DIR}/.env --mode=full
+# ИСПРАВЛЕННЫЙ ПУТЬ: bin/crypto-screener-bot (а не просто bot)
+ExecStart=${INSTALL_DIR}/bin/${APP_NAME}
 Restart=always
 RestartSec=10
 StandardOutput=append:/var/log/${APP_NAME}/app.log
@@ -693,8 +1091,6 @@ StandardError=append:/var/log/${APP_NAME}/error.log
 # Лимиты безопасности
 LimitNOFILE=65536
 LimitNPROC=65536
-LimitMEMLOCK=infinity
-LimitCORE=infinity
 
 # Сетевая изоляция
 PrivateTmp=true
@@ -706,69 +1102,88 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 SERVICE
 
-# Перезагрузка systemd
-systemctl daemon-reload
-systemctl enable \${SERVICE_NAME}.service
+echo "✅ Файл сервиса создан: /etc/systemd/system/${SERVICE_NAME}.service"
 
-echo "Systemd сервис настроен"
+# Настройка прав доступа
+echo "🔐 Настройка прав доступа..."
+chown -R cryptoapp:cryptoapp "${INSTALL_DIR}"
+chmod +x "${BINARY_PATH}"
+echo "✅ Права на бинарник установлены"
+
+# Создание директории логов если нет
+echo "📁 Создание директории логов..."
+mkdir -p "/var/log/${APP_NAME}"
+chown -R cryptoapp:cryptoapp "/var/log/${APP_NAME}"
+chmod 755 "/var/log/${APP_NAME}"
+echo "✅ Директория логов создана: /var/log/${APP_NAME}"
+
+# Перезагрузка systemd
+echo "🔄 Перезагрузка systemd..."
+systemctl daemon-reload
+systemctl enable ${SERVICE_NAME}.service
+
+echo "✅ Systemd сервис настроен"
+
+# Проверка конфигурации
+echo "🔍 Проверка конфигурации сервиса:"
+if systemctl cat ${SERVICE_NAME}.service > /dev/null 2>&1; then
+    echo "✅ Сервис загружен в systemd"
+
+    # Показать ExecStart строку для проверки
+    EXEC_LINE=$(systemctl cat ${SERVICE_NAME}.service | grep "^ExecStart=")
+    echo "   ExecStart: ${EXEC_LINE}"
+
+    if echo "${EXEC_LINE}" | grep -q "bin/${APP_NAME}"; then
+        echo "   ✅ Путь к бинарнику правильный"
+    else
+        echo "   ❌ ПУТЬ НЕПРАВИЛЬНЫЙ! Исправьте вручную"
+        echo "   Ожидалось: ${INSTALL_DIR}/bin/${APP_NAME}"
+    fi
+else
+    echo "❌ Ошибка: сервис не загружен в systemd"
+    exit 1
+fi
+
+echo ""
+echo "🎯 Systemd сервис готов к использованию"
+echo "   Команда запуска: systemctl start ${SERVICE_NAME}"
+echo "   Команда статуса: systemctl status ${SERVICE_NAME}"
+echo "   Просмотр логов: journalctl -u ${SERVICE_NAME} -f"
 EOF
 
     log_info "Systemd сервис настроен"
 }
 
-# Выполнение миграций базы данных
-run_migrations() {
-    log_step "Проверка и выполнение миграций базы данных..."
+# Проверка миграций базы данных
+check_migrations() {
+    log_step "Проверка миграций базы данных..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
 set -e
 
 INSTALL_DIR="/opt/crypto-screener-bot"
-APP_NAME="crypto-screener-bot"
 
-echo "Проверка наличия файлов миграций..."
+echo "Проверка миграций..."
 
-# Проверяем существование папки миграций
-if [ -d "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations" ]; then
-    echo "✅ Папка миграций существует"
-    MIGRATION_COUNT=$(ls "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
+# Проверяем наличие миграций в исходном коде
+if [ -d "${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations" ]; then
+    echo "✅ Директория миграций найдена"
+    MIGRATION_COUNT=$(find "${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations" -name "*.sql" 2>/dev/null | wc -l)
     echo "Количество SQL файлов миграций: ${MIGRATION_COUNT}"
 
-    # Показываем список миграций
     if [ "${MIGRATION_COUNT}" -gt 0 ]; then
         echo "Список миграций:"
-        ls "${INSTALL_DIR}/src/internal/infrastructure/persistence/postgres/migrations/"*.sql | head -10
+        find "${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations" -name "*.sql" | head -10
     fi
 else
-    echo "⚠️  Папка миграций не найдена"
+    echo "⚠️  Директория миграций не найдена"
 fi
 
 echo ""
-echo "Миграции будут автоматически выполнены при первом запуске приложения"
-echo "Приложение проверяет и применяет миграции через migrator.go"
+echo "ℹ️  Миграции будут автоматически выполнены при запуске приложения"
+echo "Приложение проверит DB_ENABLE_AUTO_MIGRATE=true и выполнит миграции"
 echo ""
-
-# Вместо прямого запуска мигратора, запускаем приложение в режиме инициализации
-echo "Запуск приложения для проверки миграций (таймаут 10 секунд)..."
-cd "${INSTALL_DIR}"
-
-# Экспортируем переменные окружения для подключения к БД
-export DB_HOST=localhost
-export DB_PORT=5432
-export DB_NAME=crypto_screener_db
-export DB_USER=crypto_screener
-export DB_PASSWORD=SecurePass123!
-export DB_SSLMODE=disable
-export LOG_LEVEL=info
-
-# Запускаем приложение с коротким таймаутом только для инициализации
-timeout 10 "${INSTALL_DIR}/bin/${APP_NAME}" --env=prod 2>&1 | grep -i -E "(migration|migrate|database|postgres|init)" | head -20 || true
-
-echo ""
-echo "✅ Проверка миграций завершена"
-echo "Примечание: Если миграции не применились автоматически,"
-echo "они будут применены при первом полноценном запуске приложения"
 EOF
 
     log_info "Миграции проверены"
@@ -783,54 +1198,90 @@ start_application() {
 set -e
 
 SERVICE_NAME="crypto-screener"
-APP_NAME="crypto-screener-bot"
 INSTALL_DIR="/opt/crypto-screener-bot"
 
-# Сначала останавливаем сервис если он уже запущен
-echo "Остановка сервиса (если запущен)..."
-systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || true
+echo "🚀 Запуск приложения ${SERVICE_NAME}..."
+
+# Останавливаем сервис если запущен
+echo "⏹️  Остановка сервиса (если запущен)..."
+systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || echo "   ⚠️  Сервис не был запущен"
+sleep 2
 
 # Проверяем конфигурацию
-echo "Проверка конфигурации..."
+echo "🔍 Проверка конфигурации..."
 if [ -f "${INSTALL_DIR}/.env" ]; then
     echo "✅ Файл конфигурации найден"
 
-    # Проверяем наличие обязательных настроек
-    if grep -q "DB_PASSWORD=" "${INSTALL_DIR}/.env"; then
-        echo "✅ Настройки базы данных найдены"
+    # Проверяем основные настройки
+    if grep -q "DB_ENABLE_AUTO_MIGRATE=" "${INSTALL_DIR}/.env"; then
+        AUTO_MIGRATE=$(grep "DB_ENABLE_AUTO_MIGRATE=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        echo "   Автоматические миграции: ${AUTO_MIGRATE}"
     else
-        echo "⚠️  Настройки базы данных не найдены, добавляем..."
-        echo "DB_PASSWORD=SecurePass123!" >> "${INSTALL_DIR}/.env"
+        echo "⚠️  DB_ENABLE_AUTO_MIGRATE не настроен, добавляем..."
+        echo "DB_ENABLE_AUTO_MIGRATE=true" >> "${INSTALL_DIR}/.env"
+    fi
+
+    # Проверяем Redis настройки
+    if ! grep -q "^REDIS_ENABLED=" "${INSTALL_DIR}/.env"; then
+        echo "REDIS_ENABLED=true" >> "${INSTALL_DIR}/.env"
     fi
 else
     echo "❌ Файл конфигурации не найден"
     exit 1
 fi
 
+# Проверяем бинарник перед запуском
+echo "🔍 Проверка бинарника..."
+BINARY_PATH="${INSTALL_DIR}/bin/crypto-screener-bot"
+if [ ! -f "${BINARY_PATH}" ]; then
+    echo "❌ Бинарник не найден: ${BINARY_PATH}"
+    echo "Попытка сборки..."
+    cd "${INSTALL_DIR}"
+    if [ -f "go.mod" ] && [ -f "application/cmd/bot/main.go" ]; then
+        /usr/local/go/bin/go build -o "${BINARY_PATH}" ./application/cmd/bot/main.go
+        chown cryptoapp:cryptoapp "${BINARY_PATH}"
+        chmod +x "${BINARY_PATH}"
+        echo "✅ Бинарник собран"
+    else
+        echo "❌ Не удалось собрать бинарник"
+        exit 1
+    fi
+fi
+
+# Проверяем права на бинарник
+if [ ! -x "${BINARY_PATH}" ]; then
+    echo "⚠️  Бинарник не исполняемый, исправляем..."
+    chmod +x "${BINARY_PATH}"
+fi
+
 # Запуск сервиса
-echo "Запуск сервиса ${SERVICE_NAME}..."
+echo "🚀 Запуск сервиса ${SERVICE_NAME}..."
 systemctl start "${SERVICE_NAME}.service"
-sleep 5
+sleep 3
 
 # Проверка статуса
-echo "Статус сервиса:"
-systemctl status "${SERVICE_NAME}.service" --no-pager
+echo "📊 Статус сервиса:"
+systemctl status "${SERVICE_NAME}.service" --no-pager | head -20
 
-# Ждем немного для инициализации
-echo "Ожидание инициализации приложения (10 секунд)..."
+# Ждем инициализацию
+echo "⏳ Ожидание инициализации (10 секунд)..."
 sleep 10
 
-# Просмотр логов на предмет миграций
-echo "Проверка логов (миграции и инициализация):"
-journalctl -u "${SERVICE_NAME}.service" -n 20 --no-pager | grep -i -E "(migration|migrate|database|postgres|init|starting|started)" || echo "Логи не содержат информации о миграциях"
-
-# Общий просмотр логов
-echo "Последние 10 строк лога:"
-tail -10 "/var/log/${APP_NAME}/app.log" 2>/dev/null || echo "Файл лога еще не создан"
-
 # Проверка процесса
-echo "Проверка процессов:"
-pgrep -f "${APP_NAME}" && echo "✅ Приложение запущено" || echo "❌ Приложение не запущено"
+echo "🔍 Проверка процессов:"
+if pgrep -f "crypto-screener-bot" > /dev/null; then
+    echo "✅ Приложение запущено"
+    PID=$(pgrep -f "crypto-screener-bot")
+    echo "   PID: ${PID}"
+    echo "   Uptime: $(ps -o etime= -p ${PID} 2>/dev/null || echo "неизвестно")"
+else
+    echo "❌ Приложение не запущено"
+    echo "Проверьте логи: journalctl -u ${SERVICE_NAME}.service -n 50"
+    exit 1
+fi
+
+echo ""
+echo "✅ Приложение успешно запущено!"
 EOF
 
     log_info "Приложение запущено"
@@ -846,43 +1297,117 @@ set -e
 
 APP_NAME="crypto-screener-bot"
 SERVICE_NAME="crypto-screener"
+INSTALL_DIR="/opt/crypto-screener-bot"
 
 echo "=== ПРОВЕРКА РАЗВЕРТЫВАНИЯ ==="
 echo ""
 
-# 1. Проверка сервисов
-echo "1. Проверка системных сервисов:"
-echo "   PostgreSQL: $(systemctl is-active postgresql)"
-echo "   Redis: $(systemctl is-active redis-server)"
-echo "   ${SERVICE_NAME}: $(systemctl is-active ${SERVICE_NAME})"
+# 1. Проверка структуры директорий
+echo "1. Структура директорий:"
+echo "   ${INSTALL_DIR}/"
+ls -la "${INSTALL_DIR}/" | head -20
 echo ""
 
-# 2. Проверка процессов
-echo "2. Запущенные процессы:"
-pgrep -f "${APP_NAME}" && echo "   Приложение запущено" || echo "   Приложение не запущено"
+# 2. Проверка сервисов
+echo "2. Проверка системных сервисов:"
+echo "   PostgreSQL: $(systemctl is-active postgresql 2>/dev/null || echo 'не установлен')"
+echo "   Redis: $(systemctl is-active redis-server 2>/dev/null || echo 'не установлен')"
+echo "   ${SERVICE_NAME}: $(systemctl is-active ${SERVICE_NAME} 2>/dev/null || echo 'не установлен')"
 echo ""
 
-# 3. Проверка логов
-echo "3. Проверка логов:"
-if [ -f "/var/log/${APP_NAME}/app.log" ]; then
-    echo "   Файл лога существует"
-    echo "   Размер: $(du -h /var/log/${APP_NAME}/app.log | cut -f1)"
-    echo "   Последние 5 строк:"
-    tail -5 "/var/log/${APP_NAME}/app.log" 2>/dev/null || echo "   Не удалось прочитать лог"
+# 3. Проверка процессов
+echo "3. Запущенные процессы:"
+if pgrep -f "${APP_NAME}" > /dev/null; then
+    echo "   ✅ Приложение запущено"
+    ps -f -p $(pgrep -f "${APP_NAME}")
 else
-    echo "   Файл лога не найден"
+    echo "   ❌ Приложение не запущено"
 fi
 echo ""
 
-# 4. Проверка сетевых портов
-echo "4. Проверка сетевых портов:"
-echo "   PostgreSQL (5432): $(ss -tln | grep ':5432' && echo 'открыт' || echo 'закрыт')"
-echo "   Redis (6379): $(ss -tln | grep ':6379' && echo 'открыт' || echo 'закрыт')"
+# 4. Проверка логов
+echo "4. Проверка логов:"
+if [ -f "/var/log/${APP_NAME}/app.log" ]; then
+    echo "   ✅ Файл лога существует"
+    echo "   Размер: $(du -h /var/log/${APP_NAME}/app.log | cut -f1)"
+    echo "   Последние 5 строк:"
+    tail -5 "/var/log/${APP_NAME}/app.log" 2>/dev/null | sed 's/^/   /'
+else
+    echo "   ❌ Файл лога не найден"
+fi
 echo ""
 
-# 5. Проверка дискового пространства
-echo "5. Дисковое пространство:"
-df -h /opt /var/log | grep -v Filesystem
+# 5. Проверка портов
+echo "5. Проверка сетевых портов:"
+echo "   PostgreSQL (5432): $(ss -tln | grep ':5432' >/dev/null && echo 'открыт' || echo 'закрыт')"
+echo "   Redis (6379): $(ss -tln | grep ':6379' >/dev/null && echo 'открыт' || echo 'закрыт')"
+echo ""
+
+# 6. Проверка БД и Redis
+echo "6. Проверка базы данных и Redis:"
+if command -v psql >/dev/null 2>&1; then
+    if [ -f "${INSTALL_DIR}/.env" ]; then
+        # Проверка БД
+        DB_HOST=$(grep "^DB_HOST=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_PORT=$(grep "^DB_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_NAME=$(grep "^DB_NAME=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_USER=$(grep "^DB_USER=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        DB_PASSWORD=$(grep "^DB_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+
+        export PGPASSWORD="${DB_PASSWORD}"
+        if psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-bot}" \
+            "${DB_NAME:-cryptobot}" -c "SELECT 1" >/dev/null 2>&1; then
+            echo "   ✅ База данных доступна"
+            TABLE_COUNT=$(psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-bot}" \
+                "${DB_NAME:-cryptobot}" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public';" 2>/dev/null | tr -d ' ')
+            echo "   Количество таблиц: ${TABLE_COUNT:-0}"
+        else
+            echo "   ❌ База данных недоступна"
+        fi
+
+        # Проверка Redis
+        REDIS_HOST=$(grep "^REDIS_HOST=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        REDIS_PORT=$(grep "^REDIS_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        REDIS_PASSWORD=$(grep "^REDIS_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "")
+        REDIS_ENABLED=$(grep "^REDIS_ENABLED=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "true")
+
+        if [ "${REDIS_ENABLED}" = "true" ]; then
+            echo "   Redis (${REDIS_HOST:-localhost}:${REDIS_PORT:-6379}):"
+
+            if command -v redis-cli >/dev/null 2>&1; then
+                REDIS_CMD="redis-cli -h '${REDIS_HOST:-localhost}' -p '${REDIS_PORT:-6379}'"
+                if [ -n "${REDIS_PASSWORD}" ]; then
+                    REDIS_CMD="${REDIS_CMD} -a '${REDIS_PASSWORD}'"
+                fi
+
+                if eval "${REDIS_CMD} ping 2>/dev/null" | grep -q "PONG"; then
+                    echo "   ✅ Redis доступен"
+                else
+                    echo "   ❌ Redis недоступен"
+                fi
+            else
+                echo "   ⚠️  redis-cli не установлен"
+            fi
+        else
+            echo "   Redis: отключен (REDIS_ENABLED=false)"
+        fi
+    else
+        echo "   ⚠️  Конфиг не найден"
+    fi
+else
+    echo "   ⚠️  psql не установлен"
+fi
+echo ""
+
+# 7. Проверка конфигурации
+echo "7. Проверка конфигурации:"
+if [ -f "${INSTALL_DIR}/.env" ]; then
+    echo "   ✅ Конфиг найден"
+    echo "   Основные настройки:"
+    grep -E "^(APP_ENV|DB_HOST|DB_NAME|DB_USER|LOG_LEVEL|TELEGRAM_ENABLED|EXCHANGE|REDIS_HOST|REDIS_PORT|REDIS_ENABLED)=" "${INSTALL_DIR}/.env" | sed 's/^/   /'
+else
+    echo "   ❌ Конфиг не найден"
+fi
 echo ""
 
 echo "=== ПРОВЕРКА ЗАВЕРШЕНА ==="
@@ -899,24 +1424,33 @@ main() {
     log_info "Имя сервиса: ${SERVICE_NAME}"
     echo ""
 
+    # Читаем настройки из .env файла
+    read_env_config
+
     # Проверяем локальный конфиг перед началом
     check_local_config
 
     # Выполнение шагов развертывания
     check_ssh_connection
     install_dependencies
+    setup_postgresql
+    setup_redis  # Теперь Redis настраивается с параметрами из .env
     setup_firewall
-    create_app_user
+    create_directory_structure
     setup_logging
-    copy_source_code
-    install_application
+    copy_source_code  # ИСПРАВЛЕННАЯ функция
+    build_application
     setup_configuration
-    setup_systemd_service
-    run_migrations
+    setup_systemd_service  # ИСПРАВЛЕННАЯ функция
+    check_migrations
     start_application
     verify_deployment
 
-    log_step "Развертывание успешно завершено!"
+    log_step "✅ Развертывание успешно завершено!"
+    echo ""
+    log_info "📋 Использованы настройки:"
+    log_info "  PostgreSQL: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+    log_info "  Redis: ${REDIS_HOST}:${REDIS_PORT} (включен: ${REDIS_ENABLED})"
     echo ""
     log_info "ВАЖНО: Проверьте настройки в файле: ${INSTALL_DIR}/.env"
     log_info "Обязательные настройки для проверки:"

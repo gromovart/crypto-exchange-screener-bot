@@ -1,6 +1,6 @@
 #!/bin/bash
 # Скрипт управления службой Crypto Screener Bot
-# Использование: ./service.sh [COMMAND] [OPTIONS]
+# Использование: ./deploy/scripts/service.sh [COMMAND] [OPTIONS]
 
 set -e  # Выход при ошибке
 
@@ -17,6 +17,7 @@ SERVER_USER="root"
 SSH_KEY="${HOME}/.ssh/id_rsa"
 SERVICE_NAME="crypto-screener"
 APP_NAME="crypto-screener-bot"
+INSTALL_DIR="/opt/${APP_NAME}"
 LINES=50  # Количество строк по умолчанию
 
 # Функции для вывода
@@ -50,6 +51,7 @@ show_help() {
     echo "  config-show         Показать текущую конфигурацию"
     echo "  config-check        Проверить конфигурацию"
     echo "  health              Проверить здоровье системы"
+    echo "  restart-app         Перезапуск только приложения (без зависимостей)"
     echo ""
     echo "Опции:"
     echo "  --ip=IP_ADDRESS     IP адрес сервера (по умолчанию: 95.142.40.244)"
@@ -98,6 +100,33 @@ service_restart() {
     log_info "Перезапуск службы ${SERVICE_NAME}..."
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl restart ${SERVICE_NAME}.service"
     sleep 3
+    service_status
+}
+
+service_restart_app() {
+    log_info "Перезапуск только приложения..."
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+set -e
+
+APP_NAME="crypto-screener-bot"
+INSTALL_DIR="/opt/${APP_NAME}"
+SERVICE_NAME="crypto-screener"
+
+# Останавливаем приложение
+if pgrep -f "${APP_NAME}" > /dev/null; then
+    echo "Остановка процесса приложения..."
+    pkill -f "${APP_NAME}"
+    sleep 2
+fi
+
+# Запускаем приложение через systemd
+echo "Запуск приложения..."
+systemctl restart ${SERVICE_NAME}.service
+
+echo "✅ Приложение перезапущено"
+EOF
+    sleep 2
     service_status
 }
 
@@ -180,6 +209,7 @@ echo "5. Процессы приложения:"
 if pgrep -f "crypto-screener-bot" > /dev/null; then
     echo "  ✅ Приложение работает"
     echo "  PID: $(pgrep -f "crypto-screener-bot")"
+    echo "  Uptime: $(ps -o etime= -p $(pgrep -f "crypto-screener-bot") | xargs)"
 else
     echo "  ❌ Приложение не работает"
 fi
@@ -201,15 +231,38 @@ echo ""
 
 # 8. Проверка конфигурации
 echo "8. Основные настройки конфигурации:"
-if [ -f "/opt/crypto-screener-bot/.env" ]; then
-    echo "  ✅ Конфиг найден: /opt/crypto-screener-bot/.env"
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+if [ -f "${CONFIG_FILE}" ]; then
+    echo "  ✅ Конфиг найден: ${CONFIG_FILE}"
     # Показываем только основные настройки без секретов
-    grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE)=" \
-        "/opt/crypto-screener-bot/.env" 2>/dev/null | head -5 | while read line; do
+    echo "  Основные настройки:"
+    grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_ENABLED)=" \
+        "${CONFIG_FILE}" 2>/dev/null | head -6 | while read line; do
         echo "  ⚙️  $line"
     done
+
+    # Проверка Redis
+    if grep -q "^REDIS_ENABLED=" "${CONFIG_FILE}" && grep -q "^REDIS_ENABLED=true" "${CONFIG_FILE}"; then
+        echo "  ✅ Redis: включен"
+    else
+        echo "  ⚠️  Redis: отключен"
+    fi
 else
     echo "  ❌ Конфиг не найден"
+fi
+echo ""
+
+# 9. Проверка структуры проекта
+echo "9. Структура проекта:"
+INSTALL_DIR="/opt/crypto-screener-bot"
+if [ -d "${INSTALL_DIR}" ]; then
+    echo "  ✅ Директория проекта существует"
+    echo "  Содержимое:"
+    ls -la "${INSTALL_DIR}" | grep -E "^(total|drwx|.env|bin)" | head -5 | while read line; do
+        echo "  📁 $line"
+    done
+else
+    echo "  ❌ Директория проекта не существует"
 fi
 echo ""
 
@@ -239,10 +292,16 @@ echo "Создание резервной копии системы..."
 echo "Остановка сервиса..."
 systemctl stop ${SERVICE_NAME}.service 2>/dev/null || echo "⚠️  Сервис уже остановлен"
 
-# Резервное копирование
+# Резервное копирование файлов приложения
 echo "Копирование файлов приложения..."
+echo "  Копирование бинарника..."
 cp -r "${INSTALL_DIR}/bin" "${BACKUP_PATH}/" 2>/dev/null || echo "⚠️  Не удалось скопировать bin"
+
+echo "  Копирование конфигурации..."
 cp -r "${INSTALL_DIR}/configs" "${BACKUP_PATH}/" 2>/dev/null || echo "⚠️  Не удалось скопировать configs"
+
+echo "  Копирование .env файла..."
+cp "${INSTALL_DIR}/.env" "${BACKUP_PATH}/" 2>/dev/null || echo "⚠️  Не удалось скопировать .env"
 
 # Создание дампа базы данных
 echo "Создание дампа базы данных..."
@@ -256,9 +315,13 @@ if command -v pg_dump >/dev/null 2>&1; then
         DB_PASSWORD=$(grep "^DB_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2)
 
         export PGPASSWORD="${DB_PASSWORD}"
-        pg_dump -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-crypto_screener}" \
-            "${DB_NAME:-crypto_screener_db}" > "${BACKUP_PATH}/database_dump.sql" 2>/dev/null && \
-            echo "✅ Дамп БД создан" || echo "⚠️  Не удалось создать дамп БД"
+        DUMP_FILE="${BACKUP_PATH}/database_dump.sql"
+        if pg_dump -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-bot}" \
+            "${DB_NAME:-cryptobot}" > "${DUMP_FILE}" 2>/dev/null; then
+            echo "✅ Дамп БД создан: $(wc -l < "${DUMP_FILE}") строк"
+        else
+            echo "⚠️  Не удалось создать дамп БД"
+        fi
     else
         echo "⚠️  Конфиг не найден, пропускаем дамп БД"
     fi
@@ -280,7 +343,7 @@ echo ""
 echo "✅ Резервная копия создана: ${BACKUP_DIR}/manual_backup_${TIMESTAMP}.tar.gz"
 echo "📊 Размер: $(du -h "${BACKUP_DIR}/manual_backup_${TIMESTAMP}.tar.gz" | cut -f1)"
 echo ""
-echo "Список резервных копий:"
+echo "📋 Список последних резервных копий:"
 ls -la "${BACKUP_DIR}"/*.tar.gz 2>/dev/null | tail -5 || echo "Резервных копий нет"
 EOF
 }
@@ -292,6 +355,7 @@ service_cleanup() {
 set -e
 
 APP_NAME="crypto-screener-bot"
+INSTALL_DIR="/opt/${APP_NAME}"
 LOG_DIR="/var/log/${APP_NAME}"
 BACKUP_DIR="/opt/${APP_NAME}_backups"
 
@@ -338,8 +402,33 @@ else
 fi
 echo ""
 
-# 3. Очистка кэша сборки Go
-echo "3. Очистка кэша сборки Go:"
+# 3. Очистка временных файлов в директории установки
+echo "3. Очистка временных файлов в ${INSTALL_DIR}:"
+if [ -d "${INSTALL_DIR}" ]; then
+    # Удаляем временные Go файлы
+    TEMP_FILES=$(find "${INSTALL_DIR}" -name "*.tmp" -type f 2>/dev/null | wc -l)
+    if [ "${TEMP_FILES}" -gt 0 ]; then
+        echo "   Найдено временных файлов: ${TEMP_FILES}"
+        find "${INSTALL_DIR}" -name "*.tmp" -type f -delete
+        echo "   ✅ Временные файлы удалены"
+    else
+        echo "   ✅ Временных файлов не найдено"
+    fi
+
+    # Очистка папки logs внутри установки
+    if [ -d "${INSTALL_DIR}/logs" ]; then
+        LOGS_IN_APP=$(find "${INSTALL_DIR}/logs" -name "*.log" -type f 2>/dev/null | wc -l)
+        if [ "${LOGS_IN_APP}" -gt 0 ]; then
+            echo "   Очистка логов в папке приложения: ${LOGS_IN_APP} файлов"
+            rm -f "${INSTALL_DIR}/logs"/*.log 2>/dev/null
+            echo "   ✅ Логи приложения очищены"
+        fi
+    fi
+fi
+echo ""
+
+# 4. Очистка кэша сборки Go
+echo "4. Очистка кэша сборки Go:"
 if command -v go >/dev/null 2>&1; then
     go clean -cache 2>/dev/null && echo "   ✅ Кэш Go очищен" || echo "   ⚠️  Не удалось очистить кэш Go"
 else
@@ -347,13 +436,13 @@ else
 fi
 echo ""
 
-# 4. Очистка журналов systemd
-echo "4. Очистка старых журналов systemd:"
+# 5. Очистка журналов systemd
+echo "5. Очистка старых журналов systemd:"
 journalctl --vacuum-time=7d 2>/dev/null && echo "   ✅ Журналы systemd очищены" || echo "   ⚠️  Не удалось очистить журналы"
 echo ""
 
-# 5. Проверка свободного места
-echo "5. Свободное место на дисках:"
+# 6. Проверка свободного места
+echo "6. Свободное место на дисках:"
 df -h /opt /var/log | grep -v Filesystem | while read line; do
     echo "   💾 $line"
 done
@@ -388,11 +477,33 @@ if [ -f "${CONFIG_FILE}" ]; then
     echo ""
 
     echo "3. REDIS:"
-    grep -E "^(REDIS_HOST|REDIS_PORT|REDIS_ENABLED)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    grep -E "^(REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_ENABLED)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    if grep -q "^REDIS_ENABLED=" "${CONFIG_FILE}"; then
+        REDIS_ENABLED=$(grep "^REDIS_ENABLED=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [ "${REDIS_ENABLED}" = "true" ]; then
+            echo "  ✅ Redis включен"
+
+            # Проверка пароля Redis
+            if grep -q "^REDIS_PASSWORD=" "${CONFIG_FILE}"; then
+                REDIS_PASS=$(grep "^REDIS_PASSWORD=" "${CONFIG_FILE}" | cut -d= -f2)
+                if [ -n "${REDIS_PASS}" ]; then
+                    echo "  ✅ Redis пароль: настроен"
+                else
+                    echo "  ⚠️  Redis пароль: не установлен"
+                fi
+            else
+                echo "  ⚠️  Redis пароль: не настроен"
+            fi
+        else
+            echo "  ⚠️  Redis отключен"
+        fi
+    else
+        echo "  ⚠️  REDIS_ENABLED не настроен"
+    fi
     echo ""
 
     echo "4. TELEGRAM:"
-    grep -E "^(TELEGRAM_ENABLED|TELEGRAM_ADMIN_IDS)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    grep -E "^(TELEGRAM_ENABLED|TELEGRAM_ADMIN_IDS|TELEGRAM_BOT_TOKEN)=" "${CONFIG_FILE}" || echo "  (не настроены)"
     if grep -q "TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
         echo "  ✅ Telegram включен"
     else
@@ -422,6 +533,16 @@ if [ -f "${CONFIG_FILE}" ]; then
         echo "  ✅ Ключ шифрования настроен"
     else
         echo "  ⚠️  Ключ шифрования не настроен"
+    fi
+
+    echo ""
+    echo "8. ФАЙЛЫ КОНФИГУРАЦИИ В ПРОЕКТЕ:"
+    echo "--------------------------------"
+    if [ -d "/opt/crypto-screener-bot/configs" ]; then
+        echo "Структура configs/:"
+        ls -la "/opt/crypto-screener-bot/configs/" 2>/dev/null | head -10 || echo "  Не удалось прочитать директорию"
+    else
+        echo "⚠️  Директория configs/ не существует"
     fi
 
 else
@@ -490,10 +611,74 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 
+# Проверка DB_ENABLE_AUTO_MIGRATE
+if grep -q "^DB_ENABLE_AUTO_MIGRATE=" "${CONFIG_FILE}"; then
+    AUTO_MIGRATE=$(grep "^DB_ENABLE_AUTO_MIGRATE=" "${CONFIG_FILE}" | cut -d= -f2)
+    if [ "${AUTO_MIGRATE}" == "true" ]; then
+        echo "  ✅ DB_ENABLE_AUTO_MIGRATE: включены (миграции выполнятся автоматически)"
+    else
+        echo "  ⚠️  DB_ENABLE_AUTO_MIGRATE: отключены (миграции не будут выполнены)"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  ⚠️  DB_ENABLE_AUTO_MIGRATE: не настроен"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
+
+# Проверка Redis настроек
+echo "2. REDIS НАСТРОЙКИ:"
+echo "------------------"
+
+if grep -q "^REDIS_ENABLED=" "${CONFIG_FILE}"; then
+    REDIS_ENABLED=$(grep "^REDIS_ENABLED=" "${CONFIG_FILE}" | cut -d= -f2)
+    if [ "${REDIS_ENABLED}" = "true" ]; then
+        echo "  ✅ REDIS_ENABLED: включен"
+
+        # Проверка хоста Redis
+        if grep -q "^REDIS_HOST=" "${CONFIG_FILE}"; then
+            REDIS_HOST=$(grep "^REDIS_HOST=" "${CONFIG_FILE}" | cut -d= -f2)
+            echo "  ✅ REDIS_HOST: ${REDIS_HOST}"
+        else
+            echo "  ⚠️  REDIS_HOST: не настроен, будет использован localhost"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+
+        # Проверка порта Redis
+        if grep -q "^REDIS_PORT=" "${CONFIG_FILE}"; then
+            REDIS_PORT=$(grep "^REDIS_PORT=" "${CONFIG_FILE}" | cut -d= -f2)
+            echo "  ✅ REDIS_PORT: ${REDIS_PORT}"
+        else
+            echo "  ⚠️  REDIS_PORT: не настроен, будет использован 6379"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+
+        # Проверка пароля Redis (необязательно, но рекомендуется)
+        if grep -q "^REDIS_PASSWORD=" "${CONFIG_FILE}"; then
+            REDIS_PASS=$(grep "^REDIS_PASSWORD=" "${CONFIG_FILE}" | cut -d= -f2)
+            if [ -n "${REDIS_PASS}" ]; then
+                echo "  ✅ REDIS_PASSWORD: настроен"
+            else
+                echo "  ⚠️  REDIS_PASSWORD: пустой пароль"
+                WARNINGS=$((WARNINGS + 1))
+            fi
+        else
+            echo "  ℹ️  REDIS_PASSWORD: не настроен (Redis без пароля)"
+        fi
+    else
+        echo "  ⚠️  REDIS_ENABLED: отключен"
+        WARNINGS=$((WARNINGS + 1))
+    fi
+else
+    echo "  ⚠️  REDIS_ENABLED: не настроен, по умолчанию будет true"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
 echo ""
 
 # Проверка API ключей
-echo "2. API КЛЮЧИ БИРЖ:"
+echo "3. API КЛЮЧИ БИРЖ:"
 echo "-----------------"
 
 EXCHANGE=$(grep "^EXCHANGE=" "${CONFIG_FILE}" | cut -d= -f2)
@@ -532,7 +717,7 @@ fi
 echo ""
 
 # Проверка Telegram
-echo "3. TELEGRAM НАСТРОЙКИ:"
+echo "4. TELEGRAM НАСТРОЙКИ:"
 echo "---------------------"
 
 if grep -q "^TELEGRAM_ENABLED=" "${CONFIG_FILE}" && grep -q "^TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
@@ -570,7 +755,7 @@ fi
 echo ""
 
 # Проверка безопасности
-echo "4. БЕЗОПАСНОСТЬ:"
+echo "5. БЕЗОПАСНОСТЬ:"
 echo "---------------"
 
 if grep -q "^JWT_SECRET=" "${CONFIG_FILE}"; then
@@ -666,6 +851,7 @@ echo "3. 🔄 ПРОВЕРКА ПРОЦЕССОВ:"
 if pgrep -f "crypto-screener-bot" > /dev/null; then
     echo "   ✅ Приложение: работает"
     echo "   📊 PID: $(pgrep -f "crypto-screener-bot")"
+    echo "   ⏱️  Uptime: $(ps -o etime= -p $(pgrep -f "crypto-screener-bot") | xargs)"
 else
     echo "   ❌ Приложение: не работает"
     HEALTH_OK=false
@@ -701,7 +887,7 @@ RECENT_ERRORS=$(journalctl -u crypto-screener.service --since "5 minutes ago" 2>
 if [ "${RECENT_ERRORS}" -gt 0 ]; then
     echo "   ⚠️  Найдено ошибок: ${RECENT_ERRORS}"
     echo "   Последние ошибки:"
-    journalctl -u crypto-screener.service --since "5 минут назад" 2>/dev/null | \
+    journalctl -u crypto-screener.service --since "5 minutes ago" 2>/dev/null | \
         grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
         echo "     📛 $(echo "$line" | cut -d' ' -f6-)"
     done
@@ -711,8 +897,10 @@ else
 fi
 echo ""
 
-# 6. Проверка подключения к БД
-echo "6. 🗄️  ПРОВЕРКА БАЗЫ ДАННЫХ:"
+# 6. Проверка подключения к БД и Redis
+echo "6. 🗄️  ПРОВЕРКА БАЗЫ ДАННЫХ И REDIS:"
+
+# Проверка БД
 if command -v psql >/dev/null 2>&1 && [ -f "/opt/crypto-screener-bot/.env" ]; then
     DB_HOST=$(grep "^DB_HOST=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
     DB_PORT=$(grep "^DB_PORT=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
@@ -721,8 +909,8 @@ if command -v psql >/dev/null 2>&1 && [ -f "/opt/crypto-screener-bot/.env" ]; th
     DB_PASSWORD=$(grep "^DB_PASSWORD=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
 
     export PGPASSWORD="${DB_PASSWORD}"
-    if psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-crypto_screener}" \
-        "${DB_NAME:-crypto_screener_db}" -c "SELECT 1" >/dev/null 2>&1; then
+    if psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "${DB_USER:-bot}" \
+        "${DB_NAME:-cryptobot}" -c "SELECT 1" >/dev/null 2>&1; then
         echo "   ✅ База данных: доступна"
     else
         echo "   ❌ База данных: недоступна"
@@ -730,6 +918,66 @@ if command -v psql >/dev/null 2>&1 && [ -f "/opt/crypto-screener-bot/.env" ]; th
     fi
 else
     echo "   ⚠️  Проверка БД: инструменты не установлены"
+fi
+
+# Проверка Redis
+if command -v redis-cli >/dev/null 2>&1 && [ -f "/opt/crypto-screener-bot/.env" ]; then
+    REDIS_ENABLED=$(grep "^REDIS_ENABLED=" "/opt/crypto-screener-bot/.env" | cut -d= -f2 2>/dev/null || echo "true")
+
+    if [ "${REDIS_ENABLED}" = "true" ]; then
+        REDIS_HOST=$(grep "^REDIS_HOST=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+        REDIS_PORT=$(grep "^REDIS_PORT=" "/opt/crypto-screener-bot/.env" | cut -d= -f2)
+        REDIS_PASSWORD=$(grep "^REDIS_PASSWORD=" "/opt/crypto-screener-bot/.env" | cut -d= -f2 2>/dev/null || echo "")
+
+        REDIS_CMD="redis-cli -h '${REDIS_HOST:-localhost}' -p '${REDIS_PORT:-6379}'"
+        if [ -n "${REDIS_PASSWORD}" ]; then
+            REDIS_CMD="${REDIS_CMD} -a '${REDIS_PASSWORD}'"
+        fi
+
+        if eval "${REDIS_CMD} ping 2>/dev/null" | grep -q "PONG"; then
+            echo "   ✅ Redis: доступен"
+        else
+            echo "   ❌ Redis: недоступен"
+            HEALTH_OK=false
+        fi
+    else
+        echo "   ℹ️  Redis: отключен в конфиге"
+    fi
+else
+    echo "   ⚠️  Проверка Redis: redis-cli не установлен"
+fi
+echo ""
+
+# 7. Проверка структуры проекта
+echo "7. 📁 ПРОВЕРКА СТРУКТУРЫ ПРОЕКТА:"
+INSTALL_DIR="/opt/crypto-screener-bot"
+if [ -d "${INSTALL_DIR}" ]; then
+    echo "   ✅ Директория проекта существует"
+
+    # Проверка ключевых файлов
+    KEY_FILES=(
+        "${INSTALL_DIR}/.env"
+        "${INSTALL_DIR}/bin/crypto-screener-bot"
+        "${INSTALL_DIR}/configs/prod/.env"
+    )
+
+    MISSING_FILES=0
+    for file in "${KEY_FILES[@]}"; do
+        if [ -f "${file}" ]; then
+            echo "   ✅ $(basename "${file}"): существует"
+        else
+            echo "   ❌ $(basename "${file}"): отсутствует"
+            MISSING_FILES=$((MISSING_FILES + 1))
+            HEALTH_OK=false
+        fi
+    done
+
+    if [ "${MISSING_FILES}" -eq 0 ]; then
+        echo "   ✅ Все ключевые файлы на месте"
+    fi
+else
+    echo "   ❌ Директория проекта не существует"
+    HEALTH_OK=false
 fi
 echo ""
 
@@ -760,7 +1008,7 @@ parse_args() {
 
     for arg in "$@"; do
         case $arg in
-            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health)
+            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health|restart-app)
                 command="$arg"
                 shift
                 ;;
@@ -818,6 +1066,9 @@ main() {
             ;;
         restart)
             service_restart
+            ;;
+        restart-app)
+            service_restart_app
             ;;
         status)
             service_status
