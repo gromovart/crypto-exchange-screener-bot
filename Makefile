@@ -3,7 +3,10 @@
 	debug-counter test-counter test-counter-quick counter-test-all \
 	test-basic test-quick test-all safe-test validate fix-vet test-stable quick-check \
 	config-show config-dev config-prod config-list config-init config-edit check-config \
-	run-dev run-local config-copy config-diff config-backup
+	run-dev run-local config-copy config-diff config-backup \
+	deploy update service check-connection health monitor backup cleanup \
+	docker-build docker-run docker-run-prod docker-db-up docker-db-down \
+	struct-check deps-update
 
 # ============================================
 # КОНФИГУРАЦИЯ ОКРУЖЕНИЙ (первым делом!)
@@ -13,6 +16,186 @@ ENV ?= dev
 CONFIG_DIR = configs/$(ENV)
 ENV_FILE = $(CONFIG_DIR)/.env
 MAIN_FILE = ./application/cmd/bot/main.go
+
+# ============================================
+# ПРОВЕРКА СТРУКТУРЫ ПРОЕКТА
+# ============================================
+
+## struct-check: Проверить структуру проекта
+struct-check:
+	@echo "📁 ПРОВЕРКА СТРУКТУРЫ ПРОЕКТА"
+	@echo "==============================="
+
+	@# Проверка необходимых директорий
+	@for dir in bin logs configs/deploy configs/prod; do \
+		if [ ! -d "$$dir" ]; then \
+			echo "📂 Создаю директорию: $$dir"; \
+			mkdir -p "$$dir"; \
+		fi; \
+	done
+
+	@# Проверка основных файлов
+	@echo ""
+	@echo "📋 ПРОВЕРКА ОСНОВНЫХ ФАЙЛОВ:"
+	@if [ -f "$(MAIN_FILE)" ]; then \
+		echo "✅ Основной файл: $(MAIN_FILE)"; \
+	else \
+		echo "❌ Основной файл не найден: $(MAIN_FILE)"; \
+	fi
+
+	@if [ -f "go.mod" ]; then \
+		echo "✅ Файл зависимостей: go.mod"; \
+	else \
+		echo "❌ Файл зависимостей не найден: go.mod"; \
+	fi
+
+	@if [ -d "deploy/scripts" ]; then \
+		echo "✅ Скрипты развертывания: deploy/scripts/"; \
+		@chmod +x deploy/scripts/*.sh 2>/dev/null || true; \
+	else \
+		echo "❌ Скрипты развертывания не найдены: deploy/scripts/"; \
+	fi
+
+	@echo ""
+	@echo "🎯 СТАТУС СБОРКИ:"
+	@go build ./... 2>&1 | head -20 && echo "✅ Компиляция проекта успешна" || echo "❌ Ошибка компиляции"
+
+# ============================================
+# СКРИПТЫ РАЗВЕРТЫВАНИЯ
+# ============================================
+
+## deploy: Развернуть приложение на сервер
+deploy:
+	@echo "🚀 РАЗВЕРТЫВАНИЕ ПРИЛОЖЕНИЯ НА СЕРВЕР"
+	@echo "====================================="
+	@if [ -z "$(ip)" ]; then \
+		echo "❌ Укажите IP сервера:"; \
+		echo "   make deploy ip=95.142.40.244"; \
+		echo "   make deploy ip=95.142.40.244 user=ubuntu key=~/.ssh/id_rsa"; \
+		exit 1; \
+	fi
+	@echo "📡 Развертывание на $(ip)..."
+	@if [ ! -x "deploy/scripts/deploy.sh" ]; then \
+		chmod +x deploy/scripts/deploy.sh; \
+	fi
+	@./deploy/scripts/deploy.sh --ip=$(ip) --user=$(or $(user),root) $(if $(key),--key=$(key),)
+
+## update: Обновить приложение на сервере
+update:
+	@echo "🔄 ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ НА СЕРВЕРЕ"
+	@echo "==================================="
+	@if [ -z "$(ip)" ]; then \
+		echo "❌ Укажите IP сервера:"; \
+		echo "   make update ip=95.142.40.244"; \
+		exit 1; \
+	fi
+	@echo "📡 Обновление на $(ip)..."
+	@if [ ! -x "deploy/scripts/update.sh" ]; then \
+		chmod +x deploy/scripts/update.sh; \
+	fi
+	@./deploy/scripts/update.sh --ip=$(ip) --user=$(or $(user),root) $(if $(key),--key=$(key),)
+
+## service: Управление службой на сервере
+service:
+	@echo "⚙️  УПРАВЛЕНИЕ СЛУЖБОЙ НА СЕРВЕРЕ"
+	@echo "================================"
+	@if [ -z "$(ip)" ] || [ -z "$(action)" ]; then \
+		echo "❌ Укажите IP сервера и действие:"; \
+		echo "   make service ip=95.142.40.244 action=status"; \
+		echo "   make service ip=95.142.40.244 action=start"; \
+		echo "   make service ip=95.142.40.244 action=stop"; \
+		echo "   make service ip=95.142.40.244 action=restart"; \
+		echo "   make service ip=95.142.40.244 action=logs"; \
+		echo "   make service ip=95.142.40.244 action=monitor"; \
+		echo "   make service ip=95.142.40.244 action=health"; \
+		echo "   make service ip=95.142.40.244 action=backup"; \
+		echo "   make service ip=95.142.40.244 action=cleanup"; \
+		exit 1; \
+	fi
+	@echo "📡 $(action) на $(ip)..."
+	@if [ ! -x "deploy/scripts/service.sh" ]; then \
+		chmod +x deploy/scripts/service.sh; \
+	fi
+	@./deploy/scripts/service.sh $(action) --ip=$(ip) --user=$(or $(user),root) $(if $(lines),--lines=$(lines),) $(if $(key),--key=$(key),)
+
+## check-connection: Проверить подключение к серверу
+check-connection:
+	@echo "🔌 ПРОВЕРКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ"
+	@echo "================================"
+	@if [ -z "$(ip)" ]; then \
+		echo "❌ Укажите IP сервера:"; \
+		echo "   make check-connection ip=95.142.40.244"; \
+		exit 1; \
+	fi
+	@echo "📡 Проверка подключения к $(ip)..."
+	@if [ ! -x "deploy/scripts/check-connection.sh" ]; then \
+		chmod +x deploy/scripts/check-connection.sh; \
+	fi
+	@./deploy/scripts/check-connection.sh --ip=$(ip) --user=$(or $(user),root) $(if $(full),--full,) $(if $(generate-key),--generate-key,) $(if $(key),--key=$(key),)
+
+## health: Проверить здоровье системы на сервере
+health:
+	@$(MAKE) service ip=$(ip) action=health user=$(user) key=$(key)
+
+## monitor: Мониторинг системы на сервере
+monitor:
+	@$(MAKE) service ip=$(ip) action=monitor user=$(user) key=$(key)
+
+## backup: Создать резервную копию на сервере
+backup:
+	@$(MAKE) service ip=$(ip) action=backup user=$(user) key=$(key)
+
+## cleanup: Очистка старых файлов на сервере
+cleanup:
+	@$(MAKE) service ip=$(ip) action=cleanup user=$(user) key=$(key)
+
+# ============================================
+# DOCKER КОМАНДЫ
+# ============================================
+
+## docker-build: Сборка Docker образа
+docker-build:
+	@echo "🐳 СБОРКА DOCKER ОБРАЗА"
+	@echo "======================"
+	@if [ ! -f "deploy/docker/dockerfile" ]; then \
+		echo "❌ Dockerfile не найден: deploy/docker/dockerfile"; \
+		exit 1; \
+	fi
+	docker build -t crypto-exchange-screener-bot:latest -f deploy/docker/dockerfile .
+
+## docker-run: Запуск в Docker
+docker-run:
+	@echo "🚀 ЗАПУСК В DOCKER"
+	@echo "================="
+	@if [ ! -f "$(ENV_FILE)" ]; then \
+		echo "⚠️  Файл конфигурации не найден: $(ENV_FILE)"; \
+		echo "   Создайте: make config-init ENV=$(ENV)"; \
+		exit 1; \
+	fi
+	docker run --rm -it \
+		--env-file "$(ENV_FILE)" \
+		--name crypto-screener-bot \
+		crypto-exchange-screener-bot:latest
+
+## docker-run-prod: Запуск в Docker с prod окружением
+docker-run-prod:
+	@$(MAKE) docker-run ENV=prod
+
+## docker-db-up: Запустить базу данных в Docker
+docker-db-up:
+	@echo "🐳 ЗАПУСК БАЗЫ ДАННЫХ В DOCKER"
+	@echo "=============================="
+	@if [ ! -f "deploy/docker/docker-compose.db.yml" ]; then \
+		echo "❌ docker-compose.db.yml не найден"; \
+		exit 1; \
+	fi
+	docker-compose -f deploy/docker/docker-compose.db.yml up -d
+
+## docker-db-down: Остановить базу данных в Docker
+docker-db-down:
+	@echo "🛑 ОСТАНОВКА БАЗЫ ДАННЫХ В DOCKER"
+	@echo "================================"
+	docker-compose -f deploy/docker/docker-compose.db.yml down
 
 # ============================================
 # УПРАВЛЕНИЕ ОКРУЖЕНИЯМИ
@@ -78,7 +261,7 @@ config-init:
 			echo "✅ Создан: $(ENV_FILE) (из .env.example)"; \
 		else \
 			echo "❌ Файл-шаблон не найден!"; \
-			echo "   Создайте configs/example/.env или .env.example"; \
+			echo "   Создайте файл configs/example/.env или .env.example"; \
 			exit 1; \
 		fi; \
 	else \
@@ -161,7 +344,7 @@ check-config:
 		echo "⚠️  COUNTER_ANALYZER_ENABLED не указан"; \
 	fi
 
-	@if grep -q "LOG_LEVEL=" "$(ENV_FILE)"; then \
+	@if grep -q "LOG_LEVEL=" "$(ENV_FILE)" ]; then \
 		LOG=$$(grep "LOG_LEVEL=" "$(ENV_FILE)" | cut -d= -f2); \
 		echo "✅ LOG_LEVEL: $$LOG"; \
 	else \
@@ -249,7 +432,7 @@ config-backup:
 
 ## build: Сборка продакшен версии с учетом окружения
 build:
-	@echo "🔨 Building Crypto Growth Monitor ($(ENV))..."
+	@echo "🔨 Сборка Crypto Growth Monitor ($(ENV))..."
 	@mkdir -p bin
 	@if [ ! -f "$(ENV_FILE)" ]; then \
 		echo "⚠️  Файл конфигурации не найден: $(ENV_FILE)"; \
@@ -263,36 +446,40 @@ build:
 	fi
 
 	@echo "📋 Конфигурация: $(ENV_FILE)"
+	@# Сначала проверяем компиляцию всего проекта
+	@echo "🔍 Проверка компиляции проекта..."
+	@go build ./... 2>&1 | head -20 && echo "✅ Компиляция успешна" || echo "❌ Ошибка компиляции"
+	@echo "📦 Сборка основного приложения..."
 	CGO_ENABLED=0 go build \
 		-ldflags="-s -w -X main.version=1.0.0 -X 'main.buildTime=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")'" \
 		-o bin/growth-monitor-$(ENV) $(MAIN_FILE)
-	@echo "✅ Built: bin/growth-monitor-$(ENV)"
+	@echo "✅ Собрано: bin/growth-monitor-$(ENV)"
 	@echo "   Используйте: ./bin/growth-monitor-$(ENV) --config=$(ENV_FILE) --mode=full"
 
 ## release: Сборка релизных версий для всех платформ
 release:
-	@echo "🚀 Building release versions..."
+	@echo "🚀 Сборка релизных версий..."
 	@mkdir -p releases
 
 	# Linux
-	@echo "📦 Building for Linux..."
+	@echo "📦 Сборка для Linux..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
 		-o releases/growth-monitor-linux $(MAIN_FILE)
 
 	# macOS
-	@echo "🍏 Building for macOS..."
+	@echo "🍏 Сборка для macOS..."
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
 		-o releases/growth-monitor-macos $(MAIN_FILE)
 
 	# Windows
-	@echo "🪟 Building for Windows..."
+	@echo "🪟 Сборка для Windows..."
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 		-ldflags="-s -w -X main.version=1.0.0" \
 		-o releases/growth-monitor-windows.exe $(MAIN_FILE)
 
-	@echo "✅ Release builds created in releases/"
+	@echo "✅ Сборки релиза созданы в releases/"
 
 ## run: Запуск в режиме разработки с учетом окружения
 run:
@@ -322,36 +509,48 @@ run-full:
 		exit 1; \
 	fi
 	@echo "📋 Используется конфигурация: $(ENV_FILE)"
-	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full 
+	go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full
 
 ## run-prod-binary: Запуск собранной бинарной версии
-run-prod-binary: build
+run-prod-binary:
 	@echo "🚀 Запуск в продакшен режиме ($(ENV))..."
+	@if [ ! -f "./bin/growth-monitor-$(ENV)" ]; then \
+		echo "⚠️  Бинарный файл не найден. Собираю..."; \
+		$(MAKE) build ENV=$(ENV); \
+	fi
 	@./bin/growth-monitor-$(ENV) --config=$(ENV_FILE) --mode=full --log-level=info
 
 ## setup: Настройка окружения для продакшена
 setup:
-	@echo "📦 Setting up production environment..."
-	@mkdir -p logs bin
+	@echo "📦 Настройка окружения для продакшена..."
+	@mkdir -p logs bin configs/example
 	@$(MAKE) config-init ENV=prod
 	@echo ""
-	@echo "🔧 Environment ready!"
-	@echo "👉 Run 'make build ENV=prod' to build the binary"
-	@echo "👉 Run 'make run-full ENV=prod' to start the monitor"
+	@echo "🔧 Окружение готово!"
+	@echo "👉 Выполните 'make build ENV=prod' для сборки бинарника"
+	@echo "👉 Выполните 'make run-full ENV=prod' для запуска монитора"
 
 ## install: Установка в систему
 install: build
-	@echo "📦 Installing to system..."
+	@echo "📦 Установка в систему..."
 	@if [ -d "$(GOPATH)/bin" ]; then \
 		cp bin/growth-monitor-$(ENV) $(GOPATH)/bin/growth-monitor; \
-		echo "✅ Installed to $(GOPATH)/bin/growth-monitor"; \
-		echo "👉 Run: growth-monitor --config=$(ENV_FILE) --mode=full"; \
+		echo "✅ Установлено в $(GOPATH)/bin/growth-monitor"; \
+		echo "👉 Запуск: growth-monitor --config=$(ENV_FILE) --mode=full"; \
 	else \
-		echo "⚠️  GOPATH/bin not found, copying to /usr/local/bin"; \
+		echo "⚠️  GOPATH/bin не найден, копирую в /usr/local/bin"; \
 		sudo cp bin/growth-monitor-$(ENV) /usr/local/bin/growth-monitor 2>/dev/null || \
 		cp bin/growth-monitor-$(ENV) ~/.local/bin/growth-monitor 2>/dev/null || \
-		echo "❌ Could not install, try manually: cp bin/growth-monitor-$(ENV) /usr/local/bin/"; \
+		echo "❌ Не удалось установить, попробуйте вручную: cp bin/growth-monitor-$(ENV) /usr/local/bin/"; \
 	fi
+
+## deps-update: Обновление зависимостей
+deps-update:
+	@echo "📦 ОБНОВЛЕНИЕ ЗАВИСИМОСТЕЙ"
+	@echo "========================"
+	go mod tidy
+	go mod download
+	@echo "✅ Зависимости обновлены"
 
 # ============================================
 # ЛОКАЛЬНЫЙ ЗАПУСК TELEGRAM БОТА
@@ -501,6 +700,29 @@ debug-diagnostic:
 	@echo ""
 	@echo "Запуск на 15 секунд..."
 	@(go run $(MAIN_FILE) --config=$(ENV_FILE) --mode=full --log-level=debug & PID=$$!; sleep 15; kill $$PID 2>/dev/null || true) 2>/dev/null || echo "✅ Диагностика завершена"
+
+## test: Запуск unit тестов
+test:
+	@echo "🧪 Запуск unit тестов..."
+	go test ./internal/... -v -short
+
+## lint: Проверка кода
+lint:
+	@echo "🔍 Проверка кода..."
+	@if command -v golangci-lint >/dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "⚠️  golangci-lint не установлен, использую go vet..."; \
+		go vet ./...; \
+	fi
+
+## clean: Очистка проекта
+clean:
+	@echo "🧹 Очистка проекта..."
+	rm -rf bin/ releases/ logs/*.log coverage/ reports/
+	rm -f configs/*/.env.local configs/*/.env.test configs/*/.env.temp
+	go clean
+	@echo "✅ Очищено"
 
 # ============================================
 # COUNTER ANALYZER ТЕСТЫ
@@ -710,82 +932,47 @@ fix-vet:
 		echo "✅ Ошибок go vet не обнаружено"; \
 	fi
 
+
 # ============================================
-# ВСПОМОГАТЕЛЬНЫЕ КОМАНДЫ
+# SSH ТУННЕЛЬ ДЛЯ БЕЗОПАСНОГО ДОСТУПА К БД
 # ============================================
 
-## test: Запуск unit тестов
-test:
-	@echo "🧪 Running unit tests..."
-	go test ./internal/analysis/analyzers/... -v -short
+## db-tunnel-start: Запустить SSH туннель для доступа к БД
+db-tunnel-start:
+	@echo "🚇 ЗАПУСК SSH ТУННЕЛЯ К БАЗЕ ДАННЫХ"
+	@echo "==================================="
+	@chmod +x deploy/scripts/db-connect.sh
+	@./deploy/scripts/db-connect.sh start
 
-## clean: Очистка проекта
-clean:
-	@echo "🧹 Cleaning project..."
-	rm -rf bin/ releases/ logs/*.log coverage/ reports/
-	rm -f configs/*/.env.local configs/*/.env.test configs/*/.env.temp
-	go clean
-	@echo "✅ Cleaned"
+## db-tunnel-stop: Остановить SSH туннель
+db-tunnel-stop:
+	@echo "🛑 ОСТАНОВКА SSH ТУННЕЛЯ"
+	@echo "========================="
+	@./deploy/scripts/db-connect.sh stop
 
-## lint: Проверка кода
-lint:
-	@echo "🔍 Linting code..."
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-		golangci-lint run ./...; \
-	else \
-		echo "⚠️  golangci-lint not installed, using go vet..."; \
-		go vet ./...; \
-	fi
+## db-tunnel-status: Проверить статус SSH туннеля
+db-tunnel-status:
+	@echo "📊 СТАТУС SSH ТУННЕЛЯ"
+	@echo "===================="
+	@./deploy/scripts/db-connect.sh status
 
-## deps: Обновление зависимостей
-deps:
-	@echo "📦 Updating dependencies..."
-	go mod tidy
-	go mod download
-	@echo "✅ Dependencies updated"
+## db-tunnel-config: Показать конфигурацию для DataGrip
+db-tunnel-config:
+	@echo "⚙️  КОНФИГУРАЦИЯ ДЛЯ DATAGRIP"
+	@echo "============================"
+	@./deploy/scripts/db-connect.sh config
 
-## docker-build: Сборка Docker образа
-docker-build:
-	@echo "🐳 Building Docker image..."
-	docker build -t crypto-growth-monitor:latest .
+## db-tunnel-test: Протестировать подключение к БД
+db-tunnel-test:
+	@echo "🧪 ТЕСТИРОВАНИЕ ПОДКЛЮЧЕНИЯ К БД"
+	@echo "================================"
+	@./deploy/scripts/db-connect.sh test
 
-## docker-run: Запуск в Docker
-docker-run:
-	@echo "🚀 Running in Docker..."
-	@if [ ! -f "$(ENV_FILE)" ]; then \
-		echo "⚠️  Warning: .env file not found"; \
-		echo "👉 Create .env file first: make config-init ENV=$(ENV)"; \
-		exit 1; \
-	fi
-	docker run --env-file $(ENV_FILE) crypto-growth-monitor:latest
-
-## docker-run-prod: Запуск в Docker с prod окружением
-docker-run-prod:
-	@$(MAKE) docker-run ENV=prod
-
-
-# Дополнение к существующему Makefile
-
-# Миграции базы данных
-migrate-status:
-	@echo "📊 Checking migration status..."
-	@go run cmd/migrate/main.go --status
-
-migrate-up:
-	@echo "🚀 Applying migrations..."
-	@go run cmd/migrate/main.go --up
-
-migrate-down:
-	@echo "↩️ Rolling back last migration..."
-	@go run cmd/migrate/main.go --down
-
-migrate-create:
-	@echo "📝 Creating new migration..."
-	@go run cmd/migrate/main.go --create --name="$(name)" --desc="$(desc)"
-
-migrate-validate:
-	@echo "🔍 Validating migrations..."
-	@go run cmd/migrate/main.go --validate
+## db-connect: Команда для быстрого подключения (старт + тест)
+db-connect: db-tunnel-start db-tunnel-test
+	@echo ""
+	@echo "✅ SSH туннель запущен и подключение работает!"
+	@echo "👉 Используйте конфигурацию из 'make db-tunnel-config'"
 
 # ============================================
 # ПОЛНЫЙ HELP
@@ -793,7 +980,7 @@ migrate-validate:
 
 ## help: Показать помощь с информацией об окружениях
 help:
-	@echo "📈 Crypto Growth Monitor - Makefile Help"
+	@echo "📈 Crypto Exchange Screener Bot - Makefile Help"
 	@echo "🎯 Текущее окружение: $(ENV)"
 	@echo ""
 	@echo "🚀 УПРАВЛЕНИЕ ОКРУЖЕНИЯМИ:"
@@ -816,6 +1003,24 @@ help:
 	@echo "  make run-prod-binary         - Запуск собранной бинарной версии"
 	@echo "  make run-local ENV=dev       - Локальный запуск Telegram бота"
 	@echo "  make setup                   - Настройка окружения"
+	@echo "  make struct-check            - Проверить структуру проекта"
+	@echo ""
+	@echo "🚀 СКРИПТЫ РАЗВЕРТЫВАНИЯ:"
+	@echo "  make deploy ip=IP           - Развернуть на сервер"
+	@echo "  make update ip=IP           - Обновить на сервере"
+	@echo "  make service ip=IP action=ACTION - Управление службой"
+	@echo "  make check-connection ip=IP - Проверить подключение к серверу"
+	@echo "  make health ip=IP           - Проверить здоровье системы"
+	@echo "  make monitor ip=IP          - Мониторинг системы"
+	@echo "  make backup ip=IP           - Резервная копия"
+	@echo "  make cleanup ip=IP          - Очистка старых файлов"
+	@echo ""
+	@echo "🐳 DOCKER КОМАНДЫ:"
+	@echo "  make docker-build           - Сборка Docker образа"
+	@echo "  make docker-run ENV=dev     - Запуск в Docker"
+	@echo "  make docker-run-prod        - Запуск в Docker с prod"
+	@echo "  make docker-db-up           - Запустить БД в Docker"
+	@echo "  make docker-db-down         - Остановить БД в Docker"
 	@echo ""
 	@echo "🔧 ОТЛАДКА И ТЕСТИРОВАНИЕ:"
 	@echo "  make debug ENV=dev           - Базовая отладка (simple)"
@@ -833,14 +1038,9 @@ help:
 	@echo "🧹 СЕРВИСНЫЕ КОМАНДЫ:"
 	@echo "  make clean                   - Очистка проекта"
 	@echo "  make lint                    - Проверка кода"
-	@echo "  make deps                    - Обновление зависимостей"
+	@echo "  make deps-update             - Обновление зависимостей"
 	@echo "  make validate                - Проверка кода перед коммитом"
 	@echo "  make test                    - Запуск unit тестов"
-	@echo ""
-	@echo "🐳 DOCKER КОМАНДЫ:"
-	@echo "  make docker-build            - Сборка Docker образа"
-	@echo "  make docker-run ENV=dev      - Запуск в Docker"
-	@echo "  make docker-run-prod         - Запуск в Docker с prod"
 	@echo ""
 	@echo "📝 ПРИМЕРЫ ИСПОЛЬЗОВАНИЯ:"
 	@echo "  # Разработка с dev окружением"
@@ -853,14 +1053,13 @@ help:
 	@echo "  make build ENV=prod"
 	@echo "  make run-full ENV=prod"
 	@echo ""
-	@echo "  # Тестирование разных окружений"
-	@echo "  make test-safe ENV=dev"
-	@echo "  make test-safe ENV=prod"
+	@echo "  # Развертывание на сервер"
+	@echo "  make deploy ip=95.142.40.244"
+	@echo "  make service ip=95.142.40.244 action=status"
+	@echo "  make service ip=95.142.40.244 action=logs"
 	@echo ""
 	@echo "  # Локальная разработка Telegram бота"
 	@echo "  make config-dev"
 	@echo "  make run-local ENV=dev"
 	@echo ""
 	@echo "✅ Этот Makefile должен работать!"
-
-
