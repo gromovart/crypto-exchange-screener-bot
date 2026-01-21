@@ -52,6 +52,12 @@ show_help() {
     echo "  config-check        Проверить конфигурацию"
     echo "  health              Проверить здоровье системы"
     echo "  restart-app         Перезапуск только приложения (без зависимостей)"
+    echo "  webhook-info        Информация о настройках webhook"
+    echo "  webhook-setup       Установить/обновить webhook в Telegram"
+    echo "  webhook-remove      Удалить webhook из Telegram"
+    echo "  webhook-check       Проверить статус webhook в Telegram"
+    echo "  ssl-check           Проверить SSL сертификаты"
+    echo "  ssl-renew           Обновить SSL сертификаты (только Let's Encrypt)"
     echo ""
     echo "Опции:"
     echo "  --ip=IP_ADDRESS     IP адрес сервера (по умолчанию: 95.142.40.244)"
@@ -66,6 +72,8 @@ show_help() {
     echo "  $0 logs-follow"
     echo "  $0 monitor"
     echo "  $0 health"
+    echo "  $0 webhook-info"
+    echo "  $0 ssl-check"
 }
 
 # Проверка SSH подключения
@@ -219,6 +227,14 @@ echo ""
 echo "6. Сетевые порты:"
 echo "  PostgreSQL (5432): $(ss -tln | grep ':5432' > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
 echo "  Redis (6379): $(ss -tln | grep ':6379' > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
+
+# Проверяем webhook порт из конфига
+if [ -f "/opt/crypto-screener-bot/.env" ]; then
+    WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "/opt/crypto-screener-bot/.env" | cut -d= -f2 2>/dev/null || echo "8443")
+    echo "  Webhook (${WEBHOOK_PORT}): $(ss -tln | grep ":${WEBHOOK_PORT} " > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
+else
+    echo "  Webhook (8443): $(ss -tln | grep ':8443' > /dev/null && echo '✅ открыт' || echo '❌ закрыт')"
+fi
 echo ""
 
 # 7. Логи (последние ошибки)
@@ -229,40 +245,43 @@ journalctl -u crypto-screener.service --since "10 minutes ago" 2>/dev/null | \
 done || echo "  ✅ Ошибок не найдено"
 echo ""
 
-# 8. Проверка конфигурации
-echo "8. Основные настройки конфигурации:"
+# 8. Проверка конфигурации webhook
+echo "8. Проверка конфигурации webhook:"
 CONFIG_FILE="/opt/crypto-screener-bot/.env"
 if [ -f "${CONFIG_FILE}" ]; then
     echo "  ✅ Конфиг найден: ${CONFIG_FILE}"
-    # Показываем только основные настройки без секретов
-    echo "  Основные настройки:"
-    grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_ENABLED)=" \
-        "${CONFIG_FILE}" 2>/dev/null | head -6 | while read line; do
-        echo "  ⚙️  $line"
-    done
 
-    # Проверка Redis
-    if grep -q "^REDIS_ENABLED=" "${CONFIG_FILE}" && grep -q "^REDIS_ENABLED=true" "${CONFIG_FILE}"; then
-        echo "  ✅ Redis: включен"
+    # Проверяем режим Telegram
+    TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "webhook")
+    echo "  Режим Telegram: ${TELEGRAM_MODE}"
+
+    if [ "${TELEGRAM_MODE}" = "webhook" ]; then
+        echo "  ✅ Режим работы: Webhook"
+
+        # Проверяем webhook настройки
+        WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+        WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "8443")
+        WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "true")
+
+        echo "  Домен: ${WEBHOOK_DOMAIN}"
+        echo "  Порт: ${WEBHOOK_PORT}"
+        echo "  TLS: ${WEBHOOK_USE_TLS}"
+
+        if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+            CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+            KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+            if [ -f "${CERT_PATH}" ] && [ -f "${KEY_PATH}" ]; then
+                echo "  ✅ Сертификаты найдены"
+            else
+                echo "  ⚠️  Сертификаты не найдены"
+            fi
+        fi
     else
-        echo "  ⚠️  Redis: отключен"
+        echo "  📡 Режим работы: Polling"
     fi
 else
     echo "  ❌ Конфиг не найден"
-fi
-echo ""
-
-# 9. Проверка структуры проекта
-echo "9. Структура проекта:"
-INSTALL_DIR="/opt/crypto-screener-bot"
-if [ -d "${INSTALL_DIR}" ]; then
-    echo "  ✅ Директория проекта существует"
-    echo "  Содержимое:"
-    ls -la "${INSTALL_DIR}" | grep -E "^(total|drwx|.env|bin)" | head -5 | while read line; do
-        echo "  📁 $line"
-    done
-else
-    echo "  ❌ Директория проекта не существует"
 fi
 echo ""
 
@@ -502,9 +521,20 @@ if [ -f "${CONFIG_FILE}" ]; then
     fi
     echo ""
 
-    echo "4. TELEGRAM:"
-    grep -E "^(TELEGRAM_ENABLED|TELEGRAM_ADMIN_IDS|TELEGRAM_BOT_TOKEN)=" "${CONFIG_FILE}" || echo "  (не настроены)"
-    if grep -q "TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
+    echo "4. TELEGRAM И WEBHOOK:"
+    TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "webhook")
+    echo "  Режим Telegram: ${TELEGRAM_MODE}"
+
+    if [ "${TELEGRAM_MODE}" = "webhook" ]; then
+        echo "  ✅ Режим: Webhook"
+        grep -E "^(WEBHOOK_DOMAIN|WEBHOOK_PORT|WEBHOOK_PATH|WEBHOOK_USE_TLS|WEBHOOK_TLS_CERT_PATH|WEBHOOK_TLS_KEY_PATH|WEBHOOK_SECRET_TOKEN)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    else
+        echo "  📡 Режим: Polling"
+    fi
+
+    echo ""
+    grep -E "^(TELEGRAM_ENABLED|TELEGRAM_ADMIN_IDS|TELEGRAM_BOT_TOKEN|TG_API_KEY|TG_CHAT_ID)=" "${CONFIG_FILE}" || echo "  (не настроены)"
+    if grep -q "TELEGRAM_ENABLED=true" "${CONFIG_FILE}" || grep -q "TG_API_KEY=" "${CONFIG_FILE}"; then
         echo "  ✅ Telegram включен"
     else
         echo "  ⚠️  Telegram отключен"
@@ -716,40 +746,79 @@ fi
 
 echo ""
 
-# Проверка Telegram
-echo "4. TELEGRAM НАСТРОЙКИ:"
-echo "---------------------"
+# Проверка Telegram и webhook
+echo "4. TELEGRAM И WEBHOOK НАСТРОЙКИ:"
+echo "------------------------------"
 
-if grep -q "^TELEGRAM_ENABLED=" "${CONFIG_FILE}" && grep -q "^TELEGRAM_ENABLED=true" "${CONFIG_FILE}"; then
-    echo "  ✅ TELEGRAM_ENABLED: включен"
+TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "webhook")
+echo "  Режим Telegram: ${TELEGRAM_MODE}"
 
-    if grep -q "^TELEGRAM_BOT_TOKEN=" "${CONFIG_FILE}"; then
-        TOKEN=$(grep "^TELEGRAM_BOT_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2)
-        if [[ "${TOKEN}" == *"your_telegram_bot_token"* ]] || [ "${TOKEN}" == "" ]; then
-            echo "  ❌ TELEGRAM_BOT_TOKEN: не настроен или шаблонный"
+if [ "${TELEGRAM_MODE}" = "webhook" ]; then
+    echo "  ✅ Режим работы: Webhook"
+
+    # Проверка webhook настроек
+    if grep -q "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}"; then
+        WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [ -z "${WEBHOOK_DOMAIN}" ]; then
+            echo "  ❌ WEBHOOK_DOMAIN: пустое значение"
             ERRORS=$((ERRORS + 1))
         else
-            echo "  ✅ TELEGRAM_BOT_TOKEN: настроен"
+            echo "  ✅ WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN}"
         fi
     else
-        echo "  ❌ TELEGRAM_BOT_TOKEN: не настроен"
+        echo "  ❌ WEBHOOK_DOMAIN: не настроен"
         ERRORS=$((ERRORS + 1))
     fi
 
-    if grep -q "^TELEGRAM_ADMIN_IDS=" "${CONFIG_FILE}"; then
-        ADMIN_ID=$(grep "^TELEGRAM_ADMIN_IDS=" "${CONFIG_FILE}" | cut -d= -f2)
-        if [[ "${ADMIN_ID}" == *"your_telegram_id"* ]] || [ "${ADMIN_ID}" == "" ]; then
-            echo "  ❌ TELEGRAM_ADMIN_IDS: не настроен или шаблонный"
+    if grep -q "^WEBHOOK_SECRET_TOKEN=" "${CONFIG_FILE}"; then
+        SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2)
+        if [ -z "${SECRET_TOKEN}" ]; then
+            echo "  ❌ WEBHOOK_SECRET_TOKEN: пустое значение"
             ERRORS=$((ERRORS + 1))
         else
-            echo "  ✅ TELEGRAM_ADMIN_IDS: настроен"
+            echo "  ✅ WEBHOOK_SECRET_TOKEN: настроен"
         fi
     else
-        echo "  ❌ TELEGRAM_ADMIN_IDS: не настроен"
+        echo "  ❌ WEBHOOK_SECRET_TOKEN: не настроен"
         ERRORS=$((ERRORS + 1))
+    fi
+
+    # Проверка SSL сертификатов если используется TLS
+    WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "true")
+    if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+        echo "  ✅ TLS включен"
+
+        CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+        KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+        if [ -f "${CERT_PATH}" ] && [ -f "${KEY_PATH}" ]; then
+            echo "  ✅ SSL сертификаты найдены"
+        else
+            echo "  ⚠️  SSL сертификаты не найдены по указанным путям"
+            WARNINGS=$((WARNINGS + 1))
+        fi
+    else
+        echo "  ⚠️  TLS отключен (небезопасно)"
+        WARNINGS=$((WARNINGS + 1))
     fi
 else
-    echo "  ⚠️  TELEGRAM_ENABLED: отключен"
+    echo "  📡 Режим работы: Polling"
+fi
+
+echo ""
+
+# Проверка токена бота
+if grep -q "^TG_API_KEY=" "${CONFIG_FILE}"; then
+    TG_API_KEY=$(grep "^TG_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2)
+    if [[ "${TG_API_KEY}" == *"your_telegram_bot_token"* ]] || [ "${TG_API_KEY}" == "" ]; then
+        echo "  ❌ TG_API_KEY: не настроен или шаблонный"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ TG_API_KEY: настроен"
+    fi
+else
+    echo "  ❌ TG_API_KEY: не настроен"
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""
@@ -843,6 +912,17 @@ if ss -tln | grep -q ':6379'; then
 else
     echo "   ❌ Redis (6379): недоступен"
     HEALTH_OK=false
+fi
+
+# Проверяем webhook порт
+if [ -f "/opt/crypto-screener-bot/.env" ]; then
+    WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "/opt/crypto-screener-bot/.env" | cut -d= -f2 2>/dev/null || echo "8443")
+    if ss -tln | grep -q ":${WEBHOOK_PORT} "; then
+        echo "   ✅ Webhook (${WEBHOOK_PORT}): доступен"
+    else
+        echo "   ⚠️  Webhook (${WEBHOOK_PORT}): недоступен"
+        HEALTH_OK=false
+    fi
 fi
 echo ""
 
@@ -1002,13 +1082,556 @@ echo "4. Мониторинг: ./service.sh monitor"
 EOF
 }
 
+# НОВЫЕ ФУНКЦИИ ДЛЯ WEBHOOK И SSL
+
+service_webhook_info() {
+    echo "Информация о настройках webhook:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+echo "=== ИНФОРМАЦИЯ О WEBHOOK ==="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+# Получаем настройки
+TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "webhook")
+WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "8443")
+WEBHOOK_PATH=$(grep "^WEBHOOK_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "/webhook")
+WEBHOOK_SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "true")
+TG_API_KEY=$(grep "^TG_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+echo "1. 📋 ОСНОВНЫЕ НАСТРОЙКИ:"
+echo "   Режим Telegram: ${TELEGRAM_MODE}"
+echo "   Домен: ${WEBHOOK_DOMAIN}"
+echo "   Порт: ${WEBHOOK_PORT}"
+echo "   Путь: ${WEBHOOK_PATH}"
+echo "   Использовать TLS: ${WEBHOOK_USE_TLS}"
+echo "   Секретный токен: $(if [ -n "${WEBHOOK_SECRET_TOKEN}" ]; then echo 'установлен'; else echo 'не установлен'; fi)"
+echo "   Telegram API ключ: $(if [ -n "${TG_API_KEY}" ]; then echo 'установлен'; else echo 'не установлен'; fi)"
+echo ""
+
+echo "2. 🌐 WEBHOOK URL:"
+if [ -n "${WEBHOOK_DOMAIN}" ]; then
+    if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+        echo "   https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}${WEBHOOK_PATH}"
+    else
+        echo "   http://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}${WEBHOOK_PATH}"
+    fi
+else
+    echo "   ⚠️  Домен не настроен"
+fi
+echo ""
+
+echo "3. 🔐 SSL СЕРТИФИКАТЫ:"
+if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+    echo "   Путь к сертификату: ${CERT_PATH}"
+    echo "   Путь к ключу: ${KEY_PATH}"
+
+    if [ -f "${CERT_PATH}" ]; then
+        echo "   ✅ Сертификат найден"
+        echo "   Срок действия: $(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "неизвестно")"
+        echo "   Subject: $(openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/subject=//' || echo "неизвестно")"
+    else
+        echo "   ❌ Сертификат не найден"
+    fi
+
+    if [ -f "${KEY_PATH}" ]; then
+        echo "   ✅ Ключ найден"
+    else
+        echo "   ❌ Ключ не найден"
+    fi
+else
+    echo "   ℹ️  TLS отключен, сертификаты не требуются"
+fi
+echo ""
+
+echo "4. 📝 ИНСТРУКЦИЯ ПО НАСТРОЙКЕ:"
+if [ -n "${TG_API_KEY}" ] && [ -n "${WEBHOOK_DOMAIN}" ] && [ -n "${WEBHOOK_SECRET_TOKEN}" ]; then
+    echo "   Для настройки webhook в Telegram выполните:"
+    echo ""
+    echo "   curl -X POST 'https://api.telegram.org/bot${TG_API_KEY}/setWebhook' \\"
+    echo "     -H 'Content-Type: application/json' \\"
+    echo "     -d '{"
+    echo "       \"url\": \"https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}${WEBHOOK_PATH}\","
+    echo "       \"secret_token\": \"${WEBHOOK_SECRET_TOKEN}\""
+    echo "     }'"
+    echo ""
+    echo "   Для проверки статуса:"
+    echo "   curl -X POST 'https://api.telegram.org/bot${TG_API_KEY}/getWebhookInfo'"
+    echo ""
+    echo "   Для удаления webhook:"
+    echo "   curl -X POST 'https://api.telegram.org/bot${TG_API_KEY}/deleteWebhook'"
+else
+    echo "   ⚠️  Для показа инструкции необходимо настроить:"
+    echo "     - TG_API_KEY (токен бота)"
+    echo "     - WEBHOOK_DOMAIN (домен)"
+    echo "     - WEBHOOK_SECRET_TOKEN (секретный токен)"
+fi
+echo ""
+
+echo "=== ИНФОРМАЦИЯ ЗАВЕРШЕНА ==="
+EOF
+}
+
+service_webhook_setup() {
+    echo "Настройка webhook в Telegram:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+# Получаем настройки
+TG_API_KEY=$(grep "^TG_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "8443")
+WEBHOOK_PATH=$(grep "^WEBHOOK_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "/webhook")
+WEBHOOK_SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+# Проверка обязательных настроек
+ERRORS=0
+if [ -z "${TG_API_KEY}" ]; then
+    echo "❌ TG_API_KEY не настроен"
+    ERRORS=1
+fi
+
+if [ -z "${WEBHOOK_DOMAIN}" ]; then
+    echo "❌ WEBHOOK_DOMAIN не настроен"
+    ERRORS=1
+fi
+
+if [ -z "${WEBHOOK_SECRET_TOKEN}" ]; then
+    echo "❌ WEBHOOK_SECRET_TOKEN не настроен"
+    ERRORS=1
+fi
+
+if [ ${ERRORS} -gt 0 ]; then
+    echo ""
+    echo "Настройте недостающие параметры в файле: ${CONFIG_FILE}"
+    exit 1
+fi
+
+# Формируем URL
+WEBHOOK_URL="https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}${WEBHOOK_PATH}"
+echo "🔧 Настройка webhook в Telegram..."
+echo "   URL: ${WEBHOOK_URL}"
+echo "   Секретный токен: ${WEBHOOK_SECRET_TOKEN:0:8}..."
+echo ""
+
+# Устанавливаем webhook
+RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TG_API_KEY}/setWebhook" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "url": "'"${WEBHOOK_URL}"'",
+        "secret_token": "'"${WEBHOOK_SECRET_TOKEN}"'"
+    }')
+
+if echo "${RESPONSE}" | grep -q '"ok":true'; then
+    echo "✅ Webhook успешно настроен"
+    echo "Ответ: ${RESPONSE}"
+
+    # Проверяем статус
+    echo ""
+    echo "🔍 Проверка статуса webhook..."
+    CHECK_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TG_API_KEY}/getWebhookInfo")
+    echo "Статус: ${CHECK_RESPONSE}"
+else
+    echo "❌ Ошибка настройки webhook"
+    echo "Ответ: ${RESPONSE}"
+    exit 1
+fi
+EOF
+}
+
+service_webhook_remove() {
+    echo "Удаление webhook из Telegram:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+TG_API_KEY=$(grep "^TG_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+if [ -z "${TG_API_KEY}" ]; then
+    echo "❌ TG_API_KEY не настроен"
+    exit 1
+fi
+
+echo "🗑️  Удаление webhook из Telegram..."
+RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TG_API_KEY}/deleteWebhook")
+
+if echo "${RESPONSE}" | grep -q '"ok":true'; then
+    echo "✅ Webhook успешно удален"
+    echo "Ответ: ${RESPONSE}"
+
+    # Обновляем режим на polling
+    echo ""
+    echo "🔄 Обновление режима на polling..."
+    sed -i "s/^TELEGRAM_MODE=.*/TELEGRAM_MODE=polling/" "${CONFIG_FILE}"
+    echo "✅ Режим обновлен на polling"
+
+    # Перезапускаем сервис
+    echo "🔄 Перезапуск сервиса..."
+    systemctl restart crypto-screener.service
+    echo "✅ Сервис перезапущен"
+else
+    echo "❌ Ошибка удаления webhook"
+    echo "Ответ: ${RESPONSE}"
+    exit 1
+fi
+EOF
+}
+
+service_webhook_check() {
+    echo "Проверка статуса webhook в Telegram:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+TG_API_KEY=$(grep "^TG_API_KEY=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+if [ -z "${TG_API_KEY}" ]; then
+    echo "❌ TG_API_KEY не настроен"
+    exit 1
+fi
+
+echo "🔍 Проверка статуса webhook в Telegram..."
+RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TG_API_KEY}/getWebhookInfo")
+
+echo "Ответ от Telegram API:"
+echo "${RESPONSE}" | python3 -m json.tool 2>/dev/null || echo "${RESPONSE}"
+EOF
+}
+
+service_ssl_check() {
+    echo "Проверка SSL сертификатов:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+echo "=== ПРОВЕРКА SSL СЕРТИФИКАТОВ ==="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+# Проверяем настройки TLS
+WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "true")
+
+if [ "${WEBHOOK_USE_TLS}" != "true" ]; then
+    echo "ℹ️  TLS отключен в настройках (WEBHOOK_USE_TLS=false)"
+    echo "SSL сертификаты не требуются"
+    exit 0
+fi
+
+echo "✅ TLS включен в настройках"
+echo ""
+
+# Получаем пути к сертификатам
+CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+echo "1. ПРОВЕРКА НАСТРОЕК:"
+echo "   Путь к сертификату: ${CERT_PATH}"
+echo "   Путь к ключу: ${KEY_PATH}"
+echo ""
+
+# Проверяем альтернативные пути
+ALT_CERT_PATHS=(
+    "${CERT_PATH}"
+    "/etc/crypto-bot/certs/cert.pem"
+    "/opt/crypto-screener-bot/ssl/fullchain.pem"
+    "/etc/letsencrypt/live/bot.gromovart.ru/fullchain.pem"
+)
+
+ALT_KEY_PATHS=(
+    "${KEY_PATH}"
+    "/etc/crypto-bot/certs/key.pem"
+    "/opt/crypto-screener-bot/ssl/privkey.pem"
+    "/etc/letsencrypt/live/bot.gromovart.ru/privkey.pem"
+)
+
+echo "2. ПРОВЕРКА ФАЙЛОВ СЕРТИФИКАТОВ:"
+CERT_FOUND=false
+KEY_FOUND=false
+
+# Поиск сертификата
+for cert_path in "${ALT_CERT_PATHS[@]}"; do
+    if [ -f "${cert_path}" ]; then
+        echo "   ✅ Сертификат найден: ${cert_path}"
+        CERT_FOUND=true
+        CERT_PATH="${cert_path}"
+        break
+    fi
+done
+
+if [ "${CERT_FOUND}" = false ]; then
+    echo "   ❌ Сертификат не найден ни по одному из путей"
+fi
+
+# Поиск ключа
+for key_path in "${ALT_KEY_PATHS[@]}"; do
+    if [ -f "${key_path}" ]; then
+        echo "   ✅ Ключ найден: ${key_path}"
+        KEY_FOUND=true
+        KEY_PATH="${key_path}"
+        break
+    fi
+done
+
+if [ "${KEY_FOUND}" = false ]; then
+    echo "   ❌ Ключ не найден ни по одному из путей"
+fi
+
+echo ""
+
+if [ "${CERT_FOUND}" = true ] && [ "${KEY_FOUND}" = true ]; then
+    echo "3. 🔍 ПРОВЕРКА ВАЛИДНОСТИ СЕРТИФИКАТА:"
+
+    # Проверка срока действия
+    if openssl x509 -in "${CERT_PATH}" -noout -checkend 0 >/dev/null 2>&1; then
+        echo "   ✅ Сертификат действителен"
+
+        NOT_BEFORE=$(openssl x509 -in "${CERT_PATH}" -noout -startdate 2>/dev/null | cut -d= -f2)
+        NOT_AFTER=$(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2)
+
+        echo "   📅 Действует с: ${NOT_BEFORE}"
+        echo "   📅 Действует до: ${NOT_AFTER}"
+
+        # Проверка на 30 дней до истечения
+        if openssl x509 -in "${CERT_PATH}" -noout -checkend 2592000 >/dev/null 2>&1; then
+            echo "   ✅ Срок действия > 30 дней"
+        else
+            echo "   ⚠️  Сертификат истекает через < 30 дней"
+        fi
+    else
+        echo "   ❌ Сертификат недействителен или просрочен"
+    fi
+
+    # Проверка Subject
+    echo ""
+    echo "4. 📄 ИНФОРМАЦИЯ О СЕРТИФИКАТЕ:"
+    SUBJECT=$(openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/subject=//')
+    echo "   Subject: ${SUBJECT}"
+
+    # Проверка SAN (Subject Alternative Names)
+    SAN=$(openssl x509 -in "${CERT_PATH}" -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | tail -1 | xargs)
+    if [ -n "${SAN}" ]; then
+        echo "   SAN: ${SAN}"
+    fi
+
+    # Проверка домена из конфига
+    WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+    if [ -n "${WEBHOOK_DOMAIN}" ]; then
+        echo ""
+        echo "5. 🔗 ПРОВЕРКА СООТВЕТСТВИЯ ДОМЕНУ:"
+        if echo "${SUBJECT} ${SAN}" | grep -q "${WEBHOOK_DOMAIN}"; then
+            echo "   ✅ Сертификат содержит домен: ${WEBHOOK_DOMAIN}"
+        else
+            echo "   ⚠️  Сертификат не содержит домен: ${WEBHOOK_DOMAIN}"
+            echo "   Рекомендуется выпустить новый сертификат для этого домена"
+        fi
+    fi
+
+    # Размер ключа
+    echo ""
+    echo "6. 🔐 ПРОВЕРКА КЛЮЧА:"
+    KEY_SIZE=$(openssl rsa -in "${KEY_PATH}" -noout -text 2>/dev/null | grep "Private-Key:" | awk '{print $2}')
+    if [ -n "${KEY_SIZE}" ]; then
+        echo "   Размер ключа: ${KEY_SIZE} бит"
+        if [ "${KEY_SIZE}" -ge 2048 ]; then
+            echo "   ✅ Размер ключа достаточный (>= 2048 бит)"
+        else
+            echo "   ⚠️  Размер ключа недостаточный (< 2048 бит)"
+        fi
+    fi
+else
+    echo "❌ Не найдены необходимые файлы сертификатов"
+    echo ""
+    echo "Рекомендации:"
+    echo "1. Проверьте пути в конфиге: nano ${CONFIG_FILE}"
+    echo "2. Создайте самоподписанный сертификат:"
+    echo "   mkdir -p /etc/crypto-bot/certs"
+    echo "   openssl req -x509 -newkey rsa:2048 -keyout /etc/crypto-bot/certs/key.pem -out /etc/crypto-bot/certs/cert.pem -days 365 -nodes -subj '/CN=bot.gromovart.ru'"
+    echo "3. Или установите Let's Encrypt:"
+    echo "   apt-get install certbot"
+    echo "   certbot certonly --standalone -d bot.gromovart.ru --non-interactive --agree-tos --email admin@example.com"
+fi
+
+echo ""
+echo "=== ПРОВЕРКА ЗАВЕРШЕНА ==="
+EOF
+}
+
+service_ssl_renew() {
+    echo "Обновление SSL сертификатов Let's Encrypt:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+echo "=== ОБНОВЛЕНИЕ SSL СЕРТИФИКАТОВ LET'S ENCRYPT ==="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+if [ -z "${WEBHOOK_DOMAIN}" ]; then
+    echo "❌ WEBHOOK_DOMAIN не настроен"
+    exit 1
+fi
+
+echo "Домен: ${WEBHOOK_DOMAIN}"
+echo ""
+
+# Проверяем установлен ли certbot
+if ! command -v certbot >/dev/null 2>&1; then
+    echo "❌ certbot не установлен"
+    echo ""
+    echo "Установите certbot:"
+    echo "apt-get update"
+    echo "apt-get install -y certbot"
+    exit 1
+fi
+
+echo "✅ certbot установлен"
+echo ""
+
+# Проверяем существующие сертификаты
+if [ -d "/etc/letsencrypt/live/${WEBHOOK_DOMAIN}" ]; then
+    echo "📋 Существующие сертификаты найдены:"
+    echo "   Путь: /etc/letsencrypt/live/${WEBHOOK_DOMAIN}/"
+
+    # Проверяем срок действия
+    CERT_PATH="/etc/letsencrypt/live/${WEBHOOK_DOMAIN}/fullchain.pem"
+    if [ -f "${CERT_PATH}" ]; then
+        NOT_AFTER=$(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2)
+        echo "   Срок действия: ${NOT_AFTER}"
+
+        # Проверяем сколько дней осталось
+        CURRENT_TIME=$(date +%s)
+        NOT_AFTER_TIME=$(date -d "${NOT_AFTER}" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "${NOT_AFTER}" +%s 2>/dev/null || echo 0)
+        DAYS_LEFT=$(((NOT_AFTER_TIME - CURRENT_TIME) / 86400))
+
+        echo "   Осталось дней: ${DAYS_LEFT}"
+
+        if [ ${DAYS_LEFT} -gt 30 ]; then
+            echo "   ✅ Сертификат еще действителен долгое время"
+            echo "   Обновление не требуется"
+            exit 0
+        elif [ ${DAYS_LEFT} -gt 0 ]; then
+            echo "   ⚠️  Сертификат скоро истекает, обновляем..."
+        else
+            echo "   ❌ Сертификат истек, обновляем..."
+        fi
+    fi
+else
+    echo "📋 Существующие сертификаты не найдены"
+    echo "   Создаем новые..."
+fi
+
+echo ""
+
+# Обновляем или получаем новые сертификаты
+echo "🔄 Обновление/получение сертификатов..."
+echo "   Остановка сервиса для освобождения порта 80/443..."
+
+# Останавливаем сервис
+systemctl stop crypto-screener.service 2>/dev/null || echo "⚠️  Не удалось остановить сервис"
+
+# Обновляем сертификаты
+if certbot renew --force-renewal --cert-name "${WEBHOOK_DOMAIN}" --non-interactive --agree-tos 2>/dev/null; then
+    echo "✅ Сертификаты успешно обновлены"
+else
+    echo "⚠️  Не удалось обновить существующие сертификаты"
+    echo "   Пробуем получить новые..."
+
+    # Получаем новые сертификаты
+    if certbot certonly --standalone -d "${WEBHOOK_DOMAIN}" --non-interactive --agree-tos --email "admin@${WEBHOOK_DOMAIN}" 2>/dev/null; then
+        echo "✅ Новые сертификаты успешно получены"
+    else
+        echo "❌ Не удалось получить сертификаты"
+        echo "   Запускаем сервис обратно..."
+        systemctl start crypto-screener.service 2>/dev/null || true
+        exit 1
+    fi
+fi
+
+echo ""
+
+# Копируем сертификаты в директорию приложения
+echo "📋 Копирование сертификатов..."
+CERTS_DIR="/etc/crypto-bot/certs"
+mkdir -p "${CERTS_DIR}"
+
+CERT_SOURCE="/etc/letsencrypt/live/${WEBHOOK_DOMAIN}/fullchain.pem"
+KEY_SOURCE="/etc/letsencrypt/live/${WEBHOOK_DOMAIN}/privkey.pem"
+
+if [ -f "${CERT_SOURCE}" ] && [ -f "${KEY_SOURCE}" ]; then
+    cp "${CERT_SOURCE}" "${CERTS_DIR}/cert.pem"
+    cp "${KEY_SOURCE}" "${CERTS_DIR}/key.pem"
+
+    # Также копируем в директорию приложения для удобства
+    mkdir -p "/opt/crypto-screener-bot/ssl"
+    cp "${CERT_SOURCE}" "/opt/crypto-screener-bot/ssl/fullchain.pem"
+    cp "${KEY_SOURCE}" "/opt/crypto-screener-bot/ssl/privkey.pem"
+
+    echo "✅ Сертификаты скопированы в:"
+    echo "   ${CERTS_DIR}/cert.pem"
+    echo "   ${CERTS_DIR}/key.pem"
+    echo "   /opt/crypto-screener-bot/ssl/fullchain.pem"
+    echo "   /opt/crypto-screener-bot/ssl/privkey.pem"
+else
+    echo "❌ Не удалось скопировать сертификаты"
+fi
+
+echo ""
+
+# Запускаем сервис обратно
+echo "🔄 Запуск сервиса..."
+systemctl start crypto-screener.service
+
+echo "✅ Сервис запущен"
+echo ""
+
+echo "=== ОБНОВЛЕНИЕ ЗАВЕРШЕНО ==="
+EOF
+}
+
 # Парсинг аргументов
 parse_args() {
     command=""
 
     for arg in "$@"; do
         case $arg in
-            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health|restart-app)
+            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health|restart-app|webhook-info|webhook-setup|webhook-remove|webhook-check|ssl-check|ssl-renew)
                 command="$arg"
                 shift
                 ;;
@@ -1099,6 +1722,24 @@ main() {
             ;;
         health)
             service_health
+            ;;
+        webhook-info)
+            service_webhook_info
+            ;;
+        webhook-setup)
+            service_webhook_setup
+            ;;
+        webhook-remove)
+            service_webhook_remove
+            ;;
+        webhook-check)
+            service_webhook_check
+            ;;
+        ssl-check)
+            service_ssl_check
+            ;;
+        ssl-renew)
+            service_ssl_renew
             ;;
         *)
             log_error "Неизвестная команда: $command"
