@@ -36,6 +36,13 @@ REDIS_PORT="6379"
 REDIS_PASSWORD=""  # Добавляем переменную для пароля Redis
 REDIS_ENABLED="true"  # Добавляем флаг включения Redis
 
+# Webhook параметры по умолчанию
+WEBHOOK_DOMAIN="95.142.40.244"
+WEBHOOK_PORT="8443"
+WEBHOOK_USE_TLS="true"
+WEBHOOK_SECRET_TOKEN=""
+TELEGRAM_MODE="webhook"  # По умолчанию webhook режим
+
 # Функции для вывода
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -163,11 +170,41 @@ read_env_config() {
             log_info "   REDIS_ENABLED: ${REDIS_ENABLED}"
         fi
 
+        # Читаем настройки Webhook
+        if grep -q "^TELEGRAM_MODE=" "${env_file}"; then
+            TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   TELEGRAM_MODE: ${TELEGRAM_MODE}"
+        fi
+
+        if grep -q "^WEBHOOK_DOMAIN=" "${env_file}"; then
+            WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   WEBHOOK_DOMAIN: ${WEBHOOK_DOMAIN}"
+        fi
+
+        if grep -q "^WEBHOOK_PORT=" "${env_file}"; then
+            WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   WEBHOOK_PORT: ${WEBHOOK_PORT}"
+        fi
+
+        if grep -q "^WEBHOOK_USE_TLS=" "${env_file}"; then
+            WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${env_file}" | cut -d= -f2- | xargs)
+            log_info "   WEBHOOK_USE_TLS: ${WEBHOOK_USE_TLS}"
+        fi
+
+        if grep -q "^WEBHOOK_SECRET_TOKEN=" "${env_file}"; then
+            WEBHOOK_SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${env_file}" | cut -d= -f2- | xargs)
+            if [ -n "${WEBHOOK_SECRET_TOKEN}" ]; then
+                log_info "   WEBHOOK_SECRET_TOKEN: [скрыто]"
+            fi
+        fi
+
         log_info "✅ Настройки прочитаны из конфига"
     else
         log_warn "⚠️  Конфиг не найден, будут использованы значения по умолчанию"
         log_info "   DB: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
         log_info "   Redis: ${REDIS_HOST}:${REDIS_PORT}"
+        log_info "   Webhook: ${WEBHOOK_DOMAIN}:${WEBHOOK_PORT} (TLS: ${WEBHOOK_USE_TLS})"
+        log_info "   Telegram режим: ${TELEGRAM_MODE}"
     fi
 }
 
@@ -394,7 +431,8 @@ apt-get install -y \
     fail2ban \
     logrotate \
     postgresql-client \
-    redis-tools
+    redis-tools \
+    openssl
 
 # Установка Go 1.21+
 if ! command -v go &> /dev/null; then
@@ -615,33 +653,124 @@ EOF
     log_info "Redis настроен"
 }
 
-# Настройка брандмауэра
-setup_firewall() {
-    log_step "Настройка брандмауэра UFW..."
+# Настройка SSL сертификатов для webhook
+setup_ssl_certificates() {
+    log_step "Настройка SSL сертификатов для webhook..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
 set -e
+
+INSTALL_DIR="/opt/crypto-screener-bot"
+CERT_DIR="/etc/crypto-bot/certs"
+
+echo "Создание самоподписанных SSL сертификатов для webhook..."
+
+# Создаем директорию для сертификатов
+mkdir -p "${CERT_DIR}"
+cd "${CERT_DIR}"
+
+# Проверяем, существуют ли уже сертификаты
+if [ -f "cert.pem" ] && [ -f "key.pem" ]; then
+    echo "✅ Сертификаты уже существуют"
+    echo "   cert.pem: $(stat -c%s cert.pem) bytes, создан: $(stat -c%y cert.pem)"
+    echo "   key.pem: $(stat -c%s key.pem) bytes, создан: $(stat -c%y key.pem)"
+
+    # Проверяем срок действия
+    openssl x509 -in cert.pem -noout -enddate 2>/dev/null | cut -d= -f2
+    exit 0
+fi
+
+# Генерация самоподписанного сертификата для IP 95.142.40.244
+echo "Генерация нового самоподписанного сертификата..."
+openssl req -x509 -newkey rsa:2048 \
+    -keyout key.pem \
+    -out cert.pem \
+    -days 365 \
+    -nodes \
+    -subj "/C=RU/ST=Moscow/L=Moscow/O=CryptoBot/CN=95.142.40.244" \
+    -addext "subjectAltName = IP:95.142.40.244"
+
+if [ $? -ne 0 ]; then
+    echo "❌ Ошибка генерации сертификатов"
+    exit 1
+fi
+
+# Устанавливаем права
+chmod 600 key.pem cert.pem
+chown -R cryptoapp:cryptoapp "${CERT_DIR}" 2>/dev/null || chown -R root:root "${CERT_DIR}"
+
+echo "✅ Самоподписанные сертификаты созданы:"
+echo "   cert.pem: $(stat -c%s cert.pem) bytes"
+echo "   key.pem: $(stat -c%s key.pem) bytes"
+echo "   Срок действия: 365 дней"
+echo "   Subject: CN=95.142.40.244"
+
+# Показываем информацию о сертификате
+echo "Информация о сертификате:"
+openssl x509 -in cert.pem -noout -subject -dates 2>/dev/null | sed 's/^/   /'
+
+# Создаем симлинки в директории приложения для удобства
+mkdir -p "${INSTALL_DIR}/certs"
+ln -sf "${CERT_DIR}/cert.pem" "${INSTALL_DIR}/certs/cert.pem"
+ln -sf "${CERT_DIR}/key.pem" "${INSTALL_DIR}/certs/key.pem"
+
+chown -R cryptoapp:cryptoapp "${INSTALL_DIR}/certs" 2>/dev/null || true
+
+echo "✅ Сертификаты настроены и доступны по путям:"
+echo "   ${CERT_DIR}/cert.pem"
+echo "   ${CERT_DIR}/key.pem"
+echo "   ${INSTALL_DIR}/certs/cert.pem (симлинк)"
+echo "   ${INSTALL_DIR}/certs/key.pem (симлинк)"
+EOF
+
+    log_info "SSL сертификаты созданы"
+}
+
+# Настройка брандмауэра с поддержкой webhook портов
+setup_firewall() {
+    log_step "Настройка брандмауэра UFW для webhook..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+WEBHOOK_PORT="${WEBHOOK_PORT}"
+
+echo "Настройка брандмауэра UFW с webhook портом: \${WEBHOOK_PORT}"
 
 # Настройка UFW
 ufw --force reset 2>/dev/null || true
 ufw default deny incoming
 ufw default allow outgoing
 
-# Разрешить SSH
-ufw allow 22/tcp
+# Разрешить SSH (обязательно!)
+ufw allow 22/tcp comment 'SSH'
 
-# Разрешить порты PostgreSQL и Redis (только localhost)
-# Эти порты не открываем наружу, только для локального доступа
+# Разрешить webhook порт если используется TLS
+if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+    echo "Разрешение HTTPS webhook порта: \${WEBHOOK_PORT}"
+    ufw allow \${WEBHOOK_PORT}/tcp comment "Telegram webhook HTTPS"
+else
+    echo "Разрешение HTTP webhook порта: \${WEBHOOK_PORT}"
+    ufw allow \${WEBHOOK_PORT}/tcp comment "Telegram webhook HTTP"
+fi
+
+# Разрешить стандартный HTTP порт для отладки
+ufw allow 8080/tcp comment "HTTP debug port"
 
 # Включить брандмауэр
 echo "y" | ufw enable
+
+echo "✅ Брандмауэр настроен с портами:"
 ufw status verbose
 
-echo "✅ Брандмауэр настроен"
+# Проверяем открытые порты
+echo "Проверка открытых портов:"
+ss -tln | grep -E ':(22|${WEBHOOK_PORT}|8080)' | sort
 EOF
 
-    log_info "Брандмауэр настроен"
+    log_info "Брандмауэр настроен с поддержкой webhook"
 }
 
 # Создание правильной структуры директорий
@@ -671,6 +800,8 @@ fi
 echo "Создание структуры директорий..."
 mkdir -p "\${INSTALL_DIR}"
 mkdir -p "\${INSTALL_DIR}/bin"
+mkdir -p "\${INSTALL_DIR}/certs"
+mkdir -p "\${INSTALL_DIR}/logs"
 mkdir -p "/var/log/\${APP_NAME}"
 
 # Настройка прав
@@ -678,10 +809,13 @@ chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}"
 chown -R cryptoapp:cryptoapp "/var/log/\${APP_NAME}"
 chmod 755 "\${INSTALL_DIR}"
 chmod 755 "/var/log/\${APP_NAME}"
+chmod 700 "\${INSTALL_DIR}/certs"
 
 echo "✅ Структура директорий создана:"
 echo "   \${INSTALL_DIR}/"
 echo "   ├── bin/"
+echo "   ├── certs/"
+echo "   ├── logs/"
 echo "   /var/log/\${APP_NAME}/"
 EOF
 
@@ -718,6 +852,7 @@ LOGROTATE
 # Создание файлов логов
 touch "/var/log/\${APP_NAME}/app.log"
 touch "/var/log/\${APP_NAME}/error.log"
+touch "/var/log/\${APP_NAME}/webhook.log"
 chown -R cryptoapp:cryptoapp "/var/log/\${APP_NAME}"
 chmod 644 "/var/log/\${APP_NAME}"/*.log
 
@@ -855,6 +990,10 @@ if [ -f "./application/cmd/bot/main.go" ]; then
         # Настройка прав бинарника
         chown cryptoapp:cryptoapp "${INSTALL_DIR}/bin/${APP_NAME}"
         chmod +x "${INSTALL_DIR}/bin/${APP_NAME}"
+
+        # Проверка webhook режима в коде
+        echo "Проверка webhook поддержки в бинарнике..."
+        strings "${INSTALL_DIR}/bin/${APP_NAME}" | grep -i "webhook" | head -5 || echo "   Webhook strings not found"
     else
         echo "❌ Ошибка сборки приложения"
         exit 1
@@ -893,9 +1032,9 @@ EOF
     log_info "Приложение собрано"
 }
 
-# Настройка конфигурации
+# Настройка конфигурации с webhook параметрами
 setup_configuration() {
-    log_step "Настройка конфигурации приложения..."
+    log_step "Настройка конфигурации приложения с webhook..."
 
     # Определяем корневую директорию проекта
     local project_root
@@ -937,6 +1076,51 @@ if [ -f "/tmp/prod.env" ]; then
     # Создаем симлинк в корне для обратной совместимости
     ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
 
+    # Обновляем webhook настройки если их нет
+    echo "Проверка и обновление webhook настроек..."
+
+    if ! grep -q "^TELEGRAM_MODE=" "\${INSTALL_DIR}/.env"; then
+        echo "TELEGRAM_MODE=${TELEGRAM_MODE}" >> "\${INSTALL_DIR}/.env"
+        echo "   Добавлен TELEGRAM_MODE=${TELEGRAM_MODE}"
+    fi
+
+    if ! grep -q "^WEBHOOK_DOMAIN=" "\${INSTALL_DIR}/.env"; then
+        echo "WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}" >> "\${INSTALL_DIR}/.env"
+        echo "   Добавлен WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}"
+    fi
+
+    if ! grep -q "^WEBHOOK_PORT=" "\${INSTALL_DIR}/.env"; then
+        echo "WEBHOOK_PORT=${WEBHOOK_PORT}" >> "\${INSTALL_DIR}/.env"
+        echo "   Добавлен WEBHOOK_PORT=${WEBHOOK_PORT}"
+    fi
+
+    if ! grep -q "^WEBHOOK_USE_TLS=" "\${INSTALL_DIR}/.env"; then
+        echo "WEBHOOK_USE_TLS=${WEBHOOK_USE_TLS}" >> "\${INSTALL_DIR}/.env"
+        echo "   Добавлен WEBHOOK_USE_TLS=${WEBHOOK_USE_TLS}"
+    fi
+
+    # Добавляем пути к сертификатам если используется TLS
+    if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+        if ! grep -q "^WEBHOOK_TLS_CERT_PATH=" "\${INSTALL_DIR}/.env"; then
+            echo "WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem" >> "\${INSTALL_DIR}/.env"
+            echo "   Добавлен WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem"
+        fi
+
+        if ! grep -q "^WEBHOOK_TLS_KEY_PATH=" "\${INSTALL_DIR}/.env"; then
+            echo "WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem" >> "\${INSTALL_DIR}/.env"
+            echo "   Добавлен WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem"
+        fi
+    fi
+
+    # Генерируем секретный токен если его нет
+    if ! grep -q "^WEBHOOK_SECRET_TOKEN=" "\${INSTALL_DIR}/.env" || [ -z "\$(grep '^WEBHOOK_SECRET_TOKEN=' "\${INSTALL_DIR}/.env" | cut -d= -f2)" ]; then
+        SECRET_TOKEN=\$(openssl rand -hex 16)
+        # Удаляем старый если есть
+        sed -i '/^WEBHOOK_SECRET_TOKEN=/d' "\${INSTALL_DIR}/.env"
+        echo "WEBHOOK_SECRET_TOKEN=\${SECRET_TOKEN}" >> "\${INSTALL_DIR}/.env"
+        echo "   Сгенерирован новый WEBHOOK_SECRET_TOKEN: \${SECRET_TOKEN}"
+    fi
+
     # Настройка прав
     chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
     chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/configs"
@@ -948,8 +1132,8 @@ if [ -f "/tmp/prod.env" ]; then
 
     echo "✅ Конфигурация настроена"
     echo "📋 Основные настройки:"
-    grep -E "^(APP_ENV|DB_HOST|DB_PORT|DB_NAME|DB_USER|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_ENABLED)=" \
-        "\${INSTALL_DIR}/.env" | head -15
+    grep -E "^(APP_ENV|TELEGRAM_MODE|WEBHOOK_DOMAIN|WEBHOOK_PORT|WEBHOOK_USE_TLS|DB_HOST|DB_PORT|DB_NAME|DB_USER|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|DB_ENABLE_AUTO_MIGRATE|REDIS_HOST|REDIS_PORT|REDIS_PASSWORD|REDIS_ENABLED)=" \
+        "\${INSTALL_DIR}/.env" | head -20
 else
     echo "❌ Конфиг не найден после копирования"
     exit 1
@@ -957,23 +1141,26 @@ fi
 EOF
 
     else
-        log_warn "Конфиг не найден, создаем минимальный..."
+        log_warn "Конфиг не найден, создаем полный конфиг с webhook..."
 
-        # Создаем минимальный конфиг на сервере
+        # Создаем полный конфиг на сервере
         ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
 INSTALL_DIR="${INSTALL_DIR}"
 
-echo "Создание минимальной конфигурации..."
+echo "Создание полной конфигурации с webhook..."
 
 # Создаем папку configs/prod
 mkdir -p "\${INSTALL_DIR}/configs/prod"
 
-# Создаем минимальный конфиг с настройками из переменных
+# Генерируем секретный токен
+SECRET_TOKEN=\$(openssl rand -hex 16)
+
+# Создаем полный конфиг с webhook настройками
 cat > "\${INSTALL_DIR}/configs/prod/.env" << 'CONFIG'
-# Минимальная конфигурация
+# Конфигурация с webhook поддержкой
 APP_ENV=production
 LOG_LEVEL=info
 
@@ -992,13 +1179,32 @@ REDIS_PORT=${REDIS_PORT}
 REDIS_PASSWORD=${REDIS_PASSWORD}
 REDIS_ENABLED=${REDIS_ENABLED}
 
-# Отключить Telegram до настройки
-TELEGRAM_ENABLED=false
+# Telegram режим и webhook
+TELEGRAM_MODE=${TELEGRAM_MODE}
+TELEGRAM_ENABLED=true
+
+# Webhook настройки
+WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}
+WEBHOOK_PORT=${WEBHOOK_PORT}
+WEBHOOK_PATH=/webhook
+WEBHOOK_USE_TLS=${WEBHOOK_USE_TLS}
+WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem
+WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem
+WEBHOOK_SECRET_TOKEN=\${SECRET_TOKEN}
+WEBHOOK_MAX_BODY_SIZE=1048576
 
 # Биржа
 EXCHANGE=bybit
 EXCHANGE_TYPE=futures
 UPDATE_INTERVAL=30
+
+# Параметры по умолчанию для телеграма
+TG_API_KEY=
+TG_CHAT_ID=
+TELEGRAM_NOTIFY_GROWTH=true
+TELEGRAM_NOTIFY_FALL=true
+TELEGRAM_GROWTH_THRESHOLD=2.0
+TELEGRAM_FALL_THRESHOLD=2.0
 CONFIG
 
 # Создаем симлинк в корне для обратной совместимости
@@ -1010,13 +1216,18 @@ chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/configs"
 chmod 600 "\${INSTALL_DIR}/.env"
 chmod 600 "\${INSTALL_DIR}/configs/prod/.env"
 
-echo "✅ Минимальная конфигурация создана"
-echo "⚠️  Требуется настройка: nano \${INSTALL_DIR}/.env"
+echo "✅ Полная конфигурация создана с webhook"
+echo "⚠️  Обязательно настройте:"
+echo "   1. TG_API_KEY - токен Telegram бота"
+echo "   2. TG_CHAT_ID - ваш Chat ID"
+echo "   3. Биржевые API ключи"
+echo ""
+echo "   nano \${INSTALL_DIR}/.env"
 EOF
 
     fi
 
-    log_info "Конфигурация настроена"
+    log_info "Конфигурация настроена с webhook поддержкой"
 }
 
 # Настройка systemd сервиса - ИСПРАВЛЕННЫЙ БЛОК
@@ -1069,7 +1280,7 @@ fi
 echo "📄 Создание нового systemd сервиса..."
 cat > /etc/systemd/system/${SERVICE_NAME}.service << SERVICE
 [Unit]
-Description=Crypto Exchange Screener Bot
+Description=Crypto Exchange Screener Bot (Webhook Mode)
 After=network.target postgresql.service redis-server.service
 Requires=postgresql.service redis-server.service
 
@@ -1095,8 +1306,11 @@ LimitNPROC=65536
 # Сетевая изоляция
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=${INSTALL_DIR} /var/log/${APP_NAME}
+ReadWritePaths=${INSTALL_DIR} /var/log/${APP_NAME} /etc/crypto-bot/certs
 NoNewPrivileges=true
+
+# Настройки для webhook режима
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -1191,7 +1405,7 @@ EOF
 
 # Запуск приложения
 start_application() {
-    log_step "Запуск приложения..."
+    log_step "Запуск приложения в webhook режиме..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
@@ -1200,17 +1414,59 @@ set -e
 SERVICE_NAME="crypto-screener"
 INSTALL_DIR="/opt/crypto-screener-bot"
 
-echo "🚀 Запуск приложения ${SERVICE_NAME}..."
+echo "🚀 Запуск приложения ${SERVICE_NAME} в webhook режиме..."
 
 # Останавливаем сервис если запущен
 echo "⏹️  Остановка сервиса (если запущен)..."
 systemctl stop "${SERVICE_NAME}.service" 2>/dev/null || echo "   ⚠️  Сервис не был запущен"
 sleep 2
 
-# Проверяем конфигурацию
-echo "🔍 Проверка конфигурации..."
+# Проверяем конфигурацию webhook
+echo "🔍 Проверка webhook конфигурации..."
 if [ -f "${INSTALL_DIR}/.env" ]; then
     echo "✅ Файл конфигурации найден"
+
+    # Проверяем режим Telegram
+    TELEGRAM_MODE=$(grep "^TELEGRAM_MODE=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "webhook")
+    echo "   Режим Telegram: ${TELEGRAM_MODE}"
+
+    # Проверяем webhook настройки
+    if [ "${TELEGRAM_MODE}" = "webhook" ]; then
+        echo "   Режим работы: Webhook"
+
+        # Проверяем обязательные настройки
+        WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "8443")
+        WEBHOOK_USE_TLS=$(grep "^WEBHOOK_USE_TLS=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "true")
+
+        echo "   Webhook порт: ${WEBHOOK_PORT}"
+        echo "   Использовать TLS: ${WEBHOOK_USE_TLS}"
+
+        if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
+            CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "")
+            KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "")
+
+            if [ -f "${CERT_PATH}" ] && [ -f "${KEY_PATH}" ]; then
+                echo "   ✅ Сертификаты найдены:"
+                echo "      cert: ${CERT_PATH}"
+                echo "      key: ${KEY_PATH}"
+            else
+                echo "   ⚠️  Сертификаты не найдены по указанным путям"
+                echo "   Проверьте настройки или создайте сертификаты:"
+                echo "   /etc/crypto-bot/certs/cert.pem"
+                echo "   /etc/crypto-bot/certs/key.pem"
+            fi
+        fi
+
+        # Проверяем секретный токен
+        SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "")
+        if [ -n "${SECRET_TOKEN}" ]; then
+            echo "   ✅ Секретный токен установлен"
+        else
+            echo "   ⚠️  Секретный токен не установлен"
+        fi
+    else
+        echo "   Режим работы: Polling"
+    fi
 
     # Проверяем основные настройки
     if grep -q "DB_ENABLE_AUTO_MIGRATE=" "${INSTALL_DIR}/.env"; then
@@ -1219,11 +1475,6 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
     else
         echo "⚠️  DB_ENABLE_AUTO_MIGRATE не настроен, добавляем..."
         echo "DB_ENABLE_AUTO_MIGRATE=true" >> "${INSTALL_DIR}/.env"
-    fi
-
-    # Проверяем Redis настройки
-    if ! grep -q "^REDIS_ENABLED=" "${INSTALL_DIR}/.env"; then
-        echo "REDIS_ENABLED=true" >> "${INSTALL_DIR}/.env"
     fi
 else
     echo "❌ Файл конфигурации не найден"
@@ -1264,8 +1515,8 @@ echo "📊 Статус сервиса:"
 systemctl status "${SERVICE_NAME}.service" --no-pager | head -20
 
 # Ждем инициализацию
-echo "⏳ Ожидание инициализации (10 секунд)..."
-sleep 10
+echo "⏳ Ожидание инициализации (15 секунд)..."
+sleep 15
 
 # Проверка процесса
 echo "🔍 Проверка процессов:"
@@ -1274,6 +1525,17 @@ if pgrep -f "crypto-screener-bot" > /dev/null; then
     PID=$(pgrep -f "crypto-screener-bot")
     echo "   PID: ${PID}"
     echo "   Uptime: $(ps -o etime= -p ${PID} 2>/dev/null || echo "неизвестно")"
+
+    # Проверяем webhook порт если в webhook режиме
+    if [ "${TELEGRAM_MODE}" = "webhook" ]; then
+        echo "🔍 Проверка webhook порта ${WEBHOOK_PORT}..."
+        if ss -tln | grep -q ":${WEBHOOK_PORT} "; then
+            echo "✅ Webhook порт ${WEBHOOK_PORT} открыт"
+        else
+            echo "⚠️  Webhook порт ${WEBHOOK_PORT} не открыт"
+            echo "Проверьте логи: journalctl -u ${SERVICE_NAME}.service -n 50"
+        fi
+    fi
 else
     echo "❌ Приложение не запущено"
     echo "Проверьте логи: journalctl -u ${SERVICE_NAME}.service -n 50"
@@ -1282,14 +1544,21 @@ fi
 
 echo ""
 echo "✅ Приложение успешно запущено!"
+echo ""
+echo "ℹ️  Для настройки webhook в Telegram выполните:"
+echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook' \\"
+echo "     -H 'Content-Type: application/json' \\"
+echo "     -d '{\"url\": \"https://95.142.40.244:${WEBHOOK_PORT}/webhook\","
+echo "          \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
+echo "          \"secret_token\": \"${SECRET_TOKEN}\"}'"
 EOF
 
     log_info "Приложение запущено"
 }
 
-# Проверка развертывания
+# Проверка развертывания с webhook
 verify_deployment() {
-    log_step "Проверка развертывания..."
+    log_step "Проверка развертывания с webhook..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
@@ -1299,7 +1568,7 @@ APP_NAME="crypto-screener-bot"
 SERVICE_NAME="crypto-screener"
 INSTALL_DIR="/opt/crypto-screener-bot"
 
-echo "=== ПРОВЕРКА РАЗВЕРТЫВАНИЯ ==="
+echo "=== ПРОВЕРКА РАЗВЕРТЫВАНИЯ С WEBHOOK ==="
 echo ""
 
 # 1. Проверка структуры директорий
@@ -1339,6 +1608,16 @@ echo ""
 
 # 5. Проверка портов
 echo "5. Проверка сетевых портов:"
+echo "   SSH (22): $(ss -tln | grep ':22' >/dev/null && echo 'открыт' || echo 'закрыт')"
+
+# Проверяем webhook порт из конфига
+if [ -f "${INSTALL_DIR}/.env" ]; then
+    WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2 || echo "8443")
+    echo "   Webhook (${WEBHOOK_PORT}): $(ss -tln | grep ":${WEBHOOK_PORT} " >/dev/null && echo 'открыт' || echo 'закрыт')"
+else
+    echo "   Webhook (8443): $(ss -tln | grep ':8443' >/dev/null && echo 'открыт' || echo 'закрыт')"
+fi
+
 echo "   PostgreSQL (5432): $(ss -tln | grep ':5432' >/dev/null && echo 'открыт' || echo 'закрыт')"
 echo "   Redis (6379): $(ss -tln | grep ':6379' >/dev/null && echo 'открыт' || echo 'закрыт')"
 echo ""
@@ -1399,14 +1678,61 @@ else
 fi
 echo ""
 
-# 7. Проверка конфигурации
-echo "7. Проверка конфигурации:"
+# 7. Проверка конфигурации webhook
+echo "7. Проверка конфигурации webhook:"
 if [ -f "${INSTALL_DIR}/.env" ]; then
     echo "   ✅ Конфиг найден"
-    echo "   Основные настройки:"
-    grep -E "^(APP_ENV|DB_HOST|DB_NAME|DB_USER|LOG_LEVEL|TELEGRAM_ENABLED|EXCHANGE|REDIS_HOST|REDIS_PORT|REDIS_ENABLED)=" "${INSTALL_DIR}/.env" | sed 's/^/   /'
+    echo "   Основные настройки webhook:"
+    grep -E "^(TELEGRAM_MODE|WEBHOOK_DOMAIN|WEBHOOK_PORT|WEBHOOK_USE_TLS|WEBHOOK_TLS_CERT_PATH|WEBHOOK_TLS_KEY_PATH|WEBHOOK_SECRET_TOKEN)=" "${INSTALL_DIR}/.env" | sed 's/^/   /'
+
+    # Проверка сертификатов
+    echo "   Проверка сертификатов:"
+    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "/etc/crypto-bot/certs/cert.pem")
+    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "/etc/crypto-bot/certs/key.pem")
+
+    if [ -f "${CERT_PATH}" ]; then
+        echo "   ✅ Сертификат найден: ${CERT_PATH}"
+        echo "      Размер: $(stat -c%s "${CERT_PATH}") bytes"
+    else
+        echo "   ❌ Сертификат не найден: ${CERT_PATH}"
+    fi
+
+    if [ -f "${KEY_PATH}" ]; then
+        echo "   ✅ Ключ найден: ${KEY_PATH}"
+        echo "      Размер: $(stat -c%s "${KEY_PATH}") bytes"
+    else
+        echo "   ❌ Ключ не найден: ${KEY_PATH}"
+    fi
 else
     echo "   ❌ Конфиг не найден"
+fi
+echo ""
+
+# 8. Инструкция по настройке webhook в Telegram
+echo "8. ИНСТРУКЦИЯ ПО НАСТРОЙКЕ WEBHOOK В TELEGRAM:"
+echo ""
+if [ -f "${INSTALL_DIR}/.env" ]; then
+    SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "")
+    WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "8443")
+
+    echo "   Выполните команду для настройки webhook в Telegram API:"
+    echo ""
+    echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook' \\"
+    echo "     -H 'Content-Type: application/json' \\"
+    echo "     -d '{"
+    echo "       \"url\": \"https://95.142.40.244:${WEBHOOK_PORT}/webhook\","
+    if [ -f "/etc/crypto-bot/certs/cert.pem" ]; then
+        echo "       \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
+    fi
+    if [ -n "${SECRET_TOKEN}" ]; then
+        echo "       \"secret_token\": \"${SECRET_TOKEN}\""
+    fi
+    echo "     }'"
+    echo ""
+    echo "   Для проверки webhook:"
+    echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo'"
+else
+    echo "   ⚠️  Не удалось получить настройки для инструкции"
 fi
 echo ""
 
@@ -1418,10 +1744,12 @@ EOF
 
 # Основная функция
 main() {
-    log_step "Начало развертывания Crypto Exchange Screener Bot"
+    log_step "Начало развертывания Crypto Exchange Screener Bot с Webhook"
     log_info "Сервер: ${SERVER_USER}@${SERVER_IP}"
     log_info "Директория установки: ${INSTALL_DIR}"
     log_info "Имя сервиса: ${SERVICE_NAME}"
+    log_info "Telegram режим: ${TELEGRAM_MODE}"
+    log_info "Webhook: ${WEBHOOK_DOMAIN}:${WEBHOOK_PORT} (TLS: ${WEBHOOK_USE_TLS})"
     echo ""
 
     # Читаем настройки из .env файла
@@ -1434,39 +1762,48 @@ main() {
     check_ssh_connection
     install_dependencies
     setup_postgresql
-    setup_redis  # Теперь Redis настраивается с параметрами из .env
-    setup_firewall
+    setup_redis
+    setup_ssl_certificates  # НОВАЯ ФУНКЦИЯ: Настройка SSL сертификатов
+    setup_firewall          # ОБНОВЛЕНО: Добавлены webhook порты
     create_directory_structure
     setup_logging
-    copy_source_code  # ИСПРАВЛЕННАЯ функция
+    copy_source_code
     build_application
-    setup_configuration
-    setup_systemd_service  # ИСПРАВЛЕННАЯ функция
+    setup_configuration     # ОБНОВЛЕНО: Добавлены webhook настройки
+    setup_systemd_service
     check_migrations
-    start_application
-    verify_deployment
+    start_application      # ОБНОВЛЕНО: Запуск с проверкой webhook
+    verify_deployment      # ОБНОВЛЕНО: Проверка webhook развертывания
 
     log_step "✅ Развертывание успешно завершено!"
     echo ""
     log_info "📋 Использованы настройки:"
     log_info "  PostgreSQL: ${DB_USER}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
     log_info "  Redis: ${REDIS_HOST}:${REDIS_PORT} (включен: ${REDIS_ENABLED})"
+    log_info "  Webhook: ${WEBHOOK_DOMAIN}:${WEBHOOK_PORT} (TLS: ${WEBHOOK_USE_TLS})"
+    log_info "  Telegram режим: ${TELEGRAM_MODE}"
     echo ""
     log_info "ВАЖНО: Проверьте настройки в файле: ${INSTALL_DIR}/.env"
     log_info "Обязательные настройки для проверки:"
-    log_info "1. TELEGRAM_BOT_TOKEN - токен бота Telegram"
-    log_info "2. TELEGRAM_ENABLED=true - включить Telegram"
-    log_info "3. TELEGRAM_ADMIN_IDS - ваш Telegram ID"
-    log_info "4. API ключи бирж (BINANCE_API_KEY/SECRET или BYBIT_API_KEY/SECRET)"
+    log_info "1. TG_API_KEY - токен Telegram бота"
+    log_info "2. TG_CHAT_ID - ваш Chat ID"
+    log_info "3. Биржевые API ключи (BYBIT_API_KEY/SECRET или BINANCE_API_KEY/SECRET)"
+    echo ""
+    log_info "Для настройки webhook в Telegram выполните команду из инструкции выше"
+    log_info "или проверьте вывод секции 'ИНСТРУКЦИЯ ПО НАСТРОЙКЕ WEBHOOK'"
     echo ""
     log_info "Команды управления:"
     log_info "  systemctl status ${SERVICE_NAME}  # Статус сервиса"
     log_info "  systemctl restart ${SERVICE_NAME} # Перезапуск"
     log_info "  journalctl -u ${SERVICE_NAME} -f  # Просмотр логов"
+    log_info "  ss -tln | grep ':${WEBHOOK_PORT}'  # Проверка webhook порта"
     echo ""
     log_info "Для настройки конфигурации на сервере:"
     log_info "  nano ${INSTALL_DIR}/.env"
     log_info "  systemctl restart ${SERVICE_NAME}"
+    echo ""
+    log_info "📝 Webhook URL для Telegram:"
+    log_info "  https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}/webhook"
 }
 
 # Запуск скрипта

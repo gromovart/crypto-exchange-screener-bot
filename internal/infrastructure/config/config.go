@@ -2,7 +2,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -212,6 +211,34 @@ type Config struct {
 		FallThreshold   float64 `mapstructure:"TELEGRAM_FALL_THRESHOLD"`
 		MessageFormat   string  `mapstructure:"MESSAGE_FORMAT"`
 		Include24hStats bool    `mapstructure:"INCLUDE_24H_STATS"`
+	} `mapstructure:",squash"`
+
+	// ======================
+	// TELEGRAM РЕЖИМ РАБОТЫ
+	// ======================
+	TelegramMode string `mapstructure:"TELEGRAM_MODE"` // "polling" или "webhook"
+
+	// ======================
+	// ВЕБХУК КОНФИГУРАЦИЯ
+	// ======================
+	Webhook struct {
+		Domain      string `mapstructure:"WEBHOOK_DOMAIN"`
+		Port        int    `mapstructure:"WEBHOOK_PORT"`
+		Path        string `mapstructure:"WEBHOOK_PATH"`
+		SecretToken string `mapstructure:"WEBHOOK_SECRET_TOKEN"`
+		UseTLS      bool   `mapstructure:"WEBHOOK_USE_TLS"`
+		TLSCertPath string `mapstructure:"WEBHOOK_TLS_CERT_PATH"`
+		TLSKeyPath  string `mapstructure:"WEBHOOK_TLS_KEY_PATH"`
+		MaxBodySize int64  `mapstructure:"WEBHOOK_MAX_BODY_SIZE"`
+	} `mapstructure:",squash"`
+
+	// ======================
+	// POLLING КОНФИГУРАЦИЯ
+	// ======================
+	Polling struct {
+		Timeout       int `mapstructure:"POLLING_TIMEOUT"`        // timeout в секундах
+		Limit         int `mapstructure:"POLLING_LIMIT"`          // лимит обновлений
+		RetryInterval int `mapstructure:"POLLING_RETRY_INTERVAL"` // интервал переподключения
 	} `mapstructure:",squash"`
 
 	// ======================
@@ -524,6 +551,30 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Telegram.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
 
 	// ======================
+	// TELEGRAM РЕЖИМ РАБОТЫ
+	// ======================
+	cfg.TelegramMode = getEnv("TELEGRAM_MODE", "polling")
+
+	// ======================
+	// ВЕБХУК КОНФИГУРАЦИЯ
+	// ======================
+	cfg.Webhook.Domain = getEnv("WEBHOOK_DOMAIN", "localhost")
+	cfg.Webhook.Port = getEnvInt("WEBHOOK_PORT", 8443)
+	cfg.Webhook.Path = getEnv("WEBHOOK_PATH", "/webhook")
+	cfg.Webhook.SecretToken = getEnv("WEBHOOK_SECRET_TOKEN", "")
+	cfg.Webhook.UseTLS = getEnvBool("WEBHOOK_USE_TLS", true)
+	cfg.Webhook.TLSCertPath = getEnv("WEBHOOK_TLS_CERT_PATH", "")
+	cfg.Webhook.TLSKeyPath = getEnv("WEBHOOK_TLS_KEY_PATH", "")
+	cfg.Webhook.MaxBodySize = getEnvInt64("WEBHOOK_MAX_BODY_SIZE", 1024*1024) // 1MB
+
+	// ======================
+	// POLLING КОНФИГУРАЦИЯ
+	// ======================
+	cfg.Polling.Timeout = getEnvInt("POLLING_TIMEOUT", 30)
+	cfg.Polling.Limit = getEnvInt("POLLING_LIMIT", 100)
+	cfg.Polling.RetryInterval = getEnvInt("POLLING_RETRY_INTERVAL", 5)
+
+	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
 	// ======================
 	cfg.Monitoring.ChatID = getEnv("MONITORING_CHAT_ID", "")
@@ -605,32 +656,32 @@ func LoadConfig(path string) (*Config, error) {
 
 // validate проверяет обязательные параметры конфигурации
 func (c *Config) validate() error {
-	var errors []string
+	var validationErrors []string
 
 	// Проверка API ключей
 	if c.Exchange == "bybit" {
 		if c.ApiKey == "" {
-			errors = append(errors, "BYBIT_API_KEY is required")
+			validationErrors = append(validationErrors, "BYBIT_API_KEY is required")
 		}
 		if c.ApiSecret == "" {
-			errors = append(errors, "BYBIT_SECRET_KEY is required")
+			validationErrors = append(validationErrors, "BYBIT_SECRET_KEY is required")
 		}
 	} else if c.Exchange == "binance" {
 		if c.ApiKey == "" {
-			errors = append(errors, "BINANCE_API_KEY is required")
+			validationErrors = append(validationErrors, "BINANCE_API_KEY is required")
 		}
 		if c.ApiSecret == "" {
-			errors = append(errors, "BINANCE_API_SECRET is required")
+			validationErrors = append(validationErrors, "BINANCE_API_SECRET is required")
 		}
 	}
 
 	// Проверка Telegram если включен
 	if c.Telegram.Enabled {
 		if c.Telegram.BotToken == "" {
-			errors = append(errors, "TG_API_KEY is required when Telegram is enabled")
+			validationErrors = append(validationErrors, "TG_API_KEY is required when Telegram is enabled")
 		}
 		if c.Telegram.ChatID == "" {
-			errors = append(errors, "TG_CHAT_ID is required when Telegram is enabled")
+			validationErrors = append(validationErrors, "TG_CHAT_ID is required when Telegram is enabled")
 		}
 	}
 
@@ -639,33 +690,57 @@ func (c *Config) validate() error {
 		settings := c.AnalyzerConfigs.CounterAnalyzer.CustomSettings
 		if settings != nil {
 			if basePeriod, ok := settings["base_period_minutes"].(int); ok && basePeriod <= 0 {
-				errors = append(errors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
+				validationErrors = append(validationErrors, "COUNTER_BASE_PERIOD_MINUTES must be positive")
 			}
 			if period, ok := settings["analysis_period"].(string); ok && !isValidPeriod(period) {
-				errors = append(errors, "COUNTER_ANALYSIS_PERIOD must be one of: 5m, 15m, 30m, 1h, 4h, 1d")
+				validationErrors = append(validationErrors, "COUNTER_ANALYSIS_PERIOD must be one of: 5m, 15m, 30m, 1h, 4h, 1d")
 			}
 		}
 	}
 
 	// Проверка настроек базы данных
 	if c.Database.Host == "" {
-		errors = append(errors, "DB_HOST is required")
+		validationErrors = append(validationErrors, "DB_HOST is required")
 	}
 	if c.Database.Port <= 0 {
-		errors = append(errors, "DB_PORT must be positive")
+		validationErrors = append(validationErrors, "DB_PORT must be positive")
 	}
 	if c.Database.User == "" {
-		errors = append(errors, "DB_USER is required")
+		validationErrors = append(validationErrors, "DB_USER is required")
 	}
 	if c.Database.Password == "" {
-		errors = append(errors, "DB_PASSWORD is required")
+		validationErrors = append(validationErrors, "DB_PASSWORD is required")
 	}
 	if c.Database.Name == "" {
-		errors = append(errors, "DB_NAME is required")
+		validationErrors = append(validationErrors, "DB_NAME is required")
 	}
 
-	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "; "))
+	// Валидация режима Telegram
+	mode := strings.ToLower(c.TelegramMode)
+	if mode != "polling" && mode != "webhook" {
+		validationErrors = append(validationErrors, "TELEGRAM_MODE должен быть 'polling' или 'webhook'")
+	}
+
+	// Валидация вебхуков если используется webhook режим
+	if mode == "webhook" {
+		if c.Webhook.Domain == "" {
+			validationErrors = append(validationErrors, "WEBHOOK_DOMAIN обязателен для webhook режима")
+		}
+		if c.Webhook.Port <= 0 || c.Webhook.Port > 65535 {
+			validationErrors = append(validationErrors, "WEBHOOK_PORT должен быть в диапазоне 1-65535")
+		}
+		if c.Webhook.UseTLS {
+			if c.Webhook.TLSCertPath == "" {
+				validationErrors = append(validationErrors, "WEBHOOK_TLS_CERT_PATH обязателен при использовании TLS")
+			}
+			if c.Webhook.TLSKeyPath == "" {
+				validationErrors = append(validationErrors, "WEBHOOK_TLS_KEY_PATH обязателен при использовании TLS")
+			}
+		}
+	}
+
+	if len(validationErrors) > 0 {
+		return fmt.Errorf(strings.Join(validationErrors, "; "))
 	}
 
 	return nil
@@ -699,12 +774,22 @@ func (c *Config) PrintSummary() {
 	log.Printf("   • Окружение: %s", c.Environment)
 	log.Printf("   • Биржа: %s %s", strings.ToUpper(c.Exchange), c.ExchangeType)
 	log.Printf("   • Уровень логирования: %s", c.Logging.Level)
+	log.Printf("   • Telegram режим: %s", c.TelegramMode)
 	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
 
 	// База данных
 	log.Printf("   • PostgreSQL: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)
 	log.Printf("   • Redis: %s:%d (DB: %d, Pool: %d)",
 		c.Redis.Host, c.Redis.Port, c.Redis.DB, c.Redis.PoolSize)
+
+	if c.IsWebhookMode() {
+		log.Printf("   • Webhook URL: %s", c.GetWebhookURL())
+		log.Printf("   • Webhook порт: %d", c.Webhook.Port)
+		log.Printf("   • TLS: %v", c.Webhook.UseTLS)
+	} else {
+		log.Printf("   • Polling timeout: %d сек", c.Polling.Timeout)
+		log.Printf("   • Polling retry: %d сек", c.Polling.RetryInterval)
+	}
 
 	if c.Telegram.Enabled {
 		token := c.Telegram.BotToken
@@ -734,18 +819,9 @@ func (c *Config) PrintSummary() {
 }
 
 // ============================================
-// ОСТАЛЬНЫЕ МЕТОДЫ БЕЗ ИЗМЕНЕНИЙ
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ============================================
 
-// [Все остальные методы без изменений: GetSymbolList, ShouldExcludeSymbol, getEnv, getEnvInt,
-// getEnvFloat, getEnvBool, getEnvDuration, parseIntList, parsePatterns, isValidPeriod,
-// IsCounterAnalyzerEnabled, GetCounterBasePeriodMinutes, GetCounterAnalysisPeriod,
-// GetCounterGrowthThreshold, GetCounterFallThreshold, GetCounterNotificationEnabled,
-// GetCounterTrackGrowth, GetCounterTrackFall, GetCounterNotificationThreshold,
-// GetGrowthContinuityThreshold, GetFallContinuityThreshold, GetContinuousAnalyzerMinPoints,
-// GetEnabledAnalyzers]
-
-// Вспомогательные функции (те же, что и раньше)
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -756,6 +832,15 @@ func getEnv(key, defaultValue string) string {
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return intValue
 		}
 	}
@@ -1013,28 +1098,28 @@ func (c *Config) GetEnabledAnalyzers() []string {
 	return enabled
 }
 
+// Добавляю вспомогательные методы:
+func (c *Config) IsWebhookMode() bool {
+	return strings.ToLower(c.TelegramMode) == "webhook"
+}
+
+func (c *Config) IsPollingMode() bool {
+	mode := strings.ToLower(c.TelegramMode)
+	return mode == "polling" || mode == "" // по умолчанию polling
+}
+
+func (c *Config) GetWebhookURL() string {
+	scheme := "https"
+	if !c.Webhook.UseTLS {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://%s:%d%s", scheme, c.Webhook.Domain, c.Webhook.Port, c.Webhook.Path)
+}
+
 // Validate проверяет конфигурацию
 func (c *Config) Validate() error {
-	// ... существующая валидация ...
-
-	// Валидация Redis
-	if c.Redis.Host == "" {
-		return errors.New("REDIS_HOST не может быть пустым")
-	}
-	if c.Redis.Port <= 0 || c.Redis.Port > 65535 {
-		return errors.New("REDIS_PORT должен быть в диапазоне 1-65535")
-	}
-	if c.Redis.DB < 0 || c.Redis.DB > 15 {
-		return errors.New("REDIS_DB должен быть в диапазоне 0-15")
-	}
-	if c.Redis.PoolSize <= 0 {
-		return errors.New("REDIS_POOL_SIZE должен быть положительным числом")
-	}
-	if c.Redis.MinIdleConns < 0 {
-		return errors.New("REDIS_MIN_IDLE_CONNS не может быть отрицательным")
-	}
-
-	return nil
+	// Используем встроенную валидацию
+	return c.validate()
 }
 
 // GetRedisAddress возвращает адрес Redis

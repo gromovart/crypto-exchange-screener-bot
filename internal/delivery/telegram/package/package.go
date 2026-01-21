@@ -13,6 +13,7 @@ import (
 	controllers_factory "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/transport"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -40,8 +41,9 @@ type TelegramDeliveryPackage struct {
 	services    map[string]interface{}
 	controllers map[string]types.EventSubscriber
 
-	// Telegram бот
+	// Telegram бот и транспорт
 	bot         *bot.TelegramBot
+	transport   transport.TelegramTransport
 	isRunning   bool
 	initialized bool
 }
@@ -117,9 +119,9 @@ func (p *TelegramDeliveryPackage) Initialize(eventBus *events.EventBus) error {
 		return fmt.Errorf("ошибка создания контроллеров: %w", err)
 	}
 
-	// 7. Создаем Telegram бота
-	if err := p.createBot(); err != nil {
-		return fmt.Errorf("ошибка создания бота: %w", err)
+	// 7. Создаем Telegram бота и транспорт
+	if err := p.createBotAndTransport(); err != nil {
+		return fmt.Errorf("ошибка создания бота и транспорта: %w", err)
 	}
 
 	// 8. Подписываем контроллеры на EventBus
@@ -276,9 +278,9 @@ func (p *TelegramDeliveryPackage) createControllers() error {
 	return nil
 }
 
-// createBot создает Telegram бота
-func (p *TelegramDeliveryPackage) createBot() error {
-	logger.Debug("🤖 Создание Telegram бота...")
+// createBotAndTransport создает Telegram бота и транспорт
+func (p *TelegramDeliveryPackage) createBotAndTransport() error {
+	logger.Debug("🤖 Создание Telegram бота и транспорта...")
 
 	if !p.config.TelegramEnabled {
 		logger.Warn("⚠️ Telegram отключен в конфигурации")
@@ -301,9 +303,18 @@ func (p *TelegramDeliveryPackage) createBot() error {
 		UserService: userService,
 	}
 
+	// Создаем бота
 	p.bot = bot.NewTelegramBot(p.config, deps)
 
-	logger.Info("✅ Telegram бот создан")
+	// Создаем транспорт на основе конфигурации
+	transportFactory := transport.NewTransportFactory(p.config, p.bot)
+	p.transport, err = transportFactory.CreateTransport()
+	if err != nil {
+		return fmt.Errorf("ошибка создания транспорта: %w", err)
+	}
+
+	logger.Info("✅ Telegram бот создан (режим: %s)", p.config.TelegramMode)
+	logger.Info("✅ Транспорт создан: %s", p.transport.Name())
 	return nil
 }
 
@@ -326,7 +337,7 @@ func (p *TelegramDeliveryPackage) subscribeControllersToEventBus() {
 	logger.Info("🎛️  Подписано %d контроллеров на EventBus", subscribedCount)
 }
 
-// Start запускает Telegram бота
+// Start запускает Telegram бота через транспорт
 func (p *TelegramDeliveryPackage) Start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -335,34 +346,24 @@ func (p *TelegramDeliveryPackage) Start() error {
 		return fmt.Errorf("TelegramDeliveryPackage уже запущен")
 	}
 
-	if p.bot == nil {
-		return fmt.Errorf("Telegram бот не инициализирован")
+	if p.transport == nil {
+		return fmt.Errorf("транспорт не инициализирован")
 	}
 
-	logger.Info("🚀 Запуск Telegram бота...")
+	logger.Info("🚀 Запуск Telegram бота (режим: %s, транспорт: %s)...",
+		p.config.TelegramMode, p.transport.Name())
 
-	// Проверяем методы бота
-	if botWithPolling, ok := interface{}(p.bot).(interface{ StartPolling() error }); ok {
-		if err := botWithPolling.StartPolling(); err != nil {
-			return fmt.Errorf("ошибка запуска бота: %w", err)
-		}
-	} else {
-		// Пробуем общий метод Start если есть
-		if botWithStart, ok := interface{}(p.bot).(interface{ Start() error }); ok {
-			if err := botWithStart.Start(); err != nil {
-				return fmt.Errorf("ошибка запуска бота: %w", err)
-			}
-		} else {
-			return fmt.Errorf("бот не поддерживает методы запуска")
-		}
+	// Запускаем через транспорт
+	if err := p.transport.Start(); err != nil {
+		return fmt.Errorf("ошибка запуска транспорта %s: %w", p.transport.Name(), err)
 	}
 
 	p.isRunning = true
-	logger.Info("✅ Telegram бот запущен")
+	logger.Info("✅ Telegram бот запущен через %s", p.transport.Name())
 	return nil
 }
 
-// Stop останавливает Telegram бота
+// Stop останавливает Telegram бота через транспорт
 func (p *TelegramDeliveryPackage) Stop() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -371,18 +372,11 @@ func (p *TelegramDeliveryPackage) Stop() error {
 		return nil
 	}
 
-	logger.Info("🛑 Остановка Telegram бота...")
+	logger.Info("🛑 Остановка Telegram бота (транспорт: %s)...", p.transport.Name())
 
-	if p.bot != nil {
-		// Проверяем методы бота
-		if botWithPolling, ok := interface{}(p.bot).(interface{ StopPolling() error }); ok {
-			if err := botWithPolling.StopPolling(); err != nil {
-				logger.Warn("⚠️ Ошибка остановки бота: %v", err)
-			}
-		} else if botWithStop, ok := interface{}(p.bot).(interface{ Stop() error }); ok {
-			if err := botWithStop.Stop(); err != nil {
-				logger.Warn("⚠️ Ошибка остановки бота: %v", err)
-			}
+	if p.transport != nil {
+		if err := p.transport.Stop(); err != nil {
+			logger.Warn("⚠️ Ошибка остановки транспорта %s: %v", p.transport.Name(), err)
 		}
 	}
 
@@ -400,12 +394,15 @@ func (p *TelegramDeliveryPackage) GetHealthStatus() map[string]interface{} {
 		"initialized":          p.initialized,
 		"is_running":           p.isRunning,
 		"bot_status":           "stopped",
+		"transport_status":     "none",
+		"transport_type":       "none",
 		"services_count":       len(p.services),
 		"controllers_count":    len(p.controllers),
 		"event_bus_linked":     p.eventBus != nil,
 		"core_factory_ready":   p.coreFactory != nil && p.coreFactory.IsReady(),
 		"user_service":         p.userService != nil,
 		"subscription_service": p.subscriptionService != nil,
+		"telegram_mode":        p.config.TelegramMode,
 	}
 
 	if p.bot != nil {
@@ -413,6 +410,15 @@ func (p *TelegramDeliveryPackage) GetHealthStatus() map[string]interface{} {
 		if p.isRunning {
 			status["bot_status"] = "running"
 		}
+	}
+
+	if p.transport != nil {
+		status["transport_status"] = "stopped"
+		if p.transport.IsRunning() {
+			status["transport_status"] = "running"
+		}
+		status["transport_type"] = string(p.transport.Type())
+		status["transport_name"] = p.transport.Name()
 	}
 
 	return status
@@ -461,6 +467,13 @@ func (p *TelegramDeliveryPackage) GetBot() *bot.TelegramBot {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.bot
+}
+
+// GetTransport возвращает транспорт
+func (p *TelegramDeliveryPackage) GetTransport() transport.TelegramTransport {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.transport
 }
 
 // GetCoreFactory возвращает фабрику ядра
@@ -517,9 +530,15 @@ func (p *TelegramDeliveryPackage) Reset() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Останавливаем транспорт если работает
+	if p.transport != nil && p.transport.IsRunning() {
+		p.transport.Stop()
+	}
+
 	p.services = make(map[string]interface{})
 	p.controllers = make(map[string]types.EventSubscriber)
 	p.bot = nil
+	p.transport = nil
 	p.isRunning = false
 	p.initialized = false
 

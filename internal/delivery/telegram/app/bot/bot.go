@@ -35,11 +35,12 @@ type TelegramBot struct {
 	router         router.Router
 	authMiddleware *middlewares.AuthMiddleware
 
-	// Polling handler
+	// Режимы работы
 	pollingHandler *PollingClient
-
-	mu          sync.RWMutex
-	startupTime time.Time
+	webhookServer  *WebhookServer
+	mu             sync.RWMutex
+	startupTime    time.Time
+	currentMode    string // "polling" или "webhook"
 }
 
 // Dependencies зависимости для TelegramBot
@@ -86,8 +87,22 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		startupTime:    time.Now(),
 	}
 
-	// Создаем polling handler
-	bot.pollingHandler = NewPollingClient(bot)
+	// Определяем текущий режим работы
+	bot.currentMode = "polling"
+	if config.IsWebhookMode() {
+		bot.currentMode = "webhook"
+	}
+
+	logger.Info("🤖 TelegramBot создан (режим: %s)", bot.currentMode)
+
+	// Создаем обработчики для выбранного режима
+	if bot.currentMode == "polling" {
+		bot.pollingHandler = NewPollingClient(bot)
+		logger.Info("🔄 PollingHandler создан")
+	} else {
+		bot.webhookServer = NewWebhookServer(config, bot)
+		logger.Info("🌐 WebhookServer создан")
+	}
 
 	// Устанавливаем меню команд Telegram
 	if err := bot.SetMyCommands(); err != nil {
@@ -96,6 +111,74 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	}
 
 	return bot
+}
+
+// Start запускает бота в выбранном режиме
+func (b *TelegramBot) Start() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	logger.Info("🚀 Запуск Telegram бота (режим: %s)", b.currentMode)
+
+	if b.currentMode == "polling" {
+		return b.startPolling()
+	} else {
+		return b.startWebhook()
+	}
+}
+
+// Stop останавливает бота
+func (b *TelegramBot) Stop() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	logger.Info("🛑 Остановка Telegram бота (режим: %s)", b.currentMode)
+
+	if b.currentMode == "polling" {
+		return b.stopPolling()
+	} else {
+		return b.stopWebhook()
+	}
+}
+
+// startPolling запускает polling режим
+func (b *TelegramBot) startPolling() error {
+	if b.pollingHandler == nil {
+		return fmt.Errorf("polling handler не инициализирован")
+	}
+
+	logger.Info("🔄 Запуск polling режима...")
+	return b.pollingHandler.Start()
+}
+
+// stopPolling останавливает polling режим
+func (b *TelegramBot) stopPolling() error {
+	if b.pollingHandler == nil {
+		return nil
+	}
+
+	logger.Info("🛑 Остановка polling режима...")
+	return b.pollingHandler.Stop()
+}
+
+// startWebhook запускает webhook режим
+func (b *TelegramBot) startWebhook() error {
+	if b.webhookServer == nil {
+		return fmt.Errorf("webhook server не инициализирован")
+	}
+
+	logger.Info("🌐 Запуск webhook режима на порту %d...", b.config.HTTPPort)
+	return b.webhookServer.Start()
+}
+
+// stopWebhook останавливает webhook режим
+func (b *TelegramBot) stopWebhook() error {
+	if b.webhookServer == nil {
+		return nil
+	}
+
+	logger.Info("🛑 Остановка webhook режима...")
+	return b.webhookServer.Stop()
 }
 
 // HandleUpdate обрабатывает обновление от Telegram (новая система)
@@ -140,37 +223,6 @@ func (b *TelegramBot) GetTelegramClient() *telegram_http.TelegramClient {
 	return b.telegramClient
 }
 
-// Для обратной совместимости со старым webhook.go
-
-// HandleMessage обрабатывает текстовое сообщение (старый метод)
-func (b *TelegramBot) HandleMessage(text, chatID string) error {
-	// TODO: Реализовать через новую систему
-	return nil
-}
-
-// HandleCallback обрабатывает callback (старый метод)
-func (b *TelegramBot) HandleCallback(callbackData, chatID string) error {
-	// TODO: Реализовать через новую систему
-	return nil
-}
-
-// StartCommandHandler обработчик команды /start (старый метод)
-func (b *TelegramBot) StartCommandHandler(chatID string) error {
-	// TODO: Реализовать через новую систему
-	return nil
-}
-
-// SendTestMessage отправляет тестовое сообщение (старый метод)
-func (b *TelegramBot) SendTestMessage() error {
-	// TODO: Реализовать через новую систему
-	return nil
-}
-
-// SendMessage отправляет сообщение (старый метод)
-func (b *TelegramBot) SendMessage(text string) error {
-	return b.messageSender.SendTextMessage(b.messageSender.GetChatID(), text, nil)
-}
-
 // SendTextMessage отправляет текстовое сообщение (для интерфейса TelegramBotClient)
 func (b *TelegramBot) SendTextMessage(chatID int64, text string, keyboard interface{}) error {
 	return b.messageSender.SendTextMessage(chatID, text, keyboard)
@@ -186,9 +238,61 @@ func (b *TelegramBot) GetConfig() *config.Config {
 	return b.config
 }
 
-// IsRunning проверяет работает ли бот (для интерфейса TelegramBotClient)
+// IsRunning проверяет работает ли бот
 func (b *TelegramBot) IsRunning() bool {
-	return b.pollingHandler != nil && b.pollingHandler.running
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	if b.currentMode == "polling" {
+		return b.pollingHandler != nil && b.pollingHandler.running
+	} else {
+		return b.webhookServer != nil
+	}
+}
+
+// IsPolling проверяет работает ли бот в polling режиме
+func (b *TelegramBot) IsPolling() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.currentMode == "polling" && b.pollingHandler != nil && b.pollingHandler.running
+}
+
+// IsWebhook проверяет работает ли бот в webhook режиме
+func (b *TelegramBot) IsWebhook() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.currentMode == "webhook" && b.webhookServer != nil
+}
+
+// GetCurrentMode возвращает текущий режим работы
+func (b *TelegramBot) GetCurrentMode() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.currentMode
+}
+
+// StartPolling запускает polling режим (для обратной совместимости с transport)
+func (b *TelegramBot) StartPolling() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.currentMode != "polling" {
+		return fmt.Errorf("бот работает в режиме %s, нельзя запустить polling", b.currentMode)
+	}
+
+	return b.startPolling()
+}
+
+// StopPolling останавливает polling режим (для обратной совместимости с transport)
+func (b *TelegramBot) StopPolling() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.currentMode != "polling" {
+		return nil // Если не polling режим, просто игнорируем
+	}
+
+	return b.stopPolling()
 }
 
 // Вспомогательные методы
@@ -233,19 +337,6 @@ func (b *TelegramBot) GetRouter() router.Router {
 // GetAuthMiddleware возвращает middleware аутентификации
 func (b *TelegramBot) GetAuthMiddleware() *middlewares.AuthMiddleware {
 	return b.authMiddleware
-}
-
-// Добавляю методы для polling:
-func (b *TelegramBot) StartPolling() error {
-	return b.pollingHandler.Start()
-}
-
-func (b *TelegramBot) StopPolling() error {
-	return b.pollingHandler.Stop()
-}
-
-func (b *TelegramBot) IsPolling() bool {
-	return b.pollingHandler != nil && b.pollingHandler.running
 }
 
 // SetMyCommands устанавливает меню команд в Telegram

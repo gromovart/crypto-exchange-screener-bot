@@ -137,6 +137,7 @@ func (lm *LayerManager) Start() error {
 	lm.running = true
 	lm.startTime = time.Now()
 	logger.Info("✅ LayerManager запущен, все слои запущены")
+
 	return nil
 }
 
@@ -293,4 +294,208 @@ func (lm *LayerManager) checkHealth() {
 	if len(unhealthy) > 0 {
 		logger.Warn("⚠️ Не здоровые слои: %v", unhealthy)
 	}
+}
+
+// GetDetailedStatus возвращает детализированный статус системы
+func (lm *LayerManager) GetDetailedStatus() map[string]interface{} {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	status := map[string]interface{}{
+		"initialized": lm.initialized,
+		"running":     lm.running,
+		"uptime":      time.Since(lm.startTime).String(),
+		"start_time":  lm.startTime.Format(time.RFC3339),
+		"environment": lm.config.Environment,
+		"version":     lm.config.Version,
+	}
+
+	if lm.layerRegistry == nil {
+		return status
+	}
+
+	// Получаем статус всех слоев
+	layersStatus := make(map[string]interface{})
+	healthCheck := make(map[string]bool)
+
+	for name, layer := range lm.layerRegistry.GetAll() {
+		layerStatus := layer.GetStatus()
+		layerInfo := map[string]interface{}{
+			"state":        layerStatus.State,
+			"is_healthy":   layerStatus.IsHealthy,
+			"initialized":  layerStatus.Initialized,
+			"running":      layerStatus.Running,
+			"uptime":       layerStatus.Uptime.String(),
+			"last_error":   layerStatus.LastError,
+			"dependencies": layerStatus.Dependencies,
+			"components":   layerStatus.Components,
+		}
+
+		// Добавляем дополнительную информацию для DeliveryLayer
+		if name == "DeliveryLayer" {
+			// Получаем TelegramDeliveryPackage если он есть
+			if component, exists := layer.GetComponent("TelegramDeliveryPackage"); exists {
+				// Пробуем получить статус через интерфейс
+				if pkg, ok := component.(interface{ GetHealthStatus() map[string]interface{} }); ok {
+					if pkgStatus := pkg.GetHealthStatus(); pkgStatus != nil {
+						layerInfo["telegram_package"] = pkgStatus
+
+						// Извлекаем информацию о транспорте
+						if transportType, ok := pkgStatus["transport_type"].(string); ok {
+							layerInfo["telegram_transport"] = transportType
+						}
+						if transportStatus, ok := pkgStatus["transport_status"].(string); ok {
+							layerInfo["telegram_transport_status"] = transportStatus
+						}
+						if telegramMode, ok := pkgStatus["telegram_mode"].(string); ok {
+							layerInfo["telegram_mode"] = telegramMode
+						}
+					}
+				}
+			}
+
+			// Пробуем получить транспорт напрямую
+			if component, exists := layer.GetComponent("TelegramBot"); exists {
+				if bot, ok := component.(interface{ IsPolling() bool }); ok {
+					layerInfo["telegram_polling"] = bot.IsPolling()
+				}
+			}
+		}
+
+		// Добавляем информацию для CoreLayer
+		if name == "CoreLayer" {
+			// Пробуем получить AnalysisEngine
+			if component, exists := layer.GetComponent("AnalysisEngine"); exists {
+				if engine, ok := component.(interface{ IsRunning() bool }); ok {
+					layerInfo["analysis_engine_running"] = engine.IsRunning()
+				}
+			}
+
+			// Пробуем получить BybitPriceFetcher
+			if component, exists := layer.GetComponent("BybitPriceFetcher"); exists {
+				if fetcher, ok := component.(interface{ IsRunning() bool }); ok {
+					layerInfo["price_fetcher_running"] = fetcher.IsRunning()
+				}
+			}
+		}
+
+		layersStatus[name] = layerInfo
+		healthCheck[name] = layerStatus.IsHealthy
+	}
+
+	status["layers"] = layersStatus
+	status["health"] = healthCheck
+
+	// Подсчитываем статистику
+	totalLayers := len(layersStatus)
+	healthyLayers := 0
+	runningLayers := 0
+
+	for _, layerInfo := range layersStatus {
+		if info, ok := layerInfo.(map[string]interface{}); ok {
+			if isHealthy, ok := info["is_healthy"].(bool); ok && isHealthy {
+				healthyLayers++
+			}
+			if isRunning, ok := info["running"].(bool); ok && isRunning {
+				runningLayers++
+			}
+		}
+	}
+
+	status["total_layers"] = totalLayers
+	status["healthy_layers"] = healthyLayers
+	status["running_layers"] = runningLayers
+	status["health_percentage"] = float64(healthyLayers) / float64(totalLayers) * 100
+
+	return status
+}
+
+// GetTransportInfo возвращает информацию о транспорте Telegram
+func (lm *LayerManager) GetTransportInfo() map[string]interface{} {
+	lm.mu.RLock()
+	defer lm.mu.RUnlock()
+
+	info := map[string]interface{}{
+		"telegram_enabled": false,
+		"mode":             "unknown",
+		"status":           "not_initialized",
+	}
+
+	if lm.layerRegistry == nil {
+		return info
+	}
+
+	// Получаем DeliveryLayer
+	deliveryLayer, exists := lm.layerRegistry.Get("DeliveryLayer")
+	if !exists {
+		return info
+	}
+
+	// Получаем TelegramDeliveryPackage
+	component, exists := deliveryLayer.GetComponent("TelegramDeliveryPackage")
+	if !exists {
+		return info
+	}
+
+	// Пробуем получить статус через интерфейс
+	if pkg, ok := component.(interface{ GetHealthStatus() map[string]interface{} }); ok {
+		if pkgStatus := pkg.GetHealthStatus(); pkgStatus != nil {
+			info["telegram_enabled"] = true
+
+			// Извлекаем информацию о транспорте
+			if transportType, ok := pkgStatus["transport_type"].(string); ok {
+				info["mode"] = transportType
+			}
+			if transportStatus, ok := pkgStatus["transport_status"].(string); ok {
+				info["status"] = transportStatus
+			}
+			if transportName, ok := pkgStatus["transport_name"].(string); ok {
+				info["transport_name"] = transportName
+			}
+			if telegramMode, ok := pkgStatus["telegram_mode"].(string); ok {
+				info["config_mode"] = telegramMode
+			}
+			if botStatus, ok := pkgStatus["bot_status"].(string); ok {
+				info["bot_status"] = botStatus
+			}
+
+			// Добавляем дополнительную информацию
+			info["services_count"] = pkgStatus["services_count"]
+			info["controllers_count"] = pkgStatus["controllers_count"]
+			info["initialized"] = pkgStatus["initialized"]
+			info["is_running"] = pkgStatus["is_running"]
+		}
+	}
+
+	return info
+}
+
+// GetTelegramStatus возвращает статус Telegram компонентов
+func (lm *LayerManager) GetTelegramStatus() map[string]interface{} {
+	transportInfo := lm.GetTransportInfo()
+
+	status := map[string]interface{}{
+		"transport": transportInfo,
+		"config": map[string]interface{}{
+			"telegram_enabled": lm.config.Telegram.Enabled,
+			"telegram_mode":    lm.config.TelegramMode,
+			"webhook_url":      lm.config.GetWebhookURL(),
+			"polling_timeout":  lm.config.Polling.Timeout,
+			"polling_retry":    lm.config.Polling.RetryInterval,
+		},
+	}
+
+	// Добавляем информацию о вебхуке если используется webhook режим
+	if lm.config.IsWebhookMode() {
+		status["webhook"] = map[string]interface{}{
+			"domain":       lm.config.Webhook.Domain,
+			"port":         lm.config.Webhook.Port,
+			"path":         lm.config.Webhook.Path,
+			"use_tls":      lm.config.Webhook.UseTLS,
+			"has_tls_cert": lm.config.Webhook.TLSCertPath != "",
+			"has_tls_key":  lm.config.Webhook.TLSKeyPath != "",
+		}
+	}
+
+	return status
 }
