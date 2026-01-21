@@ -663,7 +663,7 @@ set -e
 
 INSTALL_DIR="/opt/crypto-screener-bot"
 CERT_DIR="/etc/crypto-bot/certs"
-DOMAIN="bot.gromovart.ru"
+DOMAIN="${WEBHOOK_DOMAIN}"
 IP="95.142.40.244"
 
 echo "🔍 Проверка существующих SSL сертификатов..."
@@ -704,13 +704,13 @@ if [ -f "cert.pem" ] && [ -f "key.pem" ]; then
             echo "   ✅ Subject: ${SUBJECT}"
 
             # Проверяем содержит ли сертификат нужный домен
-            if echo "${SUBJECT}" | grep -q "bot.gromovart.ru" || \
-               openssl x509 -in cert.pem -noout -text 2>/dev/null | grep -q "bot.gromovart.ru"; then
-                echo "   ✅ Сертификат содержит домен: bot.gromovart.ru"
+            if echo "${SUBJECT}" | grep -q "${DOMAIN}" || \
+               openssl x509 -in cert.pem -noout -text 2>/dev/null | grep -q "${DOMAIN}"; then
+                echo "   ✅ Сертификат содержит домен: ${DOMAIN}"
                 CERT_VALID=true
                 CERT_INFO="Сертификат валиден и содержит нужный домен"
             else
-                echo "   ⚠️  Сертификат не содержит домен bot.gromovart.ru"
+                echo "   ⚠️  Сертификат не содержит домен ${DOMAIN}"
                 echo "   Текущий Subject: ${SUBJECT}"
             fi
         else
@@ -751,7 +751,7 @@ if [ "$CERT_EXISTS" = true ]; then
     rm -f cert.pem key.pem cert.cnf 2>/dev/null || true
 fi
 
-# Генерация самоподписанного сертификата для домена bot.gromovart.ru
+# Генерация самоподписанного сертификата для домена
 echo "📝 Генерация новых самоподписанных сертификатов..."
 echo "   Домен: ${DOMAIN}"
 echo "   IP: ${IP}"
@@ -770,7 +770,7 @@ C = RU
 ST = Moscow
 L = Moscow
 O = CryptoBot
-CN = bot.gromovart.ru
+CN = ${DOMAIN}
 
 [v3_req]
 keyUsage = keyEncipherment, dataEncipherment
@@ -778,8 +778,8 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = bot.gromovart.ru
-IP.1 = 95.142.40.244
+DNS.1 = ${DOMAIN}
+IP.1 = ${IP}
 CONFIG
 
 # Генерируем сертификат с конфигом
@@ -808,8 +808,8 @@ echo "✅ Новые самоподписанные сертификаты со�
 echo "   cert.pem: $(stat -c%s cert.pem) bytes"
 echo "   key.pem: $(stat -c%s key.pem) bytes"
 echo "   Срок действия: 365 дней"
-echo "   Subject: CN=bot.gromovart.ru"
-echo "   SAN: DNS:bot.gromovart.ru, IP:95.142.40.244"
+echo "   Subject: CN=${DOMAIN}"
+echo "   SAN: DNS:${DOMAIN}, IP:${IP}"
 
 # Проверяем новый сертификат
 echo "🔍 Проверка нового сертификата:"
@@ -840,6 +840,99 @@ fi
 EOF
 
     log_info "SSL сертификаты проверены и настроены для домена ${WEBHOOK_DOMAIN}"
+}
+
+# НОВАЯ ФУНКЦИЯ: Настройка Let's Encrypt сертификатов
+setup_letsencrypt_certificates() {
+    log_step "Проверка и настройка Let's Encrypt сертификатов..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/opt/crypto-screener-bot"
+DOMAIN="${WEBHOOK_DOMAIN}"
+
+echo "🔍 Проверка Let's Encrypt сертификатов для домена: \${DOMAIN}"
+
+# Проверяем наличие Let's Encrypt сертификатов
+if [ -d "/etc/letsencrypt/live/\${DOMAIN}" ]; then
+    echo "✅ Let's Encrypt сертификаты найдены"
+
+    # Создаем директорию для копий сертификатов с правильными правами
+    mkdir -p "\${INSTALL_DIR}/ssl"
+
+    # Копируем сертификаты
+    echo "📋 Копирование Let's Encrypt сертификатов..."
+    cp "/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem" "\${INSTALL_DIR}/ssl/fullchain.pem"
+    cp "/etc/letsencrypt/live/\${DOMAIN}/privkey.pem" "\${INSTALL_DIR}/ssl/privkey.pem"
+
+    # Настраиваем правильные права
+    echo "🔐 Настройка прав доступа..."
+    chmod 644 "\${INSTALL_DIR}/ssl/fullchain.pem"
+    chmod 600 "\${INSTALL_DIR}/ssl/privkey.pem"
+    chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}/ssl"
+
+    # Проверяем что копирование прошло успешно
+    if [ -f "\${INSTALL_DIR}/ssl/fullchain.pem" ] && [ -f "\${INSTALL_DIR}/ssl/privkey.pem" ]; then
+        echo "✅ Let's Encrypt сертификаты скопированы в \${INSTALL_DIR}/ssl/"
+        echo "   fullchain.pem: \$(stat -c%s "\${INSTALL_DIR}/ssl/fullchain.pem") bytes"
+        echo "   privkey.pem: \$(stat -c%s "\${INSTALL_DIR}/ssl/privkey.pem") bytes"
+
+        # Проверяем валидность сертификата
+        echo "🔍 Проверка валидности сертификата..."
+        if openssl x509 -in "\${INSTALL_DIR}/ssl/fullchain.pem" -noout -checkend 86400 >/dev/null 2>&1; then
+            echo "✅ Сертификат действителен как минимум на 24 часа"
+            NOT_AFTER=\$(openssl x509 -in "\${INSTALL_DIR}/ssl/fullchain.pem" -noout -enddate | cut -d= -f2)
+            echo "   Срок действия: \${NOT_AFTER}"
+        else
+            echo "⚠️  Сертификат скоро истекает или недействителен"
+        fi
+    else
+        echo "❌ Ошибка копирования сертификатов"
+    fi
+else
+    echo "⚠️  Let's Encrypt сертификаты не найдены"
+    echo "   Путь: /etc/letsencrypt/live/\${DOMAIN}/"
+    echo "   Будут использованы самоподписанные сертификаты"
+fi
+EOF
+
+    log_info "Let's Encrypt сертификаты проверены и настроены (если доступны)"
+}
+
+# НОВАЯ ФУНКЦИЯ: Обновление конфигурации для использования Let's Encrypt
+update_config_for_letsencrypt() {
+    log_step "Обновление конфигурации для Let's Encrypt..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+INSTALL_DIR="/opt/crypto-screener-bot"
+DOMAIN="${WEBHOOK_DOMAIN}"
+
+echo "🔄 Обновление конфигурации для Let's Encrypt..."
+
+# Проверяем наличие скопированных Let's Encrypt сертификатов
+if [ -f "\${INSTALL_DIR}/ssl/fullchain.pem" ] && [ -f "\${INSTALL_DIR}/ssl/privkey.pem" ]; then
+    echo "✅ Найдены Let's Encrypt сертификаты, обновляю конфиг..."
+
+    # Обновляем пути в конфиге
+    sed -i "s|^WEBHOOK_TLS_CERT_PATH=.*|WEBHOOK_TLS_CERT_PATH=\${INSTALL_DIR}/ssl/fullchain.pem|" "\${INSTALL_DIR}/.env"
+    sed -i "s|^WEBHOOK_TLS_KEY_PATH=.*|WEBHOOK_TLS_KEY_PATH=\${INSTALL_DIR}/ssl/privkey.pem|" "\${INSTALL_DIR}/.env"
+
+    echo "✅ Конфиг обновлен для Let's Encrypt"
+    echo "   WEBHOOK_TLS_CERT_PATH=\${INSTALL_DIR}/ssl/fullchain.pem"
+    echo "   WEBHOOK_TLS_KEY_PATH=\${INSTALL_DIR}/ssl/privkey.pem"
+else
+    echo "⚠️  Let's Encrypt сертификаты не найдены, оставляю текущую конфигурацию"
+    echo "   WEBHOOK_TLS_CERT_PATH: \$(grep '^WEBHOOK_TLS_CERT_PATH=' "\${INSTALL_DIR}/.env" | cut -d= -f2 || echo 'не настроен')"
+    echo "   WEBHOOK_TLS_KEY_PATH: \$(grep '^WEBHOOK_TLS_KEY_PATH=' "\${INSTALL_DIR}/.env" | cut -d= -f2 || echo 'не настроен')"
+fi
+EOF
+
+    log_info "Конфигурация обновлена"
 }
 
 # Настройка брандмауэра с поддержкой webhook портов
@@ -915,7 +1008,7 @@ fi
 echo "Создание структуры директорий..."
 mkdir -p "\${INSTALL_DIR}"
 mkdir -p "\${INSTALL_DIR}/bin"
-mkdir -p "\${INSTALL_DIR}/certs"
+mkdir -p "\${INSTALL_DIR}/ssl"  # НОВАЯ ДИРЕКТОРИЯ ДЛЯ SSL
 mkdir -p "\${INSTALL_DIR}/logs"
 mkdir -p "/var/log/\${APP_NAME}"
 
@@ -924,12 +1017,12 @@ chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}"
 chown -R cryptoapp:cryptoapp "/var/log/\${APP_NAME}"
 chmod 755 "\${INSTALL_DIR}"
 chmod 755 "/var/log/\${APP_NAME}"
-chmod 700 "\${INSTALL_DIR}/certs"
+chmod 700 "\${INSTALL_DIR}/ssl"  # Строгие права для SSL
 
 echo "✅ Структура директорий создана:"
 echo "   \${INSTALL_DIR}/"
 echo "   ├── bin/"
-echo "   ├── certs/"
+echo "   ├── ssl/"  # ОБНОВЛЕНО
 echo "   ├── logs/"
 echo "   /var/log/\${APP_NAME}/"
 EOF
@@ -977,7 +1070,7 @@ EOF
     log_info "Система логирования настроена"
 }
 
-# Копирование исходного кода - ИСПРАВЛЕННАЯ ФУНКЦИЯ
+# Копирование исходного кода
 copy_source_code() {
     log_step "Копирование исходного кода приложения..."
 
@@ -1001,7 +1094,7 @@ copy_source_code() {
         exit 1
     fi
 
-    # Создание архива с исходным кодом (сохраняем всю структуру)
+    # Создание архива с исходным кодом
     log_info "Создание архива с исходным кодом..."
     tar -czf /tmp/app_source.tar.gz \
         --exclude=.git \
@@ -1020,7 +1113,7 @@ copy_source_code() {
     log_info "Копирование архива на сервер..."
     scp -i "${SSH_KEY}" /tmp/app_source.tar.gz "${SERVER_USER}@${SERVER_IP}:/tmp/app_source.tar.gz"
 
-    # Распаковка на сервере - ИСПРАВЛЕННЫЙ БЛОК
+    # Распаковка на сервере
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
 set -e
@@ -1036,6 +1129,7 @@ tar -xzf /tmp/app_source.tar.gz -C "${INSTALL_DIR}"
 # Создаем необходимые директории если их нет
 echo "2. Создание необходимых директорий..."
 mkdir -p "${INSTALL_DIR}/bin"
+mkdir -p "${INSTALL_DIR}/ssl"
 mkdir -p "${INSTALL_DIR}/logs"
 mkdir -p "${INSTALL_DIR}/configs/prod" 2>/dev/null || true
 
@@ -1044,6 +1138,7 @@ echo "3. Настройка прав доступа..."
 chown -R cryptoapp:cryptoapp "${INSTALL_DIR}"
 chmod 755 "${INSTALL_DIR}"
 chmod 755 "${INSTALL_DIR}/bin"
+chmod 700 "${INSTALL_DIR}/ssl"
 
 # Очистка временных файлов
 echo "4. Очистка временных файлов..."
@@ -1214,19 +1309,6 @@ if [ -f "/tmp/prod.env" ]; then
         echo "   Добавлен WEBHOOK_USE_TLS=${WEBHOOK_USE_TLS}"
     fi
 
-    # Добавляем пути к сертификатам если используется TLS
-    if [ "${WEBHOOK_USE_TLS}" = "true" ]; then
-        if ! grep -q "^WEBHOOK_TLS_CERT_PATH=" "\${INSTALL_DIR}/.env"; then
-            echo "WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem" >> "\${INSTALL_DIR}/.env"
-            echo "   Добавлен WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem"
-        fi
-
-        if ! grep -q "^WEBHOOK_TLS_KEY_PATH=" "\${INSTALL_DIR}/.env"; then
-            echo "WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem" >> "\${INSTALL_DIR}/.env"
-            echo "   Добавлен WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem"
-        fi
-    fi
-
     # Генерируем секретный токен если его нет
     if ! grep -q "^WEBHOOK_SECRET_TOKEN=" "\${INSTALL_DIR}/.env" || [ -z "\$(grep '^WEBHOOK_SECRET_TOKEN=' "\${INSTALL_DIR}/.env" | cut -d= -f2)" ]; then
         SECRET_TOKEN=\$(openssl rand -hex 16)
@@ -1303,8 +1385,8 @@ WEBHOOK_DOMAIN=${WEBHOOK_DOMAIN}
 WEBHOOK_PORT=${WEBHOOK_PORT}
 WEBHOOK_PATH=/webhook
 WEBHOOK_USE_TLS=${WEBHOOK_USE_TLS}
-WEBHOOK_TLS_CERT_PATH=/etc/crypto-bot/certs/cert.pem
-WEBHOOK_TLS_KEY_PATH=/etc/crypto-bot/certs/key.pem
+WEBHOOK_TLS_CERT_PATH=/opt/crypto-screener-bot/ssl/fullchain.pem
+WEBHOOK_TLS_KEY_PATH=/opt/crypto-screener-bot/ssl/privkey.pem
 WEBHOOK_SECRET_TOKEN=\${SECRET_TOKEN}
 WEBHOOK_MAX_BODY_SIZE=1048576
 
@@ -1345,7 +1427,7 @@ EOF
     log_info "Конфигурация настроена с webhook поддержкой"
 }
 
-# Настройка systemd сервиса - ИСПРАВЛЕННЫЙ БЛОК
+# Настройка systemd сервиса - ОБНОВЛЕНА: для доступа к SSL директории
 setup_systemd_service() {
     log_step "Настройка systemd сервиса..."
 
@@ -1421,7 +1503,7 @@ LimitNPROC=65536
 # Сетевая изоляция
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=${INSTALL_DIR} /var/log/${APP_NAME} /etc/crypto-bot/certs
+ReadWritePaths=${INSTALL_DIR} /var/log/${APP_NAME} /opt/crypto-screener-bot/ssl
 NoNewPrivileges=true
 
 # Настройки для webhook режима
@@ -1567,8 +1649,7 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
             else
                 echo "   ⚠️  Сертификаты не найдены по указанным путям"
                 echo "   Проверьте настройки или создайте сертификаты:"
-                echo "   /etc/crypto-bot/certs/cert.pem"
-                echo "   /etc/crypto-bot/certs/key.pem"
+                echo "   /opt/crypto-screener-bot/ssl/"
             fi
         fi
 
@@ -1664,7 +1745,6 @@ echo "ℹ️  Для настройки webhook в Telegram выполните:"
 echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook' \\"
 echo "     -H 'Content-Type: application/json' \\"
 echo "     -d '{\"url\": \"https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}/webhook\","
-echo "          \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
 echo "          \"secret_token\": \"${SECRET_TOKEN}\"}'"
 EOF
 
@@ -1803,13 +1883,13 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
     # Проверка сертификатов
     echo "   Проверка сертификатов:"
 
-    # Получаем пути из конфига или используем значения по умолчанию
-    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null)
-    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null)
+    # Получаем пути из конфига
+    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "")
+    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "")
 
-    # Если пути не найдены в конфиге, используем значения по умолчанию
-    CERT_PATH=${CERT_PATH:-"/etc/crypto-bot/certs/cert.pem"}
-    KEY_PATH=${KEY_PATH:-"/etc/crypto-bot/certs/key.pem"}
+    # Если пути не указаны, используем дефолтные
+    CERT_PATH=${CERT_PATH:-"/opt/crypto-screener-bot/ssl/fullchain.pem"}
+    KEY_PATH=${KEY_PATH:-"/opt/crypto-screener-bot/ssl/privkey.pem"}
 
     echo "   Путь к сертификату: ${CERT_PATH}"
     echo "   Путь к ключу: ${KEY_PATH}"
@@ -1820,17 +1900,15 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
         echo "      Срок действия: $(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "неизвестно")"
 
         # Проверяем домен в сертификате
-        if openssl x509 -in "${CERT_PATH}" -noout -text 2>/dev/null | grep -q "bot.gromovart.ru"; then
-            echo "      ✅ Содержит домен: bot.gromovart.ru"
+        if openssl x509 -in "${CERT_PATH}" -noout -text 2>/dev/null | grep -q "${WEBHOOK_DOMAIN}"; then
+            echo "      ✅ Содержит домен: ${WEBHOOK_DOMAIN}"
         else
-            echo "      ⚠️  Не содержит домен bot.gromovart.ru"
+            echo "      ⚠️  Не содержит домен ${WEBHOOK_DOMAIN}"
             echo "      Информация о Subject:"
             openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/^/         /'
         fi
     else
         echo "   ❌ Сертификат не найден: ${CERT_PATH}"
-        echo "   Поиск сертификатов в системе..."
-        find /etc /opt -name "*.pem" -type f 2>/dev/null | grep -i "cert\|key" | head -10
     fi
 
     if [ -f "${KEY_PATH}" ]; then
@@ -1858,12 +1936,7 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
     echo "     -H 'Content-Type: application/json' \\"
     echo "     -d '{"
     echo "       \"url\": \"https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}/webhook\","
-    if [ -f "/etc/crypto-bot/certs/cert.pem" ]; then
-        echo "       \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
-    fi
-    if [ -n "${SECRET_TOKEN}" ]; then
-        echo "       \"secret_token\": \"${SECRET_TOKEN}\""
-    fi
+    echo "       \"secret_token\": \"${SECRET_TOKEN}\""
     echo "     }'"
     echo ""
     echo "   Для проверки webhook:"
@@ -1903,7 +1976,9 @@ main() {
     install_dependencies
     setup_postgresql
     setup_redis
-    setup_ssl_certificates  # ОБНОВЛЕНО: с проверкой наличия сертификатов
+    setup_ssl_certificates
+    setup_letsencrypt_certificates      # НОВАЯ ФУНКЦИЯ
+    update_config_for_letsencrypt      # НОВАЯ ФУНКЦИЯ
     setup_firewall
     create_directory_structure
     setup_logging

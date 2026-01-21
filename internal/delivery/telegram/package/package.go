@@ -319,10 +319,10 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 }
 
 // subscribeControllersToEventBus подписывает контроллеры на события
-func (p *TelegramDeliveryPackage) subscribeControllersToEventBus() {
+func (p *TelegramDeliveryPackage) subscribeControllersToEventBus() int {
 	if p.eventBus == nil {
 		logger.Warn("⚠️ EventBus не установлен, пропускаю подписку контроллеров")
-		return
+		return 0
 	}
 
 	subscribedCount := 0
@@ -334,7 +334,11 @@ func (p *TelegramDeliveryPackage) subscribeControllersToEventBus() {
 		}
 	}
 
-	logger.Info("🎛️  Подписано %d контроллеров на EventBus", subscribedCount)
+	if subscribedCount > 0 {
+		logger.Info("🎛️  Подписано %d контроллеров на EventBus", subscribedCount)
+	}
+
+	return subscribedCount
 }
 
 // Start запускает Telegram бота через транспорт
@@ -353,6 +357,30 @@ func (p *TelegramDeliveryPackage) Start() error {
 	logger.Info("🚀 Запуск Telegram бота (режим: %s, транспорт: %s)...",
 		p.config.TelegramMode, p.transport.Name())
 
+	// 🔴 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+	// В вебхук-режиме нужно убедиться что контроллеры подписаны на EventBus
+	// Polling режим сохраняет состояние в одном процессе, а вебхук может его терять
+	if p.config.IsWebhookMode() {
+		logger.Info("🔗 Вебхук-режим: проверка подписки контроллеров на EventBus...")
+
+		if p.eventBus == nil {
+			logger.Error("❌ EventBus не установлен в вебхук-режиме - уведомления о сигналах не будут работать!")
+			// Не возвращаем ошибку, чтобы бот продолжал работать с командами
+			// Но логируем критическое предупреждение
+		} else {
+			// Переподписываем контроллеры на EventBus
+			subscribedCount := p.subscribeControllersToEventBus()
+			if subscribedCount == 0 {
+				logger.Warn("⚠️ Ни один контроллер не был подписан в вебхук-режиме")
+			} else {
+				logger.Info("✅ %d контроллеров подписано на EventBus (вебхук)", subscribedCount)
+			}
+		}
+	} else {
+		// В polling режиме подписки уже выполнены при инициализации
+		logger.Debug("🔗 Polling-режим: подписки контроллеров уже установлены при инициализации")
+	}
+
 	// Запускаем через транспорт
 	if err := p.transport.Start(); err != nil {
 		return fmt.Errorf("ошибка запуска транспорта %s: %w", p.transport.Name(), err)
@@ -360,7 +388,37 @@ func (p *TelegramDeliveryPackage) Start() error {
 
 	p.isRunning = true
 	logger.Info("✅ Telegram бот запущен через %s", p.transport.Name())
+
+	// 🔴 ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Логируем информацию о контроллерах
+	p.logControllerInfo()
+
 	return nil
+}
+
+// 🔴 НОВЫЙ МЕТОД: logControllerInfo логирует информацию о контроллерах
+func (p *TelegramDeliveryPackage) logControllerInfo() {
+	if len(p.controllers) == 0 {
+		logger.Warn("⚠️ TelegramDeliveryPackage: контроллеры не созданы")
+		return
+	}
+
+	logger.Info("🎛️  Информация о контроллерах Telegram:")
+	for name, ctrl := range p.controllers {
+		events := ctrl.GetSubscribedEvents()
+		if len(events) > 0 {
+			logger.Info("   • %s: подписан на %v", name, events)
+
+			// Проверяем подписку на EventBus
+			for _, eventType := range events {
+				if p.eventBus != nil {
+					subscriberCount := p.eventBus.GetSubscriberCount(eventType)
+					logger.Debug("     - %s: %d подписчиков в EventBus", eventType, subscriberCount)
+				}
+			}
+		} else {
+			logger.Info("   • %s: нет подписок на события", name)
+		}
+	}
 }
 
 // Stop останавливает Telegram бота через транспорт
