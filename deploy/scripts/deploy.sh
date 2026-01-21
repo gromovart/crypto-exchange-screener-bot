@@ -37,7 +37,7 @@ REDIS_PASSWORD=""  # Добавляем переменную для пароля
 REDIS_ENABLED="true"  # Добавляем флаг включения Redis
 
 # Webhook параметры по умолчанию
-WEBHOOK_DOMAIN="95.142.40.244"
+WEBHOOK_DOMAIN="bot.gromovart.ru"
 WEBHOOK_PORT="8443"
 WEBHOOK_USE_TLS="true"
 WEBHOOK_SECRET_TOKEN=""
@@ -368,7 +368,7 @@ find_project_root() {
     done
 
     log_error "Не удалось найти корневую директорию проекта"
-    log_info "Запустите скрипт из директории проекта или укажите правильный путь"
+    log_info "Запустите скрипт из директории проекта или укажите правильный пути"
     return 1
 }
 
@@ -653,9 +653,9 @@ EOF
     log_info "Redis настроен"
 }
 
-# Настройка SSL сертификатов для webhook
+# Настройка SSL сертификатов для webhook - ОБНОВЛЕНА: с проверкой наличия
 setup_ssl_certificates() {
-    log_step "Настройка SSL сертификатов для webhook..."
+    log_step "Проверка и настройка SSL сертификатов для webhook (домен: ${WEBHOOK_DOMAIN})..."
 
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
 #!/bin/bash
@@ -663,52 +663,159 @@ set -e
 
 INSTALL_DIR="/opt/crypto-screener-bot"
 CERT_DIR="/etc/crypto-bot/certs"
+DOMAIN="bot.gromovart.ru"
+IP="95.142.40.244"
 
-echo "Создание самоподписанных SSL сертификатов для webhook..."
+echo "🔍 Проверка существующих SSL сертификатов..."
+echo "Домен: ${DOMAIN}"
+echo "IP сервера: ${IP}"
 
-# Создаем директорию для сертификатов
+# Создаем директорию для сертификатов если ее нет
 mkdir -p "${CERT_DIR}"
 cd "${CERT_DIR}"
 
-# Проверяем, существуют ли уже сертификаты
+CERT_EXISTS=false
+CERT_VALID=false
+CERT_INFO=""
+
+# Проверяем существование сертификатов
 if [ -f "cert.pem" ] && [ -f "key.pem" ]; then
-    echo "✅ Сертификаты уже существуют"
+    CERT_EXISTS=true
+    echo "✅ Сертификаты найдены:"
     echo "   cert.pem: $(stat -c%s cert.pem) bytes, создан: $(stat -c%y cert.pem)"
     echo "   key.pem: $(stat -c%s key.pem) bytes, создан: $(stat -c%y key.pem)"
 
-    # Проверяем срок действия
-    openssl x509 -in cert.pem -noout -enddate 2>/dev/null | cut -d= -f2
+    # Проверяем валидность сертификата
+    if openssl x509 -in cert.pem -noout -text 2>/dev/null > /dev/null; then
+        echo "   ✅ Сертификат валиден по формату"
+
+        # Проверяем срок действия
+        NOT_AFTER=$(openssl x509 -in cert.pem -noout -enddate 2>/dev/null | cut -d= -f2)
+        NOT_BEFORE=$(openssl x509 -in cert.pem -noout -startdate 2>/dev/null | cut -d= -f2)
+
+        CURRENT_TIME=$(date +%s)
+        NOT_AFTER_TIME=$(date -d "${NOT_AFTER}" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "${NOT_AFTER}" +%s 2>/dev/null || echo 0)
+
+        if [ ${NOT_AFTER_TIME} -gt ${CURRENT_TIME} ]; then
+            echo "   ✅ Сертификат действителен (до: ${NOT_AFTER})"
+
+            # Проверяем Subject и SAN
+            SUBJECT=$(openssl x509 -in cert.pem -noout -subject 2>/dev/null | sed 's/^subject=//')
+            echo "   ✅ Subject: ${SUBJECT}"
+
+            # Проверяем содержит ли сертификат нужный домен
+            if echo "${SUBJECT}" | grep -q "bot.gromovart.ru" || \
+               openssl x509 -in cert.pem -noout -text 2>/dev/null | grep -q "bot.gromovart.ru"; then
+                echo "   ✅ Сертификат содержит домен: bot.gromovart.ru"
+                CERT_VALID=true
+                CERT_INFO="Сертификат валиден и содержит нужный домен"
+            else
+                echo "   ⚠️  Сертификат не содержит домен bot.gromovart.ru"
+                echo "   Текущий Subject: ${SUBJECT}"
+            fi
+        else
+            echo "   ⚠️  Сертификат просрочен (истек: ${NOT_AFTER})"
+        fi
+    else
+        echo "   ⚠️  Сертификат невалиден по формату"
+    fi
+else
+    echo "   ⚠️  Сертификаты не найдены"
+fi
+
+# Если сертификаты валидны - пропускаем создание
+if [ "$CERT_VALID" = true ]; then
+    echo ""
+    echo "✅ Действительные сертификаты уже существуют"
+    echo "   Пропускаем создание новых"
+
+    # Создаем симлинки для обратной совместимости
+    mkdir -p "${INSTALL_DIR}/certs"
+    ln -sf "${CERT_DIR}/cert.pem" "${INSTALL_DIR}/certs/cert.pem" 2>/dev/null || true
+    ln -sf "${CERT_DIR}/key.pem" "${INSTALL_DIR}/certs/key.pem" 2>/dev/null || true
+
+    chown -R cryptoapp:cryptoapp "${INSTALL_DIR}/certs" 2>/dev/null || true
+    chown -R cryptoapp:cryptoapp "${CERT_DIR}" 2>/dev/null || chown -R root:root "${CERT_DIR}"
+
+    echo "✅ Существующие сертификаты настроены"
     exit 0
 fi
 
-# Генерация самоподписанного сертификата для IP 95.142.40.244
-echo "Генерация нового самоподписанного сертификата..."
+# Если сертификаты невалидны или отсутствуют - создаем новые
+echo ""
+echo "🔄 Сертификаты не найдены или невалидны, создаем новые..."
+
+# Удаляем старые невалидные сертификаты
+if [ "$CERT_EXISTS" = true ]; then
+    echo "   Удаление старых невалидных сертификатов..."
+    rm -f cert.pem key.pem cert.cnf 2>/dev/null || true
+fi
+
+# Генерация самоподписанного сертификата для домена bot.gromovart.ru
+echo "📝 Генерация новых самоподписанных сертификатов..."
+echo "   Домен: ${DOMAIN}"
+echo "   IP: ${IP}"
+
+# Создаем конфиг для сертификата с Subject Alternative Names
+cat > "${CERT_DIR}/cert.cnf" << 'CONFIG'
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+x509_extensions = v3_req
+distinguished_name = dn
+
+[dn]
+C = RU
+ST = Moscow
+L = Moscow
+O = CryptoBot
+CN = bot.gromovart.ru
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = bot.gromovart.ru
+IP.1 = 95.142.40.244
+CONFIG
+
+# Генерируем сертификат с конфигом
+echo "   Генерация ключа и сертификата..."
 openssl req -x509 -newkey rsa:2048 \
     -keyout key.pem \
     -out cert.pem \
     -days 365 \
     -nodes \
-    -subj "/C=RU/ST=Moscow/L=Moscow/O=CryptoBot/CN=95.142.40.244" \
-    -addext "subjectAltName = IP:95.142.40.244"
+    -config "${CERT_DIR}/cert.cnf"
 
 if [ $? -ne 0 ]; then
     echo "❌ Ошибка генерации сертификатов"
+    rm -f "${CERT_DIR}/cert.cnf" 2>/dev/null || true
     exit 1
 fi
+
+# Очищаем временный файл
+rm -f "${CERT_DIR}/cert.cnf"
 
 # Устанавливаем права
 chmod 600 key.pem cert.pem
 chown -R cryptoapp:cryptoapp "${CERT_DIR}" 2>/dev/null || chown -R root:root "${CERT_DIR}"
 
-echo "✅ Самоподписанные сертификаты созданы:"
+echo "✅ Новые самоподписанные сертификаты созданы:"
 echo "   cert.pem: $(stat -c%s cert.pem) bytes"
 echo "   key.pem: $(stat -c%s key.pem) bytes"
 echo "   Срок действия: 365 дней"
-echo "   Subject: CN=95.142.40.244"
+echo "   Subject: CN=bot.gromovart.ru"
+echo "   SAN: DNS:bot.gromovart.ru, IP:95.142.40.244"
 
-# Показываем информацию о сертификате
-echo "Информация о сертификате:"
+# Проверяем новый сертификат
+echo "🔍 Проверка нового сертификата:"
 openssl x509 -in cert.pem -noout -subject -dates 2>/dev/null | sed 's/^/   /'
+echo "   SAN:"
+openssl x509 -in cert.pem -noout -text 2>/dev/null | grep -A1 "Subject Alternative Name" | sed 's/^/   /' || echo "   Не удалось получить SAN"
 
 # Создаем симлинки в директории приложения для удобства
 mkdir -p "${INSTALL_DIR}/certs"
@@ -722,9 +829,17 @@ echo "   ${CERT_DIR}/cert.pem"
 echo "   ${CERT_DIR}/key.pem"
 echo "   ${INSTALL_DIR}/certs/cert.pem (симлинк)"
 echo "   ${INSTALL_DIR}/certs/key.pem (симлинк)"
+
+# Проверяем что сертификаты работают
+echo "🔍 Финальная проверка сертификатов:"
+if openssl x509 -in cert.pem -noout -checkend 86400 2>/dev/null; then
+    echo "   ✅ Сертификат действителен как минимум на 24 часа"
+else
+    echo "   ⚠️  Сертификат скоро истекает или недействителен"
+fi
 EOF
 
-    log_info "SSL сертификаты созданы"
+    log_info "SSL сертификаты проверены и настроены для домена ${WEBHOOK_DOMAIN}"
 }
 
 # Настройка брандмауэра с поддержкой webhook портов
@@ -844,7 +959,7 @@ cat > /etc/logrotate.d/\${APP_NAME} << 'LOGROTATE'
     create 0644 cryptoapp cryptoapp
     sharedscripts
     postrotate
-        systemctl reload ${SERVICE_NAME}.service > /dev/null 2>&1 || true
+        systemctl reload ${SERVICE_NAME}.service > /dev/null 2>/dev/null || true
     endscript
 }
 LOGROTATE
@@ -1548,7 +1663,7 @@ echo ""
 echo "ℹ️  Для настройки webhook в Telegram выполните:"
 echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook' \\"
 echo "     -H 'Content-Type: application/json' \\"
-echo "     -d '{\"url\": \"https://95.142.40.244:${WEBHOOK_PORT}/webhook\","
+echo "     -d '{\"url\": \"https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}/webhook\","
 echo "          \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
 echo "          \"secret_token\": \"${SECRET_TOKEN}\"}'"
 EOF
@@ -1687,19 +1802,40 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
 
     # Проверка сертификатов
     echo "   Проверка сертификатов:"
-    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "/etc/crypto-bot/certs/cert.pem")
-    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "/etc/crypto-bot/certs/key.pem")
+
+    # Получаем пути из конфига или используем значения по умолчанию
+    CERT_PATH=$(grep "^WEBHOOK_TLS_CERT_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null)
+    KEY_PATH=$(grep "^WEBHOOK_TLS_KEY_PATH=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null)
+
+    # Если пути не найдены в конфиге, используем значения по умолчанию
+    CERT_PATH=${CERT_PATH:-"/etc/crypto-bot/certs/cert.pem"}
+    KEY_PATH=${KEY_PATH:-"/etc/crypto-bot/certs/key.pem"}
+
+    echo "   Путь к сертификату: ${CERT_PATH}"
+    echo "   Путь к ключу: ${KEY_PATH}"
 
     if [ -f "${CERT_PATH}" ]; then
         echo "   ✅ Сертификат найден: ${CERT_PATH}"
-        echo "      Размер: $(stat -c%s "${CERT_PATH}") bytes"
+        echo "      Размер: $(stat -c%s "${CERT_PATH}" 2>/dev/null || echo "неизвестно") bytes"
+        echo "      Срок действия: $(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "неизвестно")"
+
+        # Проверяем домен в сертификате
+        if openssl x509 -in "${CERT_PATH}" -noout -text 2>/dev/null | grep -q "bot.gromovart.ru"; then
+            echo "      ✅ Содержит домен: bot.gromovart.ru"
+        else
+            echo "      ⚠️  Не содержит домен bot.gromovart.ru"
+            echo "      Информация о Subject:"
+            openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/^/         /'
+        fi
     else
         echo "   ❌ Сертификат не найден: ${CERT_PATH}"
+        echo "   Поиск сертификатов в системе..."
+        find /etc /opt -name "*.pem" -type f 2>/dev/null | grep -i "cert\|key" | head -10
     fi
 
     if [ -f "${KEY_PATH}" ]; then
         echo "   ✅ Ключ найден: ${KEY_PATH}"
-        echo "      Размер: $(stat -c%s "${KEY_PATH}") bytes"
+        echo "      Размер: $(stat -c%s "${KEY_PATH}" 2>/dev/null || echo "неизвестно") bytes"
     else
         echo "   ❌ Ключ не найден: ${KEY_PATH}"
     fi
@@ -1714,13 +1850,14 @@ echo ""
 if [ -f "${INSTALL_DIR}/.env" ]; then
     SECRET_TOKEN=$(grep "^WEBHOOK_SECRET_TOKEN=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "")
     WEBHOOK_PORT=$(grep "^WEBHOOK_PORT=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "8443")
+    WEBHOOK_DOMAIN=$(grep "^WEBHOOK_DOMAIN=" "${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "bot.gromovart.ru")
 
     echo "   Выполните команду для настройки webhook в Telegram API:"
     echo ""
     echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook' \\"
     echo "     -H 'Content-Type: application/json' \\"
     echo "     -d '{"
-    echo "       \"url\": \"https://95.142.40.244:${WEBHOOK_PORT}/webhook\","
+    echo "       \"url\": \"https://${WEBHOOK_DOMAIN}:${WEBHOOK_PORT}/webhook\","
     if [ -f "/etc/crypto-bot/certs/cert.pem" ]; then
         echo "       \"certificate\": \"/etc/crypto-bot/certs/cert.pem\","
     fi
@@ -1731,6 +1868,9 @@ if [ -f "${INSTALL_DIR}/.env" ]; then
     echo ""
     echo "   Для проверки webhook:"
     echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo'"
+    echo ""
+    echo "   Для удаления webhook:"
+    echo "   curl -X POST 'https://api.telegram.org/bot<YOUR_BOT_TOKEN>/deleteWebhook'"
 else
     echo "   ⚠️  Не удалось получить настройки для инструкции"
 fi
@@ -1763,17 +1903,17 @@ main() {
     install_dependencies
     setup_postgresql
     setup_redis
-    setup_ssl_certificates  # НОВАЯ ФУНКЦИЯ: Настройка SSL сертификатов
-    setup_firewall          # ОБНОВЛЕНО: Добавлены webhook порты
+    setup_ssl_certificates  # ОБНОВЛЕНО: с проверкой наличия сертификатов
+    setup_firewall
     create_directory_structure
     setup_logging
     copy_source_code
     build_application
-    setup_configuration     # ОБНОВЛЕНО: Добавлены webhook настройки
+    setup_configuration
     setup_systemd_service
     check_migrations
-    start_application      # ОБНОВЛЕНО: Запуск с проверкой webhook
-    verify_deployment      # ОБНОВЛЕНО: Проверка webhook развертывания
+    start_application
+    verify_deployment
 
     log_step "✅ Развертывание успешно завершено!"
     echo ""
