@@ -9,6 +9,7 @@ var (
 	ErrAlreadyExists   = StorageError{"символ уже существует"}
 	ErrSubscriberError = StorageError{"ошибка подписчика"}
 	ErrRedisNotReady   = StorageError{"Redis не готов"}
+	ErrStorageNotReady = storageError("хранилище не готово")
 )
 
 // StorageError ошибка хранилища
@@ -19,3 +20,7 @@ type StorageError struct {
 func (e StorageError) Error() string {
 	return e.Message
 }
+
+type storageError string
+
+func (e storageError) Error() string { return string(e) }

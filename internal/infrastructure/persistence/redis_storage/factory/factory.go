@@ -3,7 +3,8 @@ package redis_storage_factory
 
 import (
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"sync"
@@ -11,11 +12,11 @@ import (
 )
 
 // PriceStorage алиас для интерфейса
-type PriceStorage = storage.PriceStorageInterface
+type PriceStorage = redis_storage.PriceStorageInterface
 
 // StorageFactoryConfig конфигурация фабрики хранилищ
 type StorageFactoryConfig struct {
-	DefaultStorageConfig *storage.StorageConfig
+	DefaultStorageConfig *redis_storage.StorageConfig
 	EnableCleanupRoutine bool
 	CleanupInterval      time.Duration
 	MaxCustomStorages    int
@@ -87,7 +88,7 @@ func (sf *StorageFactory) CreateDefaultStorage() (PriceStorage, error) {
 		// Создаем RedisStorage
 		storageConfig := sf.config.DefaultStorageConfig
 		if storageConfig == nil {
-			storageConfig = &storage.StorageConfig{
+			storageConfig = &redis_storage.StorageConfig{
 				MaxHistoryPerSymbol: 10000,
 				MaxSymbols:          1000,
 				CleanupInterval:     5 * time.Minute,
@@ -95,8 +96,8 @@ func (sf *StorageFactory) CreateDefaultStorage() (PriceStorage, error) {
 			}
 		}
 
-		// Создаем структуру PriceStorage
-		priceStorage := storage.NewPriceStorage(redisService, storageConfig)
+		// Создаем структуру PriceStorage (используем упрощенный конструктор)
+		priceStorage := price_storage.NewPriceStorageSimple(redisService, storageConfig)
 
 		// Инициализируем хранилище
 		if err := priceStorage.Initialize(); err != nil {

@@ -1,26 +1,20 @@
-// internal/infrastructure/persistence/redis_storage/history_manager.go
-package redis_storage
+// internal/infrastructure/persistence/redis_storage/history_manager/service.go
+package history_manager
 
 import (
 	"context"
+	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"crypto-exchange-screener-bot/pkg/logger"
-
 	"github.com/go-redis/redis/v8"
 )
 
-// HistoryManager управляет историей цен
-type HistoryManager struct {
-	client *redis.Client
-	ctx    context.Context
-	prefix string
-	config *StorageConfig
-}
+
 
 // NewHistoryManager создает нового менеджера истории
 func NewHistoryManager() *HistoryManager {
@@ -31,28 +25,39 @@ func NewHistoryManager() *HistoryManager {
 }
 
 // Initialize инициализирует менеджер истории
-func (hm *HistoryManager) Initialize(client *redis.Client, config *StorageConfig) {
+func (hm *HistoryManager) Initialize(client *redis.Client, config *redis_storage.StorageConfig) {
 	hm.client = client
 	hm.config = config
 }
 
 // AddToHistory добавляет цену в историю
-func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snapshot *PriceSnapshot) error {
+func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snapshot redis_storage.PriceSnapshotInterface) error {
 	if hm.client == nil {
 		return fmt.Errorf("клиент Redis не инициализирован")
 	}
 
-	historyItem := PriceData{
+	historyItem := struct {
+		Symbol       string    `json:"symbol"`
+		Price        float64   `json:"price"`
+		Volume24h    float64   `json:"volume_24h"`
+		VolumeUSD    float64   `json:"volume_usd"`
+		Timestamp    time.Time `json:"timestamp"`
+		OpenInterest float64   `json:"open_interest"`
+		FundingRate  float64   `json:"funding_rate"`
+		Change24h    float64   `json:"change_24h"`
+		High24h      float64   `json:"high_24h"`
+		Low24h       float64   `json:"low_24h"`
+	}{
 		Symbol:       symbol,
-		Price:        snapshot.Price,
-		Volume24h:    snapshot.Volume24h,
-		VolumeUSD:    snapshot.VolumeUSD,
-		Timestamp:    snapshot.Timestamp,
-		OpenInterest: snapshot.OpenInterest,
-		FundingRate:  snapshot.FundingRate,
-		Change24h:    snapshot.Change24h,
-		High24h:      snapshot.High24h,
-		Low24h:       snapshot.Low24h,
+		Price:        snapshot.GetPrice(),
+		Volume24h:    snapshot.GetVolume24h(),
+		VolumeUSD:    snapshot.GetVolumeUSD(),
+		Timestamp:    snapshot.GetTimestamp(),
+		OpenInterest: snapshot.GetOpenInterest(),
+		FundingRate:  snapshot.GetFundingRate(),
+		Change24h:    snapshot.GetChange24h(),
+		High24h:      snapshot.GetHigh24h(),
+		Low24h:       snapshot.GetLow24h(),
 	}
 
 	data, err := json.Marshal(historyItem)
@@ -63,7 +68,7 @@ func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snap
 	// Используем ZSET для истории с timestamp как score
 	historyKey := hm.prefix + "history:" + symbol
 	pipe.ZAdd(hm.ctx, historyKey, &redis.Z{
-		Score:  float64(snapshot.Timestamp.Unix()),
+		Score:  float64(snapshot.GetTimestamp().Unix()),
 		Member: data,
 	})
 
@@ -74,7 +79,7 @@ func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snap
 }
 
 // GetHistory возвращает историю цен
-func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]PriceData, error) {
+func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]redis_storage.PriceDataInterface, error) {
 	if hm.client == nil {
 		return nil, fmt.Errorf("клиент Redis не инициализирован")
 	}
@@ -100,24 +105,49 @@ func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]PriceData, err
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var history []PriceData
+	var history []redis_storage.PriceDataInterface
 	for _, result := range results {
-		var data PriceData
+		var data struct {
+			Symbol       string    `json:"symbol"`
+			Price        float64   `json:"price"`
+			Volume24h    float64   `json:"volume_24h"`
+			VolumeUSD    float64   `json:"volume_usd"`
+			Timestamp    time.Time `json:"timestamp"`
+			OpenInterest float64   `json:"open_interest"`
+			FundingRate  float64   `json:"funding_rate"`
+			Change24h    float64   `json:"change_24h"`
+			High24h      float64   `json:"high_24h"`
+			Low24h       float64   `json:"low_24h"`
+		}
+
 		if err := json.Unmarshal([]byte(result), &data); err == nil {
-			history = append(history, data)
+			// Создаем PriceData структуру
+			priceData := &redis_storage.PriceData{
+				Symbol:       data.Symbol,
+				Price:        data.Price,
+				Volume24h:    data.Volume24h,
+				VolumeUSD:    data.VolumeUSD,
+				Timestamp:    data.Timestamp,
+				OpenInterest: data.OpenInterest,
+				FundingRate:  data.FundingRate,
+				Change24h:    data.Change24h,
+				High24h:      data.High24h,
+				Low24h:       data.Low24h,
+			}
+			history = append(history, priceData)
 		}
 	}
 
 	// Сортируем по времени (старые -> новые)
 	sort.Slice(history, func(i, j int) bool {
-		return history[i].Timestamp.Before(history[j].Timestamp)
+		return history[i].GetTimestamp().Before(history[j].GetTimestamp())
 	})
 
 	return history, nil
 }
 
 // GetHistoryRange возвращает историю за период
-func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) ([]PriceData, error) {
+func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) ([]redis_storage.PriceDataInterface, error) {
 	if hm.client == nil {
 		return nil, fmt.Errorf("клиент Redis не инициализирован")
 	}
@@ -134,11 +164,36 @@ func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) (
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var history []PriceData
+	var history []redis_storage.PriceDataInterface
 	for _, result := range results {
-		var data PriceData
+		var data struct {
+			Symbol       string    `json:"symbol"`
+			Price        float64   `json:"price"`
+			Volume24h    float64   `json:"volume_24h"`
+			VolumeUSD    float64   `json:"volume_usd"`
+			Timestamp    time.Time `json:"timestamp"`
+			OpenInterest float64   `json:"open_interest"`
+			FundingRate  float64   `json:"funding_rate"`
+			Change24h    float64   `json:"change_24h"`
+			High24h      float64   `json:"high_24h"`
+			Low24h       float64   `json:"low_24h"`
+		}
+
 		if err := json.Unmarshal([]byte(result), &data); err == nil {
-			history = append(history, data)
+			// Создаем PriceData структуру
+			priceData := &redis_storage.PriceData{
+				Symbol:       data.Symbol,
+				Price:        data.Price,
+				Volume24h:    data.Volume24h,
+				VolumeUSD:    data.VolumeUSD,
+				Timestamp:    data.Timestamp,
+				OpenInterest: data.OpenInterest,
+				FundingRate:  data.FundingRate,
+				Change24h:    data.Change24h,
+				High24h:      data.High24h,
+				Low24h:       data.Low24h,
+			}
+			history = append(history, priceData)
 		}
 	}
 
@@ -199,51 +254,6 @@ func (hm *HistoryManager) CleanupOldHistory(maxAge time.Duration) (int, error) {
 	return totalRemoved, nil
 }
 
-// GetHistoryStats возвращает статистику истории
-func (hm *HistoryManager) GetHistoryStats(symbol string) (map[string]interface{}, error) {
-	if hm.client == nil {
-		return nil, fmt.Errorf("клиент Redis не инициализирован")
-	}
-
-	historyKey := hm.prefix + "history:" + symbol
-
-	stats := make(map[string]interface{})
-
-	// Количество записей
-	count, err := hm.client.ZCard(hm.ctx, historyKey).Result()
-	if err != nil {
-		return nil, err
-	}
-	stats["total_entries"] = count
-
-	// Временной диапазон
-	if count > 0 {
-		// Самая старая запись
-		oldest, err := hm.client.ZRange(hm.ctx, historyKey, 0, 0).Result()
-		if err == nil && len(oldest) > 0 {
-			var data PriceData
-			if err := json.Unmarshal([]byte(oldest[0]), &data); err == nil {
-				stats["oldest_timestamp"] = data.Timestamp
-			}
-		}
-
-		// Самая новая запись
-		newest, err := hm.client.ZRevRange(hm.ctx, historyKey, 0, 0).Result()
-		if err == nil && len(newest) > 0 {
-			var data PriceData
-			if err := json.Unmarshal([]byte(newest[0]), &data); err == nil {
-				stats["newest_timestamp"] = data.Timestamp
-			}
-		}
-	}
-
-	// Использование памяти (примерное)
-	memoryUsage := count * 200 // ~200 байт на запись
-	stats["estimated_memory_bytes"] = memoryUsage
-
-	return stats, nil
-}
-
 // TruncateHistory ограничивает историю
 func (hm *HistoryManager) TruncateHistory(symbol string, maxPoints int) error {
 	if hm.client == nil {
@@ -264,7 +274,7 @@ func (hm *HistoryManager) TruncateHistory(symbol string, maxPoints int) error {
 
 	// Удаляем лишние старые записи
 	removeCount := count - int64(maxPoints)
-	_, err = hm.client.ZRemRangeByRank(hm.ctx, historyKey, 0, int64(removeCount)-1).Result() // ИСПРАВЛЕНО: добавлен .Result()
+	_, err = hm.client.ZRemRangeByRank(hm.ctx, historyKey, 0, removeCount-1).Result()
 	return err
 }
 

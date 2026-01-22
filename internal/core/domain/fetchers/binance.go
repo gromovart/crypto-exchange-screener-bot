@@ -3,7 +3,7 @@ package fetchers
 
 import (
 	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"

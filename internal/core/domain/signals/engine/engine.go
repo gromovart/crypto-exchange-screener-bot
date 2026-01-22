@@ -1,4 +1,5 @@
 // internal/core/domain/signals/engine/engine.go
+// internal/core/domain/signals/engine/engine.go
 package engine
 
 import (
@@ -286,17 +287,17 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 	endTime := time.Now()
 	startTime := endTime.Add(-period)
 
-	priceData, err := e.storage.GetPriceHistoryRange(symbol, startTime, endTime)
+	priceDataInterfaces, err := e.storage.GetPriceHistoryRange(symbol, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get price history for %s: %w", symbol, err)
 	}
 
-	if len(priceData) < 2 {
+	if len(priceDataInterfaces) < 2 {
 		return nil, fmt.Errorf("insufficient data for %s", symbol)
 	}
 
 	// Конвертируем в формат анализа
-	data := convertToPriceData(priceData)
+	data := convertToPriceData(priceDataInterfaces)
 
 	// Запускаем все анализаторы
 	var allSignals []analysis.Signal
@@ -416,7 +417,8 @@ func (e *AnalysisEngine) sortByVolume(symbols []string) []string {
 	var sv []symbolVolume
 	for _, symbol := range symbols {
 		if snapshot, exists := e.storage.GetCurrentSnapshot(symbol); exists {
-			sv = append(sv, symbolVolume{symbol, snapshot.Volume24h})
+			// Используем геттер вместо прямого доступа к полю
+			sv = append(sv, symbolVolume{symbol, snapshot.GetVolumeUSD()})
 		}
 	}
 
@@ -440,7 +442,8 @@ func (e *AnalysisEngine) passesVolumeFilter(symbol string) bool {
 	}
 
 	if snapshot, exists := e.storage.GetCurrentSnapshot(symbol); exists {
-		return snapshot.Volume24h >= e.config.MinVolumeFilter
+		// Используем геттер вместо прямого доступа к полю
+		return snapshot.GetVolumeUSD() >= e.config.MinVolumeFilter
 	}
 
 	return false
@@ -626,25 +629,26 @@ func (e *AnalysisEngine) setupDefaultFilters() {
 }
 
 // convertToPriceData конвертирует данные хранилища в формат анализа
-func convertToPriceData(storageData []storage.PriceData) []types.PriceData {
+func convertToPriceData(storageData []storage.PriceDataInterface) []types.PriceData {
 	result := make([]types.PriceData, len(storageData))
 
 	for i, data := range storageData {
 		result[i] = types.PriceData{
-			Symbol:       data.Symbol,
-			Price:        data.Price,
-			Volume24h:    data.Volume24h,
-			Timestamp:    data.Timestamp,
-			OpenInterest: data.OpenInterest, // ✅ Добавляем Open Interest
-			FundingRate:  data.FundingRate,  // ✅ Добавляем Funding Rate
-			Change24h:    data.Change24h,    // ✅ Добавляем Change 24h
-			High24h:      data.High24h,      // ✅ Добавляем High 24h
-			Low24h:       data.Low24h,       // ✅ Добавляем Low 24h
+			Symbol:       data.GetSymbol(),
+			Price:        data.GetPrice(),
+			Volume24h:    data.GetVolume24h(),
+			VolumeUSD:    data.GetVolumeUSD(),
+			Timestamp:    data.GetTimestamp(),
+			OpenInterest: data.GetOpenInterest(),
+			FundingRate:  data.GetFundingRate(),
+			Change24h:    data.GetChange24h(),
+			High24h:      data.GetHigh24h(),
+			Low24h:       data.GetLow24h(),
 		}
 		// Логируем для отладки
-		if data.OpenInterest > 0 {
+		if data.GetOpenInterest() > 0 {
 			logger.Debug("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
-				data.Symbol, data.OpenInterest, data.FundingRate*100, data.Change24h)
+				data.GetSymbol(), data.GetOpenInterest(), data.GetFundingRate()*100, data.GetChange24h())
 		}
 	}
 
@@ -768,12 +772,12 @@ func (e *AnalysisEngine) GetStatus() map[string]interface{} {
 
 	// Информация о конфигурации
 	status["config"] = map[string]interface{}{
-		"parallel_analysis":   e.config.EnableParallel, // Исправлено
+		"parallel_analysis":   e.config.EnableParallel,
 		"max_workers":         e.config.MaxWorkers,
-		"analysis_interval":   e.config.UpdateInterval.String(), // Исправлено
-		"min_volume":          e.config.MinVolumeFilter,         // Исправлено
-		"sort_by_volume":      true,                             // Постоянно true, так как есть метод sortByVolume()
-		"enable_filter_stats": true,                             // Постоянно true, так как есть метод GetFilterStats()
+		"analysis_interval":   e.config.UpdateInterval.String(),
+		"min_volume":          e.config.MinVolumeFilter,
+		"sort_by_volume":      true,
+		"enable_filter_stats": true,
 		"update_interval":     e.config.UpdateInterval.String(),
 		"analysis_periods":    e.config.AnalysisPeriods,
 		"max_symbols_per_run": e.config.MaxSymbolsPerRun,

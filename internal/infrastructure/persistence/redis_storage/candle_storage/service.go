@@ -16,17 +16,6 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-// RedisCandleStorage - хранилище свечей на Redis
-type RedisCandleStorage struct {
-	client       *redis.Client
-	ctx          context.Context
-	prefix       string
-	candlePrefix string
-
-	// Конфигурация
-	config candle.CandleConfig
-}
-
 // NewRedisCandleStorage создает новое Redis хранилище свечей
 func NewRedisCandleStorage(redisService *redis_service.RedisService, config candle.CandleConfig) (*RedisCandleStorage, error) {
 	if redisService == nil {

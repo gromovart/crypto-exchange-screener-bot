@@ -242,7 +242,7 @@ func (f *BybitPriceFetcher) CalculateEstimatedVolumeDelta(symbol, direction stri
 	// Получаем цену из хранилища для расчета объемов
 	var price float64
 	if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists {
-		price = snapshot.Price
+		price = snapshot.GetPrice()
 	} else {
 		price = 1.0
 	}
@@ -414,7 +414,7 @@ func (f *BybitPriceFetcher) fetchOpenInterest() error {
 		} else {
 			symbols = make([]string, len(topSymbols))
 			for i, sv := range topSymbols {
-				symbols[i] = sv.Symbol
+				symbols[i] = sv.GetSymbol()
 			}
 		}
 		logger.Debug("📋 Ограничено до %d символов", len(symbols))
@@ -472,7 +472,18 @@ func (f *BybitPriceFetcher) fetchOpenInterest() error {
 // calculateEstimatedOIFromStorage рассчитывает OI на основе данных из хранилища
 func (f *BybitPriceFetcher) calculateEstimatedOIFromStorage(symbol string) float64 {
 	if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists {
-		return f.calculateEstimatedOI(symbol, snapshot)
+		// Получаем цену и объем из снапшота
+		price := snapshot.GetPrice()
+		volumeUSD := snapshot.GetVolumeUSD()
+
+		// Создаем временный объект для расчета OI
+		tempSnapshot := &storage.PriceSnapshot{
+			Symbol:    symbol,
+			Price:     price,
+			VolumeUSD: volumeUSD,
+		}
+
+		return f.calculateEstimatedOI(symbol, tempSnapshot)
 	}
 
 	// Дефолтное значение
@@ -485,13 +496,24 @@ func (f *BybitPriceFetcher) estimateMissingOI(symbols []string, realOI map[strin
 
 	for _, symbol := range symbols {
 		if _, hasRealOI := realOI[symbol]; !hasRealOI {
-			if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists && snapshot.VolumeUSD > 0 {
+			if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists && snapshot.GetVolumeUSD() > 0 {
+				// Получаем данные для расчета
+				price := snapshot.GetPrice()
+				volumeUSD := snapshot.GetVolumeUSD()
+
+				// Создаем временный объект для расчета OI
+				tempSnapshot := &storage.PriceSnapshot{
+					Symbol:    symbol,
+					Price:     price,
+					VolumeUSD: volumeUSD,
+				}
+
 				// Улучшенная эвристика с учетом типа символа
-				estimatedOI := f.calculateEstimatedOI(symbol, snapshot)
+				estimatedOI := f.calculateEstimatedOI(symbol, tempSnapshot)
 				f.oiCache[symbol] = estimatedOI
 				estimatedCount++
 				logger.Debug("📊 Расчетный OI для %s: %.0f (объем: %.0f)",
-					symbol, estimatedOI, snapshot.VolumeUSD)
+					symbol, estimatedOI, volumeUSD)
 			}
 		}
 	}
@@ -510,9 +532,20 @@ func (f *BybitPriceFetcher) useEstimatedOI(symbols []string) error {
 
 	for _, symbol := range symbols {
 		if _, exists := f.oiCache[symbol]; !exists {
-			if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists && snapshot.VolumeUSD > 0 {
+			if snapshot, exists := f.storage.GetCurrentSnapshot(symbol); exists && snapshot.GetVolumeUSD() > 0 {
+				// Получаем данные для расчета
+				price := snapshot.GetPrice()
+				volumeUSD := snapshot.GetVolumeUSD()
+
+				// Создаем временный объект для расчета OI
+				tempSnapshot := &storage.PriceSnapshot{
+					Symbol:    symbol,
+					Price:     price,
+					VolumeUSD: volumeUSD,
+				}
+
 				// Рассчитываем OI
-				estimatedOI := f.calculateEstimatedOI(symbol, snapshot)
+				estimatedOI := f.calculateEstimatedOI(symbol, tempSnapshot)
 				f.oiCache[symbol] = estimatedOI
 				estimatedCount++
 			}
@@ -747,7 +780,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		// НОВОЕ: Отправляем цену в свечной движок если он есть
 		if f.candleSystem != nil {
-			priceData := storage.PriceData{
+			// Создаем PriceData структуру для отправки в свечной движок
+			priceData := &storage.PriceData{
 				Symbol:       ticker.Symbol,
 				Price:        price,
 				Volume24h:    volumeBase,
@@ -761,8 +795,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			}
 
 			// Отправляем асинхронно чтобы не блокировать основной поток
-			go func(pd storage.PriceData) {
-				f.candleSystem.OnPriceUpdate(pd)
+			go func(pd *storage.PriceData) {
+				f.candleSystem.OnPriceUpdate(*pd)
 				logger.Debug("🕯️ Цена отправлена в свечной движок: %s %.6f",
 					pd.Symbol, pd.Price)
 			}(priceData)
@@ -879,7 +913,7 @@ func (f *BybitPriceFetcher) fetchLiquidationsLoop(interval time.Duration) {
 	}
 }
 
-// fetchLiquidations получает данные о ликвидациях
+// fetchLiquidations получает данные о ликвидаций
 func (f *BybitPriceFetcher) fetchLiquidations() error {
 	if !f.liqEnabled {
 		return nil
@@ -893,14 +927,14 @@ func (f *BybitPriceFetcher) fetchLiquidations() error {
 	logger.Info("🔄 BybitFetcher: получение данных о ликвидациях...")
 
 	// Получаем символы с наибольшим объемом
-	symbols, err := f.storage.GetTopSymbolsByVolumeUSD(10) // Топ-10 символов
+	topSymbols, err := f.storage.GetTopSymbolsByVolumeUSD(10) // Топ-10 символов
 	if err != nil {
 		logger.Warn("⚠️ Не удалось получить топ-символы: %v", err)
 		return err
 	}
 
-	for _, symbolVolume := range symbols {
-		symbol := symbolVolume.Symbol
+	for _, symbolVolume := range topSymbols {
+		symbol := symbolVolume.GetSymbol()
 
 		summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute) // За последние 5 минут
 		if err != nil {

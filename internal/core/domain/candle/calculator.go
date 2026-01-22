@@ -1,4 +1,4 @@
-// internal/core/candle/calculator.go (исправленная строка 100)
+// internal/core/candle/calculator.go
 package candle
 
 import (
@@ -49,12 +49,12 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*Cand
 	return cc.buildCandleFromPriceData(symbol, period, prices), nil
 }
 
-// buildCandleFromPriceData строит свечу из массива PriceData
+// buildCandleFromPriceData строит свечу из массива PriceDataInterface
 func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
-	prices []storage.PriceData) *Candle {
+	prices []storage.PriceDataInterface) *Candle {
 
 	// Сортируем цены по времени
-	sortedPrices := sortPriceDataByTime(prices)
+	sortedPrices := sortPriceDataInterfaceByTime(prices)
 
 	// Если после сортировки нет данных
 	if len(sortedPrices) == 0 {
@@ -67,32 +67,34 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 	}
 
 	// Начальные значения
-	open := sortedPrices[0].Price
-	close := sortedPrices[len(sortedPrices)-1].Price
+	open := sortedPrices[0].GetPrice()
+	close := sortedPrices[len(sortedPrices)-1].GetPrice()
 	high := open
 	low := open
 
 	var volume, volumeUSD float64
-	startTime := sortedPrices[0].Timestamp
-	endTime := sortedPrices[len(sortedPrices)-1].Timestamp
+	startTime := sortedPrices[0].GetTimestamp()
+	endTime := sortedPrices[len(sortedPrices)-1].GetTimestamp()
 
 	// Рассчитываем OHLCV
 	for _, price := range sortedPrices {
-		if price.Price > high {
-			high = price.Price
+		priceVal := price.GetPrice()
+		if priceVal > high {
+			high = priceVal
 		}
-		if price.Price < low {
-			low = price.Price
+		if priceVal < low {
+			low = priceVal
 		}
-		volume += price.Volume24h
-		volumeUSD += price.VolumeUSD
+		volume += price.GetVolume24h()
+		volumeUSD += price.GetVolumeUSD()
 
 		// Обновляем временные границы
-		if price.Timestamp.Before(startTime) {
-			startTime = price.Timestamp
+		timestamp := price.GetTimestamp()
+		if timestamp.Before(startTime) {
+			startTime = timestamp
 		}
-		if price.Timestamp.After(endTime) {
-			endTime = price.Timestamp
+		if timestamp.After(endTime) {
+			endTime = timestamp
 		}
 	}
 
@@ -256,13 +258,13 @@ func periodToDuration(period string) time.Duration {
 	}
 }
 
-// sortPriceDataByTime сортирует цены по времени
-func sortPriceDataByTime(prices []storage.PriceData) []storage.PriceData {
-	sorted := make([]storage.PriceData, len(prices))
+// sortPriceDataInterfaceByTime сортирует интерфейсы цен по времени
+func sortPriceDataInterfaceByTime(prices []storage.PriceDataInterface) []storage.PriceDataInterface {
+	sorted := make([]storage.PriceDataInterface, len(prices))
 	copy(sorted, prices)
 
 	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].Timestamp.Before(sorted[j].Timestamp)
+		return sorted[i].GetTimestamp().Before(sorted[j].GetTimestamp())
 	})
 
 	return sorted

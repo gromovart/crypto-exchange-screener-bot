@@ -1,17 +1,10 @@
 // internal/infrastructure/persistence/redis_storage/subscription_manager.go
-package redis_storage
+package subscription_manager
 
 import (
-	"sync"
+	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
-
-// Subscriber интерфейс подписчика
-type Subscriber interface {
-	OnPriceUpdate(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time)
-	OnSymbolAdded(symbol string)
-	OnSymbolRemoved(symbol string)
-}
 
 // SubscriberFunc функциональный тип подписчика
 type SubscriberFunc func(symbol string, price, volume24h, volumeUSD float64, timestamp time.Time)
@@ -27,39 +20,33 @@ func (f SubscriberFunc) OnSymbolRemoved(symbol string) {
 	// По умолчанию ничего не делаем
 }
 
-// SubscriptionManager управляет подписками
-type SubscriptionManager struct {
-	mu             sync.RWMutex
-	subscribers    map[string]map[Subscriber]struct{} // symbol -> subscribers
-	allSubscribers []Subscriber                       // Подписчики на все символы
-}
-
 // NewSubscriptionManager создает нового менеджера подписок
 func NewSubscriptionManager() *SubscriptionManager {
 	return &SubscriptionManager{
-		subscribers:    make(map[string]map[Subscriber]struct{}),
-		allSubscribers: make([]Subscriber, 0),
+		subscribers:    make(map[string]map[redis_storage.SubscriberInterface]struct{}),
+		allSubscribers: make([]redis_storage.SubscriberInterface, 0),
 	}
 }
 
 // Subscribe подписывает на обновления символа
-func (sm *SubscriptionManager) Subscribe(symbol string, subscriber Subscriber) {
+func (sm *SubscriptionManager) Subscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
 	if symbol == "all" {
 		sm.allSubscribers = append(sm.allSubscribers, subscriber)
-		return
+		return nil
 	}
 
 	if _, exists := sm.subscribers[symbol]; !exists {
-		sm.subscribers[symbol] = make(map[Subscriber]struct{})
+		sm.subscribers[symbol] = make(map[redis_storage.SubscriberInterface]struct{})
 	}
 	sm.subscribers[symbol][subscriber] = struct{}{}
+	return nil
 }
 
 // Unsubscribe отписывает от обновлений символа
-func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber Subscriber) {
+func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -70,7 +57,7 @@ func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber Subscriber)
 				break
 			}
 		}
-		return
+		return nil
 	}
 
 	if subs, exists := sm.subscribers[symbol]; exists {
@@ -79,6 +66,7 @@ func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber Subscriber)
 			delete(sm.subscribers, symbol)
 		}
 	}
+	return nil
 }
 
 // NotifyAll уведомляет всех подписчиков на символ

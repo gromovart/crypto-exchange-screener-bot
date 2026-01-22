@@ -407,7 +407,7 @@ func (a *CounterAnalyzer) getCandleData(symbol, period string) ([]types.PriceDat
 	}
 
 	// Конвертируем в types.PriceData
-	return convertStoragePricesToTypes(prices), nil
+	return a.convertStoragePricesInterfaceToTypes(prices), nil
 }
 
 // convertCandleToPriceData конвертирует свечу в массив PriceData
@@ -427,18 +427,38 @@ func (a *CounterAnalyzer) convertCandleToPriceData(c *candle.Candle) []types.Pri
 
 	// Получаем текущие метрики для символа
 	if metrics, exists := a.storage.GetSymbolMetrics(c.Symbol); exists {
-		openData.Volume24h = metrics.Volume24h
-		openData.OpenInterest = metrics.OpenInterest
-		openData.FundingRate = metrics.FundingRate
-		openData.Change24h = metrics.Change24h
+		openData.Volume24h = metrics.GetVolume24h()
+		openData.OpenInterest = metrics.GetOpenInterest()
+		openData.FundingRate = metrics.GetFundingRate()
+		openData.Change24h = metrics.GetChange24h()
 
-		closeData.Volume24h = metrics.Volume24h
-		closeData.OpenInterest = metrics.OpenInterest
-		closeData.FundingRate = metrics.FundingRate
-		closeData.Change24h = metrics.Change24h
+		closeData.Volume24h = metrics.GetVolume24h()
+		closeData.OpenInterest = metrics.GetOpenInterest()
+		closeData.FundingRate = metrics.GetFundingRate()
+		closeData.Change24h = metrics.GetChange24h()
 	}
 
 	return []types.PriceData{openData, closeData}
+}
+
+// convertStoragePricesInterfaceToTypes конвертирует storage.PriceDataInterface в types.PriceData
+func (a *CounterAnalyzer) convertStoragePricesInterfaceToTypes(prices []storage.PriceDataInterface) []types.PriceData {
+	var result []types.PriceData
+	for _, price := range prices {
+		result = append(result, types.PriceData{
+			Symbol:       price.GetSymbol(),
+			Price:        price.GetPrice(),
+			Volume24h:    price.GetVolume24h(),
+			VolumeUSD:    price.GetVolumeUSD(),
+			Timestamp:    price.GetTimestamp(),
+			OpenInterest: price.GetOpenInterest(),
+			FundingRate:  price.GetFundingRate(),
+			Change24h:    price.GetChange24h(),
+			High24h:      price.GetHigh24h(),
+			Low24h:       price.GetLow24h(),
+		})
+	}
+	return result
 }
 
 // convertStoragePricesToTypes конвертирует storage.PriceData в types.PriceData
@@ -488,13 +508,8 @@ func (a *CounterAnalyzer) getDataForPeriodLegacy(symbol, period string) ([]types
 		return a.getFallbackData(symbol, period)
 	}
 
-	// Сортируем по времени
-	sort.Slice(priceHistory, func(i, j int) bool {
-		return priceHistory[i].Timestamp.Before(priceHistory[j].Timestamp)
-	})
-
 	// Конвертируем в types.PriceData
-	return convertStoragePricesToTypes(priceHistory), nil
+	return a.convertStoragePricesInterfaceToTypes(priceHistory), nil
 }
 
 // getFallbackData возвращает заглушку если нет реальных данных
@@ -506,10 +521,10 @@ func (a *CounterAnalyzer) getFallbackData(symbol, period string) ([]types.PriceD
 
 	if a.storage != nil {
 		if snapshot, exists := a.storage.GetCurrentSnapshot(symbol); exists {
-			currentPrice = snapshot.Price
-			volume24h = snapshot.Volume24h
-			openInterest = snapshot.OpenInterest
-			fundingRate = snapshot.FundingRate
+			currentPrice = snapshot.GetPrice()
+			volume24h = snapshot.GetVolume24h()
+			openInterest = snapshot.GetOpenInterest()
+			fundingRate = snapshot.GetFundingRate()
 
 			logger.Debug("   Найден снапшот: цена=%.4f, объем=%.0f, OI=%.0f",
 				currentPrice, volume24h, openInterest)
@@ -986,7 +1001,7 @@ func (a *CounterAnalyzer) getRequiredPointsForPeriod(period string) int {
 
 // getInterpolatedData создает интерполированные данные если недостаточно точек
 func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
-	existingData []storage.PriceData, requiredPoints int) ([]types.PriceData, error) {
+	existingData []storage.PriceDataInterface, requiredPoints int) ([]types.PriceData, error) {
 
 	if len(existingData) == 0 {
 		return a.getFallbackData(symbol, period)
@@ -1007,14 +1022,14 @@ func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
 
 			result = append(result, types.PriceData{
 				Symbol:       symbol,
-				Price:        point.Price*priceMultiplier + noise,
-				Volume24h:    point.Volume24h,
-				OpenInterest: point.OpenInterest,
-				FundingRate:  point.FundingRate,
-				Timestamp:    point.Timestamp.Add(time.Duration(i) * time.Minute),
-				Change24h:    point.Change24h,
-				High24h:      point.High24h * priceMultiplier,
-				Low24h:       point.Low24h * priceMultiplier,
+				Price:        point.GetPrice()*priceMultiplier + noise,
+				Volume24h:    point.GetVolume24h(),
+				OpenInterest: point.GetOpenInterest(),
+				FundingRate:  point.GetFundingRate(),
+				Timestamp:    point.GetTimestamp().Add(time.Duration(i) * time.Minute),
+				Change24h:    point.GetChange24h(),
+				High24h:      point.GetHigh24h() * priceMultiplier,
+				Low24h:       point.GetLow24h() * priceMultiplier,
 			})
 		}
 		logger.Warn("⚠️ Интерполяция %s: 1 точка → %d точек", symbol, requiredPoints)
@@ -1026,11 +1041,11 @@ func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
 
 	// Сортируем по времени
 	sort.Slice(existingData, func(i, j int) bool {
-		return existingData[i].Timestamp.Before(existingData[j].Timestamp)
+		return existingData[i].GetTimestamp().Before(existingData[j].GetTimestamp())
 	})
 
 	// Временной диапазон существующих данных
-	timeRange := existingData[len(existingData)-1].Timestamp.Sub(existingData[0].Timestamp)
+	timeRange := existingData[len(existingData)-1].GetTimestamp().Sub(existingData[0].GetTimestamp())
 	if timeRange <= 0 {
 		timeRange = time.Duration(requiredPoints) * time.Minute
 	}
@@ -1040,14 +1055,14 @@ func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
 
 	// Интерполяция
 	for i := 0; i < requiredPoints; i++ {
-		currentTime := existingData[0].Timestamp.Add(timeStep * time.Duration(i))
+		currentTime := existingData[0].GetTimestamp().Add(timeStep * time.Duration(i))
 
 		// Находим две ближайшие точки для интерполяции
-		var prev, next *storage.PriceData
+		var prev, next storage.PriceDataInterface
 		for j := 0; j < len(existingData)-1; j++ {
-			if !existingData[j].Timestamp.After(currentTime) && existingData[j+1].Timestamp.After(currentTime) {
-				prev = &existingData[j]
-				next = &existingData[j+1]
+			if !existingData[j].GetTimestamp().After(currentTime) && existingData[j+1].GetTimestamp().After(currentTime) {
+				prev = existingData[j]
+				next = existingData[j+1]
 				break
 			}
 		}
@@ -1057,24 +1072,24 @@ func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
 
 		if prev != nil && next != nil {
 			// Линейная интерполяция
-			timeRatio := float64(currentTime.Sub(prev.Timestamp)) / float64(next.Timestamp.Sub(prev.Timestamp))
-			price = prev.Price + (next.Price-prev.Price)*timeRatio
-			volume = prev.Volume24h + (next.Volume24h-prev.Volume24h)*timeRatio
-			oi = prev.OpenInterest + (next.OpenInterest-prev.OpenInterest)*timeRatio
-			funding = prev.FundingRate + (next.FundingRate-prev.FundingRate)*timeRatio
+			timeRatio := float64(currentTime.Sub(prev.GetTimestamp())) / float64(next.GetTimestamp().Sub(prev.GetTimestamp()))
+			price = prev.GetPrice() + (next.GetPrice()-prev.GetPrice())*timeRatio
+			volume = prev.GetVolume24h() + (next.GetVolume24h()-prev.GetVolume24h())*timeRatio
+			oi = prev.GetOpenInterest() + (next.GetOpenInterest()-prev.GetOpenInterest())*timeRatio
+			funding = prev.GetFundingRate() + (next.GetFundingRate()-prev.GetFundingRate())*timeRatio
 			timestamp = currentTime
 		} else {
 			// Используем ближайшую точку
 			if i == 0 {
-				price = existingData[0].Price
-				timestamp = existingData[0].Timestamp
+				price = existingData[0].GetPrice()
+				timestamp = existingData[0].GetTimestamp()
 			} else {
-				price = existingData[len(existingData)-1].Price
-				timestamp = existingData[len(existingData)-1].Timestamp
+				price = existingData[len(existingData)-1].GetPrice()
+				timestamp = existingData[len(existingData)-1].GetTimestamp()
 			}
-			volume = existingData[0].Volume24h
-			oi = existingData[0].OpenInterest
-			funding = existingData[0].FundingRate
+			volume = existingData[0].GetVolume24h()
+			oi = existingData[0].GetOpenInterest()
+			funding = existingData[0].GetFundingRate()
 		}
 
 		result = append(result, types.PriceData{
@@ -1084,9 +1099,9 @@ func (a *CounterAnalyzer) getInterpolatedData(symbol, period string,
 			OpenInterest: oi,
 			FundingRate:  funding,
 			Timestamp:    timestamp,
-			Change24h:    existingData[0].Change24h,
-			High24h:      existingData[0].High24h,
-			Low24h:       existingData[0].Low24h,
+			Change24h:    existingData[0].GetChange24h(),
+			High24h:      existingData[0].GetHigh24h(),
+			Low24h:       existingData[0].GetLow24h(),
 		})
 	}
 

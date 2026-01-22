@@ -1,41 +1,9 @@
-// internal/infrastructure/persistence/redis_storage/types.go(переименован)
+// internal/infrastructure/persistence/redis_storage/structs.go
 package redis_storage
 
 import (
 	"time"
 )
-
-// PriceSnapshot текущий снапшот цены
-type PriceSnapshot struct {
-	Symbol       string    `json:"symbol"`
-	Price        float64   `json:"price"`
-	Volume24h    float64   `json:"volume_24h"`
-	VolumeUSD    float64   `json:"volume_usd"`
-	Timestamp    time.Time `json:"timestamp"`
-	OpenInterest float64   `json:"open_interest"`
-	FundingRate  float64   `json:"funding_rate"`
-	Change24h    float64   `json:"change_24h"`
-	High24h      float64   `json:"high_24h"`
-	Low24h       float64   `json:"low_24h"`
-}
-
-// PriceData представляет точку данных цены
-type PriceData struct {
-	Symbol       string                 `json:"symbol"`
-	Price        float64                `json:"price"`
-	Volume24h    float64                `json:"volume_24h"`
-	VolumeUSD    float64                `json:"volume_usd"`
-	Timestamp    time.Time              `json:"timestamp"`
-	OpenInterest float64                `json:"open_interest"`
-	FundingRate  float64                `json:"funding_rate"`
-	Change24h    float64                `json:"change_24h"`
-	High24h      float64                `json:"high_24h"`
-	Low24h       float64                `json:"low_24h"`
-	Category     string                 `json:"category,omitempty"`
-	Basis        float64                `json:"basis,omitempty"`
-	Liquidation  float64                `json:"liquidation,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-}
 
 // SymbolMetrics содержит все метрики символа
 type SymbolMetrics struct {
@@ -104,14 +72,34 @@ type StorageStats struct {
 	SymbolsWithFunding  int           `json:"symbols_with_funding"`
 }
 
-// PriceChange изменение цены
-type PriceChange struct {
-	Symbol        string    `json:"symbol"`
-	CurrentPrice  float64   `json:"current_price"`
-	PreviousPrice float64   `json:"previous_price"`
-	Change        float64   `json:"change"`
-	ChangePercent float64   `json:"change_percent"`
-	Interval      string    `json:"interval"`
-	Timestamp     time.Time `json:"timestamp"`
-	VolumeUSD     float64   `json:"volume_usd,omitempty"`
+// PriceData представляет точку данных цены
+type PriceData struct {
+	Symbol       string                 `json:"symbol"`
+	Price        float64                `json:"price"`
+	Volume24h    float64                `json:"volume_24h"`
+	VolumeUSD    float64                `json:"volume_usd"`
+	Timestamp    time.Time              `json:"timestamp"`
+	OpenInterest float64                `json:"open_interest"`
+	FundingRate  float64                `json:"funding_rate"`
+	Change24h    float64                `json:"change_24h"`
+	High24h      float64                `json:"high_24h"`
+	Low24h       float64                `json:"low_24h"`
+	Category     string                 `json:"category,omitempty"`
+	Basis        float64                `json:"basis,omitempty"`
+	Liquidation  float64                `json:"liquidation,omitempty"`
+	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+}
+
+// PriceSnapshot текущий снапшот цены
+type PriceSnapshot struct {
+	Symbol       string    `json:"symbol"`
+	Price        float64   `json:"price"`
+	Volume24h    float64   `json:"volume_24h"`
+	VolumeUSD    float64   `json:"volume_usd"`
+	Timestamp    time.Time `json:"timestamp"`
+	OpenInterest float64   `json:"open_interest"`
+	FundingRate  float64   `json:"funding_rate"`
+	Change24h    float64   `json:"change_24h"`
+	High24h      float64   `json:"high_24h"`
+	Low24h       float64   `json:"low_24h"`
 }
