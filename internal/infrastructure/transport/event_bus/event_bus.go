@@ -425,11 +425,19 @@ func (b *EventBus) executeWithMiddleware(event types.Event, handler HandlerFunc)
 }
 
 // GetMetrics возвращает метрики
-func (b *EventBus) GetMetrics() types.EventBusMetrics {
+func (b *EventBus) GetMetrics() *types.EventBusMetrics {
 	b.metrics.Mu.RLock()
 	defer b.metrics.Mu.RUnlock()
 
-	return *b.metrics
+	// Создаем копию без мьютекса
+	return &types.EventBusMetrics{
+		EventsPublished:  b.metrics.EventsPublished,
+		EventsProcessed:  b.metrics.EventsProcessed,
+		EventsFailed:     b.metrics.EventsFailed,
+		SubscribersCount: b.metrics.SubscribersCount,
+		ProcessingTime:   b.metrics.ProcessingTime,
+		// Не копируем Mu
+	}
 }
 
 // GetSubscriberCount возвращает количество подписчиков

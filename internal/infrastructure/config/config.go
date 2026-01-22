@@ -738,7 +738,8 @@ func (c *Config) validate() error {
 	}
 
 	if len(validationErrors) > 0 {
-		return fmt.Errorf(strings.Join(validationErrors, "; "))
+		errMsg := strings.Join(validationErrors, "; ")
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	return nil

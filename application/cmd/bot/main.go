@@ -258,7 +258,8 @@ func validateConfig(cfg *config.Config) error {
 	}
 
 	if len(errors) > 0 {
-		return fmt.Errorf(strings.Join(errors, "; "))
+		errMsg := strings.Join(errors, "; ")
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	return nil

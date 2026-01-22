@@ -27,7 +27,7 @@ type EventBus interface {
 	Stop()
 
 	// GetMetrics возвращает метрики
-	GetMetrics() EventBusMetrics
+	GetMetrics() *EventBusMetrics
 }
 
 // Event - структура события
