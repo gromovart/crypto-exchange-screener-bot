@@ -8,7 +8,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	in_memory_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory"
+	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -229,7 +229,7 @@ func (cl *CoreLayer) startAnalysisEngine() error {
 		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
 	}
 
-	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	storageFactory, ok := storageInterface.(*redis_storage_factory.StorageFactory)
 	if !ok {
 		return fmt.Errorf("неверный тип StorageFactory")
 	}
@@ -319,7 +319,7 @@ func (cl *CoreLayer) ensureBybitPriceFetcher() error {
 		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
 	}
 
-	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	storageFactory, ok := storageInterface.(*redis_storage_factory.StorageFactory)
 	if !ok {
 		return fmt.Errorf("неверный тип StorageFactory")
 	}
@@ -370,7 +370,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
 	}
 
-	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	storageFactory, ok := storageInterface.(*redis_storage_factory.StorageFactory)
 	if !ok {
 		return fmt.Errorf("неверный тип StorageFactory")
 	}
@@ -443,7 +443,7 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		return
 	}
 
-	storageFactory, ok := storageInterface.(*in_memory_storage.StorageFactory)
+	storageFactory, ok := storageInterface.(*redis_storage_factory.StorageFactory)
 	if !ok {
 		logger.Warn("⚠️ CoreLayer: неверный тип StorageFactory")
 		return

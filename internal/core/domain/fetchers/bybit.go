@@ -19,7 +19,7 @@ import (
 // BybitPriceFetcher реализация
 type BybitPriceFetcher struct {
 	client       *bybit.BybitClient
-	storage      storage.PriceStorage
+	storage      storage.PriceStorageInterface
 	eventBus     *events.EventBus
 	candleSystem *candle.CandleSystem // НОВОЕ: Свечная система
 	mu           sync.RWMutex
@@ -67,7 +67,7 @@ type volumeDeltaCache struct {
 }
 
 // NewPriceFetcher создает новый PriceFetcher (обновленный конструктор)
-func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorage,
+func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorageInterface,
 	eventBus *events.EventBus, candleSystem *candle.CandleSystem) *BybitPriceFetcher { // НОВЫЙ параметр
 
 	return &BybitPriceFetcher{
@@ -1016,7 +1016,7 @@ func parseFloat(s string) (float64, error) {
 }
 
 // NewPriceFetcherWithoutCandleSystem создает фетчер без свечной системы (для обратной совместимости)
-func NewPriceFetcherWithoutCandleSystem(apiClient *bybit.BybitClient, storage storage.PriceStorage,
+func NewPriceFetcherWithoutCandleSystem(apiClient *bybit.BybitClient, storage storage.PriceStorageInterface,
 	eventBus *events.EventBus) *BybitPriceFetcher {
 
 	return &BybitPriceFetcher{

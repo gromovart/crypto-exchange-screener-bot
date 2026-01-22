@@ -23,7 +23,7 @@ func NewMarketFetcherFactory(cfg *config.Config) *MarketFetcherFactory {
 
 // CreateBybitFetcher создает Bybit фетчер (обновленный)
 func (f *MarketFetcherFactory) CreateBybitFetcher(
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 	eventBus *events.EventBus,
 ) (*BybitPriceFetcher, error) {
 	// Создаем клиент Bybit
@@ -41,7 +41,7 @@ func (f *MarketFetcherFactory) CreateBybitFetcher(
 
 // CreateBybitFetcherWithCandleSystem создает Bybit фетчер со свечной системой
 func (f *MarketFetcherFactory) CreateBybitFetcherWithCandleSystem(
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 	eventBus *events.EventBus,
 	candleSystem *candle.CandleSystem,
 ) (*BybitPriceFetcher, error) {
@@ -61,7 +61,7 @@ func (f *MarketFetcherFactory) CreateBybitFetcherWithCandleSystem(
 // CreateBybitFetcherWithClient создает Bybit фетчер с готовым клиентом (обновленный)
 func (f *MarketFetcherFactory) CreateBybitFetcherWithClient(
 	client *bybit.BybitClient,
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 	eventBus *events.EventBus,
 	candleSystem *candle.CandleSystem,
 ) *BybitPriceFetcher {
@@ -70,7 +70,7 @@ func (f *MarketFetcherFactory) CreateBybitFetcherWithClient(
 
 // CreateSimpleBybitFetcher создает простой Bybit фетчер
 func (f *MarketFetcherFactory) CreateSimpleBybitFetcher(
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 ) (*BybitPriceFetcher, error) {
 	// Создаем клиент Bybit
 	bybitClient := bybit.NewBybitClient(f.config)

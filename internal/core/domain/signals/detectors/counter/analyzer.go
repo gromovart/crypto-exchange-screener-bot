@@ -13,7 +13,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/manager"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 
@@ -25,7 +25,7 @@ type CounterAnalyzer struct {
 	config        common.AnalyzerConfig
 	stats         common.AnalyzerStats
 	marketFetcher interface{}
-	storage       storage.PriceStorage
+	storage       storage.PriceStorageInterface
 	eventBus      types.EventBus
 	candleSystem  *candle.CandleSystem // НОВОЕ: Свечная система
 
@@ -46,7 +46,7 @@ type CounterAnalyzer struct {
 // NewCounterAnalyzer создает новый анализатор счетчика (обновленный конструктор)
 func NewCounterAnalyzer(
 	config common.AnalyzerConfig,
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 	eventBus types.EventBus,
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem, // НОВЫЙ параметр

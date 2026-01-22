@@ -4,7 +4,7 @@ package counter
 import (
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage" // ДОБАВИТЬ
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 )
@@ -19,7 +19,7 @@ func NewCounterAnalyzerFactory() *CounterAnalyzerFactory {
 
 // CreateAnalyzer создает CounterAnalyzer с настройками по умолчанию
 func (f *CounterAnalyzerFactory) CreateAnalyzer(
-	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	storage storage.PriceStorageInterface, // ИЗМЕНЕНО: конкретный тип
 	eventBus types.EventBus,
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
@@ -31,7 +31,7 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
 func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	config common.AnalyzerConfig,
-	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	storage storage.PriceStorageInterface,
 	eventBus types.EventBus,
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
@@ -42,7 +42,7 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 // CreateFromCustomSettings создает CounterAnalyzer из пользовательских настроек
 func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
 	customSettings map[string]interface{},
-	storage storage.PriceStorage, // ИЗМЕНЕНО: конкретный тип
+	storage storage.PriceStorageInterface, // ИЗМЕНЕНО: конкретный тип
 	eventBus types.EventBus,
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
@@ -80,7 +80,7 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 }
 
 // CreateMinimalAnalyzer создает минимальный анализатор
-func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStorage) *CounterAnalyzer { // ИЗМЕНЕНО
+func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStorageInterface) *CounterAnalyzer { // ИЗМЕНЕНО
 	config := common.AnalyzerConfig{
 		Enabled:       true,
 		Weight:        0.7,

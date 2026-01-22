@@ -5,7 +5,7 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -33,7 +33,7 @@ type AnalysisEngine struct {
 	mu           sync.RWMutex
 	analyzers    map[string]common.Analyzer
 	filters      *FilterChain
-	storage      storage.PriceStorage
+	storage      storage.PriceStorageInterface
 	eventBus     *events.EventBus
 	config       EngineConfig
 	stats        EngineStats
@@ -107,7 +107,7 @@ var DefaultConfig = EngineConfig{
 }
 
 // NewAnalysisEngine создает новый движок анализа
-func NewAnalysisEngine(storage storage.PriceStorage, eventBus *events.EventBus, config ...EngineConfig) *AnalysisEngine {
+func NewAnalysisEngine(storage storage.PriceStorageInterface, eventBus *events.EventBus, config ...EngineConfig) *AnalysisEngine {
 	cfg := DefaultConfig
 	if len(config) > 0 {
 		cfg = config[0]

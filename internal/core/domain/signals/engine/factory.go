@@ -7,7 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
@@ -36,7 +36,7 @@ func NewFactoryWithoutCandleSystem(priceFetcher interface{}) *Factory {
 }
 
 func (f *Factory) NewAnalysisEngineFromConfig(
-	storage storage.PriceStorage,
+	storage storage.PriceStorageInterface,
 	eventBus *events.EventBus,
 	cfg *config.Config,
 ) *AnalysisEngine {
@@ -249,7 +249,7 @@ func (f *Factory) configureFilters(engine *AnalysisEngine, cfg *config.Config) {
 	}
 }
 
-func (e *AnalysisEngine) GetStorage() storage.PriceStorage {
+func (e *AnalysisEngine) GetStorage() storage.PriceStorageInterface {
 	return e.storage
 }
 
