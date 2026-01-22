@@ -5,7 +5,7 @@ import (
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 )
 

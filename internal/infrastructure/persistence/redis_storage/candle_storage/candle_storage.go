@@ -1,5 +1,5 @@
-// internal/infrastructure/persistence/redis_storage/candle_storage.go(переименован)
-package redis_storage
+// internal/infrastructure/persistence/redis_storage/candle_storage/candle_storage.go
+package candle_storage
 
 import (
 	"context"

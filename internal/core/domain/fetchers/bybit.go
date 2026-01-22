@@ -2,11 +2,11 @@
 package fetchers
 
 import (
-	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"

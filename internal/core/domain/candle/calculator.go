@@ -5,16 +5,16 @@ import (
 	"sort"
 	"time"
 
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
 // CandleCalculator - калькулятор для свечей
 type CandleCalculator struct {
-	storage storage.PriceStorage
+	storage storage.PriceStorageInterface
 }
 
 // NewCandleCalculator создает новый калькулятор свечей
-func NewCandleCalculator(priceStorage storage.PriceStorage) *CandleCalculator {
+func NewCandleCalculator(priceStorage storage.PriceStorageInterface) *CandleCalculator {
 	return &CandleCalculator{
 		storage: priceStorage,
 	}

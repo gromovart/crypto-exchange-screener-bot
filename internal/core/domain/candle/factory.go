@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -51,7 +51,7 @@ func (f *CandleSystemFactory) WithAutoBuild(autoBuild bool) *CandleSystemFactory
 }
 
 // CreateSystem создает полную свечную систему
-func (f *CandleSystemFactory) CreateSystem(priceStorage storage.PriceStorage) (*CandleSystem, error) {
+func (f *CandleSystemFactory) CreateSystem(priceStorage storage.PriceStorageInterface) (*CandleSystem, error) {
 	if priceStorage == nil {
 		return nil, fmt.Errorf("price storage не инициализирован")
 	}
@@ -85,7 +85,7 @@ type CandleSystem struct {
 	Storage      *CandleStorage
 	Engine       *CandleEngine
 	Calculator   *CandleCalculator
-	priceStorage storage.PriceStorage
+	priceStorage storage.PriceStorageInterface
 	config       CandleConfig
 }
 
@@ -139,7 +139,7 @@ func (cs *CandleSystem) preloadCandles() {
 }
 
 // OnPriceUpdate обрабатывает обновление цены
-func (cs *CandleSystem) OnPriceUpdate(priceData storage.PriceData) {
+func (cs *CandleSystem) OnPriceUpdate(priceData storage.PriceData) { // Изменено
 	cs.Engine.OnPriceUpdate(priceData)
 }
 
@@ -182,7 +182,7 @@ func (cs *CandleSystem) GetStats() map[string]interface{} {
 }
 
 // CreateSimpleSystem создает упрощенную свечную систему
-func CreateSimpleSystem(priceStorage storage.PriceStorage) (*CandleSystem, error) {
+func CreateSimpleSystem(priceStorage storage.PriceStorageInterface) (*CandleSystem, error) {
 	factory := NewCandleSystemFactory()
 	return factory.CreateSystem(priceStorage)
 }
