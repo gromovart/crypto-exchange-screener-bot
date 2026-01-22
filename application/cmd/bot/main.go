@@ -114,7 +114,7 @@ func main() {
 	logger.Warn("   • Окружение: %s", cfg.Environment)
 	logger.Warn("   • Биржа: %s %s", strings.ToUpper(cfg.Exchange), cfg.ExchangeType)
 	logger.Warn("   • Уровень логирования: %s", cfg.LogLevel)
-	logger.Warn("   • Telegram включен: %v", cfg.TelegramEnabled)
+	logger.Warn("   • Telegram включен: %v", cfg.Telegram.Enabled)
 	logger.Warn("   • PostgreSQL: %s:%d/%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 	logger.Warn("   • Redis: %s:%d (DB: %d, Pool: %d)", cfg.Redis.Host, cfg.Redis.Port, cfg.Redis.DB, cfg.Redis.PoolSize)
 
@@ -169,7 +169,7 @@ func runBootstrapMode(cfg *config.Config, testMode bool) {
 	builder = builder.
 		WithConfig(cfg).
 		WithTestMode(testMode).
-		WithTelegramBot(cfg.TelegramEnabled, cfg.TelegramChatID).
+		WithTelegramBot(cfg.Telegram.Enabled, cfg.TelegramChatID).
 		WithTelegramBotToken(cfg.TelegramBotToken)
 
 	// Собираем приложение
@@ -251,7 +251,7 @@ func validateConfig(cfg *config.Config) error {
 	}
 
 	// Проверка Telegram если включен
-	if cfg.TelegramEnabled {
+	if cfg.Telegram.Enabled {
 		if cfg.TelegramBotToken == "" || cfg.TelegramChatID == "" {
 			errors = append(errors, "TG_API_KEY and TG_CHAT_ID are required when Telegram is enabled")
 		}

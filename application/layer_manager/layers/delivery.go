@@ -165,13 +165,13 @@ func (dl *DeliveryLayer) Start() error {
 	logger.Info("🚀 Запуск слоя доставки...")
 
 	// Запускаем TelegramDeliveryPackage если он создан
-	if dl.telegramPackage != nil && dl.config.TelegramEnabled {
+	if dl.telegramPackage != nil && dl.config.Telegram.Enabled {
 		if err := dl.telegramPackage.Start(); err != nil {
 			dl.setError(err)
 			return fmt.Errorf("не удалось запустить TelegramDeliveryPackage: %w", err)
 		}
 		logger.Info("🤖 Telegram бот запущен")
-	} else if !dl.config.TelegramEnabled {
+	} else if !dl.config.Telegram.Enabled {
 		logger.Info("⚠️ Telegram отключен в конфигурации, пропускаем запуск")
 	}
 

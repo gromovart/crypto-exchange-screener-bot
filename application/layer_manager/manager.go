@@ -44,7 +44,7 @@ func (lm *LayerManager) Initialize() error {
 
 	logger.Info("🏗️  Инициализация LayerManager...")
 	logger.Debug("Конфигурация: TelegramEnabled=%v, TestMode=%v",
-		lm.config.TelegramEnabled, lm.config.MonitoringTestMode)
+		lm.config.Telegram.Enabled, lm.config.MonitoringTestMode)
 
 	// Создаем фабрику слоев
 	logger.Debug("Создание LayerFactory...")
@@ -143,10 +143,17 @@ func (lm *LayerManager) Start() error {
 
 // waitForInfrastructureReady ожидает готовности InfrastructureFactory
 func (lm *LayerManager) waitForInfrastructureReady(timeout time.Duration) bool {
+	logger.Info("🔧 ОТЛАДКА: waitForInfrastructureReady ВЫЗВАН")
+
 	infraLayer, exists := lm.layerRegistry.Get("InfrastructureLayer")
 	if !exists {
+		logger.Error("❌ InfrastructureLayer не найден в реестре!")
 		return false
 	}
+
+	logger.Info("   - infraLayer найден: %v", infraLayer != nil)
+	logger.Info("   - infraLayer.IsRunning(): %v", infraLayer.IsRunning())
+	logger.Info("   - infraLayer.HealthCheck(): %v", infraLayer.HealthCheck())
 
 	startTime := time.Now()
 	checkInterval := 500 * time.Millisecond

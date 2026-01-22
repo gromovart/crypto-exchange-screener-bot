@@ -65,7 +65,7 @@ func (app *Application) Initialize() error {
 
 	app.logger.Println("🚀 Инициализация приложения...")
 	app.logger.Printf("📋 Конфигурация: TelegramEnabled=%v, TestMode=%v",
-		app.config.TelegramEnabled, app.config.MonitoringTestMode)
+		app.config.Telegram.Enabled, app.config.MonitoringTestMode)
 
 	// Создаем LayerManager
 	app.logger.Println("🛠️  Создание LayerManager...")
@@ -228,7 +228,7 @@ func (app *Application) getConfigurationSummary() map[string]interface{} {
 	cfg := app.GetConfig()
 
 	return map[string]interface{}{
-		"telegram_enabled": cfg.TelegramEnabled,
+		"telegram_enabled": cfg.Telegram.Enabled,
 		"telegram_chat_id": maskString(cfg.TelegramChatID, 4),
 		"update_interval":  cfg.UpdateInterval,
 		"log_level":        cfg.LogLevel,

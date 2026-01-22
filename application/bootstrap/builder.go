@@ -130,7 +130,7 @@ func (app *Application) Status() map[string]interface{} {
 		"uptime":    time.Since(app.startTime).String(),
 		"startTime": app.startTime.Format(time.RFC3339),
 		"config": map[string]interface{}{
-			"telegram_enabled": app.config.TelegramEnabled,
+			"telegram_enabled": app.config.Telegram.Enabled,
 			"update_interval":  app.config.UpdateInterval,
 			"log_level":        app.config.LogLevel,
 		},
@@ -295,7 +295,7 @@ func WithTelegramBot(enabled bool, chatID string) AppOption {
 	return func(app *Application) error {
 		if enabled {
 			app.logger.Printf("Telegram бот включен (чат: %s)", chatID)
-			app.config.TelegramEnabled = true
+			app.config.Telegram.Enabled = true
 			if chatID != "" {
 				app.config.TelegramChatID = chatID
 			}

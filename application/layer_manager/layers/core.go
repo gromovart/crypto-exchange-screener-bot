@@ -161,22 +161,22 @@ func (cl *CoreLayer) Start() error {
 	logger.Info("🚀 Запуск слоя ядра...")
 
 	// НОВОЕ: Запускаем свечную систему
-	if cl.config.TelegramEnabled && cl.infraLayer != nil {
+	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		if err := cl.setupAndStartCandleSystem(); err != nil {
 			logger.Warn("⚠️ Не удалось запустить свечной системы: %v", err)
 		}
 	}
 
 	// НОВОЕ: Запускаем BybitPriceFetcher если включен в конфигурации
-	if cl.config.TelegramEnabled && cl.infraLayer != nil {
+	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		cl.startBybitPriceFetcher()
 	}
 
 	// НОВОЕ: Запускаем AnalysisEngine если CounterAnalyzer включен в конфигурации
 	// Вместо AnalysisEngine.Enabled используем AnalyzerConfigs.CounterAnalyzer.Enabled
-	if cl.config.TelegramEnabled && cl.infraLayer != nil {
+	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		logger.Info("🔧 Проверка условий запуска AnalysisEngine:")
-		logger.Info("   - TelegramEnabled: %v", cl.config.TelegramEnabled)
+		logger.Info("   - TelegramEnabled: %v", cl.config.Telegram.Enabled)
 		logger.Info("   - InfraLayer: %v", cl.infraLayer != nil)
 		logger.Info("   - CounterAnalyzer.Enabled: %v", cl.config.AnalyzerConfigs.CounterAnalyzer.Enabled)
 
@@ -408,6 +408,9 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 // НОВЫЙ МЕТОД: запуск BybitPriceFetcher
 func (cl *CoreLayer) startBybitPriceFetcher() {
 	logger.Info("🔄 CoreLayer: инициализация BybitPriceFetcher...")
+	logger.Info("🔧 ОТЛАДКА: startBybitPriceFetcher ВЫЗВАН!")
+	logger.Info("   - Время: %s", time.Now().Format("15:04:05.000"))
+	logger.Info("   - Telegram.Enabled: %v", cl.config.Telegram.Enabled)
 
 	// Получаем EventBus из инфраструктуры
 	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")

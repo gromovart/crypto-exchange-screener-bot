@@ -52,7 +52,7 @@ func NewMessageSender(cfg *config.Config) MessageSender {
 		rateLimiter:  NewRateLimiter(2 * time.Second),
 		chatID:       chatID,
 		testMode:     cfg.MonitoringTestMode,
-		enabled:      cfg.TelegramEnabled,
+		enabled:      cfg.Telegram.Enabled,
 		messageCache: NewMessageCache(10 * time.Minute),
 	}
 }

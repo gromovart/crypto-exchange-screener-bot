@@ -289,7 +289,6 @@ type Config struct {
 	// ======================
 
 	// Старые поля Telegram (для совместимости)
-	TelegramEnabled         bool    `mapstructure:"-"`
 	TelegramBotToken        string  `mapstructure:"-"`
 	TelegramChatID          string  `mapstructure:"-"`
 	TelegramNotifyGrowth    bool    `mapstructure:"-"`
@@ -613,7 +612,6 @@ func LoadConfig(path string) (*Config, error) {
 	// ОБРАТНАЯ СОВМЕСТИМОСТЬ
 	// ======================
 	// Назначаем старые поля из новых структур для обратной совместимости
-	cfg.TelegramEnabled = cfg.Telegram.Enabled
 	cfg.TelegramBotToken = cfg.Telegram.BotToken
 	cfg.TelegramChatID = cfg.Telegram.ChatID
 	cfg.TelegramNotifyGrowth = cfg.Telegram.NotifyGrowth

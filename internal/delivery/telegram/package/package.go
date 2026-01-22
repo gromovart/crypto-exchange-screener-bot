@@ -282,7 +282,7 @@ func (p *TelegramDeliveryPackage) createControllers() error {
 func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 	logger.Debug("🤖 Создание Telegram бота и транспорта...")
 
-	if !p.config.TelegramEnabled {
+	if !p.config.Telegram.Enabled {
 		logger.Warn("⚠️ Telegram отключен в конфигурации")
 		return nil
 	}

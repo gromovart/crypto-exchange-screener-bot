@@ -42,7 +42,7 @@ func (f *ComponentFactory) CreateMessageSender() message_sender.MessageSender {
 		return nil
 	}
 
-	if !f.config.TelegramEnabled || f.config.TelegramBotToken == "" {
+	if !f.config.Telegram.Enabled || f.config.TelegramBotToken == "" {
 		logger.Warn("⚠️ Telegram отключен, создаю заглушку MessageSender")
 		return &stubMessageSender{}
 	}
