@@ -5,16 +5,20 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage"
-	storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/in_memory_storage/factory"
 	database "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/database"
 	postgres_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/factory"
+	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"sync"
 	"time"
 )
+
+// Алиасы для совместимости
+type PriceStorage = redis_storage_factory.PriceStorage
+type StorageFactory = redis_storage_factory.StorageFactory
 
 // InfrastructureFactory главная фабрика инфраструктурных компонентов
 type InfrastructureFactory struct {
@@ -25,7 +29,7 @@ type InfrastructureFactory struct {
 	eventBus          *events.EventBus
 	apiClient         *bybit.BybitClient
 	repositoryFactory *postgres_factory.RepositoryFactory
-	storageFactory    *storage_factory.StorageFactory
+	storageFactory    *StorageFactory
 	mu                sync.RWMutex
 	initialized       bool
 	running           bool
@@ -93,9 +97,9 @@ func (f *InfrastructureFactory) Initialize() error {
 		logger.Info("✅ Bybit API клиент создан")
 	}
 
-	// 5. Создаем фабрику хранилищ
-	storageFactoryConfig := &storage_factory.StorageFactoryConfig{
-		DefaultStorageConfig: &storage.StorageConfig{
+	// 5. Создаем фабрику хранилищ (redis_storage_factory)
+	storageFactoryConfig := &redis_storage_factory.StorageFactoryConfig{
+		DefaultStorageConfig: &redis_storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * 60 * time.Second,
@@ -105,17 +109,17 @@ func (f *InfrastructureFactory) Initialize() error {
 		CleanupInterval:      60 * time.Second,
 		MaxCustomStorages:    10,
 	}
-	storageFactory, err := storage_factory.NewStorageFactory(storage_factory.StorageDependencies{
+	storageFactory, err := redis_storage_factory.NewStorageFactory(redis_storage_factory.StorageDependencies{
 		Config: storageFactoryConfig,
 	})
 	if err != nil {
-		logger.Warn("⚠️ Не удалось создать StorageFactory: %v", err)
+		logger.Warn("⚠️ Не удалось создать Redis StorageFactory: %v", err)
 	} else {
 		f.storageFactory = storageFactory
 		if err := f.storageFactory.Initialize(); err != nil {
-			logger.Warn("⚠️ Не удалось инициализировать StorageFactory: %v", err)
+			logger.Warn("⚠️ Не удалось инициализировать Redis StorageFactory: %v", err)
 		} else {
-			logger.Info("✅ StorageFactory инициализирована")
+			logger.Info("✅ Redis StorageFactory инициализирована")
 		}
 	}
 
@@ -345,7 +349,7 @@ func (f *InfrastructureFactory) CreateEventBus() (*events.EventBus, error) {
 	defer f.mu.Unlock()
 
 	if !f.initialized {
-		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирован")
 	}
 
 	if f.eventBus == nil {
@@ -439,7 +443,7 @@ func (f *InfrastructureFactory) CreateRepositoryFactory() (*postgres_factory.Rep
 }
 
 // CreateStorageFactory создает или возвращает фабрику хранилищ
-func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.StorageFactory, error) {
+func (f *InfrastructureFactory) CreateStorageFactory() (*StorageFactory, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -448,8 +452,8 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.Storage
 	}
 
 	if f.storageFactory == nil {
-		storageFactoryConfig := &storage_factory.StorageFactoryConfig{
-			DefaultStorageConfig: &storage.StorageConfig{
+		storageFactoryConfig := &redis_storage_factory.StorageFactoryConfig{
+			DefaultStorageConfig: &redis_storage.StorageConfig{
 				MaxHistoryPerSymbol: 10000,
 				MaxSymbols:          1000,
 				CleanupInterval:     5 * 60,
@@ -461,7 +465,7 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.Storage
 		}
 
 		var err error
-		f.storageFactory, err = storage_factory.NewStorageFactory(storage_factory.StorageDependencies{
+		f.storageFactory, err = redis_storage_factory.NewStorageFactory(redis_storage_factory.StorageDependencies{
 			Config: storageFactoryConfig,
 		})
 		if err != nil {
@@ -487,7 +491,7 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*storage_factory.Storage
 }
 
 // GetDefaultStorage создает или возвращает хранилище по умолчанию через фабрику
-func (f *InfrastructureFactory) GetDefaultStorage() (storage.PriceStorage, error) {
+func (f *InfrastructureFactory) GetDefaultStorage() (PriceStorage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -610,7 +614,7 @@ func (f *InfrastructureFactory) GetAllRepositories() (map[string]interface{}, er
 }
 
 // GetAllStorages создает все хранилища через StorageFactory
-func (f *InfrastructureFactory) GetAllStorages() (map[string]storage.PriceStorage, error) {
+func (f *InfrastructureFactory) GetAllStorages() (map[string]PriceStorage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
