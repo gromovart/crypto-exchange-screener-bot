@@ -1,9 +1,10 @@
+// application/layer_manager/layers/core.go
 package layers
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/fetchers"
-	engine "crypto-exchange-screener-bot/internal/core/domain/signals/engine" // НОВЫЙ импорт
+	engine "crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
@@ -25,7 +26,7 @@ type CoreLayer struct {
 	bybitPriceFetcher *fetchers.BybitPriceFetcher
 	fetcherFactory    *fetchers.MarketFetcherFactory
 	candleSystem      *candle.CandleSystem
-	analysisEngine    *engine.AnalysisEngine // НОВОЕ: движок анализа
+	analysisEngine    *engine.AnalysisEngine
 }
 
 // NewCoreLayer создает слой ядра
@@ -83,7 +84,7 @@ func (cl *CoreLayer) Initialize() error {
 	// Создаем конфигурацию для фабрики ядра со значениями по умолчанию
 	coreConfig := &core_factory.Config{
 		UserConfig: users.Config{
-			DefaultMinGrowthThreshold: 2.0, // значение по умолчанию
+			DefaultMinGrowthThreshold: 2.0,
 			DefaultMaxSignalsPerDay:   50,
 			SessionTTL:                24 * time.Hour,
 			MaxSessionsPerUser:        5,
@@ -160,14 +161,14 @@ func (cl *CoreLayer) Start() error {
 	cl.updateState(StateStarting)
 	logger.Info("🚀 Запуск слоя ядра...")
 
-	// НОВОЕ: Запускаем свечную систему
+	// НОВОЕ: Запускаем свечную систему если включен Telegram
 	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		if err := cl.setupAndStartCandleSystem(); err != nil {
-			logger.Warn("⚠️ Не удалось запустить свечной системы: %v", err)
+			logger.Warn("⚠️ Не удалось запустить свечную систему: %v", err)
 		}
 	}
 
-	// НОВОЕ: Запускаем BybitPriceFetcher если включен в конфигурации
+	// НОВОЕ: Запускаем BybitPriceFetcher если включен Telegram
 	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		cl.startBybitPriceFetcher()
 	}
@@ -198,7 +199,7 @@ func (cl *CoreLayer) Start() error {
 	return nil
 }
 
-// НОВЫЙ МЕТОД: запуск движка анализа
+// startAnalysisEngine запуск движка анализа
 func (cl *CoreLayer) startAnalysisEngine() error {
 	logger.Info("🔧 CoreLayer: запуск AnalysisEngine...")
 
@@ -284,7 +285,7 @@ func (cl *CoreLayer) startAnalysisEngine() error {
 	return nil
 }
 
-// Вспомогательный метод: создает BybitPriceFetcher если не создан
+// ensureBybitPriceFetcher создает BybitPriceFetcher если не создан
 func (cl *CoreLayer) ensureBybitPriceFetcher() error {
 	if cl.bybitPriceFetcher != nil {
 		return nil
@@ -354,7 +355,7 @@ func (cl *CoreLayer) ensureBybitPriceFetcher() error {
 	return nil
 }
 
-// НОВЫЙ МЕТОД: настройка и запуск свечной системы
+// setupAndStartCandleSystem настройка и запуск свечной системы
 func (cl *CoreLayer) setupAndStartCandleSystem() error {
 	logger.Info("🕯️ CoreLayer: настройка свечной системы...")
 
@@ -405,7 +406,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 	return nil
 }
 
-// НОВЫЙ МЕТОД: запуск BybitPriceFetcher
+// startBybitPriceFetcher запуск BybitPriceFetcher
 func (cl *CoreLayer) startBybitPriceFetcher() {
 	logger.Info("🔄 CoreLayer: инициализация BybitPriceFetcher...")
 	logger.Info("🔧 ОТЛАДКА: startBybitPriceFetcher ВЫЗВАН!")
@@ -423,6 +424,11 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 	eventBusInterface, err := cl.getComponentValue(eventBusComp)
 	if err != nil {
 		logger.Warn("⚠️ CoreLayer: не удалось получить EventBus: %v", err)
+		return
+	}
+
+	if eventBusInterface == nil {
+		logger.Warn("⚠️ CoreLayer: EventBus равен nil")
 		return
 	}
 
@@ -459,7 +465,12 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		return
 	}
 
-	// Создаем фетчер с учетом наличия свечной системы
+	if priceStorage == nil {
+		logger.Warn("⚠️ CoreLayer: хранилище цен равно nil")
+		logger.Info("ℹ️  Пропускаем создание BybitPriceFetcher")
+		return
+	}
+
 	var fetcher *fetchers.BybitPriceFetcher
 	if cl.candleSystem != nil {
 		// Используем фабрику с поддержкой свечной системы
@@ -491,7 +502,7 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 	// Запускаем фетчер с интервалом из конфигурации
 	interval := time.Duration(cl.config.UpdateInterval) * time.Second
 	if interval == 0 {
-		interval = 10 * time.Second // дефолтное значение
+		interval = 10 * time.Second
 		logger.Info("ℹ️  Используется дефолтный интервал для BybitPriceFetcher: %v", interval)
 	}
 
@@ -512,7 +523,7 @@ func (cl *CoreLayer) Stop() error {
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
 
-	// НОВОЕ: Останавливаем AnalysisEngine если запущен
+	//Останавливаем AnalysisEngine если запущен
 	if cl.analysisEngine != nil && cl.analysisEngine.IsRunning() {
 		if err := cl.analysisEngine.Stop(); err != nil {
 			logger.Warn("⚠️ Ошибка остановки AnalysisEngine: %v", err)
@@ -521,7 +532,7 @@ func (cl *CoreLayer) Stop() error {
 		}
 	}
 
-	// НОВОЕ: Останавливаем свечную систему если запущена
+	// Останавливаем свечную систему если запущена
 	if cl.candleSystem != nil {
 		if err := cl.candleSystem.Stop(); err != nil {
 			logger.Warn("⚠️ Ошибка остановки свечной системы: %v", err)
@@ -530,7 +541,7 @@ func (cl *CoreLayer) Stop() error {
 		}
 	}
 
-	// НОВОЕ: Останавливаем BybitPriceFetcher если запущен
+	// Останавливаем BybitPriceFetcher если запущен
 	if cl.bybitPriceFetcher != nil && cl.bybitPriceFetcher.IsRunning() {
 		if err := cl.bybitPriceFetcher.Stop(); err != nil {
 			logger.Warn("⚠️ Ошибка остановки BybitPriceFetcher: %v", err)
@@ -562,17 +573,17 @@ func (cl *CoreLayer) Reset() error {
 		cl.coreFactory.Reset()
 	}
 
-	// НОВОЕ: Сбрасываем AnalysisEngine
+	// Сбрасываем AnalysisEngine
 	if cl.analysisEngine != nil {
 		cl.analysisEngine = nil
 	}
 
-	// НОВОЕ: Сбрасываем свечную систему
+	// Сбрасываем свечную систему
 	if cl.candleSystem != nil {
 		cl.candleSystem = nil
 	}
 
-	// НОВОЕ: Сбрасываем фетчер
+	// Сбрасываем фетчер
 	if cl.bybitPriceFetcher != nil {
 		cl.bybitPriceFetcher = nil
 	}
@@ -582,7 +593,6 @@ func (cl *CoreLayer) Reset() error {
 
 	// Сбрасываем базовый слой
 	cl.BaseLayer.Reset()
-
 	cl.coreFactory = nil
 	cl.initialized = false
 	logger.Info("✅ Слой ядра сброшен")
@@ -601,7 +611,7 @@ func (cl *CoreLayer) GetCoreFactory() *core_factory.CoreServiceFactory {
 	return cl.coreFactory
 }
 
-// НОВЫЙ МЕТОД: получает значение компонента из LazyComponent
+// getComponentValue получает значение компонента из LazyComponent
 func (cl *CoreLayer) getComponentValue(component interface{}) (interface{}, error) {
 	if lc, ok := component.(*LazyComponent); ok {
 		return lc.Get()
@@ -640,7 +650,7 @@ func (cl *CoreLayer) registerCoreComponents() {
 	components := map[string]string{
 		"UserService":         "сервис пользователей",
 		"SubscriptionService": "сервис подписок",
-		"AnalysisEngine":      "движок анализа сигналов", // НОВОЕ
+		"AnalysisEngine":      "движок анализа сигналов",
 	}
 
 	for name, description := range components {

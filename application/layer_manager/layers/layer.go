@@ -275,6 +275,13 @@ func (bl *BaseLayer) areDependenciesReadyRecursive(deps map[string]Layer, visite
 	var notReady []string
 	visited[bl.name] = true
 
+	// ВАЖНОЕ ИЗМЕНЕНИЕ:
+	// Определяем, нужно ли проверять IsRunning() или достаточно IsInitialized()
+	// Правило:
+	// - Если слой ЕЩЁ НЕ инициализирован (Initialize()): достаточно IsInitialized() зависимостей
+	// - Если слой УЖЕ инициализирован (Start()): нужно IsRunning() зависимостей
+	checkRunning := bl.IsInitialized()
+
 	for _, depName := range bl.dependencies {
 		// Проверяем циклическую зависимость
 		if visited[depName] {
@@ -288,27 +295,27 @@ func (bl *BaseLayer) areDependenciesReadyRecursive(deps map[string]Layer, visite
 			continue
 		}
 
-		// ⚠️ ВАЖНОЕ ИЗМЕНЕНИЕ:
-		// При проверке зависимостей для инициализации или ожидания запуска
-		// достаточно, чтобы зависимый слой был ИНИЦИАЛИЗИРОВАН (IsInitialized())
-		// НЕ ТРЕБУЕТСЯ, чтобы он уже был ЗАПУЩЕН (IsRunning())
-		// Это позволяет слоям правильно ожидать друг друга при запуске
-		if !dep.IsInitialized() {
-			notReady = append(notReady, depName+" (не инициализирован)")
-			continue
+		if checkRunning {
+			// Для запуска: проверяем что зависимость уже ЗАПУЩЕНА
+			if !dep.IsRunning() {
+				notReady = append(notReady, depName+" (не запущен)")
+				continue
+			}
+		} else {
+			// Для инициализации: проверяем что зависимость ИНИЦИАЛИЗИРОВАНА
+			if !dep.IsInitialized() {
+				notReady = append(notReady, depName+" (не инициализирован)")
+				continue
+			}
 		}
 
-		// ⚠️ ИЗМЕНЕНИЕ: Убираем проверку IsRunning() для зависимых слоев
-		// Слой может быть инициализирован, но еще не запущен - это нормально
-		// Проверка запуска будет позже, в WaitForDependencies()
-
-		// ✅ ЗАВИСИМЫЙ СЛОЙ ИНИЦИАЛИЗИРОВАН - ЭТО ДОСТАТОЧНО
+		// ✅ ЗАВИСИМЫЙ СЛОЙ ГОТОВ
 	}
 	delete(visited, bl.name)
 	return len(notReady) == 0, notReady
 }
 
-// UpdateConfig обновляет конфигурацию
+// UpdateConfig обновляет конфигурация
 func (bl *BaseLayer) UpdateConfig(config interface{}) error {
 	bl.mu.Lock()
 	defer bl.mu.Unlock()
