@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,36 +96,54 @@ func NewCounterAnalyzer(
 // AnalyzeAllSymbols анализирует все символы каждую минуту
 func (a *CounterAnalyzer) AnalyzeAllSymbols(symbols []string) error {
 	startTime := time.Now()
-	var signals []analysis.Signal
+	totalSignals := 0
+
+	logger.Info("🔍 Начало анализа %d символов", len(symbols))
 
 	// Определяем все периоды для анализа
 	periods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
 
 	// Для каждого символа
-	for _, symbol := range symbols {
+	for i, symbol := range symbols {
+		logger.Debug("  [%d/%d] Анализ %s", i+1, len(symbols), symbol)
+		symbolSignals := 0
+
 		// Для каждого периода
 		for _, period := range periods {
 			// Получаем данные за период
 			data, err := a.getDataForPeriod(symbol, period)
 			if err != nil {
-				// Пропускаем если нет данных
+				logger.Debug("    ⚠️ %s: %v", period, err)
 				continue
 			}
 
 			// Анализируем
 			signal, err := a.analyzeSymbolPeriod(symbol, period, data)
 			if err != nil {
+				logger.Debug("    ⚠️ %s: ошибка анализа - %v", period, err)
 				continue
 			}
 
 			if signal != nil {
-				signals = append(signals, *signal)
+				totalSignals++
+				symbolSignals++
+				logger.Info("    🚀 %s: сигнал обнаружен (%.2f%%)",
+					period, signal.ChangePercent)
+			} else {
+				logger.Debug("    📊 %s: сигнал не обнаружен", period)
 			}
+		}
+
+		if symbolSignals > 0 {
+			logger.Info("  📈 %s: найдено %d сигналов", symbol, symbolSignals)
 		}
 	}
 
 	// Отправляем статистику
-	a.updateStats(time.Since(startTime), len(signals) > 0)
+	a.updateStats(time.Since(startTime), totalSignals > 0)
+
+	logger.Info("✅ Анализ завершен: %d символов, %d сигналов, время: %v",
+		len(symbols), totalSignals, time.Since(startTime))
 
 	return nil
 }
@@ -132,17 +151,38 @@ func (a *CounterAnalyzer) AnalyzeAllSymbols(symbols []string) error {
 // analyzeSymbolPeriod анализирует конкретный символ и период
 func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []types.PriceData) (*analysis.Signal, error) {
 	if len(data) < 2 {
-		return nil, fmt.Errorf("insufficient data for %s period %s", symbol, period)
+		logger.Debug("⚠️ Недостаточно данных для %s период %s (%d точек)",
+			symbol, period, len(data))
+		return nil, fmt.Errorf("недостаточно данных")
 	}
 
-	// Рассчитываем изменение за весь период
-	change := a.calculateChangeOverPeriod(data)
+	// Проверяем, что у нас есть открытие и закрытие свечи
+	if len(data) != 2 {
+		logger.Warn("⚠️ Для %s %s получено %d точек, ожидается 2 (открытие/закрытие)",
+			symbol, period, len(data))
+
+		// Если точек много, берем первую и последнюю как приближение
+		if len(data) > 2 {
+			startPrice := data[0].Price
+			endPrice := data[len(data)-1].Price
+			logger.Warn("   • Используем приближение: %.6f → %.6f", startPrice, endPrice)
+
+			// Создаем упрощенные данные
+			data = []types.PriceData{data[0], data[len(data)-1]}
+		}
+	}
+
+	// Рассчитываем изменение свечи (открытие → закрытие)
+	change := a.calculateCandleChange(data, period)
 
 	// Проверяем базовый порог (0.1% по умолчанию)
 	if math.Abs(change) < a.baseThreshold {
-		// Изменение слишком маленькое, пропускаем
+		logger.Debug("📊 %s %s: изменение %.4f%% < порога %.4f%%, пропускаем",
+			symbol, period, change, a.baseThreshold)
 		return nil, nil
 	}
+
+	logger.Info("🎯 %s %s: значительное изменение %.4f%%", symbol, period, change)
 
 	// Добавляем подтверждение в менеджер
 	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period)
@@ -151,6 +191,12 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 		// Создаем сырой сигнал
 		signal := a.createRawSignal(symbol, period, change, confirmations, data)
 
+		logger.Info("🚀 Сигнал для %s %s:", symbol, period)
+		logger.Info("   • Изменение: %.4f%%", change)
+		logger.Info("   • Подтверждений: %d/%d",
+			confirmations, GetRequiredConfirmations(period))
+		logger.Info("   • Направление: %s", signal.Direction)
+
 		// Публикуем в EventBus
 		a.publishRawCounterSignal(signal)
 
@@ -158,9 +204,51 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 		a.confirmationManager.Reset(symbol, period)
 
 		return &signal, nil
+	} else {
+		logger.Debug("⏳ %s %s: подтверждений %d/%d, ждем еще",
+			symbol, period, confirmations, GetRequiredConfirmations(period))
 	}
 
 	return nil, nil
+}
+
+// calculateCandleChange рассчитывает изменение свечи с проверкой корректности
+func (a *CounterAnalyzer) calculateCandleChange(data []types.PriceData, period string) float64 {
+	if len(data) < 2 {
+		return 0
+	}
+
+	// Берем первую точку как открытие, последнюю как закрытие
+	openPrice := data[0].Price
+	closePrice := data[len(data)-1].Price
+	openTime := data[0].Timestamp
+	closeTime := data[len(data)-1].Timestamp
+
+	// Рассчитываем изменение
+	change := ((closePrice - openPrice) / openPrice) * 100
+
+	// Проверяем длительность для определения корректности данных
+	actualDuration := closeTime.Sub(openTime)
+	expectedDuration := getPeriodDuration(period)
+	coverageRatio := actualDuration.Seconds() / expectedDuration.Seconds()
+
+	// Логируем детали
+	logger.Debug("📐 Расчет изменения свечи %s:", data[0].Symbol)
+	logger.Debug("   • Открытие: %.6f в %s", openPrice, openTime.Format("15:04:05"))
+	logger.Debug("   • Закрытие: %.6f в %s", closePrice, closeTime.Format("15:04:05"))
+	logger.Debug("   • Изменение: %.4f%%", change)
+	logger.Debug("   • Длительность: %v (ожидается: %v)",
+		actualDuration, expectedDuration)
+	logger.Debug("   • Покрытие: %.1f%%", coverageRatio*100)
+
+	// Проверяем корректность данных
+	if coverageRatio < 0.5 {
+		logger.Warn("⚠️ Низкое покрытие данных для %s %s: %.1f%% периода",
+			data[0].Symbol, period, coverageRatio*100)
+		logger.Warn("   • Могут быть расхождения с реальными свечами Bybit")
+	}
+
+	return change
 }
 
 // Analyze - совместимый метод для AnalysisEngine
@@ -168,13 +256,13 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerCon
 	// ВРЕМЕННОЕ РЕШЕНИЕ для совместимости с AnalysisEngine
 
 	if len(data) < 2 {
-		return nil, fmt.Errorf("insufficient data points")
+		return nil, fmt.Errorf("недостаточно точек данных")
 	}
 
 	symbol := data[0].Symbol
 
 	// Рассчитываем изменение
-	change := a.calculateChangeOverPeriod(data)
+	change := a.calculateCandleChange(data, "15m") // Используем дефолтный период
 
 	// Используем период из конфига или дефолтный
 	period := "15m"
@@ -192,6 +280,8 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerCon
 
 	if !isReady {
 		// Еще не готов, ждем больше подтверждений
+		logger.Debug("⏳ %s %s: подтверждений %d/%d, ждем еще",
+			symbol, period, confirmations, GetRequiredConfirmations(period))
 		return nil, nil
 	}
 
@@ -218,11 +308,14 @@ func (a *CounterAnalyzer) createRawSignal(
 		return analysis.Signal{} // Возвращаем пустой сигнал
 	}
 
+	// Берем данные для свечи
+	openPrice := data[0].Price
+	closePrice := data[len(data)-1].Price
+	openTime := data[0].Timestamp
+	closeTime := data[len(data)-1].Timestamp
+
+	// Получаем текущие метрики для расчета индикаторов
 	latestData := data[len(data)-1]
-	candleStartPrice := data[0].Price
-	candleEndPrice := latestData.Price
-	candleStartTime := data[0].Timestamp
-	candleEndTime := latestData.Timestamp
 
 	// Рассчитываем дополнительные метрики
 	var volumeDelta, volumeDeltaPercent float64
@@ -251,9 +344,9 @@ func (a *CounterAnalyzer) createRawSignal(
 	// Детальное логирование свечи
 	logger.Info("📈 Создание сигнала для %s %s:", symbol, period)
 	logger.Info("   • Свеча: %.6f → %.6f (изменение: %.2f%%)",
-		candleStartPrice, candleEndPrice, change)
+		openPrice, closePrice, change)
 	logger.Info("   • Время: %s → %s",
-		candleStartTime.Format("15:04:05"), candleEndTime.Format("15:04:05"))
+		openTime.Format("15:04:05"), closeTime.Format("15:04:05"))
 	logger.Info("   • Подтверждений: %d/%d",
 		confirmations, GetRequiredConfirmations(period))
 	logger.Info("   • Индикаторы: RSI=%.1f, MACD=%.4f", rsi, macdLine)
@@ -270,11 +363,11 @@ func (a *CounterAnalyzer) createRawSignal(
 	customMap["required_confirmations"] = GetRequiredConfirmations(period)
 
 	// Данные свечи
-	customMap["candle_open_price"] = candleStartPrice
-	customMap["candle_close_price"] = candleEndPrice
-	customMap["candle_open_time"] = candleStartTime
-	customMap["candle_close_time"] = candleEndTime
-	customMap["candle_duration_minutes"] = candleEndTime.Sub(candleStartTime).Minutes()
+	customMap["candle_open_price"] = openPrice
+	customMap["candle_close_price"] = closePrice
+	customMap["candle_open_time"] = openTime
+	customMap["candle_close_time"] = closeTime
+	customMap["candle_duration_minutes"] = closeTime.Sub(openTime).Minutes()
 	customMap["candle_data_points"] = len(data)
 
 	// MACD компоненты
@@ -294,8 +387,8 @@ func (a *CounterAnalyzer) createRawSignal(
 		Period:        periodMinutes,
 		Confidence:    float64(confirmations),
 		DataPoints:    len(data),
-		StartPrice:    candleStartPrice, // Цена открытия свечи
-		EndPrice:      candleEndPrice,   // Цена закрытия свечи
+		StartPrice:    openPrice,  // Цена открытия свечи
+		EndPrice:      closePrice, // Цена закрытия свечи
 		Timestamp:     time.Now(),
 		Metadata: analysis.Metadata{
 			Strategy: "counter_analyzer_candle",
@@ -328,8 +421,8 @@ func (a *CounterAnalyzer) createRawSignal(
 				"macd_histogram":   histogram,
 
 				// Данные свечи
-				"candle_open_price":     candleStartPrice,
-				"candle_close_price":    candleEndPrice,
+				"candle_open_price":     openPrice,
+				"candle_close_price":    closePrice,
 				"candle_change_percent": change, // Дублируем для ясности
 			},
 			Custom: customMap,
@@ -344,21 +437,11 @@ func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 		return
 	}
 
-	// Проверяем ToMap()
-	signalMap := signal.ToMap()
-	logger.Debug("   ToMap() результат (важные поля):\n")
-	for key, value := range signalMap {
-		if key == "change_percent" || key == "period" || key == "custom" ||
-			key == "period_string" || key == "symbol" || key == "direction" {
-			logger.Debug("      %s: %v (тип: %T)\n", key, value, value)
-		}
-	}
-
 	// Создаем событие с сырыми данными
 	event := types.Event{
 		Type:      types.EventCounterSignalDetected,
 		Source:    "counter_analyzer_raw",
-		Data:      signalMap,
+		Data:      signal.ToMap(),
 		Timestamp: time.Now(),
 	}
 
@@ -375,9 +458,10 @@ func (a *CounterAnalyzer) publishRawCounterSignal(signal analysis.Signal) {
 // getDataForPeriod получает данные за указанный период (обновлен с использованием свечного движка)
 func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.PriceData, error) {
 	if a.candleSystem != nil {
-		// НОВОЕ: Используем свечной движок для получения свечи
+		// Пробуем получить данные из свечного движка
 		candleData, err := a.getCandleData(symbol, period)
-		if err == nil {
+		if err == nil && len(candleData) >= 2 {
+			logger.Debug("✅ Получены свечные данные для %s %s", symbol, period)
 			return candleData, nil
 		}
 		logger.Debug("⚠️ Не удалось получить свечу из движка: %v, используем старый метод", err)
@@ -387,9 +471,9 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 	return a.getDataForPeriodLegacy(symbol, period)
 }
 
-// getCandleData получает данные из свечного движка
+// getCandleData получает данные из свечного движка (исправленная версия)
 func (a *CounterAnalyzer) getCandleData(symbol, period string) ([]types.PriceData, error) {
-	// Получаем свечу из движка
+	// 1. Получаем свечу из движка
 	candle, err := a.candleSystem.GetCandle(symbol, period)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения свечи: %w", err)
@@ -399,46 +483,31 @@ func (a *CounterAnalyzer) getCandleData(symbol, period string) ([]types.PriceDat
 		return nil, fmt.Errorf("свеча не содержит реальных данных")
 	}
 
-	// Получаем историю цен для этой свечи
-	prices, err := a.storage.GetPriceHistoryRange(symbol, candle.StartTime, candle.EndTime)
-	if err != nil {
-		// Если не можем получить историю, используем OHLC данные свечи
-		return a.convertCandleToPriceData(candle), nil
-	}
+	logger.Info("🕯️ Получена свеча для %s %s:", symbol, period)
+	logger.Info("   • Открытие: %.6f", candle.Open)
+	logger.Info("   • Закрытие: %.6f", candle.Close)
+	logger.Info("   • Высшая: %.6f", candle.High)
+	logger.Info("   • Низшая: %.6f", candle.Low)
+	logger.Info("   • Время: %s - %s",
+		candle.StartTime.Format("15:04:05"),
+		candle.EndTime.Format("15:04:05"))
 
-	// Конвертируем в types.PriceData
-	return a.convertStoragePricesInterfaceToTypes(prices), nil
-}
+	changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
+	logger.Info("   • Изменение: %.4f%%", changePercent)
 
-// convertCandleToPriceData конвертирует свечу в массив PriceData
-func (a *CounterAnalyzer) convertCandleToPriceData(c *candle.Candle) []types.PriceData {
-	// Создаем две точки: открытие и закрытие свечи
-	openData := types.PriceData{
-		Symbol:    c.Symbol,
-		Price:     c.Open,
-		Timestamp: c.StartTime,
-	}
-
-	closeData := types.PriceData{
-		Symbol:    c.Symbol,
-		Price:     c.Close,
-		Timestamp: c.EndTime,
-	}
-
-	// Получаем текущие метрики для символа
-	if metrics, exists := a.storage.GetSymbolMetrics(c.Symbol); exists {
-		openData.Volume24h = metrics.GetVolume24h()
-		openData.OpenInterest = metrics.GetOpenInterest()
-		openData.FundingRate = metrics.GetFundingRate()
-		openData.Change24h = metrics.GetChange24h()
-
-		closeData.Volume24h = metrics.GetVolume24h()
-		closeData.OpenInterest = metrics.GetOpenInterest()
-		closeData.FundingRate = metrics.GetFundingRate()
-		closeData.Change24h = metrics.GetChange24h()
-	}
-
-	return []types.PriceData{openData, closeData}
+	// 2. Возвращаем ТОЛЬКО данные открытия и закрытия для правильного расчета
+	return []types.PriceData{
+		{
+			Symbol:    symbol,
+			Price:     candle.Open,      // Важно: цена открытия свечи
+			Timestamp: candle.StartTime, // Время открытия
+		},
+		{
+			Symbol:    symbol,
+			Price:     candle.Close,   // Важно: цена закрытия свечи
+			Timestamp: candle.EndTime, // Время закрытия
+		},
+	}, nil
 }
 
 // convertStoragePricesInterfaceToTypes конвертирует storage.PriceDataInterface в types.PriceData
@@ -493,7 +562,7 @@ func (a *CounterAnalyzer) getDataForPeriodLegacy(symbol, period string) ([]types
 	endTime := time.Now()
 	startTime := endTime.Add(-periodDuration)
 
-	logger.Info("🔍 getDataForPeriodLegacy: %s за %s (%s - %s)",
+	logger.Debug("🔍 getDataForPeriodLegacy: %s за %s (%s - %s)",
 		symbol, period, startTime.Format("15:04:05"), endTime.Format("15:04:05"))
 
 	// Получаем историю цен за период
@@ -509,7 +578,15 @@ func (a *CounterAnalyzer) getDataForPeriodLegacy(symbol, period string) ([]types
 	}
 
 	// Конвертируем в types.PriceData
-	return a.convertStoragePricesInterfaceToTypes(priceHistory), nil
+	result := a.convertStoragePricesInterfaceToTypes(priceHistory)
+
+	logger.Debug("   Получено %d точек данных", len(result))
+	if len(result) >= 2 {
+		change := ((result[len(result)-1].Price - result[0].Price) / result[0].Price) * 100
+		logger.Debug("   Изменение: %.4f%%", change)
+	}
+
+	return result, nil
 }
 
 // getFallbackData возвращает заглушку если нет реальных данных
@@ -566,101 +643,154 @@ func (a *CounterAnalyzer) getFallbackData(symbol, period string) ([]types.PriceD
 	}, nil
 }
 
-// calculateChangeOverPeriod рассчитывает изменение за период
-func (a *CounterAnalyzer) calculateChangeOverPeriod(data []types.PriceData) float64 {
-	if len(data) < 2 {
-		return 0
+// TestCandleAccuracy тестирует точность свечей
+func (a *CounterAnalyzer) TestCandleAccuracy(symbol string) string {
+	if a.candleSystem == nil {
+		return "❌ Свечная система не инициализирована"
 	}
 
-	// Для свечи: берем первую и последнюю точку (открытие и закрытие)
-	startPrice := data[0].Price
-	endPrice := data[len(data)-1].Price
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("📊 Тест точности свечей для %s:\n", symbol))
 
-	// Строгий расчет как у свечи
-	change := ((endPrice - startPrice) / startPrice) * 100
+	// Тестируем разные периоды
+	periods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
 
-	// Дополнительная проверка: время должно соответствовать периоду
-	startTime := data[0].Timestamp
-	endTime := data[len(data)-1].Timestamp
-	actualDuration := endTime.Sub(startTime)
-	expectedDuration := getPeriodDurationFromData(data)
+	for _, period := range periods {
+		// Получаем свечу из системы
+		candle, err := a.candleSystem.GetCandle(symbol, period)
+		if err != nil {
+			result.WriteString(fmt.Sprintf("⚠️ %s: ошибка - %s\n", period, err))
+			continue
+		}
 
-	// Если данные покрывают менее 50% периода, результат ненадежен
-	coverageRatio := actualDuration.Seconds() / expectedDuration.Seconds()
-	if coverageRatio < 0.5 {
-		logger.Debug("⚠️ Малое покрытие данных для %s: %.0f%% периода",
-			data[0].Symbol, coverageRatio*100)
-		// Можно скорректировать изменение пропорционально покрытию
-		change = change * coverageRatio
+		if candle == nil || !candle.IsReal {
+			result.WriteString(fmt.Sprintf("⏳ %s: нет данных\n", period))
+			continue
+		}
+
+		// Рассчитываем изменение из свечи
+		candleChangePercent := ((candle.Close - candle.Open) / candle.Open) * 100
+
+		// Получаем данные через наш метод
+		data, err := a.getDataForPeriod(symbol, period)
+		var ourChangePercent float64
+		if err == nil && len(data) >= 2 {
+			ourChangePercent = ((data[1].Price - data[0].Price) / data[0].Price) * 100
+		}
+
+		// Сравниваем
+		result.WriteString(fmt.Sprintf("✅ %s:\n", period))
+		result.WriteString(fmt.Sprintf("   • Bybit свеча: %.6f → %.6f (%.4f%%)\n",
+			candle.Open, candle.Close, candleChangePercent))
+
+		if err == nil && len(data) >= 2 {
+			result.WriteString(fmt.Sprintf("   • Наш расчет: %.6f → %.6f (%.4f%%)\n",
+				data[0].Price, data[1].Price, ourChangePercent))
+
+			// Рассчитываем разницу
+			diff := math.Abs(candleChangePercent - ourChangePercent)
+			diffPriceOpen := math.Abs(candle.Open - data[0].Price)
+			diffPriceClose := math.Abs(candle.Close - data[1].Price)
+
+			result.WriteString(fmt.Sprintf("   • Разница цен: открытие=%.6f, закрытие=%.6f\n",
+				diffPriceOpen, diffPriceClose))
+			result.WriteString(fmt.Sprintf("   • Разница изменения: %.6f%%\n", diff))
+
+			// Оценка точности
+			if diff < 0.001 { // 0.001% разницы
+				result.WriteString(fmt.Sprintf("   • ✓ Точность: отличная\n"))
+			} else if diff < 0.01 { // 0.01% разницы
+				result.WriteString(fmt.Sprintf("   • ✓ Точность: хорошая\n"))
+			} else if diff < 0.1 { // 0.1% разницы
+				result.WriteString(fmt.Sprintf("   • ⚠️ Точность: приемлемая\n"))
+			} else {
+				result.WriteString(fmt.Sprintf("   • ❌ Точность: низкая\n"))
+			}
+
+			// Проверяем временные метки
+			if len(data) >= 2 {
+				candleDuration := candle.EndTime.Sub(candle.StartTime)
+				ourDuration := data[1].Timestamp.Sub(data[0].Timestamp)
+				result.WriteString(fmt.Sprintf("   • Время свечи: %v (наше: %v)\n",
+					candleDuration, ourDuration))
+			}
+		} else {
+			result.WriteString(fmt.Sprintf("   • ❌ Не удалось получить данные для сравнения\n"))
+		}
 	}
 
-	logger.Info("📊 Изменение свечи %s: %.6f → %.6f = %.2f%% (покрытие: %.0f%%)",
-		data[0].Symbol, startPrice, endPrice, change, coverageRatio*100)
-
-	return change
+	return result.String()
 }
 
-// getPeriodDurationFromData определяет период на основе данных
-func getPeriodDurationFromData(data []types.PriceData) time.Duration {
-	if len(data) < 2 {
-		return 15 * time.Minute // дефолтный период
+// VerifyCandleData проверяет корректность свечных данных
+func (a *CounterAnalyzer) VerifyCandleData(symbol string) (map[string]interface{}, error) {
+	result := make(map[string]interface{})
+
+	if a.candleSystem == nil {
+		result["error"] = "Свечная система не инициализирована"
+		return result, nil
 	}
 
-	// Пытаемся определить период по разнице времени
-	timeDiffs := make([]time.Duration, 0)
-	for i := 1; i < len(data); i++ {
-		diff := data[i].Timestamp.Sub(data[i-1].Timestamp)
-		if diff > 0 {
-			timeDiffs = append(timeDiffs, diff)
+	// Проверяем все периоды
+	periods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
+	periodData := make(map[string]interface{})
+
+	for _, period := range periods {
+		periodInfo := make(map[string]interface{})
+
+		// Получаем свечу
+		candle, err := a.candleSystem.GetCandle(symbol, period)
+		if err != nil {
+			periodInfo["status"] = "error"
+			periodInfo["error"] = err.Error()
+			periodData[period] = periodInfo
+			continue
 		}
-	}
 
-	if len(timeDiffs) == 0 {
-		return 15 * time.Minute
-	}
-
-	// Находим наиболее частый интервал
-	freq := make(map[time.Duration]int)
-	for _, diff := range timeDiffs {
-		// Округляем до ближайшей минуты
-		rounded := diff.Round(time.Minute)
-		freq[rounded]++
-	}
-
-	var mostCommon time.Duration
-	maxCount := 0
-	for period, count := range freq {
-		if count > maxCount {
-			maxCount = count
-			mostCommon = period
+		if candle == nil {
+			periodInfo["status"] = "no_data"
+			periodData[period] = periodInfo
+			continue
 		}
-	}
 
-	// Стандартные периоды
-	standardPeriods := []time.Duration{
-		5 * time.Minute,
-		15 * time.Minute,
-		30 * time.Minute,
-		1 * time.Hour,
-		4 * time.Hour,
-		24 * time.Hour,
-	}
+		// Проверяем свечу
+		periodInfo["status"] = "ok"
+		periodInfo["is_real"] = candle.IsReal
+		periodInfo["is_closed"] = candle.IsClosed
+		periodInfo["open"] = candle.Open
+		periodInfo["close"] = candle.Close
+		periodInfo["high"] = candle.High
+		periodInfo["low"] = candle.Low
+		periodInfo["volume_usd"] = candle.VolumeUSD
+		periodInfo["start_time"] = candle.StartTime.Format("15:04:05")
+		periodInfo["end_time"] = candle.EndTime.Format("15:04:05")
 
-	// Находим ближайший стандартный период
-	var closestPeriod time.Duration
-	minDiff := time.Duration(1<<63 - 1)
-	for _, std := range standardPeriods {
-		diff := mostCommon - std
-		if diff < 0 {
-			diff = -diff
+		// Рассчитываем изменение
+		if candle.Open > 0 {
+			change := ((candle.Close - candle.Open) / candle.Open) * 100
+			periodInfo["change_percent"] = change
 		}
-		if diff < minDiff {
-			minDiff = diff
-			closestPeriod = std
+
+		// Проверяем логику: закрытие должно быть между high и low
+		if candle.Close < candle.Low || candle.Close > candle.High {
+			periodInfo["warning"] = "Цена закрытия вне диапазона high/low"
 		}
+
+		// Проверяем временные метки
+		if candle.StartTime.After(candle.EndTime) {
+			periodInfo["error"] = "Некорректное время: начало позже окончания"
+		}
+
+		periodData[period] = periodInfo
 	}
 
-	return closestPeriod
+	result["periods"] = periodData
+
+	// Получаем статистику системы
+	stats := a.candleSystem.GetStats()
+	result["system_stats"] = stats
+
+	return result, nil
 }
 
 // GetCandleStats получает статистику свечей для символа
@@ -723,7 +853,7 @@ func (a *CounterAnalyzer) TestCandleSystem(symbol string) string {
 
 		if candle != nil && candle.IsReal {
 			changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
-			result += fmt.Sprintf("✅ %s: %.6f → %.6f (%.2f%%)",
+			result += fmt.Sprintf("✅ %s: %.6f → %.6f (%.4f%%)",
 				period, candle.Open, candle.Close, changePercent)
 
 			if !candle.IsClosed {
@@ -737,11 +867,12 @@ func (a *CounterAnalyzer) TestCandleSystem(symbol string) string {
 
 	// Получаем статистику системы
 	stats := a.candleSystem.GetStats()
-	storageStats := stats["storage_stats"].(candle.CandleStats)
-	result += fmt.Sprintf("\n📊 Статистика системы:\n")
-	result += fmt.Sprintf("• Активных свечей: %d\n", storageStats.ActiveCandles)
-	result += fmt.Sprintf("• Всего свечей: %d\n", storageStats.TotalCandles)
-	result += fmt.Sprintf("• Символов: %d\n", storageStats.SymbolsCount)
+	if storageStats, ok := stats["storage_stats"].(candle.CandleStats); ok {
+		result += fmt.Sprintf("\n📊 Статистика системы:\n")
+		result += fmt.Sprintf("• Активных свечей: %d\n", storageStats.ActiveCandles)
+		result += fmt.Sprintf("• Всего свечей: %d\n", storageStats.TotalCandles)
+		result += fmt.Sprintf("• Символов: %d\n", storageStats.SymbolsCount)
+	}
 
 	return result
 }
@@ -900,21 +1031,6 @@ func (a *CounterAnalyzer) GetNotifierStats() map[string]interface{} {
 		"notification_enabled": a.notificationEnabled,
 		"chart_provider":       a.chartProvider,
 	}
-}
-
-// Вспомогательные методы для получения настроек
-func (a *CounterAnalyzer) getBasePeriodMinutes(cfg common.AnalyzerConfig) int {
-	if val, ok := cfg.CustomSettings["base_period_minutes"].(int); ok {
-		return val
-	}
-	return 1
-}
-
-func (a *CounterAnalyzer) getCurrentPeriod(cfg common.AnalyzerConfig) string {
-	if val, ok := cfg.CustomSettings["analysis_period"].(string); ok {
-		return val
-	}
-	return "15m"
 }
 
 // TestDeltaConnection тестирует подключение к API дельты
