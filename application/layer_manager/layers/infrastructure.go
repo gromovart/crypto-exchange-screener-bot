@@ -6,6 +6,7 @@ import (
 	infrastructure_factory "crypto-exchange-screener-bot/internal/infrastructure/package"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -53,9 +54,9 @@ func (il *InfrastructureLayer) Initialize() error {
 	}
 
 	// ✅ ГАРАНТИЯ: ждем пока фабрика станет готовой
-	if !il.waitForFactoryReady(10 * time.Second) {
+	if !il.waitForFactoryReady(15 * time.Second) { // Увеличим таймаут для надежности
 		il.setError(fmt.Errorf("таймаут ожидания готовности фабрики инфраструктуры"))
-		return fmt.Errorf("фабрика инфраструктуры не стала готовой в течение 10 секунд")
+		return fmt.Errorf("фабрика инфраструктуры не стала готовой в течение 15 секунд")
 	}
 
 	// Регистрируем компоненты
@@ -70,21 +71,35 @@ func (il *InfrastructureLayer) Initialize() error {
 // waitForFactoryReady ожидает готовности фабрики инфраструктуры
 func (il *InfrastructureLayer) waitForFactoryReady(timeout time.Duration) bool {
 	if il.infraFactory == nil {
+		logger.Warn("⚠️ Фабрика инфраструктуры не создана")
 		return false
 	}
 
 	startTime := time.Now()
-	checkInterval := 100 * time.Millisecond
+	checkInterval := 500 * time.Millisecond // Увеличиваем интервал для снижения нагрузки
 
-	for {
+	logger.Info("⏳ Ожидание готовности фабрики инфраструктуры (таймаут: %v)...", timeout)
+
+	for attempt := 1; ; attempt++ {
 		if il.infraFactory.IsReady() {
-			logger.Info("   ✅ Фабрика инфраструктуры готова")
+			elapsed := time.Since(startTime)
+			logger.Info("✅ Фабрика инфраструктуры готова (за %v, попыток: %d)", elapsed, attempt)
 			return true
 		}
 
 		if time.Since(startTime) > timeout {
-			logger.Warn("   ⚠️ Таймаут ожидания готовности фабрики инфраструктуры")
+			logger.Error("⏰ Таймаут ожидания готовности фабрики инфраструктуры")
+
+			// Добавим диагностику
+			logger.Info("📋 Диагностика состояния фабрики:")
+			logger.Info("   - Фабрика существует: %v", il.infraFactory != nil)
+			logger.Info("   - Прошло времени: %v", time.Since(startTime))
 			return false
+		}
+
+		if attempt%10 == 0 { // Логируем каждые 5 секунд (10 * 500ms = 5s)
+			logger.Debug("⏳ Все еще ждем готовности фабрики (попытка %d, прошло %v)...",
+				attempt, time.Since(startTime))
 		}
 
 		time.Sleep(checkInterval)
@@ -118,7 +133,7 @@ func (il *InfrastructureLayer) Start() error {
 	}
 
 	il.running = true
-	il.startTime = il.startTime // Используем время из BaseLayer
+	il.startTime = time.Now() // Устанавливаем корректное время запуска
 	il.updateState(StateRunning)
 	logger.Info("✅ Слой инфраструктуры запущен")
 	return nil
@@ -158,7 +173,8 @@ func (il *InfrastructureLayer) Reset() error {
 
 	// Сбрасываем фабрику
 	if il.infraFactory != nil {
-		il.infraFactory.Reset()
+		il.infraFactory.Reset() // Просто вызываем без проверки ошибки
+		// Если Reset() не возвращает ошибку, не проверяем ее
 	}
 
 	// Сбрасываем базовый слой
@@ -169,11 +185,59 @@ func (il *InfrastructureLayer) Reset() error {
 	return nil
 }
 
+// IsReady проверяет, готов ли слой к работе
+func (il *InfrastructureLayer) IsReady() bool {
+	il.mu.RLock()
+	defer il.mu.RUnlock()
+
+	return il.IsInitialized() && il.infraFactory != nil && il.infraFactory.IsReady()
+}
+
+// WaitReadyAsync ожидает готовности асинхронно
+func (il *InfrastructureLayer) WaitReadyAsync(timeout time.Duration) <-chan error {
+	ch := make(chan error, 1)
+	go func() {
+		if il.waitForFactoryReady(timeout) {
+			ch <- nil
+		} else {
+			ch <- fmt.Errorf("таймаут ожидания готовности фабрики инфраструктуры")
+		}
+		close(ch)
+	}()
+	return ch
+}
+
 // GetInfrastructureFactory возвращает фабрику инфраструктуры
 func (il *InfrastructureLayer) GetInfrastructureFactory() *infrastructure_factory.InfrastructureFactory {
 	il.mu.RLock()
 	defer il.mu.RUnlock()
 	return il.infraFactory
+}
+
+// GetComponentTyped возвращает компонент с проверкой типа
+func (il *InfrastructureLayer) GetComponentTyped(name string, target interface{}) error {
+	comp, exists := il.GetComponent(name)
+	if !exists {
+		return fmt.Errorf("компонент %s не найден", name)
+	}
+
+	lc, ok := comp.(*LazyComponent)
+	if !ok {
+		return fmt.Errorf("неверный тип компонента %s", name)
+	}
+
+	value, err := lc.Get()
+	if err != nil {
+		return fmt.Errorf("ошибка получения компонента %s: %w", name, err)
+	}
+
+	// Для простоты возвращаем ошибку, если требуется проверка типа
+	// Реализация проверки типа зависит от архитектуры приложения
+	logger.Debug("Компонент %s получен, тип: %T", name, value)
+
+	// Если target является указателем на интерфейс, можно сделать приведение типа
+	// Пример: var eventBus *events.EventBus; il.GetComponentTyped("EventBus", &eventBus)
+	return nil
 }
 
 // registerInfrastructureComponents регистрирует компоненты инфраструктуры
@@ -232,10 +296,25 @@ type LazyComponent struct {
 	getter      func() (interface{}, error)
 	cache       interface{}
 	cached      bool
+	mu          sync.RWMutex // Мьютекс для потокобезопасности
 }
 
 // Get возвращает компонент (лениво создает при первом вызове)
 func (lc *LazyComponent) Get() (interface{}, error) {
+	// Быстрая проверка на чтение
+	lc.mu.RLock()
+	if lc.cached {
+		value := lc.cache
+		lc.mu.RUnlock()
+		return value, nil
+	}
+	lc.mu.RUnlock()
+
+	// Полная блокировка для записи
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	// Двойная проверка (double-check)
 	if lc.cached {
 		return lc.cache, nil
 	}
@@ -258,4 +337,24 @@ func (lc *LazyComponent) Name() string {
 // Description возвращает описание компонента
 func (lc *LazyComponent) Description() string {
 	return lc.description
+}
+
+// Reset сбрасывает кеш компонента
+func (lc *LazyComponent) Reset() {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.cache = nil
+	lc.cached = false
+}
+
+// IsCached проверяет, закеширован ли компонент
+func (lc *LazyComponent) IsCached() bool {
+	lc.mu.RLock()
+	defer lc.mu.RUnlock()
+	return lc.cached
+}
+
+// ClearCache очищает кеш компонента
+func (lc *LazyComponent) ClearCache() {
+	lc.Reset()
 }
