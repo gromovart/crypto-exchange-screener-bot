@@ -214,3 +214,80 @@ func GetDirectionText(direction string) string {
 	}
 	return "ПАДЕНИЕ"
 }
+
+// ========== ДОПОЛНИТЕЛЬНЫЕ УТИЛИТЫ ДЛЯ PERIOD MANAGER ==========
+
+// GetRequiredPointsForPeriod возвращает необходимое количество точек для периода
+func GetRequiredPointsForPeriod(period string) int {
+	switch period {
+	case "5m":
+		return 6
+	case "15m":
+		return 10
+	case "30m":
+		return 15
+	case "1h":
+		return 20
+	case "4h":
+		return 25
+	case "1d":
+		return 30
+	default:
+		return 15
+	}
+}
+
+// IsValidPeriod проверяет валидность периода
+func IsValidPeriod(period string) bool {
+	switch period {
+	case "5m", "15m", "30m", "1h", "4h", "1d":
+		return true
+	default:
+		return false
+	}
+}
+
+// PeriodToMinutes конвертирует период в минуты
+func PeriodToMinutes(period string) int {
+	switch period {
+	case "5m":
+		return 5
+	case "15m":
+		return 15
+	case "30m":
+		return 30
+	case "1h":
+		return 60
+	case "4h":
+		return 240
+	case "1d":
+		return 1440
+	default:
+		return 15
+	}
+}
+
+// PeriodToDuration конвертирует период в time.Duration
+func PeriodToDuration(period string) time.Duration {
+	return time.Duration(PeriodToMinutes(period)) * time.Minute
+}
+
+// FormatPeriod форматирует период для отображения
+func FormatPeriod(period string) string {
+	switch period {
+	case "5m":
+		return "5 минут"
+	case "15m":
+		return "15 минут"
+	case "30m":
+		return "30 минут"
+	case "1h":
+		return "1 час"
+	case "4h":
+		return "4 часа"
+	case "1d":
+		return "1 день"
+	default:
+		return period
+	}
+}

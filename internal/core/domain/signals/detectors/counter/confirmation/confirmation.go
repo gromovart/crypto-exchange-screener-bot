@@ -1,5 +1,5 @@
-// internal/core/domain/signals/detectors/counter/confirmation_manager.go
-package counter
+// internal/core/domain/signals/detectors/counter/confirmation/confirmation.go
+package confirmation
 
 import (
 	"sync"
