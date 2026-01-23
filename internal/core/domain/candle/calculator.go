@@ -1,4 +1,4 @@
-// internal/core/candle/calculator.go
+// internal/core/domain/candle/calculator.go
 package candle
 
 import (

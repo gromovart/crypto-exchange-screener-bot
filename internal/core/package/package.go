@@ -122,20 +122,6 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 	return factory, nil
 }
 
-// NewCoreServiceFactoryLegacy создает фабрику ядра для обратной совместимости
-// @deprecated Используйте NewCoreServiceFactory с InfrastructureFactory
-func NewCoreServiceFactoryLegacy(databaseService interface{}, redisService interface{}, config *Config) (*CoreServiceFactory, error) {
-	logger.Warn("⚠️ Используется устаревший конструктор NewCoreServiceFactoryLegacy")
-
-	// Создаем mock инфраструктурную фабрику для обратной совместимости
-	mockInfraFactory := &infrastructure_factory.InfrastructureFactory{}
-
-	return NewCoreServiceFactory(CoreServiceDependencies{
-		InfrastructureFactory: mockInfraFactory,
-		Config:                config,
-	})
-}
-
 // Initialize инициализирует фабрику и создает все сервисы
 func (f *CoreServiceFactory) Initialize() error {
 	f.mu.Lock()

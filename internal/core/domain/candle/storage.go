@@ -1,4 +1,4 @@
-// internal/core/candle/storage.go
+// internal/core/domain/candle/storage.go
 package candle
 
 import (

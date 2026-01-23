@@ -108,9 +108,13 @@ func (il *InfrastructureLayer) Start() error {
 	if il.infraFactory != nil {
 		if err := il.infraFactory.Start(); err != nil {
 			il.setError(err)
+			logger.Error("❌ InfrastructureLayer: ОШИБКА в infraFactory.Start(): %v", err)
 			return fmt.Errorf("не удалось запустить фабрику инфраструктуры: %w", err)
 		}
 		logger.Info("   • Фабрика инфраструктуры запущена")
+	} else {
+		logger.Error("❌ InfrastructureLayer: infraFactory равен nil!")
+		return fmt.Errorf("фабрика инфраструктуры не создана")
 	}
 
 	il.running = true

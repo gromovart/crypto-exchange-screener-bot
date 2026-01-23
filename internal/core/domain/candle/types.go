@@ -1,4 +1,4 @@
-// internal/core/candle/types.go
+// internal/core/domain/candle/types.go
 package candle
 
 import "time"

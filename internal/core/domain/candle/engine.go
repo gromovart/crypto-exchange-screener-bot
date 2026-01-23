@@ -1,4 +1,4 @@
-// internal/core/candle/engine.go
+// internal/core/domain/candle/engine.go
 package candle
 
 import (

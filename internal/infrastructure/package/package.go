@@ -109,8 +109,19 @@ func (f *InfrastructureFactory) Initialize() error {
 		CleanupInterval:      60 * time.Second,
 		MaxCustomStorages:    10,
 	}
+
+	// Передаем RedisService как RedisClient
+	var redisClient interface{} = nil
+	if f.config.Redis.Enabled && f.redisService != nil {
+		redisClient = f.redisService
+		logger.Debug("🔧 RedisService передан в StorageFactory")
+	} else if f.config.Redis.Enabled {
+		logger.Warn("⚠️ RedisService не создан, но Redis включен в конфигурации")
+	}
+
 	storageFactory, err := redis_storage_factory.NewStorageFactory(redis_storage_factory.StorageDependencies{
-		Config: storageFactoryConfig,
+		Config:      storageFactoryConfig,
+		RedisClient: redisClient,
 	})
 	if err != nil {
 		logger.Warn("⚠️ Не удалось создать Redis StorageFactory: %v", err)
@@ -171,11 +182,17 @@ func (f *InfrastructureFactory) Start() error {
 	}
 
 	if len(errors) > 0 {
+		// ДОБАВИТЬ: Подробное логирование ошибок
+		logger.Error("❌ InfrastructureFactory.Start(): обнаружены ошибки:")
+		for i, err := range errors {
+			logger.Error("   %d. %v", i+1, err)
+		}
 		return fmt.Errorf("ошибки при запуске: %v", errors)
 	}
 
 	f.running = true
 	logger.Info("✅ Все инфраструктурные компоненты запущены")
+	logger.Info("🔧 ОТЛАДКА InfrastructureFactory.Start(): завершено успешно")
 	return nil
 }
 
@@ -242,11 +259,14 @@ func (f *InfrastructureFactory) startStorageFactory() error {
 	}
 
 	if !f.storageFactory.IsRunning() {
+		logger.Info("🔧 ОТЛАДКА: Перед запуском storageFactory")
 		if err := f.storageFactory.Start(); err != nil {
 			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
+			logger.Warn("⚠️ Детали ошибки: %+v", err)
 			return fmt.Errorf("ошибка запуска StorageFactory: %w", err)
 		}
 		logger.Info("✅ StorageFactory запущена")
+		logger.Info("🔧 ОТЛАДКА: storageFactory успешно запущена")
 	} else {
 		logger.Info("✅ StorageFactory уже запущена, пропускаем")
 	}
