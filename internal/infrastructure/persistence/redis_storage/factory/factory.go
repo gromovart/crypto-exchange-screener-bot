@@ -119,8 +119,18 @@ func (sf *StorageFactory) Start() error {
 	defer sf.mu.Unlock()
 
 	// Создаем хранилище по умолчанию если еще не создано
-	if _, err := sf.CreateDefaultStorage(); err != nil {
-		return fmt.Errorf("не удалось создать хранилище: %w", err)
+	if sf.defaultStorage == nil {
+		// Временная переменная для хранения ошибки
+		var err error
+
+		// Создаем хранилище с временной разблокировкой
+		sf.mu.Unlock()
+		sf.defaultStorage, err = sf.createDefaultStorageUnsafe()
+		sf.mu.Lock()
+
+		if err != nil {
+			return fmt.Errorf("не удалось создать хранилище: %w", err)
+		}
 	}
 
 	// Запускаем очистку если настроено
@@ -130,6 +140,44 @@ func (sf *StorageFactory) Start() error {
 
 	logger.Info("🚀 Redis StorageFactory запущена")
 	return nil
+}
+
+// createDefaultStorageUnsafe создает хранилище без блокировки (для внутреннего использования)
+func (sf *StorageFactory) createDefaultStorageUnsafe() (PriceStorage, error) {
+	if sf.redisClient == nil {
+		return nil, fmt.Errorf("Redis клиент не установлен")
+	}
+
+	// Проверяем тип redisClient
+	var redisService *redis_service.RedisService
+	switch client := sf.redisClient.(type) {
+	case *redis_service.RedisService:
+		redisService = client
+	default:
+		return nil, fmt.Errorf("неподдерживаемый тип Redis клиента: %T", client)
+	}
+
+	// Создаем RedisStorage
+	storageConfig := sf.config.DefaultStorageConfig
+	if storageConfig == nil {
+		storageConfig = &redis_storage.StorageConfig{
+			MaxHistoryPerSymbol: 10000,
+			MaxSymbols:          1000,
+			CleanupInterval:     5 * time.Minute,
+			RetentionPeriod:     48 * time.Hour,
+		}
+	}
+
+	// Создаем структуру PriceStorage (используем упрощенный конструктор)
+	priceStorage := price_storage.NewPriceStorageSimple(redisService, storageConfig)
+
+	// Инициализируем хранилище
+	if err := priceStorage.Initialize(); err != nil {
+		return nil, fmt.Errorf("ошибка инициализации Redis хранилища: %w", err)
+	}
+
+	logger.Info("✅ Создано Redis хранилище по умолчанию")
+	return priceStorage, nil
 }
 
 // Stop останавливает фабрику
