@@ -1,5 +1,4 @@
 // internal/core/domain/signals/engine/engine.go
-// internal/core/domain/signals/engine/engine.go
 package engine
 
 import (
@@ -96,8 +95,8 @@ type EngineStats struct {
 
 // DefaultConfig - конфигурация по умолчанию
 var DefaultConfig = EngineConfig{
-	UpdateInterval:   10 * time.Second,
-	AnalysisPeriods:  []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, 60 * time.Minute},
+	UpdateInterval:   30 * time.Second,
+	AnalysisPeriods:  []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, 60 * time.Minute, 240 * time.Minute, 1440 * time.Minute},
 	MinVolumeFilter:  100000,
 	MaxSymbolsPerRun: 100,
 	EnableParallel:   true,

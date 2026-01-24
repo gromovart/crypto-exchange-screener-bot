@@ -2,7 +2,6 @@
 package progress
 
 import (
-	"crypto-exchange-screener-bot/pkg/logger"
 	"math"
 	"time"
 )
@@ -42,8 +41,8 @@ func NewProgressData(confirmations, requiredConfirmations int, period string, ti
 	// Рассчитываем время до следующего анализа и сигнала
 	nextAnalysis, nextSignal := calculateNextTimes(confirmations, period, timestamp)
 
-	logger.Warn("🧮 Progress расчет для %s: подтверждений %d, групп %d/%d, процент %.0f%%",
-		period, confirmations, filledGroups, totalGroups, percentage)
+	// logger.Info("🧮 Progress расчет для %s: подтверждений %d, групп %d/%d, процент %.0f%%",
+	// 	period, confirmations, filledGroups, totalGroups, percentage)
 
 	return ProgressData{
 		Confirmations:         confirmations,

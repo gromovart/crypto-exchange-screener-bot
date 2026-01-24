@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"time"
 
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // CandleSystemFactory - фабрика для создания свечной системы
 type CandleSystemFactory struct {
-	config CandleConfig
+	config storage.CandleConfig
 }
 
 // NewCandleSystemFactory создает новую фабрику
 func NewCandleSystemFactory() *CandleSystemFactory {
 	return &CandleSystemFactory{
-		config: CandleConfig{
+		config: storage.CandleConfig{
 			SupportedPeriods: []string{"5m", "15m", "30m", "1h", "4h", "1d"},
 			MaxHistory:       1000,
 			CleanupInterval:  5 * time.Minute,
@@ -50,16 +51,20 @@ func (f *CandleSystemFactory) WithAutoBuild(autoBuild bool) *CandleSystemFactory
 	return f
 }
 
-// CreateSystem создает полную свечную систему
-func (f *CandleSystemFactory) CreateSystem(priceStorage storage.PriceStorageInterface) (*CandleSystem, error) {
+// CreateSystem создает свечную систему с RedisCandleStorage
+func (f *CandleSystemFactory) CreateSystem(
+	priceStorage storage.PriceStorageInterface,
+	candleStorage storage.CandleStorageInterface,
+) (*CandleSystem, error) {
 	if priceStorage == nil {
 		return nil, fmt.Errorf("price storage не инициализирован")
 	}
 
-	logger.Info("🏗️ Создание свечной системы с периодами: %v", f.config.SupportedPeriods)
+	if candleStorage == nil {
+		return nil, fmt.Errorf("candle storage не инициализирован")
+	}
 
-	// Создаем хранилище свечей
-	candleStorage := NewCandleStorage(f.config)
+	logger.Info("🏗️ Создание свечной системы (Redis хранилище) с периодами: %v", f.config.SupportedPeriods)
 
 	// Создаем движок
 	candleEngine := NewCandleEngine(candleStorage, f.config)
@@ -76,17 +81,17 @@ func (f *CandleSystemFactory) CreateSystem(priceStorage storage.PriceStorageInte
 		config:       f.config,
 	}
 
-	logger.Info("✅ Свечная система создана успешно")
+	logger.Info("✅ Свечная система с Redis хранилищем создана успешно")
 	return system, nil
 }
 
 // CandleSystem - полная свечная система
 type CandleSystem struct {
-	Storage      *CandleStorage
+	Storage      storage.CandleStorageInterface
 	Engine       *CandleEngine
 	Calculator   *CandleCalculator
 	priceStorage storage.PriceStorageInterface
-	config       CandleConfig
+	config       storage.CandleConfig
 }
 
 // Start запускает свечную систему
@@ -127,10 +132,11 @@ func (cs *CandleSystem) preloadCandles() {
 		for _, period := range cs.config.SupportedPeriods {
 			// Пробуем построить свечу из истории
 			candle, err := cs.Calculator.BuildCandleFromHistory(symbol, period)
-			if err == nil && candle != nil && candle.IsReal {
+			if err == nil && candle != nil && candle.IsRealFlag {
 				// Сохраняем как историческую свечу
-				candle.IsClosed = true
-				cs.Storage.CloseAndArchiveCandle(candle)
+				candle.IsClosedFlag = true
+				// Для RedisCandleStorage используем SaveActiveCandle
+				cs.Storage.SaveActiveCandle(candle)
 			}
 		}
 	}
@@ -139,29 +145,74 @@ func (cs *CandleSystem) preloadCandles() {
 }
 
 // OnPriceUpdate обрабатывает обновление цены
-func (cs *CandleSystem) OnPriceUpdate(priceData storage.PriceData) { // Изменено
+func (cs *CandleSystem) OnPriceUpdate(priceData storage.PriceData) {
 	cs.Engine.OnPriceUpdate(priceData)
 }
 
 // GetCandle получает свечу для символа и периода
-func (cs *CandleSystem) GetCandle(symbol, period string) (*Candle, error) {
-	// Сначала проверяем активную свечу
-	if candle, exists := cs.Storage.GetActiveCandle(symbol, period); exists {
+func (cs *CandleSystem) GetCandle(symbol, period string) (*redis_storage.Candle, error) {
+	// Получаем свечу из Redis хранилища
+	candleInterface, err := cs.Storage.GetCandle(symbol, period)
+	if err != nil {
+		return nil, err
+	}
+
+	// Конвертируем интерфейс в *Candle
+	if candle, ok := candleInterface.(*redis_storage.Candle); ok {
 		return candle, nil
 	}
 
-	// Затем проверяем последнюю историческую
-	if candle, exists := cs.Storage.GetLatestCandle(symbol, period); exists {
-		return candle, nil
-	}
-
-	// Если нет, строим из истории
-	return cs.Calculator.BuildCandleFromHistory(symbol, period)
+	// Создаем *Candle из интерфейса
+	return &redis_storage.Candle{
+		Symbol:       candleInterface.GetSymbol(),
+		Period:       candleInterface.GetPeriod(),
+		Open:         candleInterface.GetOpen(),
+		High:         candleInterface.GetHigh(),
+		Low:          candleInterface.GetLow(),
+		Close:        candleInterface.GetClose(),
+		Volume:       candleInterface.GetVolume(),
+		VolumeUSD:    candleInterface.GetVolumeUSD(),
+		Trades:       candleInterface.GetTrades(),
+		StartTime:    candleInterface.GetStartTime(),
+		EndTime:      candleInterface.GetEndTime(),
+		IsClosedFlag: candleInterface.IsClosed(),
+		IsRealFlag:   candleInterface.IsReal(),
+	}, nil
 }
 
 // GetHistory возвращает историю свечей
-func (cs *CandleSystem) GetHistory(symbol, period string, limit int) ([]*Candle, error) {
-	return cs.Storage.GetHistory(symbol, period, limit)
+func (cs *CandleSystem) GetHistory(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
+	historyInterfaces, err := cs.Storage.GetHistory(symbol, period, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Конвертируем интерфейсы в *Candle
+	candles := make([]*redis_storage.Candle, len(historyInterfaces))
+	for i, candleInterface := range historyInterfaces {
+		if candle, ok := candleInterface.(*redis_storage.Candle); ok {
+			candles[i] = candle
+		} else {
+			// Создаем *Candle из интерфейса
+			candles[i] = &redis_storage.Candle{
+				Symbol:       candleInterface.GetSymbol(),
+				Period:       candleInterface.GetPeriod(),
+				Open:         candleInterface.GetOpen(),
+				High:         candleInterface.GetHigh(),
+				Low:          candleInterface.GetLow(),
+				Close:        candleInterface.GetClose(),
+				Volume:       candleInterface.GetVolume(),
+				VolumeUSD:    candleInterface.GetVolumeUSD(),
+				Trades:       candleInterface.GetTrades(),
+				StartTime:    candleInterface.GetStartTime(),
+				EndTime:      candleInterface.GetEndTime(),
+				IsClosedFlag: candleInterface.IsClosed(),
+				IsRealFlag:   candleInterface.IsReal(),
+			}
+		}
+	}
+
+	return candles, nil
 }
 
 // GetStats возвращает статистику системы
@@ -178,11 +229,15 @@ func (cs *CandleSystem) GetStats() map[string]interface{} {
 		},
 		"engine_stats":  engineStats,
 		"storage_stats": storageStats,
+		"storage_type":  "redis",
 	}
 }
 
-// CreateSimpleSystem создает упрощенную свечную систему
-func CreateSimpleSystem(priceStorage storage.PriceStorageInterface) (*CandleSystem, error) {
+// CreateSimpleSystem создает упрощенную свечную систему с Redis
+func CreateSimpleSystem(
+	priceStorage storage.PriceStorageInterface,
+	candleStorage storage.CandleStorageInterface,
+) (*CandleSystem, error) {
 	factory := NewCandleSystemFactory()
-	return factory.CreateSystem(priceStorage)
+	return factory.CreateSystem(priceStorage, candleStorage)
 }

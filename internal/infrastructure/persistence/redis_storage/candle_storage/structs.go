@@ -3,7 +3,8 @@ package candle_storage
 
 import (
 	"context"
-	"crypto-exchange-screener-bot/internal/core/domain/candle"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -17,7 +18,13 @@ type RedisCandleStorage struct {
 	candlePrefix string
 
 	// Конфигурация
-	config candle.CandleConfig
+	config redis_storage.CandleConfig
+
+	// Статистика для агрегированного логирования
+	closedCandlesCount int           // счетчик закрытых свечей
+	lastCleanupLog     time.Time     // время последнего логирования статистики
+	cleanupLogInterval time.Duration // интервал логирования статистики
+	statsMu            sync.RWMutex  // мьютекс для статистики
 }
 
 type CandleData struct {

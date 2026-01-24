@@ -5,10 +5,6 @@ import (
 	"time"
 )
 
-
-
-
-
 // Реализация методов интерфейса PriceChange
 func (pc *PriceChange) GetSymbol() string         { return pc.Symbol }
 func (pc *PriceChange) GetCurrentPrice() float64  { return pc.CurrentPrice }

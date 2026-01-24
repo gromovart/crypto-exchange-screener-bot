@@ -43,12 +43,12 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 
 	// Проверяем базовый порог (0.1% по умолчанию)
 	if math.Abs(change) < a.baseThreshold {
-		logger.Debug("📊 %s %s: изменение %.4f%% < порога %.4f%%, пропускаем",
-			symbol, period, change, a.baseThreshold)
+		// logger.Debug("📊 %s %s: изменение %.4f%% < порога %.4f%%, пропускаем",
+		// 	symbol, period, change, a.baseThreshold)
 		return nil, nil
 	}
 
-	logger.Info("🎯 %s %s: значительное изменение %.4f%%", symbol, period, change)
+	// logger.Info("🎯 %s %s: значительное изменение %.4f%%", symbol, period, change)
 
 	// Определяем направление на основе change
 	direction := "growth"
@@ -61,8 +61,8 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 
 	// Еще не готов, ждем больше подтверждений
 	if !isReady {
-		logger.Warn("⏳ %s %s: подтверждений %d, ждем сигнала (направление: %s)",
-			symbol, period, confirmations, direction)
+		// logger.Info("⏳ %s %s: подтверждений %d, ждем сигнала (направление: %s)",
+		// 	symbol, period, confirmations, direction)
 		return nil, nil
 	}
 
@@ -70,11 +70,11 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 		// Создаем сырой сигнал
 		signal := a.createRawSignal(symbol, period, change, confirmations, data)
 
-		logger.Info("🚀 Сигнал для %s %s:", symbol, period)
-		logger.Info("   • Изменение: %.4f%%", change)
-		logger.Info("   • Подтверждений: %d/%d",
-			confirmations, confirmation.GetRequiredConfirmations(period))
-		logger.Info("   • Направление: %s", signal.Direction)
+		// logger.Info("🚀 Сигнал для %s %s:", symbol, period)
+		// logger.Info("   • Изменение: %.4f%%", change)
+		// logger.Info("   • Подтверждений: %d/%d",
+		// 	confirmations, confirmation.GetRequiredConfirmations(period))
+		// logger.Info("   • Направление: %s", signal.Direction)
 
 		// Публикуем в EventBus
 		a.publishRawCounterSignal(signal)
@@ -181,21 +181,21 @@ func (a *CounterAnalyzer) createRawSignal(
 		period,
 		time.Now(),
 	)
-	logger.Warn("📊 Прогресс сигнала: %d подтверждений → %d/%d групп (%d%%)",
-		confirmations, progressData.FilledGroups, progressData.TotalGroups,
-		int(progressData.Percentage))
+	// logger.Info("📊 Прогресс сигнала: %d подтверждений → %d/%d групп (%d%%)",
+	// 	confirmations, progressData.FilledGroups, progressData.TotalGroups,
+	// 	int(progressData.Percentage))
 
 	// Детальное логирование свечи
-	logger.Warn("📈 Создание сигнала для %s %s:", symbol, period)
-	logger.Warn("   • Свеча: %.6f → %.6f (изменение: %.2f%%)",
-		openPrice, closePrice, change)
-	logger.Warn("   • Время: %s → %s",
-		openTime.Format("15:04:05"), closeTime.Format("15:04:05"))
-	logger.Warn("   • Подтверждений: %d/%d",
-		confirmations, confirmation.GetRequiredConfirmations(period))
-	logger.Warn("   • Индикаторы: RSI=%.1f, MACD=%.4f", rsi, macdLine)
-	logger.Warn("   • Прогресс: %d/%d групп (%d%%)", // НОВОЕ логирование
-		progressData.FilledGroups, progressData.TotalGroups, int(progressData.Percentage))
+	// logger.Info("📈 Создание сигнала для %s %s:", symbol, period)
+	// logger.Info("   • Свеча: %.6f → %.6f (изменение: %.2f%%)",
+	// 	openPrice, closePrice, change)
+	// logger.Info("   • Время: %s → %s",
+	// 	openTime.Format("15:04:05"), closeTime.Format("15:04:05"))
+	// logger.Info("   • Подтверждений: %d/%d",
+	// 	confirmations, confirmation.GetRequiredConfirmations(period))
+	// logger.Info("   • Индикаторы: RSI=%.1f, MACD=%.4f", rsi, macdLine)
+	// logger.Info("   • Прогресс: %d/%d групп (%d%%)", // НОВОЕ логирование
+	// 	progressData.FilledGroups, progressData.TotalGroups, int(progressData.Percentage))
 
 	// СОЗДАЕМ Custom map с деталями свечи
 	customMap := make(map[string]interface{})

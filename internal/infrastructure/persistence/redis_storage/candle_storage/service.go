@@ -1,4 +1,4 @@
-// internal/infrastructure/persistence/redis_storage/candle_storage/candle_storage.go
+// internal/infrastructure/persistence/redis_storage/candle_storage/service.go
 package candle_storage
 
 import (
@@ -11,13 +11,14 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/go-redis/redis/v8"
 )
 
 // NewRedisCandleStorage создает новое Redis хранилище свечей
-func NewRedisCandleStorage(redisService *redis_service.RedisService, config candle.CandleConfig) (*RedisCandleStorage, error) {
+func NewRedisCandleStorage(redisService *redis_service.RedisService, config redis_storage.CandleConfig) (*RedisCandleStorage, error) {
 	if redisService == nil {
 		return nil, fmt.Errorf("сервис Redis не инициализирован")
 	}
@@ -35,30 +36,64 @@ func NewRedisCandleStorage(redisService *redis_service.RedisService, config cand
 	}
 
 	return &RedisCandleStorage{
-		client:       client,
-		ctx:          context.Background(),
-		prefix:       "candle:",
-		candlePrefix: "candle:data:",
-		config:       config,
+		client:             client,
+		ctx:                context.Background(),
+		prefix:             "candle:",
+		candlePrefix:       "candle:data:",
+		config:             config,
+		cleanupLogInterval: 60 * time.Second,
+		lastCleanupLog:     time.Now(),
 	}, nil
 }
 
-// SaveActiveCandle сохраняет активную свечу
-func (rcs *RedisCandleStorage) SaveActiveCandle(candle *candle.Candle) error {
+// SaveActiveCandle сохраняет активную свечу (реализация интерфейса)
+func (rcs *RedisCandleStorage) SaveActiveCandle(candleInterface redis_storage.CandleInterface) error {
+	// Конвертируем интерфейс в *candle.Candle
+	candle := rcs.convertToCandle(candleInterface)
+	logger.Debug("🕯️ Сохранена активная свеча %s %s: O=%.6f, H=%.6f, L=%.6f, C=%.6f",
+		candle.Symbol, candle.Period, candle.Open, candle.High, candle.Low, candle.Close)
+
+	return rcs.saveActiveCandleInternal(candle)
+}
+
+// saveActiveCandleInternal внутренний метод для сохранения
+func (rcs *RedisCandleStorage) saveActiveCandleInternal(candle *redis_storage.Candle) error {
 	key := rcs.getActiveCandleKey(candle.Symbol, candle.Period)
 	return rcs.saveCandleToRedis(key, candle, 1*time.Hour) // TTL 1 час для активных свечей
 }
 
-// GetActiveCandle получает активную свечу
-func (rcs *RedisCandleStorage) GetActiveCandle(symbol, period string) (*candle.Candle, bool) {
+// GetActiveCandle получает активную свечу (реализация интерфейса)
+func (rcs *RedisCandleStorage) GetActiveCandle(symbol, period string) (redis_storage.CandleInterface, bool) {
+	candle, exists := rcs.getActiveCandleInternal(symbol, period)
+	if !exists {
+		return nil, false
+	}
+	return candle, true
+}
+
+// getActiveCandleInternal внутренний метод получения
+func (rcs *RedisCandleStorage) getActiveCandleInternal(symbol, period string) (*redis_storage.Candle, bool) {
 	key := rcs.getActiveCandleKey(symbol, period)
 	return rcs.loadCandleFromRedis(key)
 }
 
-// CloseAndArchiveCandle закрывает свечу и архивирует
-func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candle *candle.Candle) error {
+// CloseAndArchiveCandle закрывает свечу и архивирует (реализация интерфейса)
+func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candleInterface redis_storage.CandleInterface) error {
+	// Конвертируем интерфейс в *candle.Candle
+	candle := rcs.convertToCandle(candleInterface)
+
+	// УБРАНО ЛОГИРОВАНИЕ КАЖДОЙ ЗАКРЫТОЙ СВЕЧИ
+	// logger.Warn("📊 Закрыта свеча %s %s: %.6f → %.6f (%.2f%%)",
+	//     candle.Symbol, candle.Period, candle.Open, candle.Close,
+	//     ((candle.Close-candle.Open)/candle.Open)*100)
+
+	return rcs.closeAndArchiveCandleInternal(candle)
+}
+
+// closeAndArchiveCandleInternal внутренний метод закрытия
+func (rcs *RedisCandleStorage) closeAndArchiveCandleInternal(candle *redis_storage.Candle) error {
 	// Закрываем свечу
-	candle.IsClosed = true
+	candle.IsClosedFlag = true
 	candle.EndTime = time.Now()
 
 	// Удаляем из активных
@@ -68,12 +103,32 @@ func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candle *candle.Candle) erro
 			candle.Symbol, candle.Period, err)
 	}
 
+	// Увеличиваем счетчик закрытых свечей
+	rcs.statsMu.Lock()
+	rcs.closedCandlesCount++
+	rcs.statsMu.Unlock()
+
 	// Добавляем в историю
 	return rcs.addToHistory(candle)
 }
 
-// GetHistory возвращает историю свечей
-func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]*candle.Candle, error) {
+// GetHistory возвращает историю свечей (реализация интерфейса)
+func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]redis_storage.CandleInterface, error) {
+	candles, err := rcs.getHistoryInternal(symbol, period, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Конвертируем []*candle.Candle в []redis_storage.CandleInterface
+	result := make([]redis_storage.CandleInterface, len(candles))
+	for i, c := range candles {
+		result[i] = c
+	}
+	return result, nil
+}
+
+// getHistoryInternal внутренний метод получения истории
+func (rcs *RedisCandleStorage) getHistoryInternal(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
 	historyKey := rcs.getHistoryKey(symbol, period)
 
 	// Получаем последние N записей
@@ -88,7 +143,7 @@ func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]*
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var candles []*candle.Candle
+	var candles []*redis_storage.Candle
 	for _, result := range results {
 		candle, err := rcs.unmarshalCandle(result)
 		if err == nil {
@@ -104,15 +159,24 @@ func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]*
 	return candles, nil
 }
 
-// GetLatestCandle возвращает последнюю свечу
-func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (*candle.Candle, bool) {
+// GetLatestCandle возвращает последнюю свечу (реализация интерфейса)
+func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (redis_storage.CandleInterface, bool) {
+	candle, exists := rcs.getLatestCandleInternal(symbol, period)
+	if !exists {
+		return nil, false
+	}
+	return candle, true
+}
+
+// getLatestCandleInternal внутренний метод получения последней свечи
+func (rcs *RedisCandleStorage) getLatestCandleInternal(symbol, period string) (*redis_storage.Candle, bool) {
 	// Сначала проверяем активные свечи
-	if candle, exists := rcs.GetActiveCandle(symbol, period); exists {
+	if candle, exists := rcs.getActiveCandleInternal(symbol, period); exists {
 		return candle, true
 	}
 
 	// Затем историю
-	history, err := rcs.GetHistory(symbol, period, 1)
+	history, err := rcs.getHistoryInternal(symbol, period, 1)
 	if err != nil || len(history) == 0 {
 		return nil, false
 	}
@@ -120,15 +184,24 @@ func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (*candle.C
 	return history[len(history)-1], true
 }
 
-// GetCandle получает свечу (активную или последнюю из истории)
-func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (*candle.Candle, error) {
+// GetCandle получает свечу (реализация интерфейса)
+func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (redis_storage.CandleInterface, error) {
+	candle, err := rcs.getCandleInternal(symbol, period)
+	if err != nil {
+		return nil, err
+	}
+	return candle, nil
+}
+
+// getCandleInternal внутренний метод получения свечи
+func (rcs *RedisCandleStorage) getCandleInternal(symbol, period string) (*redis_storage.Candle, error) {
 	// Сначала активную
-	if candle, exists := rcs.GetActiveCandle(symbol, period); exists {
+	if candle, exists := rcs.getActiveCandleInternal(symbol, period); exists {
 		return candle, nil
 	}
 
 	// Затем последнюю из истории
-	history, err := rcs.GetHistory(symbol, period, 1)
+	history, err := rcs.getHistoryInternal(symbol, period, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -140,8 +213,13 @@ func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (*candle.Candle,
 	return history[0], nil
 }
 
-// CleanupOldCandles очищает старые свечи
+// CleanupOldCandles очищает старые свечи (реализация интерфейса)
 func (rcs *RedisCandleStorage) CleanupOldCandles(maxAge time.Duration) int {
+	return rcs.cleanupOldCandlesInternal(maxAge)
+}
+
+// cleanupOldCandlesInternal внутренний метод очистки
+func (rcs *RedisCandleStorage) cleanupOldCandlesInternal(maxAge time.Duration) int {
 	cutoffTime := time.Now().Add(-maxAge)
 	cutoffUnix := cutoffTime.Unix()
 
@@ -191,8 +269,13 @@ func (rcs *RedisCandleStorage) CleanupOldCandles(maxAge time.Duration) int {
 	return totalRemoved
 }
 
-// GetSymbols возвращает все символы с данными
+// GetSymbols возвращает все символы с данными (реализация интерфейса)
 func (rcs *RedisCandleStorage) GetSymbols() []string {
+	return rcs.getSymbolsInternal()
+}
+
+// getSymbolsInternal внутренний метод получения символов
+func (rcs *RedisCandleStorage) getSymbolsInternal() []string {
 	// Получаем все ключи активных свечей
 	pattern := rcs.prefix + "active:*"
 	var cursor uint64
@@ -257,8 +340,13 @@ func (rcs *RedisCandleStorage) GetSymbols() []string {
 	return symbols
 }
 
-// GetPeriodsForSymbol возвращает периоды для символа
+// GetPeriodsForSymbol возвращает периоды для символа (реализация интерфейса)
 func (rcs *RedisCandleStorage) GetPeriodsForSymbol(symbol string) []string {
+	return rcs.getPeriodsForSymbolInternal(symbol)
+}
+
+// getPeriodsForSymbolInternal внутренний метод получения периодов
+func (rcs *RedisCandleStorage) getPeriodsForSymbolInternal(symbol string) []string {
 	periodsMap := make(map[string]bool)
 
 	// Проверяем активные свечи
@@ -323,9 +411,22 @@ func (rcs *RedisCandleStorage) GetPeriodsForSymbol(symbol string) []string {
 	return periods
 }
 
-// GetStats возвращает статистику
-func (rcs *RedisCandleStorage) GetStats() candle.CandleStats {
-	symbols := rcs.GetSymbols()
+// GetStats возвращает статистику (реализация интерфейса)
+func (rcs *RedisCandleStorage) GetStats() redis_storage.CandleStatsInterface {
+	stats := rcs.getStatsInternal()
+	return &CandleStatsData{
+		TotalCandles:  stats.TotalCandles,
+		ActiveCandles: stats.ActiveCandles,
+		SymbolsCount:  stats.SymbolsCount,
+		OldestCandle:  stats.OldestCandle,
+		NewestCandle:  stats.NewestCandle,
+		PeriodsCount:  stats.PeriodsCount,
+	}
+}
+
+// getStatsInternal внутренний метод получения статистики
+func (rcs *RedisCandleStorage) getStatsInternal() candle.CandleStats {
+	symbols := rcs.getSymbolsInternal()
 	stats := candle.CandleStats{
 		PeriodsCount: make(map[string]int),
 		OldestCandle: time.Now(),
@@ -335,9 +436,9 @@ func (rcs *RedisCandleStorage) GetStats() candle.CandleStats {
 	// Подсчитываем активные свечи
 	activeCount := 0
 	for _, symbol := range symbols {
-		periods := rcs.GetPeriodsForSymbol(symbol)
+		periods := rcs.getPeriodsForSymbolInternal(symbol)
 		for _, period := range periods {
-			if _, exists := rcs.GetActiveCandle(symbol, period); exists {
+			if _, exists := rcs.getActiveCandleInternal(symbol, period); exists {
 				activeCount++
 				stats.PeriodsCount[period]++
 			}
@@ -348,9 +449,9 @@ func (rcs *RedisCandleStorage) GetStats() candle.CandleStats {
 	// Подсчитываем исторические свечи
 	historyCount := 0
 	for _, symbol := range symbols {
-		periods := rcs.GetPeriodsForSymbol(symbol)
+		periods := rcs.getPeriodsForSymbolInternal(symbol)
 		for _, period := range periods {
-			history, err := rcs.GetHistory(symbol, period, rcs.config.MaxHistory)
+			history, err := rcs.getHistoryInternal(symbol, period, rcs.config.MaxHistory)
 			if err == nil {
 				historyCount += len(history)
 				stats.PeriodsCount[period] += len(history)
@@ -375,8 +476,32 @@ func (rcs *RedisCandleStorage) GetStats() candle.CandleStats {
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
 
+// convertToCandle конвертирует интерфейс в *redis_storage.Candle
+func (rcs *RedisCandleStorage) convertToCandle(candleInterface redis_storage.CandleInterface) *redis_storage.Candle {
+	if c, ok := candleInterface.(*redis_storage.Candle); ok {
+		return c
+	}
+
+	// Создаем новый *redis_storage.Candle из интерфейса
+	return &redis_storage.Candle{
+		Symbol:       candleInterface.GetSymbol(),
+		Period:       candleInterface.GetPeriod(),
+		Open:         candleInterface.GetOpen(),
+		High:         candleInterface.GetHigh(),
+		Low:          candleInterface.GetLow(),
+		Close:        candleInterface.GetClose(),
+		Volume:       candleInterface.GetVolume(),
+		VolumeUSD:    candleInterface.GetVolumeUSD(),
+		Trades:       candleInterface.GetTrades(),
+		StartTime:    candleInterface.GetStartTime(),
+		EndTime:      candleInterface.GetEndTime(),
+		IsClosedFlag: candleInterface.IsClosed(),
+		IsRealFlag:   candleInterface.IsReal(),
+	}
+}
+
 // saveCandleToRedis сохраняет свечу в Redis
-func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *candle.Candle, ttl time.Duration) error {
+func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *redis_storage.Candle, ttl time.Duration) error {
 	data, err := json.Marshal(candle)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга свечи: %w", err)
@@ -386,7 +511,7 @@ func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *candle.Cand
 }
 
 // loadCandleFromRedis загружает свечу из Redis
-func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*candle.Candle, bool) {
+func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*redis_storage.Candle, bool) {
 	data, err := rcs.client.Get(rcs.ctx, key).Result()
 	if err == redis.Nil {
 		return nil, false
@@ -405,8 +530,8 @@ func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*candle.Candle, 
 }
 
 // unmarshalCandle преобразует JSON в свечу
-func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*candle.Candle, error) {
-	var candle candle.Candle
+func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*redis_storage.Candle, error) {
+	var candle redis_storage.Candle
 	if err := json.Unmarshal([]byte(data), &candle); err != nil {
 		return nil, fmt.Errorf("ошибка парсинга свечи: %w", err)
 	}
@@ -414,7 +539,7 @@ func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*candle.Candle, err
 }
 
 // addToHistory добавляет свечу в историю
-func (rcs *RedisCandleStorage) addToHistory(candle *candle.Candle) error {
+func (rcs *RedisCandleStorage) addToHistory(candle *redis_storage.Candle) error {
 	data, err := json.Marshal(candle)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга свечи для истории: %w", err)
@@ -433,11 +558,24 @@ func (rcs *RedisCandleStorage) addToHistory(candle *candle.Candle) error {
 	// Ограничиваем размер истории
 	rcs.client.ZRemRangeByRank(rcs.ctx, historyKey, 0, -int64(rcs.config.MaxHistory+100))
 
-	logger.Debug("📊 Архивирована свеча %s %s: %.6f → %.6f (%.2f%%)",
-		candle.Symbol, candle.Period, candle.Open, candle.Close,
-		((candle.Close-candle.Open)/candle.Open)*100)
+	// Логировать статистику
+	rcs.logArchiveStatsIfNeeded()
 
 	return nil
+}
+
+// logArchiveStatsIfNeeded логирует статистику архивации
+func (rcs *RedisCandleStorage) logArchiveStatsIfNeeded() {
+	rcs.statsMu.Lock()
+	defer rcs.statsMu.Unlock()
+
+	now := time.Now()
+	if now.Sub(rcs.lastCleanupLog) >= rcs.cleanupLogInterval && rcs.closedCandlesCount > 0 {
+		logger.Info("📊 RedisCandleStorage: закрыто и архивировано %d свечей за %v",
+			rcs.closedCandlesCount, rcs.cleanupLogInterval)
+		rcs.closedCandlesCount = 0
+		rcs.lastCleanupLog = now
+	}
 }
 
 // getActiveCandleKey возвращает ключ для активной свечи

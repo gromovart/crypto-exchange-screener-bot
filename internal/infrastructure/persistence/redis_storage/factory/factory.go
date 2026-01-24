@@ -4,6 +4,7 @@ package redis_storage_factory
 import (
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/candle_storage"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -287,4 +288,30 @@ func (sf *StorageFactory) Reset() {
 	sf.defaultStorage = nil
 	sf.customStorages = make(map[string]PriceStorage)
 	sf.redisClient = nil
+}
+func (sf *StorageFactory) CreateCandleStorage(config redis_storage.CandleConfig) (redis_storage.CandleStorageInterface, error) {
+	sf.mu.RLock()
+	defer sf.mu.RUnlock()
+
+	if sf.redisClient == nil {
+		return nil, fmt.Errorf("Redis клиент не установлен")
+	}
+
+	// Проверяем тип redisClient
+	var redisService *redis_service.RedisService
+	switch client := sf.redisClient.(type) {
+	case *redis_service.RedisService:
+		redisService = client
+	default:
+		return nil, fmt.Errorf("неподдерживаемый тип Redis клиента: %T", client)
+	}
+
+	// Создаем RedisCandleStorage
+	candleStorage, err := candle_storage.NewRedisCandleStorage(redisService, config)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка создания RedisCandleStorage: %w", err)
+	}
+
+	logger.Info("✅ Создано RedisCandleStorage")
+	return candleStorage, nil
 }

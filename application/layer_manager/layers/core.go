@@ -9,6 +9,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -359,13 +360,12 @@ func (cl *CoreLayer) ensureBybitPriceFetcher() error {
 func (cl *CoreLayer) setupAndStartCandleSystem() error {
 	logger.Info("🕯️ CoreLayer: настройка свечной системы...")
 
-	// Получаем StorageFactory для создания priceStorage
+	// Получаем StorageFactory
 	storageFactoryComp, exists := cl.infraLayer.GetComponent("StorageFactory")
 	if !exists {
 		return fmt.Errorf("StorageFactory не найден")
 	}
 
-	// Получаем StorageFactory из LazyComponent
 	storageInterface, err := cl.getComponentValue(storageFactoryComp)
 	if err != nil {
 		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
@@ -382,14 +382,27 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 		return fmt.Errorf("ошибка создания хранилища цен: %w", err)
 	}
 
-	// Создаем свечную систему
-	candleFactory := candle.NewCandleSystemFactory().
-		WithSupportedPeriods([]string{"5m", "15m", "30m", "1h", "4h", "1d"}).
-		WithMaxHistory(1000).
-		WithCleanupInterval(5 * time.Minute).
-		WithAutoBuild(true)
+	// Создаем хранилище свечей Redis
+	candleConfig := redis_storage.CandleConfig{
+		SupportedPeriods: []string{"5m", "15m", "30m", "1h", "4h", "1d"},
+		MaxHistory:       1000,
+		CleanupInterval:  5 * time.Minute,
+		AutoBuild:        true,
+	}
 
-	cl.candleSystem, err = candleFactory.CreateSystem(priceStorage)
+	candleStorage, err := storageFactory.CreateCandleStorage(candleConfig)
+	if err != nil {
+		return fmt.Errorf("ошибка создания хранилища свечей: %w", err)
+	}
+
+	// Создаем свечную систему с Redis хранилищем
+	candleFactory := candle.NewCandleSystemFactory().
+		WithSupportedPeriods(candleConfig.SupportedPeriods).
+		WithMaxHistory(candleConfig.MaxHistory).
+		WithCleanupInterval(candleConfig.CleanupInterval).
+		WithAutoBuild(candleConfig.AutoBuild)
+
+	cl.candleSystem, err = candleFactory.CreateSystem(priceStorage, candleStorage)
 	if err != nil {
 		return fmt.Errorf("ошибка создания свечной системы: %w", err)
 	}
@@ -401,7 +414,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 
 	// Регистрируем компонент
 	cl.registerComponent("CandleSystem", cl.candleSystem)
-	logger.Info("✅ Свечная система создана и запущена")
+	logger.Info("✅ Свечная система с Redis хранилищем создана и запущена")
 
 	return nil
 }
@@ -409,9 +422,6 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 // startBybitPriceFetcher запуск BybitPriceFetcher
 func (cl *CoreLayer) startBybitPriceFetcher() {
 	logger.Info("🔄 CoreLayer: инициализация BybitPriceFetcher...")
-	logger.Info("🔧 ОТЛАДКА: startBybitPriceFetcher ВЫЗВАН!")
-	logger.Info("   - Время: %s", time.Now().Format("15:04:05.000"))
-	logger.Info("   - Telegram.Enabled: %v", cl.config.Telegram.Enabled)
 
 	// Получаем EventBus из инфраструктуры
 	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")

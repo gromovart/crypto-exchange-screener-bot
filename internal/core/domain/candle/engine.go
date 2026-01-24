@@ -2,17 +2,19 @@
 package candle
 
 import (
+	"math"
 	"sync"
 	"time"
 
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // CandleEngine - движок построения свечей
 type CandleEngine struct {
-	storage *CandleStorage
-	config  CandleConfig
+	storage storage.CandleStorageInterface // Изменено на интерфейс
+	config  redis_storage.CandleConfig
 
 	// Каналы для обработки
 	priceUpdates chan storage.PriceData
@@ -20,19 +22,24 @@ type CandleEngine struct {
 	wg           sync.WaitGroup
 
 	// Статистика
-	buildErrors  int
-	buildSuccess int
-	totalBuilds  int
-	statsMu      sync.RWMutex
+	buildErrors   int
+	buildSuccess  int
+	totalBuilds   int
+	closedCandles int           // Добавлено: счетчик закрытых свечей
+	lastStatsLog  time.Time     // Добавлено: время последнего логирования статистики
+	statsInterval time.Duration // Добавлено: интервал логирования статистики
+	statsMu       sync.RWMutex
 }
 
 // NewCandleEngine создает новый движок свечей
-func NewCandleEngine(candleStorage *CandleStorage, config CandleConfig) *CandleEngine {
+func NewCandleEngine(candleStorage storage.CandleStorageInterface, config redis_storage.CandleConfig) *CandleEngine {
 	return &CandleEngine{
-		storage:      candleStorage,
-		config:       config,
-		priceUpdates: make(chan storage.PriceData, 10000),
-		stopCh:       make(chan struct{}),
+		storage:       candleStorage,
+		config:        config,
+		priceUpdates:  make(chan storage.PriceData, 10000),
+		stopCh:        make(chan struct{}),
+		lastStatsLog:  time.Now(),
+		statsInterval: 60 * time.Second, // Логировать статистику раз в 60 секунд
 	}
 }
 
@@ -131,6 +138,20 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 
 	// Проверяем, не нужно ли закрыть свечу
 	if ce.shouldCloseCandle(candle, period) {
+		// Логируем информацию о закрытии
+		elapsed := time.Now().Sub(candle.StartTime)
+		expectedDuration := ce.getExpectedDuration(period)
+		completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+		if completionPercent >= 95.0 {
+			changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
+			// Вариант B: Только значимые изменения
+			if math.Abs(changePercent) > 0.05 { // > 0.05%
+				logger.Info("📊 CandleEngine: значимое закрытие %s %s: %.2f%%",
+					symbol, period, changePercent)
+			}
+		}
+
 		ce.closeCandle(candle)
 		candle = ce.createNewCandle(symbol, period, priceData)
 		ce.storage.SaveActiveCandle(candle)
@@ -146,6 +167,16 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 	ce.updateCandle(candle, priceData)
 	ce.storage.SaveActiveCandle(candle)
 
+	// Логируем обновление если свеча почти завершена
+	elapsed := time.Now().Sub(candle.StartTime)
+	expectedDuration := ce.getExpectedDuration(period)
+	completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+	if completionPercent >= 80.0 && completionPercent < 95.0 {
+		logger.Debug("⏳ CandleEngine: обновляем почти завершенную свечу %s %s (%.0f%% завершено)",
+			symbol, period, completionPercent)
+	}
+
 	return BuildResult{
 		Candle:   candle,
 		IsNew:    false,
@@ -155,20 +186,44 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 
 // getOrCreateCandle получает или создает свечу
 func (ce *CandleEngine) getOrCreateCandle(symbol, period string,
-	priceData storage.PriceData) (*Candle, error) {
+	priceData storage.PriceData) (*redis_storage.Candle, error) {
 
 	// Пробуем получить активную свечу
-	if candle, exists := ce.storage.GetActiveCandle(symbol, period); exists {
-		return candle, nil
+	if candleInterface, exists := ce.storage.GetActiveCandle(symbol, period); exists {
+		// Конвертируем интерфейс в *Candle
+		if candle, ok := candleInterface.(*redis_storage.Candle); ok {
+			return candle, nil
+		}
+		// Если это не *Candle, создаем новый из интерфейса
+		return ce.convertCandleInterface(candleInterface), nil
 	}
 
 	// Создаем новую свечу
 	return ce.createNewCandle(symbol, period, priceData), nil
 }
 
+// convertCandleInterface конвертирует интерфейс в *Candle
+func (ce *CandleEngine) convertCandleInterface(candleInterface storage.CandleInterface) *redis_storage.Candle {
+	return &redis_storage.Candle{
+		Symbol:       candleInterface.GetSymbol(),
+		Period:       candleInterface.GetPeriod(),
+		Open:         candleInterface.GetOpen(),
+		High:         candleInterface.GetHigh(),
+		Low:          candleInterface.GetLow(),
+		Close:        candleInterface.GetClose(),
+		Volume:       candleInterface.GetVolume(),
+		VolumeUSD:    candleInterface.GetVolumeUSD(),
+		Trades:       candleInterface.GetTrades(),
+		StartTime:    candleInterface.GetStartTime(),
+		EndTime:      candleInterface.GetEndTime(),
+		IsClosedFlag: candleInterface.IsClosed(),
+		IsRealFlag:   candleInterface.IsReal(),
+	}
+}
+
 // createNewCandle создает новую свечу
 func (ce *CandleEngine) createNewCandle(symbol, period string,
-	priceData storage.PriceData) *Candle {
+	priceData storage.PriceData) *redis_storage.Candle {
 
 	now := time.Now()
 	price := priceData.Price
@@ -177,20 +232,20 @@ func (ce *CandleEngine) createNewCandle(symbol, period string,
 	startTime := ce.calculateCandleStartTime(now, period)
 	endTime := ce.calculateCandleEndTime(startTime, period)
 
-	return &Candle{
-		Symbol:    symbol,
-		Period:    period,
-		Open:      price,
-		High:      price,
-		Low:       price,
-		Close:     price,
-		Volume:    priceData.Volume24h,
-		VolumeUSD: priceData.VolumeUSD,
-		Trades:    1,
-		StartTime: startTime,
-		EndTime:   endTime,
-		IsClosed:  false,
-		IsReal:    price > 0,
+	return &redis_storage.Candle{
+		Symbol:       symbol,
+		Period:       period,
+		Open:         price,
+		High:         price,
+		Low:          price,
+		Close:        price,
+		Volume:       priceData.Volume24h,
+		VolumeUSD:    priceData.VolumeUSD,
+		Trades:       1,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		IsClosedFlag: false,
+		IsRealFlag:   price > 0,
 	}
 }
 
@@ -258,26 +313,72 @@ func (ce *CandleEngine) calculateCandleEndTime(startTime time.Time, period strin
 }
 
 // shouldCloseCandle проверяет, нужно ли закрыть свечу
-func (ce *CandleEngine) shouldCloseCandle(candle *Candle, period string) bool {
-	if candle.IsClosed {
+func (ce *CandleEngine) shouldCloseCandle(candle *redis_storage.Candle, period string) bool {
+	// 1. Если свеча уже закрыта - да
+	if candle.IsClosedFlag {
 		return true
 	}
 
-	// Если текущее время после времени окончания свечи
-	if time.Now().After(candle.EndTime) {
+	now := time.Now()
+
+	// 2. Если текущее время после времени окончания свечи - закрываем
+	if now.After(candle.EndTime) {
+		logger.Debug("🕐 CandleEngine: закрываем свечу %s %s (время окончания: %s, сейчас: %s)",
+			candle.Symbol, period,
+			candle.EndTime.Format("15:04:05"), now.Format("15:04:05"))
 		return true
 	}
 
-	// Для тестирования: закрываем если свеча слишком старая
-	if !candle.IsReal && time.Since(candle.StartTime) > 2*time.Minute {
+	// 3. Если свеча слишком старая (больше чем 2 периода) - закрываем как бракованную
+	elapsed := now.Sub(candle.StartTime)
+	expectedDuration := ce.getExpectedDuration(period)
+
+	if elapsed > expectedDuration*2 {
+		logger.Warn("⚠️ CandleEngine: закрываем бракованную свечу %s %s (слишком старая: %v, ожидалось: %v)",
+			candle.Symbol, period, elapsed.Round(time.Second), expectedDuration)
+		return true
+	}
+
+	// 4. Для тестового режима: если свеча ненастоящая и старая
+	if !candle.IsRealFlag && elapsed > 2*time.Minute {
+		return true
+	}
+
+	// 5. НОВОЕ: если прошло >95% времени свечи, закрываем её заранее
+	// Это гарантирует что свеча будет закрыта даже если цена пришла чуть раньше
+	completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+	if completionPercent >= 95.0 {
+		logger.Debug("⚡ CandleEngine: досрочно закрываем свечу %s %s (%.0f%% завершено)",
+			candle.Symbol, period, completionPercent)
 		return true
 	}
 
 	return false
 }
 
+// getExpectedDuration возвращает ожидаемую длительность периода
+func (ce *CandleEngine) getExpectedDuration(period string) time.Duration {
+	switch period {
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "30m":
+		return 30 * time.Minute
+	case "1h":
+		return 1 * time.Hour
+	case "4h":
+		return 4 * time.Hour
+	case "1d":
+		return 24 * time.Hour
+	default:
+		return 15 * time.Minute
+	}
+}
+
 // updateCandle обновляет свечу новой ценой
-func (ce *CandleEngine) updateCandle(candle *Candle, priceData storage.PriceData) {
+func (ce *CandleEngine) updateCandle(candle *redis_storage.Candle, priceData storage.PriceData) {
 	price := priceData.Price
 
 	// Обновляем high/low
@@ -297,14 +398,15 @@ func (ce *CandleEngine) updateCandle(candle *Candle, priceData storage.PriceData
 	candle.Trades++
 }
 
-// closeCandle закрывает свечу
-func (ce *CandleEngine) closeCandle(candle *Candle) {
+// closeCandle закрывает свечу - УБРАНО ЛОГИРОВАНИЕ
+func (ce *CandleEngine) closeCandle(candle *redis_storage.Candle) {
 	candle.EndTime = time.Now()
-	candle.IsClosed = true
+	candle.IsClosedFlag = true
 	ce.storage.CloseAndArchiveCandle(candle)
+	// Убрано логирование каждой закрытой свечи
 }
 
-// recordBuildResult записывает результат построения
+// recordBuildResult записывает результат построения и логирует статистику раз в statsInterval
 func (ce *CandleEngine) recordBuildResult(result BuildResult) {
 	ce.statsMu.Lock()
 	defer ce.statsMu.Unlock()
@@ -313,8 +415,36 @@ func (ce *CandleEngine) recordBuildResult(result BuildResult) {
 
 	if result.Error != nil {
 		ce.buildErrors++
+		logger.Debug("❌ CandleEngine: ошибка построения свечи: %v", result.Error)
 	} else {
 		ce.buildSuccess++
+		// Если свеча новая (была закрыта старая и создана новая)
+		if result.IsNew {
+			ce.closedCandles++
+			// Логируем закрытие свечи только для статистики
+			if ce.closedCandles%100 == 0 { // Каждую 100-ю свечу
+				logger.Info("📊 CandleEngine: закрыто %d свечей", ce.closedCandles)
+			}
+		}
+	}
+
+	// Логировать агрегированную статистику раз в statsInterval
+	now := time.Now()
+	if now.Sub(ce.lastStatsLog) >= ce.statsInterval {
+		var successRate float64
+		if ce.totalBuilds > 0 {
+			successRate = float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100
+		}
+
+		logger.Info("📊 Статистика CandleEngine за %v: обработано %d свечей, закрыто %d, успешно: %.2f%%",
+			ce.statsInterval, ce.totalBuilds, ce.closedCandles, successRate)
+
+		// Сбросить счетчики для следующего интервала
+		ce.totalBuilds = 0
+		ce.buildSuccess = 0
+		ce.buildErrors = 0
+		ce.closedCandles = 0
+		ce.lastStatsLog = now
 	}
 }
 
@@ -346,16 +476,26 @@ func (ce *CandleEngine) GetStats() map[string]interface{} {
 	ce.statsMu.RLock()
 	defer ce.statsMu.RUnlock()
 
-	storageStats := ce.storage.GetStats()
+	var storageStats interface{}
+	if stats := ce.storage.GetStats(); stats != nil {
+		storageStats = stats
+	}
+
+	var successRate float64
+	if ce.totalBuilds > 0 {
+		successRate = float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100
+	}
 
 	return map[string]interface{}{
 		"storage_stats": storageStats,
 		"engine_stats": map[string]interface{}{
-			"total_builds":  ce.totalBuilds,
-			"build_success": ce.buildSuccess,
-			"build_errors":  ce.buildErrors,
-			"queue_size":    len(ce.priceUpdates),
-			"success_rate":  float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100,
+			"total_builds":   ce.totalBuilds,
+			"build_success":  ce.buildSuccess,
+			"build_errors":   ce.buildErrors,
+			"closed_candles": ce.closedCandles, // Добавлено в статистику
+			"queue_size":     len(ce.priceUpdates),
+			"success_rate":   successRate,
+			"stats_interval": ce.statsInterval.String(),
 		},
 	}
 }

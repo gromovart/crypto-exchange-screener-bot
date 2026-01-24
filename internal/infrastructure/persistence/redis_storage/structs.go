@@ -103,3 +103,28 @@ type PriceSnapshot struct {
 	High24h      float64   `json:"high_24h"`
 	Low24h       float64   `json:"low_24h"`
 }
+
+// CandleConfig - конфигурация построителя
+type CandleConfig struct {
+	SupportedPeriods []string      // Поддерживаемые периоды
+	MaxHistory       int           // Максимальная история свечей
+	CleanupInterval  time.Duration // Интервал очистки
+	AutoBuild        bool          // Автоматическое построение
+}
+
+// Candle - свеча (OHLCV)
+type Candle struct {
+	Symbol       string
+	Period       string // "5m", "15m", "30m", "1h", "4h", "1d"
+	Open         float64
+	High         float64
+	Low          float64
+	Close        float64
+	Volume       float64 // Объем в базовой валюте
+	VolumeUSD    float64 // Объем в USD
+	Trades       int     // Количество сделок
+	StartTime    time.Time
+	EndTime      time.Time
+	IsClosedFlag bool // Закрыта ли свеча
+	IsRealFlag   bool // Реальные данные или построенные
+}

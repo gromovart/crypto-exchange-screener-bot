@@ -108,25 +108,25 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 			}
 		}
 
-		logger.Warn("📊 CounterController: Извлечены данные прогресса: заполнено %d из %d (%.0f%%)",
+		logger.Info("📊 CounterController: Извлечены данные прогресса: заполнено %d из %d (%.0f%%)",
 			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
 	}
 
 	// После извлечения прогресса добавить:
 	if params.ProgressFilledGroups > 0 || params.ProgressTotalGroups > 0 {
-		logger.Warn("📊 CounterController: Извлечен прогресс из события: %d/%d групп (%.0f%%)",
+		logger.Info("📊 CounterController: Извлечен прогресс из события: %d/%d групп (%.0f%%)",
 			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
 	} else {
 		logger.Warn("⚠️ CounterController: Данные прогресса НЕ извлечены из события")
 
 		// Логируем структуру данных для отладки
 		if progress, ok := dataMap["progress"]; ok {
-			logger.Warn("ℹ️ Структура progress в событии: %T = %+v", progress, progress)
+			logger.Info("ℹ️ Структура progress в событии: %T = %+v", progress, progress)
 
 			// Детальное логирование структуры
 			if progressMap, ok := progress.(map[string]interface{}); ok {
 				for key, val := range progressMap {
-					logger.Warn("   • %s: %T = %v", key, val, val)
+					logger.Info("   • %s: %T = %v", key, val, val)
 				}
 			}
 		} else {

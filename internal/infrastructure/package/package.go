@@ -192,7 +192,6 @@ func (f *InfrastructureFactory) Start() error {
 
 	f.running = true
 	logger.Info("✅ Все инфраструктурные компоненты запущены")
-	logger.Info("🔧 ОТЛАДКА InfrastructureFactory.Start(): завершено успешно")
 	return nil
 }
 
@@ -259,14 +258,12 @@ func (f *InfrastructureFactory) startStorageFactory() error {
 	}
 
 	if !f.storageFactory.IsRunning() {
-		logger.Info("🔧 ОТЛАДКА: Перед запуском storageFactory")
 		if err := f.storageFactory.Start(); err != nil {
 			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
 			logger.Warn("⚠️ Детали ошибки: %+v", err)
 			return fmt.Errorf("ошибка запуска StorageFactory: %w", err)
 		}
 		logger.Info("✅ StorageFactory запущена")
-		logger.Info("🔧 ОТЛАДКА: storageFactory успешно запущена")
 	} else {
 		logger.Info("✅ StorageFactory уже запущена, пропускаем")
 	}

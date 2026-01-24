@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
 // TestCandleAccuracy тестирует точность свечей
@@ -29,7 +30,7 @@ func (a *CounterAnalyzer) TestCandleAccuracy(symbol string) string {
 			continue
 		}
 
-		if candle == nil || !candle.IsReal {
+		if candle == nil || !candle.IsRealFlag {
 			result.WriteString(fmt.Sprintf("⏳ %s: нет данных\n", period))
 			continue
 		}
@@ -217,12 +218,12 @@ func (a *CounterAnalyzer) TestCandleSystem(symbol string) string {
 			continue
 		}
 
-		if candle != nil && candle.IsReal {
+		if candle != nil && candle.IsRealFlag {
 			changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
 			result += fmt.Sprintf("✅ %s: %.6f → %.6f (%.4f%%)",
 				period, candle.Open, candle.Close, changePercent)
 
-			if !candle.IsClosed {
+			if !candle.IsClosedFlag {
 				result += " 🔄 активная"
 			}
 			result += "\n"
@@ -244,7 +245,7 @@ func (a *CounterAnalyzer) TestCandleSystem(symbol string) string {
 }
 
 // getHistoryFromCandles получает историю свечей для анализа
-func (a *CounterAnalyzer) getHistoryFromCandles(symbol, period string, limit int) ([]*candle.Candle, error) {
+func (a *CounterAnalyzer) getHistoryFromCandles(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
 	if a.candleSystem == nil {
 		return nil, fmt.Errorf("свечная система не инициализирована")
 	}

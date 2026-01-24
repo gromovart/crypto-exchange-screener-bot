@@ -44,10 +44,10 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 
 	// После создания данных добавить:
 	if params.ProgressFilledGroups > 0 || params.ProgressTotalGroups > 0 {
-		logger.Warn("📊 Service: Использованы данные прогресса из параметров: заполнено %d из %d (%.0f%%)",
+		logger.Info("📊 Service: Использованы данные прогресса из параметров: заполнено %d из %d (%.0f%%)",
 			data.FilledSlots, data.TotalSlots, data.ProgressPercentage)
 	} else {
-		logger.Warn("📊 Service: Прогресс рассчитан автоматически: заполнено %d из %d (%.0f%%)",
+		logger.Info("📊 Service: Прогресс рассчитан автоматически: заполнено %d из %d (%.0f%%)",
 			data.FilledSlots, data.TotalSlots, data.ProgressPercentage)
 	}
 

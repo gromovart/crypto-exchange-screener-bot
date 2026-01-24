@@ -28,41 +28,52 @@ func (a *CounterAnalyzer) getDataForPeriod(symbol, period string) ([]types.Price
 
 // getCandleData получает данные из свечного движка (исправленная версия)
 func (a *CounterAnalyzer) getCandleData(symbol, period string) ([]types.PriceData, error) {
+	if a.candleSystem == nil {
+		return nil, fmt.Errorf("свечной движок не инициализирован")
+	}
+
 	// 1. Получаем свечу из движка
 	candle, err := a.candleSystem.GetCandle(symbol, period)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения свечи: %w", err)
 	}
 
-	if candle == nil || !candle.IsReal {
-		return nil, fmt.Errorf("свеча не содержит реальных данных")
+	if candle == nil {
+		return nil, fmt.Errorf("свеча не найдена")
 	}
 
-	logger.Info("🕯️ Получена свеча для %s %s:", symbol, period)
-	logger.Info("   • Открытие: %.6f", candle.Open)
-	logger.Info("   • Закрытие: %.6f", candle.Close)
-	logger.Info("   • Высшая: %.6f", candle.High)
-	logger.Info("   • Низшая: %.6f", candle.Low)
-	logger.Info("   • Время: %s - %s",
-		candle.StartTime.Format("15:04:05"),
-		candle.EndTime.Format("15:04:05"))
+	// 2. Получаем историю свечей (минимум 2)
+	candles, err := a.candleSystem.GetHistory(symbol, period, 2)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения истории свечей: %w", err)
+	}
 
-	changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
-	logger.Info("   • Изменение: %.4f%%", changePercent)
+	if len(candles) < 2 {
+		return nil, fmt.Errorf("недостаточно свечей в истории (%d)", len(candles))
+	}
 
-	// 2. Возвращаем ТОЛЬКО данные открытия и закрытия для правильного расчета
-	return []types.PriceData{
-		{
-			Symbol:    symbol,
-			Price:     candle.Open,      // Важно: цена открытия свечи
-			Timestamp: candle.StartTime, // Время открытия
-		},
-		{
-			Symbol:    symbol,
-			Price:     candle.Close,   // Важно: цена закрытия свечи
-			Timestamp: candle.EndTime, // Время закрытия
-		},
-	}, nil
+	// 3. Конвертируем свечи в PriceData
+	var priceData []types.PriceData
+	for _, c := range candles {
+		pd := types.PriceData{
+			Symbol:       c.Symbol,
+			Price:        c.Close, // Используем цену закрытия
+			Volume24h:    c.Volume,
+			VolumeUSD:    c.VolumeUSD,
+			Timestamp:    c.EndTime, // Время закрытия свечи
+			OpenInterest: 0,         // Свечи не содержат OI
+			FundingRate:  0,         // Свечи не содержат funding
+			Change24h:    0,
+			High24h:      c.High,
+			Low24h:       c.Low,
+		}
+		priceData = append(priceData, pd)
+	}
+
+	logger.Debug("📊 Получены свечные данные для %s %s: %d свечей",
+		symbol, period, len(priceData))
+
+	return priceData, nil
 }
 
 // convertStoragePricesInterfaceToTypes конвертирует storage.PriceDataInterface в types.PriceData

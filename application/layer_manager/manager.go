@@ -143,7 +143,6 @@ func (lm *LayerManager) Start() error {
 
 // waitForInfrastructureReady ожидает готовности InfrastructureFactory
 func (lm *LayerManager) waitForInfrastructureReady(timeout time.Duration) bool {
-	logger.Info("🔧 ОТЛАДКА: waitForInfrastructureReady ВЫЗВАН")
 
 	infraLayer, exists := lm.layerRegistry.Get("InfrastructureLayer")
 	if !exists {
