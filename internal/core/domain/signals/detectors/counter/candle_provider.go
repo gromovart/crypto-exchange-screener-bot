@@ -2,14 +2,14 @@
 package counter
 
 import (
+	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/confirmation"
+	counterprogress "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/progress"
+	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"math"
 	"time"
-
-	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/confirmation"
-	"crypto-exchange-screener-bot/internal/types"
-	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/google/uuid"
 )
@@ -50,8 +50,21 @@ func (a *CounterAnalyzer) analyzeSymbolPeriod(symbol, period string, data []type
 
 	logger.Info("🎯 %s %s: значительное изменение %.4f%%", symbol, period, change)
 
+	// Определяем направление на основе change
+	direction := "growth"
+	if change < 0 {
+		direction = "fall"
+	}
+
 	// Добавляем подтверждение в менеджер
-	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period)
+	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period, direction)
+
+	// Еще не готов, ждем больше подтверждений
+	if !isReady {
+		logger.Warn("⏳ %s %s: подтверждений %d, ждем сигнала (направление: %s)",
+			symbol, period, confirmations, direction)
+		return nil, nil
+	}
 
 	if isReady {
 		// Создаем сырой сигнал
@@ -161,15 +174,28 @@ func (a *CounterAnalyzer) createRawSignal(
 
 	periodMinutes := getPeriodMinutes(period)
 
+	// СОЗДАЕМ ДАННЫЕ ПРОГРЕССА (НОВОЕ)
+	progressData := counterprogress.NewProgressData(
+		confirmations,
+		confirmation.GetRequiredConfirmations(period),
+		period,
+		time.Now(),
+	)
+	logger.Warn("📊 Прогресс сигнала: %d подтверждений → %d/%d групп (%d%%)",
+		confirmations, progressData.FilledGroups, progressData.TotalGroups,
+		int(progressData.Percentage))
+
 	// Детальное логирование свечи
-	logger.Info("📈 Создание сигнала для %s %s:", symbol, period)
-	logger.Info("   • Свеча: %.6f → %.6f (изменение: %.2f%%)",
+	logger.Warn("📈 Создание сигнала для %s %s:", symbol, period)
+	logger.Warn("   • Свеча: %.6f → %.6f (изменение: %.2f%%)",
 		openPrice, closePrice, change)
-	logger.Info("   • Время: %s → %s",
+	logger.Warn("   • Время: %s → %s",
 		openTime.Format("15:04:05"), closeTime.Format("15:04:05"))
-	logger.Info("   • Подтверждений: %d/%d",
+	logger.Warn("   • Подтверждений: %d/%d",
 		confirmations, confirmation.GetRequiredConfirmations(period))
-	logger.Info("   • Индикаторы: RSI=%.1f, MACD=%.4f", rsi, macdLine)
+	logger.Warn("   • Индикаторы: RSI=%.1f, MACD=%.4f", rsi, macdLine)
+	logger.Warn("   • Прогресс: %d/%d групп (%d%%)", // НОВОЕ логирование
+		progressData.FilledGroups, progressData.TotalGroups, int(progressData.Percentage))
 
 	// СОЗДАЕМ Custom map с деталями свечи
 	customMap := make(map[string]interface{})
@@ -247,6 +273,7 @@ func (a *CounterAnalyzer) createRawSignal(
 			},
 			Custom: customMap,
 		},
+		Progress: &progressData, // НОВОЕ: добавляем прогресс
 	}
 }
 

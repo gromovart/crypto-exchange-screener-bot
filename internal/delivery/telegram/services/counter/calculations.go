@@ -100,73 +100,96 @@ func (s *serviceImpl) calculateNextPeriodStart(timestamp time.Time, period strin
 }
 
 // convertToFormatterData конвертирует сырые данные в форматтер данные
-func (s *serviceImpl) convertToFormatterData(raw RawCounterData) formatters.CounterData {
+func (s *serviceImpl) convertToFormatterData(rawData RawCounterData) formatters.CounterData {
+	// ВИЗУАЛЬНАЯ ЦЕЛЬ ВСЕГДА = 6
+	visualTarget := 6
+
+	// ПЕРЕСЧИТЫВАЕМ группы на основе периода
+	totalGroups := s.getTotalGroupsForPeriod(rawData.Period)
+	filledGroups := s.calculateFilledGroups(rawData.Confirmations, totalGroups)
+
 	// Рассчитываем процент прогресса
-	progressPercentage := 0.0
-	if raw.RequiredConfirmations > 0 {
-		progressPercentage = float64(raw.Confirmations) / float64(raw.RequiredConfirmations) * 100
-	} else if raw.MaxSignals > 0 {
-		// Обратная совместимость
-		progressPercentage = float64(raw.SignalCount) / float64(raw.MaxSignals) * 100
-	}
-
-	// Рассчитываем следующий анализ (всегда через 1 минуту)
-	nextAnalysis := s.calculateNextAnalysis(raw.Timestamp, raw.Period)
-
-	// Рассчитываем следующий сигнал
-	nextSignal := s.calculateNextSignal(raw.Timestamp, raw.Period, raw.Confirmations, raw.RequiredConfirmations)
-
-	// Рассчитываем группировку для прогресс-бара
-	totalGroups, _ := s.getGroupedSlotsInfo(raw.Period)
-	filledGroups := s.calculateFilledGroups(raw.Confirmations, raw.RequiredConfirmations, totalGroups)
+	progressPercentage := math.Min(float64(rawData.Confirmations)/float64(visualTarget), 1.0) * 100
 
 	return formatters.CounterData{
-		Symbol:                raw.Symbol,
-		Direction:             raw.Direction,
-		ChangePercent:         raw.ChangePercent,
-		SignalCount:           raw.Confirmations,         // теперь это подтверждения
-		MaxSignals:            raw.RequiredConfirmations, // теперь это требуемые подтверждения
-		Period:                raw.Period,
-		CurrentPrice:          raw.CurrentPrice,
-		Volume24h:             raw.Volume24h,
-		OpenInterest:          raw.OpenInterest,
-		OIChange24h:           raw.OIChange24h,
-		FundingRate:           raw.FundingRate,
-		NextFundingTime:       raw.NextFundingTime,
-		LiquidationVolume:     raw.LiquidationVolume,
-		LongLiqVolume:         raw.LongLiqVolume,
-		ShortLiqVolume:        raw.ShortLiqVolume,
-		VolumeDelta:           raw.VolumeDelta,
-		VolumeDeltaPercent:    raw.VolumeDeltaPercent,
-		RSI:                   raw.RSI,
-		MACDSignal:            raw.MACDSignal,
-		DeltaSource:           raw.DeltaSource,
-		Confidence:            raw.Confidence,
-		Timestamp:             raw.Timestamp,
-		Confirmations:         raw.Confirmations,
-		RequiredConfirmations: raw.RequiredConfirmations,
-		TotalSlots:            totalGroups,  // Теперь это группы (не отдельные минуты)
-		FilledSlots:           filledGroups, // Заполненные группы
+		Symbol:             rawData.Symbol,
+		Direction:          rawData.Direction,
+		ChangePercent:      rawData.ChangePercent,
+		SignalCount:        rawData.SignalCount,
+		MaxSignals:         rawData.MaxSignals,
+		Period:             rawData.Period,
+		CurrentPrice:       rawData.CurrentPrice,
+		Volume24h:          rawData.Volume24h,
+		OpenInterest:       rawData.OpenInterest,
+		OIChange24h:        rawData.OIChange24h,
+		FundingRate:        rawData.FundingRate,
+		NextFundingTime:    rawData.NextFundingTime,
+		LiquidationVolume:  rawData.LiquidationVolume,
+		LongLiqVolume:      rawData.LongLiqVolume,
+		ShortLiqVolume:     rawData.ShortLiqVolume,
+		VolumeDelta:        rawData.VolumeDelta,
+		VolumeDeltaPercent: rawData.VolumeDeltaPercent,
+		RSI:                rawData.RSI,
+		MACDSignal:         rawData.MACDSignal,
+		DeltaSource:        rawData.DeltaSource,
+		Confidence:         rawData.Confidence,
+		Timestamp:          rawData.Timestamp,
+
+		// ПРАВИЛЬНЫЕ данные прогресса
+		Confirmations:         rawData.Confirmations,
+		RequiredConfirmations: visualTarget, // ВСЕГДА 6
+		TotalSlots:            totalGroups,  // ПЕРЕСЧИТАНО
+		FilledSlots:           filledGroups, // ПЕРЕСЧИТАНО
 		ProgressPercentage:    progressPercentage,
-		NextAnalysis:          nextAnalysis,
-		NextSignal:            nextSignal,
+		NextAnalysis:          rawData.NextAnalysis,
+		NextSignal:            rawData.NextSignal,
 	}
 }
 
 // calculateFilledGroups рассчитывает заполненные группы для прогресс-бара
-func (s *serviceImpl) calculateFilledGroups(confirmations, requiredConfirmations, totalGroups int) int {
-	if requiredConfirmations == 0 {
+func (s *serviceImpl) calculateFilledGroups(confirmations, totalGroups int) int {
+	// ВИЗУАЛЬНАЯ ЦЕЛЬ ВСЕГДА = 6
+	visualTarget := 6
+
+	if confirmations <= 0 {
 		return 0
 	}
 
-	// Каждая группа подтверждается если большинство минут в ней подтверждены
-	filled := float64(confirmations) / float64(requiredConfirmations) * float64(totalGroups)
+	// Ограничиваем подтверждения визуальной целью
+	normalizedConfirmations := math.Min(float64(confirmations), float64(visualTarget))
 
-	// Округляем вверх, но не больше totalGroups
-	filledInt := int(math.Ceil(filled))
-	if filledInt > totalGroups {
-		filledInt = totalGroups
+	// Рассчитываем прогресс: подтверждения / 6
+	progressRatio := normalizedConfirmations / float64(visualTarget)
+
+	// Математическое округление
+	filledGroups := int(math.Round(progressRatio * float64(totalGroups)))
+
+	// Корректировки
+	if filledGroups == 0 && confirmations > 0 {
+		filledGroups = 1
+	}
+	if filledGroups > totalGroups {
+		filledGroups = totalGroups
+	}
+	if filledGroups < 0 {
+		filledGroups = 0
 	}
 
-	return filledInt
+	return filledGroups
+}
+
+// getTotalGroupsForPeriod возвращает количество групп для периода
+func (s *serviceImpl) getTotalGroupsForPeriod(period string) int {
+	switch period {
+	case "5m", "15m":
+		return 5
+	case "30m", "1h":
+		return 6
+	case "4h":
+		return 8
+	case "1d":
+		return 12
+	default:
+		return 5
+	}
 }

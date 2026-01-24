@@ -8,19 +8,20 @@ import (
 
 // Signal - структура сигнала анализа
 type Signal struct {
-	ID            string    `json:"id"`
-	Symbol        string    `json:"symbol"`
-	Type          string    `json:"type"`           // "growth", "fall", "breakout", "volume_spike"
-	Direction     string    `json:"direction"`      // "up", "down"
-	ChangePercent float64   `json:"change_percent"` // процент изменения
-	Period        int       `json:"period"`         // период в минутах
-	Confidence    float64   `json:"confidence"`     // уверенность 0-100
-	DataPoints    int       `json:"data_points"`    // количество точек данных
-	StartPrice    float64   `json:"start_price"`
-	EndPrice      float64   `json:"end_price"`
-	Volume        float64   `json:"volume"`
-	Timestamp     time.Time `json:"timestamp"`
-	Metadata      Metadata  `json:"metadata"`
+	ID            string      `json:"id"`
+	Symbol        string      `json:"symbol"`
+	Type          string      `json:"type"`           // "growth", "fall", "breakout", "volume_spike"
+	Direction     string      `json:"direction"`      // "up", "down"
+	ChangePercent float64     `json:"change_percent"` // процент изменения
+	Period        int         `json:"period"`         // период в минутах
+	Confidence    float64     `json:"confidence"`     // уверенность 0-100
+	DataPoints    int         `json:"data_points"`    // количество точек данных
+	StartPrice    float64     `json:"start_price"`
+	EndPrice      float64     `json:"end_price"`
+	Volume        float64     `json:"volume"`
+	Timestamp     time.Time   `json:"timestamp"`
+	Metadata      Metadata    `json:"metadata"`
+	Progress      interface{} `json:"progress,omitempty"`
 }
 
 // Metadata - метаданные сигнала
@@ -50,6 +51,17 @@ func (s *Signal) ToMap() map[string]interface{} {
 		"end_price":      s.EndPrice,
 		"volume":         s.Volume,
 		"timestamp":      s.Timestamp.Format(time.RFC3339),
+	}
+
+	// Добавляем прогресс если есть - используем type assertion
+	if s.Progress != nil {
+		// Преобразуем прогресс в map через JSON (универсальный способ)
+		if progressJSON, err := json.Marshal(s.Progress); err == nil {
+			var progressMap map[string]interface{}
+			if err := json.Unmarshal(progressJSON, &progressMap); err == nil {
+				data["progress"] = progressMap
+			}
+		}
 	}
 
 	// Добавляем метаданные

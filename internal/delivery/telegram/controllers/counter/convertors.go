@@ -4,6 +4,7 @@ package counter
 import (
 	counterService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"time"
 )
@@ -78,6 +79,65 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		params.MACDSignal = getFloat64FromMap(indicators, "macd_signal")
 		params.VolumeDelta = getFloat64FromMap(indicators, "volume_delta")
 		params.VolumeDeltaPercent = getFloat64FromMap(indicators, "volume_delta_percent")
+	}
+
+	// НОВОЕ: Извлекаем данные прогресса если есть
+	if progress, ok := dataMap["progress"].(map[string]interface{}); ok {
+		// Извлекаем данные прогресса
+		if filled, ok := progress["filled_groups"]; ok {
+			switch v := filled.(type) {
+			case int:
+				params.ProgressFilledGroups = v
+			case float64:
+				params.ProgressFilledGroups = int(v)
+			}
+		}
+
+		if total, ok := progress["total_groups"]; ok {
+			switch v := total.(type) {
+			case int:
+				params.ProgressTotalGroups = v
+			case float64:
+				params.ProgressTotalGroups = int(v)
+			}
+		}
+
+		if percent, ok := progress["percentage"]; ok {
+			if v, ok := percent.(float64); ok {
+				params.ProgressPercentage = v
+			}
+		}
+
+		logger.Warn("📊 CounterController: Извлечены данные прогресса: заполнено %d из %d (%.0f%%)",
+			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
+	}
+
+	// После извлечения прогресса добавить:
+	if params.ProgressFilledGroups > 0 || params.ProgressTotalGroups > 0 {
+		logger.Warn("📊 CounterController: Извлечен прогресс из события: %d/%d групп (%.0f%%)",
+			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
+	} else {
+		logger.Warn("⚠️ CounterController: Данные прогресса НЕ извлечены из события")
+
+		// Логируем структуру данных для отладки
+		if progress, ok := dataMap["progress"]; ok {
+			logger.Warn("ℹ️ Структура progress в событии: %T = %+v", progress, progress)
+
+			// Детальное логирование структуры
+			if progressMap, ok := progress.(map[string]interface{}); ok {
+				for key, val := range progressMap {
+					logger.Warn("   • %s: %T = %v", key, val, val)
+				}
+			}
+		} else {
+			logger.Warn("ℹ️ Поле 'progress' отсутствует в данных события")
+
+			// Логируем все ключи для отладки
+			logger.Warn("ℹ️ Доступные поля в событии:")
+			for key := range dataMap {
+				logger.Warn("   • %s", key)
+			}
+		}
 	}
 
 	return params, nil

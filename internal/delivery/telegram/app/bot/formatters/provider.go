@@ -3,6 +3,7 @@ package formatters
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters/recommendation"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"strings"
 	"time"
@@ -73,6 +74,11 @@ type CounterData struct {
 
 // FormatCounterSignal форматирует counter сигнал для отправки в Telegram
 func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
+	// В начале метода FormatCounterSignal добавить:
+	logger.Warn("📝 Форматирование сигнала %s: подтверждений %d/%d, слотов %d/%d",
+		data.Symbol, data.Confirmations, data.RequiredConfirmations,
+		data.FilledSlots, data.TotalSlots)
+
 	var builder strings.Builder
 
 	// 1. ЗАГОЛОВОК
@@ -144,23 +150,17 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	// 📡 Подтверждений: 3/6 🟢🟢🟢▫️▫️▫️ (50%)
 	// 🕐 Следующий анализ: 10:10
 	// ⏰ Следующий сигнал: 10:40 (через 20м)
-	if data.RequiredConfirmations > 0 {
-		builder.WriteString(p.ProgressFormatter.FormatConfirmationProgress(
-			data.Confirmations,
-			data.RequiredConfirmations,
-			data.Period,
-			data.NextAnalysis,
-			data.NextSignal,
-		))
-		builder.WriteString("\n\n")
-	} else {
-		// Обратная совместимость со старым форматом
-		builder.WriteString(p.ProgressFormatter.FormatProgressBlock(
-			data.SignalCount,
-			data.MaxSignals,
-			data.Period,
-		))
-	}
+	// ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД с готовыми данными групп
+	builder.WriteString(p.ProgressFormatter.FormatConfirmationProgressWithGroups(
+		data.Confirmations,
+		data.RequiredConfirmations,
+		data.FilledSlots, // готовые данные заполненных групп
+		data.TotalSlots,  // готовые данные всех групп
+		data.Period,
+		data.NextAnalysis,
+		data.NextSignal,
+	))
+	builder.WriteString("\n\n")
 
 	// 8. РЕКОМЕНДАЦИИ (если есть данные)
 	// 🎯 РЕКОМЕНДАЦИЯ:

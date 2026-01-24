@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// ProgressFormatter отвечает за форматирование прогресс-баров с группировкой
+// ProgressFormatter отвечает ТОЛЬКО за ОТОБРАЖЕНИЕ прогресса
+// ВСЯ логика расчета находится в counter/progress/progress.go
 type ProgressFormatter struct{}
 
 // NewProgressFormatter создает новый форматтер прогресса
@@ -16,105 +17,58 @@ func NewProgressFormatter() *ProgressFormatter {
 	return &ProgressFormatter{}
 }
 
-// FormatProgressBlock форматирует блок прогресса сигналов (старый формат, для обратной совместимости)
-func (f *ProgressFormatter) FormatProgressBlock(
-	signalCount int,
-	maxSignals int,
-	period string,
-) string {
-	percentage := float64(signalCount) / float64(maxSignals) * 100
-	progressBar := f.formatOldProgressBar(percentage)
-
-	return fmt.Sprintf("📡 %d/%d %s (%.0f%%)\n🕐 Период: %s\n\n",
-		signalCount, maxSignals, progressBar, percentage, period)
-}
-
-// FormatConfirmationProgress форматирует прогресс подтверждений с группировкой
-func (f *ProgressFormatter) FormatConfirmationProgress(
+// FormatConfirmationProgressWithGroups форматирует прогресс с готовыми данными групп
+// ТОЛЬКО ОТОБРАЖЕНИЕ, БЕЗ РАСЧЕТОВ - все расчеты в counter/progress/progress.go
+func (f *ProgressFormatter) FormatConfirmationProgressWithGroups(
 	confirmations int,
 	required int,
+	filledGroups int,
+	totalGroups int,
 	period string,
 	nextAnalysis, nextSignal time.Time,
 ) string {
-	// Получаем информацию о группировке для периода
-	totalGroups, minutesPerGroup := f.getGroupingInfo(period)
-	filledGroups := f.calculateFilledGroups(confirmations, required, totalGroups)
+	// Валидация входных данных
+	if totalGroups <= 0 {
+		totalGroups = 5 // дефолтное значение
+	}
+	if filledGroups < 0 {
+		filledGroups = 0
+	}
+	if filledGroups > totalGroups {
+		filledGroups = totalGroups
+	}
+	// Валидация
+	if required <= 0 {
+		required = 6
+	}
+	// Процент заполнения групп
+	percentage := math.Min(float64(confirmations)/float64(required), 1.0) * 100
 
-	// ИЗМЕНЕНИЕ: Процент = процент заполненных групп, а не подтверждений
-	groupPercentage := float64(filledGroups) / float64(totalGroups) * 100
-
-	// Создаем прогресс-бар с группами
-	progressBar := f.createGroupedProgressBar(filledGroups, totalGroups, groupPercentage)
+	// Создаем прогресс-бар
+	progressBar := f.createGroupedProgressBar(filledGroups, totalGroups, percentage)
 
 	// Форматируем время
 	timeUntilNextAnalysis := f.formatTimeUntil(nextAnalysis)
 	timeUntilNextSignal := f.formatTimeUntil(nextSignal)
 
-	// Добавляем информацию о группировке
-	groupInfo := f.formatGroupInfo(period, filledGroups, totalGroups, minutesPerGroup)
+	// Информация о группировке (только для длинных периодов)
+	groupInfo := f.formatGroupInfo(period, filledGroups, totalGroups)
 
 	return fmt.Sprintf("📡 Подтверждений: %d/%d %s (%.0f%%)\n%s🕐 Следующий анализ: %s\n⏰ Следующий сигнал: %s",
-		confirmations, required, progressBar, groupPercentage,
+		confirmations, required, progressBar, percentage,
 		groupInfo, timeUntilNextAnalysis, timeUntilNextSignal)
 }
 
-// getGroupingInfo возвращает информацию о группировке для периода
-func (f *ProgressFormatter) getGroupingInfo(period string) (totalGroups int, minutesPerGroup int) {
-	switch period {
-	case "5m":
-		return 5, 1 // 5 групп по 1 минуте
-	case "15m":
-		return 5, 3 // 5 групп по 3 минуты
-	case "30m":
-		return 6, 5 // 6 групп по 5 минут
-	case "1h":
-		return 6, 10 // 6 групп по 10 минут
-	case "4h":
-		return 8, 30 // 8 групп по 30 минут
-	case "1d":
-		return 12, 120 // 12 групп по 2 часа
-	default:
-		return 5, 1
-	}
-}
-
-// calculateFilledGroups рассчитывает заполненные группы для прогресс-бара
-func (f *ProgressFormatter) calculateFilledGroups(confirmations, required, totalGroups int) int {
-	if required == 0 {
-		return 0
-	}
-
-	// Если все требуемые подтверждения получены - все группы заполнены
-	if confirmations >= required {
-		return totalGroups
-	}
-
-	// Если не все подтверждения, заполняем пропорционально
-	ratio := float64(confirmations) / float64(required)
-	filledGroups := int(float64(totalGroups) * ratio)
-
-	// Минимум 1 группа если есть хотя бы 1 подтверждение
-	if filledGroups == 0 && confirmations > 0 {
-		filledGroups = 1
-	}
-
-	if filledGroups > totalGroups {
-		filledGroups = totalGroups
-	}
-
-	return filledGroups
-}
-
-// createGroupedProgressBar создает прогресс-бар с группами
-func (f *ProgressFormatter) createGroupedProgressBar(filledGroups, totalGroups int, groupPercentage float64) string {
+// createGroupedProgressBar создает прогресс-бар с группами (ТОЛЬКО ОТОБРАЖЕНИЕ)
+func (f *ProgressFormatter) createGroupedProgressBar(filledGroups, totalGroups int, percentage float64) string {
 	var progressBar strings.Builder
 
 	for i := 0; i < totalGroups; i++ {
 		if i < filledGroups {
-			// Цвет заполненной группы зависит от процента заполнения групп
-			if groupPercentage >= 80 {
+			// Цвет заполненной группы зависит от процента заполнения
+			if percentage >= 80 {
 				progressBar.WriteString("🟢") // Большинство групп заполнено - зеленый
-			} else if groupPercentage >= 50 {
+			} else if percentage >= 50 {
 				progressBar.WriteString("🟡") // Половина групп заполнена - желтый
 			} else {
 				progressBar.WriteString("🔴") // Меньшинство групп заполнено - красный
@@ -127,26 +81,31 @@ func (f *ProgressFormatter) createGroupedProgressBar(filledGroups, totalGroups i
 	return progressBar.String()
 }
 
-// formatGroupInfo форматирует информацию о группах
-func (f *ProgressFormatter) formatGroupInfo(period string, filledGroups, totalGroups, minutesPerGroup int) string {
+// formatGroupInfo форматирует информацию о группах (только отображение)
+func (f *ProgressFormatter) formatGroupInfo(period string, filledGroups, totalGroups int) string {
 	if totalGroups <= 5 {
 		// Для коротких периодов не показываем детали
 		return ""
 	}
 
-	groupInfo := fmt.Sprintf("🏷️ Группы: %d/%d (по %d минут)\n", filledGroups, totalGroups, minutesPerGroup)
-
-	// Добавляем детали для каждого периода
+	// Справочная информация о минутах на группу
+	minutesPerGroup := 0
 	switch period {
+	case "30m":
+		minutesPerGroup = 5
 	case "1h":
-		groupInfo += "⏱️ Каждая группа = 10 минут анализа\n"
+		minutesPerGroup = 10
 	case "4h":
-		groupInfo += "⏱️ Каждая группа = 30 минут анализа\n"
+		minutesPerGroup = 30
 	case "1d":
-		groupInfo += "⏱️ Каждая группа = 2 часа анализа\n"
+		minutesPerGroup = 120
 	}
 
-	return groupInfo
+	if minutesPerGroup > 0 {
+		return fmt.Sprintf("🏷️ Группы: %d/%d (по %d минут)\n", filledGroups, totalGroups, minutesPerGroup)
+	}
+
+	return fmt.Sprintf("🏷️ Группы: %d/%d\n", filledGroups, totalGroups)
 }
 
 // formatTimeUntil форматирует время до события
@@ -161,9 +120,12 @@ func (f *ProgressFormatter) formatTimeUntil(t time.Time) string {
 	}
 
 	duration := t.Sub(now)
+	minutes := int(duration.Minutes())
 
 	// Округляем минуты вверх
-	minutes := int(math.Ceil(duration.Minutes()))
+	if duration.Seconds() > float64(minutes*60) {
+		minutes++
+	}
 
 	// Минимум 1 минута
 	if minutes <= 0 {

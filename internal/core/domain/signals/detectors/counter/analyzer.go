@@ -169,13 +169,19 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerCon
 		return nil, nil
 	}
 
-	// Добавляем подтверждение
-	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period)
+	// Определяем направление на основе изменения
+	direction := "growth"
+	if change < 0 {
+		direction = "fall"
+	}
+
+	// Добавляем подтверждение с направлением
+	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period, direction)
 
 	if !isReady {
 		// Еще не готов, ждем больше подтверждений
-		logger.Debug("⏳ %s %s: подтверждений %d/%d, ждем еще",
-			symbol, period, confirmations, confirmation.GetRequiredConfirmations(period))
+		logger.Debug("⏳ %s %s: подтверждений %d, ждем сигнала (направление: %s)",
+			symbol, period, confirmations, direction)
 		return nil, nil
 	}
 
