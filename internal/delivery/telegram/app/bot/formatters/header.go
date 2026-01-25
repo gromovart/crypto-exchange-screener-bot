@@ -34,37 +34,27 @@ func (f *HeaderFormatter) GetContractType(symbol string) string {
 
 // ExtractTimeframe извлекает таймфрейм из периода анализа
 func (f *HeaderFormatter) ExtractTimeframe(period string) string {
-	// Нормализуем входную строку
+	// Нормализуем строку
 	period = strings.ToLower(strings.TrimSpace(period))
 
-	switch {
-	case strings.HasSuffix(period, "m") || strings.HasSuffix(period, "мин"):
-		// Обработка минутных интервалов: "5m", "15m", "30m"
-		if strings.Contains(period, "5") {
-			return "5мин"
-		} else if strings.Contains(period, "15") {
-			return "15мин"
-		} else if strings.Contains(period, "30") {
-			return "30мин"
-		} else if strings.Contains(period, "1") {
-			return "1мин"
-		}
-	case strings.HasSuffix(period, "h") || strings.HasSuffix(period, "ч") || strings.Contains(period, "час"):
-		// Обработка часовых интервалов: "1h", "4h"
-		if strings.Contains(period, "4") {
-			return "4ч"
-		} else if strings.Contains(period, "1") {
-			return "1ч"
-		}
-	case strings.HasSuffix(period, "d") || strings.HasSuffix(period, "д") || strings.Contains(period, "день"):
-		// Обработка дневных интервалов: "1d"
-		if strings.Contains(period, "1") {
-			return "1д"
-		}
+	// ТОЛЬКО реальные форматы из CounterAnalyzer
+	switch period {
+	case "5m":
+		return "5мин"
+	case "15m":
+		return "15мин"
+	case "30m":
+		return "30мин"
+	case "1h":
+		return "1ч"
+	case "4h":
+		return "4ч"
+	case "1d":
+		return "1д"
+	default:
+		// На случай, если придет что-то неожиданное
+		return "Не удалось определить период"
 	}
-
-	// Дефолтное значение
-	return "5мин"
 }
 
 // GetIntensityEmoji возвращает эмодзи силы движения на основе процентного изменения

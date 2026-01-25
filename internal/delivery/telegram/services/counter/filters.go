@@ -8,49 +8,91 @@ import (
 	"math"
 )
 
+// Константы для типов сигналов
+const (
+	SignalTypeGrowth = "growth"
+	SignalTypeFall   = "fall"
+)
+
+// Константы для фильтрации пользователей
+const (
+	DefaultUserFetchLimit = 1000
+	DefaultUserOffset     = 0
+)
+
 // getUsersToNotify возвращает пользователей, которым нужно отправить уведомление
 func (s *serviceImpl) getUsersToNotify(data RawCounterData) ([]*models.User, error) {
 	if s.userService == nil {
-		return nil, fmt.Errorf("userService not initialized")
+		return nil, fmt.Errorf("сервис пользователей не инициализирован")
 	}
 
 	// Получаем всех пользователей
-	allUsers, err := s.userService.GetAllUsers(1000, 0)
+	allUsers, err := s.userService.GetAllUsers(DefaultUserFetchLimit, DefaultUserOffset)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get users: %w", err)
+		return nil, fmt.Errorf("ошибка получения пользователей: %w", err)
 	}
-
-	logger.Debug("🔍 getUsersToNotify: symbol=%s, всего пользователей: %d",
-		data.Symbol, len(allUsers))
 
 	// Фильтруем пользователей
-	var filteredUsers []*models.User
-	filteredOut := 0
+	filteredUsers := s.filterUsers(allUsers, data)
 
-	for _, user := range allUsers {
-		if s.shouldSendToUser(user, data) {
-			filteredUsers = append(filteredUsers, user)
-		} else {
-			filteredOut++
-		}
-	}
-
-	logger.Debug("🔍 getUsersToNotify результат: symbol=%s, отфильтровано: %d, пропущено: %d",
-		data.Symbol, len(filteredUsers), filteredOut)
+	logger.Debug("🔍 getUsersToNotify результат: символ=%s, отфильтровано: %d, всего пользователей: %d",
+		data.Symbol, len(filteredUsers), len(allUsers))
 
 	return filteredUsers, nil
 }
 
+// filterUsers применяет все фильтры к списку пользователей
+func (s *serviceImpl) filterUsers(users []*models.User, data RawCounterData) []*models.User {
+	var filteredUsers []*models.User
+
+	for _, user := range users {
+		if s.shouldSendToUser(user, data) {
+			filteredUsers = append(filteredUsers, user)
+		}
+	}
+
+	return filteredUsers
+}
+
 // shouldSendToUser проверяет, нужно ли отправлять пользователю
 func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) bool {
-	// БАЗОВЫЕ ПРОВЕРКИ
-	if user == nil {
-		logger.Debug("🔍 shouldSendToUser: user=nil")
+	// Базовые проверки
+	if !s.checkBasicConditions(user, data) {
 		return false
 	}
 
-	logger.Debug("🔍 Проверка user=%d (%s), symbol=%s",
-		user.ID, user.Username, data.Symbol)
+	// Проверка типа сигнала
+	signalType, valid := s.determineSignalType(data)
+	if !valid {
+		return false
+	}
+
+	// Проверка настроек пользователя для этого типа сигнала
+	if !s.checkSignalTypeSettings(user, signalType) {
+		return false
+	}
+
+	// Проверка порогов и лимитов пользователя
+	changePercentForCheck := s.calculateChangePercentForCheck(signalType, data.ChangePercent)
+	if !s.checkUserThresholds(user, signalType, changePercentForCheck, data) {
+		return false
+	}
+
+	// Применяем дополнительные фильтры пользователя
+	if !s.applyUserFilters(user, data) {
+		return false
+	}
+
+	logger.Debug("✅ shouldSendToUser ПРОШЕЛ: user=%d (%s) для %s signal (%.2f%%)",
+		user.ID, user.Username, signalType, changePercentForCheck)
+	return true
+}
+
+// checkBasicConditions проверяет базовые условия пользователя
+func (s *serviceImpl) checkBasicConditions(user *models.User, data RawCounterData) bool {
+	if user == nil {
+		return false
+	}
 
 	// Проверяем ChatID
 	if user.ChatID == "" {
@@ -70,59 +112,61 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 		return false
 	}
 
-	// Определяем тип сигнала для проверки
-	var signalType string
+	return true
+}
+
+// determineSignalType определяет тип сигнала
+func (s *serviceImpl) determineSignalType(data RawCounterData) (string, bool) {
 	switch data.Direction {
-	case "growth":
-		signalType = "growth"
-	case "fall":
-		signalType = "fall"
+	case SignalTypeGrowth:
+		return SignalTypeGrowth, true
+	case SignalTypeFall:
+		return SignalTypeFall, true
 	default:
-		logger.Debug("🔍 Пропуск user=%d: неизвестный direction=%s",
-			user.ID, data.Direction)
-		return false
+		logger.Debug("🔍 Неизвестный direction=%s", data.Direction)
+		return "", false
 	}
+}
 
-	// Проверяем включен ли конкретный тип сигнала
-	if signalType == "growth" && !user.NotifyGrowth {
-		logger.Debug("🔍 Пропуск user=%d: рост отключен", user.ID)
-		return false
+// checkSignalTypeSettings проверяет настройки пользователя для типа сигнала
+func (s *serviceImpl) checkSignalTypeSettings(user *models.User, signalType string) bool {
+	switch signalType {
+	case SignalTypeGrowth:
+		if !user.NotifyGrowth {
+			logger.Debug("🔍 Пропуск user=%d: рост отключен", user.ID)
+			return false
+		}
+	case SignalTypeFall:
+		if !user.NotifyFall {
+			logger.Debug("🔍 Пропуск user=%d: падение отключено", user.ID)
+			return false
+		}
 	}
-	if signalType == "fall" && !user.NotifyFall {
-		logger.Debug("🔍 Пропуск user=%d: падение отключено", user.ID)
-		return false
-	}
+	return true
+}
 
-	// Используем метод ShouldReceiveSignal из модели User
-	var changePercentForCheck float64
-	if signalType == "fall" {
-		changePercentForCheck = -data.ChangePercent
-	} else {
-		changePercentForCheck = data.ChangePercent
+// calculateChangePercentForCheck рассчитывает процент изменения для проверки
+func (s *serviceImpl) calculateChangePercentForCheck(signalType string, changePercent float64) float64 {
+	if signalType == SignalTypeFall {
+		return -changePercent
 	}
+	return changePercent
+}
 
-	shouldReceive := user.ShouldReceiveSignal(signalType, changePercentForCheck)
+// checkUserThresholds проверяет пороги и лимиты пользователя
+func (s *serviceImpl) checkUserThresholds(user *models.User, signalType string, changePercent float64, data RawCounterData) bool {
+	shouldReceive := user.ShouldReceiveSignal(signalType, changePercent)
 
 	if !shouldReceive {
-		// Детальное логирование почему не отправляем
-		s.logUserSkipReason(user, signalType, changePercentForCheck, data)
+		s.logUserSkipReason(user, signalType, changePercent, data)
 		return false
 	}
 
-	// Применяем дополнительные фильтры пользователя
-	if !s.applyUserFilters(user, data) {
-		logger.Debug("🔍 Пропуск user=%d: дополнительные фильтры", user.ID)
-		return false
-	}
-
-	logger.Debug("✅ shouldSendToUser ПРОШЕЛ: user=%d (%s) для %s signal (%.2f%%)",
-		user.ID, user.Username, signalType, changePercentForCheck)
 	return true
 }
 
 // logUserSkipReason логирует причину пропуска пользователя
 func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, changePercent float64, data RawCounterData) {
-	// Используем WARN для всех сообщений
 	if !user.IsActive {
 		logger.Debug("🔍 Пропуск user=%d: не активен", user.ID)
 		return
@@ -133,24 +177,24 @@ func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, ch
 		return
 	}
 
-	if signalType == "growth" && !user.CanReceiveGrowthSignals() {
+	if signalType == SignalTypeGrowth && !user.CanReceiveGrowthSignals() {
 		logger.Debug("🔍 Пропуск user=%d: рост отключен", user.ID)
 		return
 	}
 
-	if signalType == "fall" && !user.CanReceiveFallSignals() {
+	if signalType == SignalTypeFall && !user.CanReceiveFallSignals() {
 		logger.Debug("🔍 Пропуск user=%d: падение отключено", user.ID)
 		return
 	}
 
-	// Проверка порогов с учетом знака changePercent
-	if signalType == "growth" && changePercent < user.MinGrowthThreshold {
+	// Проверка порогов
+	if signalType == SignalTypeGrowth && changePercent < user.MinGrowthThreshold {
 		logger.Debug("🔍 Пропуск user=%d: порог роста не достигнут (%.2f%% < %.1f%%)",
 			user.ID, changePercent, user.MinGrowthThreshold)
 		return
 	}
 
-	if signalType == "fall" && math.Abs(changePercent) < user.MinFallThreshold {
+	if signalType == SignalTypeFall && math.Abs(changePercent) < user.MinFallThreshold {
 		logger.Debug("🔍 Пропуск user=%d: порог падения не достигнут (%.2f%% < %.1f%%)",
 			user.ID, math.Abs(changePercent), user.MinFallThreshold)
 		return
@@ -168,8 +212,7 @@ func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, ch
 		return
 	}
 
-	// Если все проверки прошли, но ShouldReceiveSignal вернул false
-	logger.Debug("🔍 Пропуск user=%d: ShouldReceiveSignal вернул false (type: %s, change: %.2f%%)",
+	logger.Debug("🔍 Пропуск user=%d: ShouldReceiveSignal вернул false (тип: %s, изменение: %.2f%%)",
 		user.ID, signalType, changePercent)
 }
 
@@ -179,46 +222,36 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 		return false
 	}
 
-	// Проверяем минимальный объем (если настроено) - используем Volume24h
+	// Проверяем минимальный объем
 	if user.MinVolumeFilter > 0 && data.Volume24h < user.MinVolumeFilter {
-		logger.Debug("⚠️ User %d (%s) skipped: volume filter (%.0f < %.0f)",
+		logger.Debug("⚠️ User %d (%s) пропущен: фильтр объема (%.0f < %.0f)",
 			user.ID, user.Username, data.Volume24h, user.MinVolumeFilter)
 		return false
 	}
 
-	// Проверяем исключенные паттерны (если настроены)
+	// Проверяем исключенные паттерны
 	if len(user.ExcludePatterns) > 0 {
 		for _, pattern := range user.ExcludePatterns {
-			// Простая проверка на вхождение подстроки в символ
-			// TODO: Реализовать более сложную логику сопоставления
-			if pattern != "" && containsString(data.Symbol, pattern) {
-				logger.Debug("⚠️ User %d (%s) skipped: excluded pattern '%s' in symbol '%s'",
+			if pattern != "" && ContainsString(data.Symbol, pattern) {
+				logger.Debug("⚠️ User %d (%s) пропущен: исключенный паттерн '%s' в символе '%s'",
 					user.ID, user.Username, pattern, data.Symbol)
 				return false
 			}
 		}
 	}
 
-	// Проверяем предпочтительные периоды (если настроены)
+	// Проверяем предпочтительные периоды
 	if len(user.PreferredPeriods) > 0 {
-		// Преобразуем Period из string в int для сравнения
-		periodInt, err := convertPeriodToInt(data.Period)
+		periodInt, err := ConvertPeriodToInt(data.Period)
 		if err != nil {
-			logger.Debug("⚠️ User %d (%s) skipped: invalid period format '%s'",
+			logger.Debug("⚠️ User %d (%s) пропущен: неверный формат периода '%s'",
 				user.ID, user.Username, data.Period)
 			return false
 		}
 
-		periodMatch := false
-		for _, period := range user.PreferredPeriods {
-			if periodInt == period {
-				periodMatch = true
-				break
-			}
-		}
-		if !periodMatch {
-			logger.Debug("⚠️ User %d (%s) skipped: period %s (%d) not in preferred periods",
-				user.ID, user.Username, data.Period, periodInt)
+		if !s.isPeriodPreferred(periodInt, user.PreferredPeriods) {
+			logger.Debug("❌ User %d (%s) пропущен: период %s (%d) не в предпочтительных периодах %v",
+				user.ID, user.Username, data.Period, periodInt, user.PreferredPeriods)
 			return false
 		}
 	}
@@ -226,43 +259,10 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 	return true
 }
 
-// convertPeriodToInt преобразует период из string в int
-func convertPeriodToInt(periodStr string) (int, error) {
-	switch periodStr {
-	case "5m":
-		return 5, nil
-	case "15m":
-		return 15, nil
-	case "30m":
-		return 30, nil
-	case "1h":
-		return 60, nil // 1 час = 60 минут
-	case "4h":
-		return 240, nil // 4 часа = 240 минут
-	case "1d":
-		return 1440, nil // 1 день = 1440 минут
-	default:
-		// Пробуем распарсить как число
-		var minutes int
-		_, err := fmt.Sscanf(periodStr, "%dm", &minutes)
-		if err == nil {
-			return minutes, nil
-		}
-		return 0, fmt.Errorf("неизвестный формат периода: %s", periodStr)
-	}
-}
-
-// containsString проверяет наличие подстроки в строке (вспомогательная функция)
-func containsString(str, substr string) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	if len(str) == 0 {
-		return false
-	}
-	// Простая проверка на вхождение (можно заменить на regexp при необходимости)
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
+// isPeriodPreferred проверяет, находится ли период в предпочтительных
+func (s *serviceImpl) isPeriodPreferred(periodInt int, preferredPeriods []int) bool {
+	for _, period := range preferredPeriods {
+		if periodInt == period {
 			return true
 		}
 	}
@@ -271,15 +271,5 @@ func containsString(str, substr string) bool {
 
 // filterByUserSettings применяет все настройки пользователя к данным
 func (s *serviceImpl) filterByUserSettings(user *models.User, data RawCounterData) bool {
-	// Применяем базовые фильтры
-	if !s.shouldSendToUser(user, data) {
-		return false
-	}
-
-	// Применяем дополнительные фильтры
-	if !s.applyUserFilters(user, data) {
-		return false
-	}
-
-	return true
+	return s.shouldSendToUser(user, data)
 }
