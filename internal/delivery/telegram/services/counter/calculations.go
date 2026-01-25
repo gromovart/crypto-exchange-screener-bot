@@ -3,7 +3,6 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
-	"math"
 	"time"
 )
 
@@ -45,26 +44,6 @@ func (s *serviceImpl) calculateNextSignal(timestamp time.Time, period string, co
 	return next
 }
 
-// getGroupedSlotsInfo возвращает информацию о группировке слотов
-func (s *serviceImpl) getGroupedSlotsInfo(period string) (totalGroups int, minutesPerGroup int) {
-	switch period {
-	case "5m":
-		return 5, 1 // 5 групп по 1 минуте
-	case "15m":
-		return 5, 3 // 5 групп по 3 минуты
-	case "30m":
-		return 6, 5 // 6 групп по 5 минут
-	case "1h":
-		return 6, 10 // 6 групп по 10 минут
-	case "4h":
-		return 8, 30 // 8 групп по 30 минут
-	case "1d":
-		return 12, 120 // 12 групп по 2 часа
-	default:
-		return 5, 1
-	}
-}
-
 // calculateNextPeriodStart рассчитывает начало следующего периода
 func (s *serviceImpl) calculateNextPeriodStart(timestamp time.Time, period string) time.Time {
 	periodMinutes := s.periodToMinutes(period)
@@ -101,16 +80,6 @@ func (s *serviceImpl) calculateNextPeriodStart(timestamp time.Time, period strin
 
 // convertToFormatterData конвертирует сырые данные в форматтер данные
 func (s *serviceImpl) convertToFormatterData(rawData RawCounterData) formatters.CounterData {
-	// ВИЗУАЛЬНАЯ ЦЕЛЬ ВСЕГДА = 6
-	visualTarget := 6
-
-	// ПЕРЕСЧИТЫВАЕМ группы на основе периода
-	totalGroups := s.getTotalGroupsForPeriod(rawData.Period)
-	filledGroups := s.calculateFilledGroups(rawData.Confirmations, totalGroups)
-
-	// Рассчитываем процент прогресса
-	progressPercentage := math.Min(float64(rawData.Confirmations)/float64(visualTarget), 1.0) * 100
-
 	return formatters.CounterData{
 		Symbol:             rawData.Symbol,
 		Direction:          rawData.Direction,
@@ -135,47 +104,15 @@ func (s *serviceImpl) convertToFormatterData(rawData RawCounterData) formatters.
 		Confidence:         rawData.Confidence,
 		Timestamp:          rawData.Timestamp,
 
-		// ПРАВИЛЬНЫЕ данные прогресса
+		// Используем переданные данные прогресса, НЕ пересчитываем!
 		Confirmations:         rawData.Confirmations,
-		RequiredConfirmations: visualTarget, // ВСЕГДА 6
-		TotalSlots:            totalGroups,  // ПЕРЕСЧИТАНО
-		FilledSlots:           filledGroups, // ПЕРЕСЧИТАНО
-		ProgressPercentage:    progressPercentage,
+		RequiredConfirmations: rawData.RequiredConfirmations,
+		TotalSlots:            rawData.TotalSlots,         // Используем переданное
+		FilledSlots:           rawData.FilledSlots,        // Используем переданное
+		ProgressPercentage:    rawData.ProgressPercentage, // Используем переданное
 		NextAnalysis:          rawData.NextAnalysis,
 		NextSignal:            rawData.NextSignal,
 	}
-}
-
-// calculateFilledGroups рассчитывает заполненные группы для прогресс-бара
-func (s *serviceImpl) calculateFilledGroups(confirmations, totalGroups int) int {
-	// ВИЗУАЛЬНАЯ ЦЕЛЬ ВСЕГДА = 6
-	visualTarget := 6
-
-	if confirmations <= 0 {
-		return 0
-	}
-
-	// Ограничиваем подтверждения визуальной целью
-	normalizedConfirmations := math.Min(float64(confirmations), float64(visualTarget))
-
-	// Рассчитываем прогресс: подтверждения / 6
-	progressRatio := normalizedConfirmations / float64(visualTarget)
-
-	// Математическое округление
-	filledGroups := int(math.Round(progressRatio * float64(totalGroups)))
-
-	// Корректировки
-	if filledGroups == 0 && confirmations > 0 {
-		filledGroups = 1
-	}
-	if filledGroups > totalGroups {
-		filledGroups = totalGroups
-	}
-	if filledGroups < 0 {
-		filledGroups = 0
-	}
-
-	return filledGroups
 }
 
 // getTotalGroupsForPeriod возвращает количество групп для периода

@@ -475,7 +475,7 @@ func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
 		})
 
 		// Логируем сигнал
-		log.Printf("📈 Обнаружен сигнал: %s %s %.2f%% (уверенность: %.0f%%)",
+		logger.Info("📈 Обнаружен сигнал: %s %s %.2f%% (уверенность: %.0f%%)",
 			signal.Symbol, signal.Direction, signal.ChangePercent, signal.Confidence)
 	}
 }

@@ -4,7 +4,6 @@ package counter
 import (
 	counterService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/types"
-	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"time"
 )
@@ -16,14 +15,13 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		return counterService.CounterParams{}, fmt.Errorf("неверный формат данных события")
 	}
 
-	// Получаем Timestamp из события, если есть
+	// Получаем Timestamp из события
 	var timestamp time.Time
 	if ts, ok := dataMap["timestamp"]; ok {
 		switch v := ts.(type) {
 		case time.Time:
 			timestamp = v
 		case string:
-			// Пробуем распарсить строку
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
 				timestamp = t
 			} else {
@@ -37,15 +35,15 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 	}
 
 	params := counterService.CounterParams{
-		// Базовые поля
+		// Базовые поля - ТОЛЬКО period, НЕ period_string
 		Symbol:        getString(dataMap, "symbol"),
 		Direction:     getString(dataMap, "direction"),
 		ChangePercent: getFloat64(dataMap, "change_percent"),
-		Period:        getString(dataMap, "period_string"),
+		Period:        getString(dataMap, "period"), // ТОЛЬКО period
 		Timestamp:     timestamp,
 	}
 
-	// Опциональные поля
+	// Confirmations из верхнего уровня
 	if confirmations, ok := dataMap["confirmations"]; ok {
 		switch v := confirmations.(type) {
 		case int:
@@ -55,35 +53,18 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		}
 	}
 
-	// Поля из indicators - поддерживаем ДВА формата:
-	// 1. map[string]float64 (актуальный из логов)
-	// 2. map[string]interface{} (для обратной совместимости)
+	// ВСЕ индикаторы из верхнего уровня flat map
+	params.CurrentPrice = getFloat64(dataMap, "current_price")
+	params.Volume24h = getFloat64(dataMap, "volume_24h")
+	params.OpenInterest = getFloat64(dataMap, "open_interest")
+	params.FundingRate = getFloat64(dataMap, "funding_rate")
+	params.RSI = getFloat64(dataMap, "rsi")
+	params.MACDSignal = getFloat64(dataMap, "macd_signal")
+	params.VolumeDelta = getFloat64(dataMap, "volume_delta")
+	params.VolumeDeltaPercent = getFloat64(dataMap, "volume_delta_percent")
 
-	// Попробуем как map[string]float64
-	if indicators, ok := dataMap["indicators"].(map[string]float64); ok {
-		params.CurrentPrice = getFloat64FromFloatMap(indicators, "current_price")
-		params.Volume24h = getFloat64FromFloatMap(indicators, "volume_24h")
-		params.OpenInterest = getFloat64FromFloatMap(indicators, "open_interest")
-		params.FundingRate = getFloat64FromFloatMap(indicators, "funding_rate")
-		params.RSI = getFloat64FromFloatMap(indicators, "rsi")
-		params.MACDSignal = getFloat64FromFloatMap(indicators, "macd_signal")
-		params.VolumeDelta = getFloat64FromFloatMap(indicators, "volume_delta")
-		params.VolumeDeltaPercent = getFloat64FromFloatMap(indicators, "volume_delta_percent")
-	} else if indicators, ok := dataMap["indicators"].(map[string]interface{}); ok {
-		// Для обратной совместимости
-		params.CurrentPrice = getFloat64FromMap(indicators, "current_price")
-		params.Volume24h = getFloat64FromMap(indicators, "volume_24h")
-		params.OpenInterest = getFloat64FromMap(indicators, "open_interest")
-		params.FundingRate = getFloat64FromMap(indicators, "funding_rate")
-		params.RSI = getFloat64FromMap(indicators, "rsi")
-		params.MACDSignal = getFloat64FromMap(indicators, "macd_signal")
-		params.VolumeDelta = getFloat64FromMap(indicators, "volume_delta")
-		params.VolumeDeltaPercent = getFloat64FromMap(indicators, "volume_delta_percent")
-	}
-
-	// НОВОЕ: Извлекаем данные прогресса если есть
+	// Прогресс - вложенный в "progress"
 	if progress, ok := dataMap["progress"].(map[string]interface{}); ok {
-		// Извлекаем данные прогресса
 		if filled, ok := progress["filled_groups"]; ok {
 			switch v := filled.(type) {
 			case int:
@@ -105,37 +86,6 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		if percent, ok := progress["percentage"]; ok {
 			if v, ok := percent.(float64); ok {
 				params.ProgressPercentage = v
-			}
-		}
-
-		logger.Info("📊 CounterController: Извлечены данные прогресса: заполнено %d из %d (%.0f%%)",
-			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
-	}
-
-	// После извлечения прогресса добавить:
-	if params.ProgressFilledGroups > 0 || params.ProgressTotalGroups > 0 {
-		logger.Info("📊 CounterController: Извлечен прогресс из события: %d/%d групп (%.0f%%)",
-			params.ProgressFilledGroups, params.ProgressTotalGroups, params.ProgressPercentage)
-	} else {
-		logger.Warn("⚠️ CounterController: Данные прогресса НЕ извлечены из события")
-
-		// Логируем структуру данных для отладки
-		if progress, ok := dataMap["progress"]; ok {
-			logger.Info("ℹ️ Структура progress в событии: %T = %+v", progress, progress)
-
-			// Детальное логирование структуры
-			if progressMap, ok := progress.(map[string]interface{}); ok {
-				for key, val := range progressMap {
-					logger.Info("   • %s: %T = %v", key, val, val)
-				}
-			}
-		} else {
-			logger.Warn("ℹ️ Поле 'progress' отсутствует в данных события")
-
-			// Логируем все ключи для отладки
-			logger.Warn("ℹ️ Доступные поля в событии:")
-			for key := range dataMap {
-				logger.Warn("   • %s", key)
 			}
 		}
 	}

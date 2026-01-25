@@ -147,7 +147,7 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 			changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
 			// Вариант B: Только значимые изменения
 			if math.Abs(changePercent) > 0.05 { // > 0.05%
-				logger.Info("📊 CandleEngine: значимое закрытие %s %s: %.2f%%",
+				logger.Debug("📊 CandleEngine: значимое закрытие %s %s: %.2f%%",
 					symbol, period, changePercent)
 			}
 		}

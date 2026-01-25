@@ -12,8 +12,8 @@ func ValidateEventData(eventData interface{}) error {
 		return fmt.Errorf("данные события должны быть map[string]interface{}, получен %T", eventData)
 	}
 
-	// Обязательные поля
-	requiredFields := []string{"symbol", "direction", "change_percent", "period_string"}
+	// Обязательные поля - ИЗМЕНЕНИЕ: period вместо period_string
+	requiredFields := []string{"symbol", "direction", "change_percent", "period"}
 	for _, field := range requiredFields {
 		if _, exists := dataMap[field]; !exists {
 			return fmt.Errorf("отсутствует обязательное поле: %s", field)
@@ -33,8 +33,9 @@ func ValidateEventData(eventData interface{}) error {
 		return fmt.Errorf("поле change_percent должно быть числом float64")
 	}
 
-	if period, ok := dataMap["period_string"].(string); !ok || period == "" {
-		return fmt.Errorf("поле period_string должно быть непустой строкой")
+	// ИЗМЕНЕНИЕ: проверяем period вместо period_string
+	if period, ok := dataMap["period"].(string); !ok || period == "" {
+		return fmt.Errorf("поле period должно быть непустой строкой")
 	}
 
 	return nil

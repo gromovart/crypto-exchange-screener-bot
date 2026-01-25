@@ -25,7 +25,7 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
 	config := f.DefaultConfig()
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
+	return NewCounterAnalyzer(config, storage, eventBus, candleSystem)
 }
 
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
@@ -36,25 +36,7 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
-}
-
-// CreateFromCustomSettings создает CounterAnalyzer из пользовательских настроек
-func (f *CounterAnalyzerFactory) CreateFromCustomSettings(
-	customSettings map[string]interface{},
-	storage storage.PriceStorageInterface, // ИЗМЕНЕНО: конкретный тип
-	eventBus types.EventBus,
-	marketFetcher interface{},
-	candleSystem *candle.CandleSystem,
-) *CounterAnalyzer {
-	config := common.AnalyzerConfig{
-		Enabled:        true,
-		Weight:         0.7,
-		MinConfidence:  10.0,
-		MinDataPoints:  2,
-		CustomSettings: f.mergeWithDefaults(customSettings),
-	}
-	return NewCounterAnalyzer(config, storage, eventBus, marketFetcher, candleSystem)
+	return NewCounterAnalyzer(config, storage, eventBus, candleSystem)
 }
 
 // CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
@@ -76,7 +58,7 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 		},
 	}
 	// Для тестов передаем nil storage
-	return NewCounterAnalyzer(config, nil, nil, nil, nil)
+	return NewCounterAnalyzer(config, nil, nil, nil)
 }
 
 // CreateMinimalAnalyzer создает минимальный анализатор
@@ -96,7 +78,7 @@ func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStor
 			"notify_on_signal":    false,
 		},
 	}
-	return NewCounterAnalyzer(config, storage, nil, nil, nil)
+	return NewCounterAnalyzer(config, storage, nil, nil)
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию

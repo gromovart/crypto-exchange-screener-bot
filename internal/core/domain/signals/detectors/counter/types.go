@@ -58,23 +58,6 @@ type internalCounter struct {
 	mu sync.RWMutex
 }
 
-// CounterNotification - уведомление счетчика
-type CounterNotification struct {
-	Symbol          string            `json:"symbol"`
-	SignalType      CounterSignalType `json:"signal_type"`
-	CurrentCount    int               `json:"current_count"`
-	TotalCount      int               `json:"total_count"` // Общее количество сигналов в периоде
-	Period          CounterPeriod     `json:"period"`
-	PeriodStartTime time.Time         `json:"period_start_time"`
-	PeriodEndTime   time.Time         `json:"period_end_time"`
-	Timestamp       time.Time         `json:"timestamp"`
-	MaxSignals      int               `json:"max_signals"` // Максимальное количество сигналов для периода
-	Percentage      float64           `json:"percentage"`  // Процент заполнения (0-100)
-	ChangePercent   float64           `json:"change_percent"`
-}
-
-// ==================== МЕТОДЫ ДЛЯ CounterPeriod ====================
-
 // GetMinutes возвращает количество минут для периода
 func (cp CounterPeriod) GetMinutes() int {
 	switch cp {

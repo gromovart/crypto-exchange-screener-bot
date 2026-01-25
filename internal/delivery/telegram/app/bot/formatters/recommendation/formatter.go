@@ -85,7 +85,6 @@ func (f *Formatter) FormatResultLegacy(
 	var result strings.Builder
 
 	// Направление тренда
-	result.WriteString("📌 Направление:\n")
 	result.WriteString(fmt.Sprintf("%s\n\n", primarySignal))
 
 	// Заголовок анализа

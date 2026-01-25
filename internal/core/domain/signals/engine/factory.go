@@ -219,7 +219,6 @@ func (f *Factory) configureCounterAnalyzer(
 		counterConfig,
 		storage,
 		engine.eventBus,
-		f.priceFetcher,
 		f.candleSystem, // НОВЫЙ параметр
 	)
 

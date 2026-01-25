@@ -25,7 +25,7 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 		VolumeDelta:           params.VolumeDelta,
 		VolumeDeltaPercent:    params.VolumeDeltaPercent,
 
-		// НОВОЕ: Используем данные прогресса из параметров если есть
+		// Используем данные прогресса из параметров
 		FilledSlots:        params.ProgressFilledGroups,
 		TotalSlots:         params.ProgressTotalGroups,
 		ProgressPercentage: params.ProgressPercentage,
@@ -38,34 +38,15 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 		ShortLiqVolume:    0.0,
 		DeltaSource:       "",
 		Confidence:        0.0,
-		SignalCount:       params.Confirmations,                    // для обратной совместимости
-		MaxSignals:        GetRequiredConfirmations(params.Period), // для обратной совместимости
+		SignalCount:       params.Confirmations,
+		MaxSignals:        GetRequiredConfirmations(params.Period),
 	}
 
-	// После создания данных добавить:
-	if params.ProgressFilledGroups > 0 || params.ProgressTotalGroups > 0 {
-		logger.Info("📊 Service: Использованы данные прогресса из параметров: заполнено %d из %d (%.0f%%)",
-			data.FilledSlots, data.TotalSlots, data.ProgressPercentage)
-	} else {
-		logger.Info("📊 Service: Прогресс рассчитан автоматически: заполнено %d из %d (%.0f%%)",
-			data.FilledSlots, data.TotalSlots, data.ProgressPercentage)
-	}
+	// Логируем полученные данные прогресса
+	logger.Debug("📊 Service: Использованы данные прогресса из параметров: заполнено %d из %d (%.0f%%)",
+		data.FilledSlots, data.TotalSlots, data.ProgressPercentage)
 
-	// Если данные прогресса не переданы, рассчитываем как раньше
-	if data.TotalSlots == 0 {
-		totalGroups, _ := s.getGroupedSlotsInfo(params.Period)
-		data.TotalSlots = totalGroups
-	}
-
-	if data.FilledSlots == 0 && params.Confirmations > 0 {
-		data.FilledSlots = s.calculateFilledGroups(params.Confirmations, data.TotalSlots)
-	}
-
-	if data.ProgressPercentage == 0 && data.RequiredConfirmations > 0 {
-		data.ProgressPercentage = float64(data.Confirmations) / float64(data.RequiredConfirmations) * 100
-	}
-
-	// Рассчитываем дополнительные поля
+	// Рассчитываем дополнительные временные поля
 	data.NextAnalysis = s.calculateNextAnalysis(data.Timestamp, data.Period)
 	data.NextSignal = s.calculateNextSignal(data.Timestamp, data.Period, data.Confirmations, data.RequiredConfirmations)
 

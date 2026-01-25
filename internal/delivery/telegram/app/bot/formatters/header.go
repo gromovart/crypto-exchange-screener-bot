@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/formatters/header.go
 package formatters
 
 import (
@@ -35,22 +34,37 @@ func (f *HeaderFormatter) GetContractType(symbol string) string {
 
 // ExtractTimeframe извлекает таймфрейм из периода анализа
 func (f *HeaderFormatter) ExtractTimeframe(period string) string {
+	// Нормализуем входную строку
+	period = strings.ToLower(strings.TrimSpace(period))
+
 	switch {
-	case strings.Contains(period, "5"):
-		return "5мин"
-	case strings.Contains(period, "15"):
-		return "15мин"
-	case strings.Contains(period, "30"):
-		return "30мин"
-	case strings.Contains(period, "1 час"):
-		return "1ч"
-	case strings.Contains(period, "4"):
-		return "4ч"
-	case strings.Contains(period, "1 день"):
-		return "1д"
-	default:
-		return "1мин"
+	case strings.HasSuffix(period, "m") || strings.HasSuffix(period, "мин"):
+		// Обработка минутных интервалов: "5m", "15m", "30m"
+		if strings.Contains(period, "5") {
+			return "5мин"
+		} else if strings.Contains(period, "15") {
+			return "15мин"
+		} else if strings.Contains(period, "30") {
+			return "30мин"
+		} else if strings.Contains(period, "1") {
+			return "1мин"
+		}
+	case strings.HasSuffix(period, "h") || strings.HasSuffix(period, "ч") || strings.Contains(period, "час"):
+		// Обработка часовых интервалов: "1h", "4h"
+		if strings.Contains(period, "4") {
+			return "4ч"
+		} else if strings.Contains(period, "1") {
+			return "1ч"
+		}
+	case strings.HasSuffix(period, "d") || strings.HasSuffix(period, "д") || strings.Contains(period, "день"):
+		// Обработка дневных интервалов: "1d"
+		if strings.Contains(period, "1") {
+			return "1д"
+		}
 	}
+
+	// Дефолтное значение
+	return "5мин"
 }
 
 // GetIntensityEmoji возвращает эмодзи силы движения на основе процентного изменения

@@ -4,7 +4,7 @@ package events
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/controllers/counter"
 	"crypto-exchange-screener-bot/internal/types"
-	"log"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // BaseSubscriber - базовая реализация подписчика
@@ -57,12 +57,12 @@ func NewConsoleLoggerSubscriber() *ConsoleLoggerSubscriber {
 				case types.EventPriceUpdated:
 					data, ok := event.Data.(map[string]interface{})
 					if ok {
-						log.Printf("💰 Цена обновлена: %v", data)
+						logger.Info("💰 Цена обновлена: %v", data)
 					}
 				case types.EventSignalDetected:
-					log.Printf("📈 Обнаружен сигнал: %v", event.Data)
+					logger.Info("📈 Обнаружен сигнал: %v", event.Data)
 				case types.EventError:
-					log.Printf("❌ Ошибка: %v", event.Data)
+					logger.Info("❌ Ошибка: %v", event.Data)
 				}
 				return nil
 			},
@@ -83,7 +83,7 @@ func NewTelegramNotifierSubscriber(bot interface{}) *TelegramNotifierSubscriber 
 			[]types.EventType{types.EventSignalDetected},
 			func(event types.Event) error {
 				// Логика отправки в Telegram
-				log.Printf("🤖 Отправка в Telegram: %v", event.Data)
+				logger.Info("🤖 Отправка в Telegram: %v", event.Data)
 				return nil
 			},
 		),
@@ -104,7 +104,7 @@ func NewStorageSubscriber(storage interface{}) *StorageSubscriber {
 			[]types.EventType{types.EventPriceUpdated},
 			func(event types.Event) error {
 				// Логика сохранения в хранилище
-				log.Printf("💾 Сохранение в хранилище: %v", event.Data)
+				logger.Info("💾 Сохранение в хранилище: %v", event.Data)
 				return nil
 			},
 		),
