@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -475,8 +476,8 @@ func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
 		})
 
 		// Логируем сигнал
-		logger.Info("📈 Обнаружен сигнал: %s %s %.2f%% (уверенность: %.0f%%)",
-			signal.Symbol, signal.Direction, signal.ChangePercent, signal.Confidence)
+		logger.Info("📈 Обнаружен сигнал: %s %s %.2f%% (уверенность: %.0f%%, период: %s)",
+			signal.Symbol, signal.Direction, signal.ChangePercent, signal.Confidence, strconv.Itoa(signal.Period))
 	}
 }
 

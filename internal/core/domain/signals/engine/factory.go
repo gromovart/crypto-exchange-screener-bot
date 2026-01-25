@@ -217,11 +217,14 @@ func (f *Factory) configureCounterAnalyzer(
 	// Обновленный вызов с candleSystem
 	counterAnalyzer := counter.NewCounterAnalyzer(
 		counterConfig,
-		storage,
-		engine.eventBus,
-		f.candleSystem, // НОВЫЙ параметр
-	)
 
+		counter.Dependencies{
+			Storage:       storage,
+			EventBus:      engine.eventBus,
+			CandleSystem:  f.candleSystem,
+			MarketFetcher: f.priceFetcher,
+		},
+	)
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
 		logger.Warn("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {

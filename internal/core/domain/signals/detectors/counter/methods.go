@@ -1,8 +1,9 @@
-// /internal/core/domain/signals/detectors/counter/methods.go
+// internal/core/domain/signals/detectors/counter/methods.go
 package counter
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -12,32 +13,30 @@ import (
 	"github.com/google/uuid"
 )
 
-// getOIAndDelta получает OI и Volume Delta
-func (a *CounterAnalyzer) GetOIAndDelta(symbol string) (float64, float64) {
-	var oi, volumeDelta float64
-
-	// Получаем OI из storage
-	if a.storage != nil {
-		if snapshot, exists := a.storage.GetCurrentSnapshot(symbol); exists {
-			oi = snapshot.GetOpenInterest()
+// GetOI получает Open Interest
+func (a *CounterAnalyzer) GetOI(symbol string) float64 {
+	if a.deps.Storage != nil {
+		if snapshot, exists := a.deps.Storage.GetCurrentSnapshot(symbol); exists {
+			return snapshot.GetOpenInterest()
 		}
 	}
+	return 0
+}
 
-	// TODO: Реальная реализация Volume Delta
-	// Пока эмуляция
-	volumeDelta = 1000000.0 // $1M
-
-	return oi, volumeDelta
+// GetVolumeDelta получает дельту объема
+func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.VolumeDeltaData {
+	volumeCalculator := calculator.NewVolumeDeltaCalculator(a.deps.MarketFetcher, a.deps.Storage)
+	return volumeCalculator.CalculateWithFallback(symbol, direction)
 }
 
 // analyzeCandle анализирует свечу
-func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string, oi, volumeDelta float64) (*analysis.Signal, error) {
-	if a.candleSystem == nil {
+func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal, error) {
+	if a.deps.CandleSystem == nil {
 		return nil, fmt.Errorf("свечная система не инициализирована")
 	}
 
 	// Получаем свечу
-	candleData, err := a.candleSystem.GetCandle(symbol, period)
+	candleData, err := a.deps.CandleSystem.GetCandle(symbol, period)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения свечи %s/%s: %w", symbol, period, err)
 	}
@@ -75,14 +74,14 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string, oi, volumeDelta f
 	}
 
 	// Создаем сигнал
-	signal := a.CreateSignal(symbol, period, direction, changePercent, candleData, oi, volumeDelta)
+	signal := a.CreateSignal(symbol, period, direction, changePercent, candleData)
 
 	return &signal, nil
 }
 
 // createSignal создает сигнал
 func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changePercent float64,
-	candleData *redis_storage.Candle, oi, volumeDelta float64) analysis.Signal {
+	candleData *redis_storage.Candle) analysis.Signal {
 
 	// Упрощенный расчет уверенности
 	confidence := 50.0
@@ -121,14 +120,14 @@ func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changeP
 }
 
 // publishRawCounterSignal публикует сигнал (только отправка)
-func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period string, oi, volumeDelta float64) {
-	if a.eventBus == nil {
+func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period string) {
+	if a.deps.EventBus == nil {
 		logger.Error("❌ EventBus не инициализирован")
 		return
 	}
 
 	// Создаем данные через отдельный метод
-	eventData := a.CreateCounterEventData(signal, period, oi, volumeDelta)
+	eventData := a.CreateCounterEventData(signal, period)
 
 	// Создаем и отправляем событие
 	event := types.Event{
@@ -138,7 +137,7 @@ func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period
 		Timestamp: time.Now(),
 	}
 
-	if err := a.eventBus.Publish(event); err != nil {
+	if err := a.deps.EventBus.Publish(event); err != nil {
 		logger.Error("❌ Ошибка публикации сигнала %s: %v", signal.Symbol, err)
 	} else {
 		logger.Debug("✅ Сигнал опубликован: %s %s %.2f%%",
@@ -147,7 +146,7 @@ func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period
 }
 
 // createCounterEventData создает плоский map с 17 полями для контроллера
-func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period string, oi, volumeDelta float64) map[string]interface{} {
+func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period string) map[string]interface{} {
 	eventData := make(map[string]interface{})
 
 	// 1. Базовые поля из Signal (5 полей)
@@ -162,13 +161,29 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 
 	// 3. Данные из indicators (8 полей) - flat map
 	eventData["current_price"] = signal.EndPrice
-	eventData["volume_24h"] = signal.Volume * 10 // Заглушка
+
+	// Получаем реальный объем 24ч из storage
+	volume24h := 0.0
+	if a.deps.Storage != nil {
+		if snapshot, exists := a.deps.Storage.GetCurrentSnapshot(signal.Symbol); exists {
+			volume24h = snapshot.GetVolume24h()
+		}
+	}
+	eventData["volume_24h"] = volume24h
+
+	// Получаем OI
+	oi := a.GetOI(signal.Symbol)
+
 	eventData["open_interest"] = oi
 	eventData["funding_rate"] = 0.001 // Заглушка
-	eventData["rsi"] = 55.0           // Заглушка
-	eventData["macd_signal"] = 0.01   // Заглушка
-	eventData["volume_delta"] = volumeDelta
-	eventData["volume_delta_percent"] = 2.0 // Заглушка
+
+	// Получаем реальную дельту и процент через новый метод
+	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction)
+
+	eventData["rsi"] = 55.0         // Заглушка
+	eventData["macd_signal"] = 0.01 // Заглушка
+	eventData["volume_delta"] = deltaData.Delta
+	eventData["volume_delta_percent"] = deltaData.DeltaPercent
 
 	// 4. Данные прогресса (3 поля) - вложенные в progress map
 	eventData["progress"] = map[string]interface{}{

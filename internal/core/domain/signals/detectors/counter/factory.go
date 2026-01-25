@@ -25,7 +25,12 @@ func (f *CounterAnalyzerFactory) CreateAnalyzer(
 	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
 	config := f.DefaultConfig()
-	return NewCounterAnalyzer(config, storage, eventBus, candleSystem)
+	return NewCounterAnalyzer(config, Dependencies{
+		Storage:       storage,
+		EventBus:      eventBus,
+		CandleSystem:  candleSystem,
+		MarketFetcher: marketFetcher,
+	})
 }
 
 // CreateAnalyzerWithConfig создает CounterAnalyzer с пользовательской конфигурацией
@@ -36,7 +41,12 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
 ) *CounterAnalyzer {
-	return NewCounterAnalyzer(config, storage, eventBus, candleSystem)
+	return NewCounterAnalyzer(config, Dependencies{
+		Storage:       storage,
+		EventBus:      eventBus,
+		CandleSystem:  candleSystem,
+		MarketFetcher: marketFetcher,
+	})
 }
 
 // CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)
@@ -58,7 +68,7 @@ func (f *CounterAnalyzerFactory) CreateTestAnalyzer() *CounterAnalyzer {
 		},
 	}
 	// Для тестов передаем nil storage
-	return NewCounterAnalyzer(config, nil, nil, nil)
+	return NewCounterAnalyzer(config, Dependencies{})
 }
 
 // CreateMinimalAnalyzer создает минимальный анализатор
@@ -78,7 +88,7 @@ func (f *CounterAnalyzerFactory) CreateMinimalAnalyzer(storage storage.PriceStor
 			"notify_on_signal":    false,
 		},
 	}
-	return NewCounterAnalyzer(config, storage, nil, nil)
+	return NewCounterAnalyzer(config, Dependencies{})
 }
 
 // DefaultConfig возвращает конфигурацию по умолчанию

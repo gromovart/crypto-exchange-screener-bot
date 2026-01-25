@@ -11,15 +11,20 @@ import (
 	"time"
 )
 
+// Dependencies зависимости для TelegramBot
+type Dependencies struct {
+	Storage       storage.PriceStorageInterface
+	EventBus      types.EventBus
+	CandleSystem  *candle.CandleSystem
+	MarketFetcher interface{}
+}
+
 // CounterAnalyzer - анализатор счетчика сигналов
 type CounterAnalyzer struct {
-	config       common.AnalyzerConfig
-	storage      storage.PriceStorageInterface
-	eventBus     types.EventBus
-	candleSystem *candle.CandleSystem
-	stats        common.AnalyzerStats
-
+	config common.AnalyzerConfig
+	deps   Dependencies
 	// Статистика отправленных сигналов
+	stats              common.AnalyzerStats
 	sentStatsMu        sync.RWMutex
 	sentSignalsCount   int       // Общее количество отправленных сигналов
 	sentStatsStartTime time.Time // Время начала сбора статистики
@@ -29,15 +34,11 @@ type CounterAnalyzer struct {
 // NewCounterAnalyzer создает новый анализатор счетчика
 func NewCounterAnalyzer(
 	config common.AnalyzerConfig,
-	storage storage.PriceStorageInterface,
-	eventBus types.EventBus,
-	candleSystem *candle.CandleSystem,
+	deps Dependencies,
 ) *CounterAnalyzer {
 	analyzer := &CounterAnalyzer{
-		config:       config,
-		storage:      storage,
-		eventBus:     eventBus,
-		candleSystem: candleSystem,
+		config: config,
+		deps:   deps,
 		stats: common.AnalyzerStats{
 			TotalCalls:   0,
 			SuccessCount: 0,
@@ -79,12 +80,9 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config common.Analyzer
 	for i, point := range data {
 		logger.Debug("📊 Анализ точки #%d: Символ: %s", i+1, point.Symbol)
 
-		// Получаем OI и Volume Delta
-		oi, volumeDelta := a.GetOIAndDelta(point.Symbol)
-
 		// Анализируем каждый период
 		for _, period := range supportedPeriods {
-			signal, err := a.AnalyzeCandle(point.Symbol, period, oi, volumeDelta)
+			signal, err := a.AnalyzeCandle(point.Symbol, period)
 			if err != nil {
 				logger.Warn("⚠️ Ошибка анализа свечи %s/%s: %v", point.Symbol, period, err)
 				continue
@@ -93,8 +91,8 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config common.Analyzer
 			if signal != nil {
 				signals = append(signals, *signal)
 
-				// Публикуем сигнал в EventBus с периодом, OI и VolumeDelta
-				a.PublishRawCounterSignal(*signal, period, oi, volumeDelta)
+				// Публикуем сигнал в EventBus
+				a.PublishRawCounterSignal(*signal, period)
 
 				// Увеличиваем локальный счетчик
 				localSentCount++
