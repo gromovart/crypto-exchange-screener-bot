@@ -51,17 +51,36 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 		period = periodPkg.DefaultPeriod
 	}
 
-	// Получаем свечу
-	candleData, err := a.deps.CandleSystem.GetCandle(symbol, period)
+	// ⭐ ПОЛУЧАЕМ ПОСЛЕДНЮЮ ЗАКРЫТУЮ СВЕЧУ ЧЕРЕЗ CANDLE SYSTEM
+	// CandleSystem сам проверит через трекер если он есть
+	candleData, err := a.deps.CandleSystem.GetLatestClosedCandle(symbol, period)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка получения свечи %s/%s: %w", symbol, period, err)
+		return nil, fmt.Errorf("ошибка получения закрытой свечи %s/%s: %w", symbol, period, err)
 	}
 
 	if candleData == nil {
+		logger.Debug("📭 Нет закрытых свечей для %s/%s", symbol, period)
 		return nil, nil
 	}
 
 	if !candleData.IsRealFlag || candleData.Open == 0 {
+		logger.Debug("📭 Нереальная свеча для %s/%s", symbol, period)
+		return nil, nil
+	}
+
+	// ⭐ АТОМАРНАЯ ПРОВЕРКА И ОТМЕТКА СВЕЧИ ЧЕРЕЗ CANDLE SYSTEM
+	startTimeUnix := candleData.StartTime.Unix()
+	marked, err := a.deps.CandleSystem.MarkCandleProcessedAtomically(symbol, period, startTimeUnix)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка атомарной отметки свечи %s/%s (начало: %s): %v",
+			symbol, period, candleData.StartTime.Format("15:04:05"), err)
+		// Продолжаем анализ, но могут быть дубликаты
+	} else if !marked {
+		// Свеча уже была обработана ранее
+		logger.Debug("⏭️ Пропускаем - свеча %s/%s уже обработана (начало: %s, конец: %s)",
+			symbol, period,
+			candleData.StartTime.Format("15:04:05"),
+			candleData.EndTime.Format("15:04:05"))
 		return nil, nil
 	}
 
@@ -91,6 +110,11 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 
 	// Создаем сигнал
 	signal := a.CreateSignal(symbol, period, direction, changePercent, candleData)
+
+	logger.Info("📊 Анализ ЗАКРЫТОЙ свечи %s/%s: %.2f%% (начало: %s, конец: %s)",
+		symbol, period, changePercent,
+		candleData.StartTime.Format("15:04:05"),
+		candleData.EndTime.Format("15:04:05"))
 
 	return &signal, nil
 }
@@ -260,10 +284,6 @@ func (a *CounterAnalyzer) calculateMACD(symbol, period string) (float64, string,
 	status := a.deps.TechnicalCalculator.GetMACDStatus(priceHistory)
 	description := a.deps.TechnicalCalculator.GetMACDDescription(priceHistory)
 
-	// ⭐ ДОБАВИМ ЛОГИРОВАНИЕ
-	logger.Info("📊 CounterAnalyzer: MACD для %s/%s = %.4f, статус: %s, описание: %s",
-		symbol, period, macdLine, status, description)
-
 	return macdLine, status, description
 }
 
@@ -315,21 +335,16 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	}
 	eventData["funding_rate"] = fundingRate
 
-	// ⭐ РЕАЛЬНЫЙ RSI (вместо заглушки 55.0)
+	// ⭐ РЕАЛЬНЫЙ RSI
 	rsi, rsiStatus := a.calculateRSI(signal.Symbol, period)
 	eventData["rsi"] = rsi
-	eventData["rsi_status"] = rsiStatus // Добавляем статус для форматирования
+	eventData["rsi_status"] = rsiStatus
 
-	// ⭐ РЕАЛЬНЫЙ MACD (вместо заглушки 0.01)
-	// ⭐ РЕАЛЬНЫЙ MACD (вместо заглушки 0.01)
+	// ⭐ РЕАЛЬНЫЙ MACD
 	macdSignal, macdStatus, macdDescription := a.calculateMACD(signal.Symbol, period)
 	eventData["macd_signal"] = macdSignal
 	eventData["macd_status"] = macdStatus
 	eventData["macd_description"] = macdDescription
-
-	// ⭐ ЛОГИРОВАНИЕ ЧТО МЫ ПЕРЕДАЕМ
-	logger.Info("📤 CounterAnalyzer: передаем в событие для %s/%s - MACD сигнал: %.4f",
-		signal.Symbol, period, macdSignal)
 
 	// Получаем реальную дельту и процент
 	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction)
@@ -347,4 +362,69 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 		signal.Symbol, period, rsi, rsiStatus, macdSignal, macdStatus)
 
 	return eventData
+}
+
+// isCandleAlreadyProcessed проверяет обрабатывали ли мы уже эту свечу
+func (a *CounterAnalyzer) isCandleAlreadyProcessed(candleKey string) bool {
+	if a.deps.CandleSystem == nil {
+		logger.Warn("⚠️ CandleSystem не инициализирован")
+		return false
+	}
+
+	// Парсим ключ свечи
+	symbol, period, startTime, err := parseCandleKey(candleKey)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка парсинга ключа свечи %s: %v", candleKey, err)
+		return false
+	}
+
+	// Используем CandleSystem для проверки
+	processed, err := a.deps.CandleSystem.IsCandleProcessed(symbol, period, startTime)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка проверки свечи %s через CandleSystem: %v", candleKey, err)
+		return false
+	}
+
+	return processed
+}
+
+// markCandleAsProcessed помечает свечу как обработанную (через CandleSystem)
+func (a *CounterAnalyzer) markCandleAsProcessed(candleKey string) bool {
+	if a.deps.CandleSystem == nil {
+		logger.Warn("⚠️ CandleSystem не инициализирован")
+		return false
+	}
+
+	// Парсим ключ свечи
+	symbol, period, startTime, err := parseCandleKey(candleKey)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка парсинга ключа свечи %s: %v", candleKey, err)
+		return false
+	}
+
+	// Используем CandleSystem для атомарной отметки
+	marked, err := a.deps.CandleSystem.MarkCandleProcessedAtomically(symbol, period, startTime)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка отметки свечи %s через CandleSystem: %v", candleKey, err)
+		return false
+	}
+
+	return marked
+}
+
+// parseCandleKey парсит ключ свечи в формате "symbol:period:startTimeUnix"
+func parseCandleKey(candleKey string) (symbol, period string, startTime int64, err error) {
+	// Формат: symbol:period:startTimeUnix
+	// Пример: BTCUSDT:5m:1737897000
+
+	var startTimeInt int64
+	n, scanErr := fmt.Sscanf(candleKey, "%s:%s:%d", &symbol, &period, &startTimeInt)
+	if scanErr != nil {
+		return "", "", 0, fmt.Errorf("ошибка парсинга ключа свечи: %w", scanErr)
+	}
+	if n != 3 {
+		return "", "", 0, fmt.Errorf("неверный формат ключа свечи: %s", candleKey)
+	}
+
+	return symbol, period, startTimeInt, nil
 }

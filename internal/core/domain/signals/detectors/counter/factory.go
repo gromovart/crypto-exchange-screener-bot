@@ -19,7 +19,7 @@ func NewCounterAnalyzerFactory() *CounterAnalyzerFactory {
 
 // CreateAnalyzer создает CounterAnalyzer с настройками по умолчанию
 func (f *CounterAnalyzerFactory) CreateAnalyzer(
-	storage storage.PriceStorageInterface, // ИЗМЕНЕНО: конкретный тип
+	storage storage.PriceStorageInterface,
 	eventBus types.EventBus,
 	marketFetcher interface{},
 	candleSystem *candle.CandleSystem,
@@ -47,6 +47,13 @@ func (f *CounterAnalyzerFactory) CreateAnalyzerWithConfig(
 		CandleSystem:  candleSystem,
 		MarketFetcher: marketFetcher,
 	})
+}
+
+func (f *CounterAnalyzerFactory) CreateAnalyzerWithDeps(
+	config common.AnalyzerConfig,
+	deps Dependencies,
+) *CounterAnalyzer {
+	return NewCounterAnalyzer(config, deps)
 }
 
 // CreateTestAnalyzer создает тестовый анализатор (без внешних зависимостей)

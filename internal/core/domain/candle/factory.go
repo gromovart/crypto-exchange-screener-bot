@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	candletracker "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/candle_tracker"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -79,19 +81,65 @@ func (f *CandleSystemFactory) CreateSystem(
 		Calculator:   candleCalculator,
 		priceStorage: priceStorage,
 		config:       f.config,
+		// candleTracker будет установлен позже через SetCandleTracker
 	}
 
 	logger.Info("✅ Свечная система с Redis хранилищем создана успешно")
 	return system, nil
 }
 
+// CreateSystemWithRedis создает свечную систему с RedisService для CandleTracker
+func (f *CandleSystemFactory) CreateSystemWithRedis(
+	priceStorage storage.PriceStorageInterface,
+	candleStorage storage.CandleStorageInterface,
+	redisService *redis_service.RedisService,
+) (*CandleSystem, error) {
+	system, err := f.CreateSystem(priceStorage, candleStorage)
+	if err != nil {
+		return nil, err
+	}
+
+	// Создаем CandleTracker если есть RedisService
+	if redisService != nil {
+		tracker := candletracker.NewCandleTracker(redisService, 2*time.Hour)
+		if err := tracker.Initialize(); err != nil {
+			logger.Warn("⚠️ Не удалось инициализировать CandleTracker: %v", err)
+			// Не прерываем создание системы
+		} else {
+			system.SetCandleTracker(tracker)
+			logger.Info("✅ CandleTracker добавлен в CandleSystem (TTL: 2 часа)")
+		}
+	} else {
+		logger.Warn("⚠️ RedisService не передан, CandleTracker не будет создан")
+	}
+
+	return system, nil
+}
+
 // CandleSystem - полная свечная система
 type CandleSystem struct {
-	Storage      storage.CandleStorageInterface
-	Engine       *CandleEngine
-	Calculator   *CandleCalculator
-	priceStorage storage.PriceStorageInterface
-	config       storage.CandleConfig
+	Storage       storage.CandleStorageInterface
+	Engine        *CandleEngine
+	Calculator    *CandleCalculator
+	candleTracker *candletracker.CandleTracker // Трекер обработанных свечей
+	priceStorage  storage.PriceStorageInterface
+	config        storage.CandleConfig
+}
+
+// SetCandleTracker устанавливает трекер свечей
+func (cs *CandleSystem) SetCandleTracker(tracker *candletracker.CandleTracker) {
+	cs.candleTracker = tracker
+	logger.Info("✅ CandleTracker установлен в CandleSystem")
+}
+
+// GetCandleTracker возвращает трекер свечей
+func (cs *CandleSystem) GetCandleTracker() *candletracker.CandleTracker {
+	return cs.candleTracker
+}
+
+// HasCandleTracker проверяет есть ли трекер свечей
+func (cs *CandleSystem) HasCandleTracker() bool {
+	return cs.candleTracker != nil
 }
 
 // Start запускает свечную систему
@@ -106,7 +154,7 @@ func (cs *CandleSystem) Start() error {
 	// Предзагружаем свечи для существующих символов
 	cs.preloadCandles()
 
-	logger.Info("✅ Свечная система запущена")
+	logger.Info("✅ Свечная система запущена (трекер свечей: %v)", cs.HasCandleTracker())
 	return nil
 }
 
@@ -180,6 +228,92 @@ func (cs *CandleSystem) GetCandle(symbol, period string) (*redis_storage.Candle,
 	}, nil
 }
 
+// MarkCandleProcessedAtomically атомарно помечает свечу как обработанную
+func (cs *CandleSystem) MarkCandleProcessedAtomically(symbol, period string, startTime int64) (bool, error) {
+	if cs.candleTracker == nil {
+		return false, fmt.Errorf("candle tracker не инициализирован")
+	}
+	return cs.candleTracker.MarkCandleProcessedAtomically(symbol, period, startTime)
+}
+
+// IsCandleProcessed проверяет была ли свеча обработана
+func (cs *CandleSystem) IsCandleProcessed(symbol, period string, startTime int64) (bool, error) {
+	if cs.candleTracker == nil {
+		return false, fmt.Errorf("candle tracker не инициализирован")
+	}
+	return cs.candleTracker.IsCandleProcessed(symbol, period, startTime)
+}
+
+// GetLatestClosedCandle получает последнюю закрытую свечу с проверкой трекера
+func (cs *CandleSystem) GetLatestClosedCandle(symbol, period string) (*redis_storage.Candle, error) {
+	// Получаем историю (последние 5 свечей)
+	history, err := cs.GetHistory(symbol, period, 10) // Увеличиваем лимит для надежности
+	if err != nil {
+		return nil, err
+	}
+
+	if len(history) == 0 {
+		return nil, nil
+	}
+
+	// Идем от новых к старым свечам
+	for i := len(history) - 1; i >= 0; i-- {
+		candle := history[i]
+
+		// Проверяем что свеча закрыта
+		if !candle.IsClosedFlag {
+			continue
+		}
+
+		// Проверяем что свеча реальная
+		if !candle.IsRealFlag || candle.Open == 0 {
+			continue
+		}
+
+		// ⭐ КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: проверяем через трекер если он доступен
+		if cs.candleTracker != nil {
+			processed, err := cs.IsCandleProcessed(symbol, period, candle.StartTime.Unix())
+			if err != nil {
+				logger.Warn("⚠️ Ошибка проверки свечи %s/%s через трекер (начало: %s): %v",
+					symbol, period, candle.StartTime.Format("15:04:05"), err)
+				// Продолжаем, но возвращаем свечу (может быть дублирование)
+			} else if processed {
+				logger.Debug("⏭️ Свеча %s/%s уже обработана (начало: %s, изменение: %.2f%%)",
+					symbol, period, candle.StartTime.Format("15:04:05"),
+					((candle.Close-candle.Open)/candle.Open)*100)
+				continue // Пропускаем уже обработанные свечи
+			}
+		}
+
+		// Нашли подходящую свечу
+		logger.Debug("🔍 Найдена необработанная закрытая свеча %s/%s (начало: %s, изменение: %.2f%%)",
+			symbol, period, candle.StartTime.Format("15:04:05"),
+			((candle.Close-candle.Open)/candle.Open)*100)
+		return candle, nil
+	}
+
+	// Если все свечи уже обработаны или нет подходящих
+	logger.Debug("📭 Все закрытые свечи %s/%s уже обработаны или нет подходящих", symbol, period)
+	return nil, nil
+}
+
+// GetCandleOrLatestClosed получает свечу (активную или последнюю закрытую)
+func (cs *CandleSystem) GetCandleOrLatestClosed(symbol, period string) (*redis_storage.Candle, error) {
+	// Сначала пробуем получить активную свечу
+	candle, err := cs.GetCandle(symbol, period)
+	if err != nil {
+		return nil, err
+	}
+
+	// Если активная свеча есть и она закрыта - возвращаем её
+	if candle != nil && candle.IsClosedFlag {
+		return candle, nil
+	}
+
+	// Если активная свеча не закрыта или её нет, ищем последнюю закрытую
+	return cs.GetLatestClosedCandle(symbol, period)
+}
+
 // GetHistory возвращает историю свечей
 func (cs *CandleSystem) GetHistory(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
 	historyInterfaces, err := cs.Storage.GetHistory(symbol, period, limit)
@@ -220,16 +354,27 @@ func (cs *CandleSystem) GetStats() map[string]interface{} {
 	engineStats := cs.Engine.GetStats()
 	storageStats := cs.Storage.GetStats()
 
+	// Получаем статистику трекера если есть
+	var trackerStats map[string]interface{}
+	if cs.candleTracker != nil {
+		stats, err := cs.candleTracker.GetStats()
+		if err == nil {
+			trackerStats = stats
+		}
+	}
+
 	return map[string]interface{}{
 		"system_config": map[string]interface{}{
-			"supported_periods": cs.config.SupportedPeriods,
-			"max_history":       cs.config.MaxHistory,
-			"cleanup_interval":  cs.config.CleanupInterval.String(),
-			"auto_build":        cs.config.AutoBuild,
+			"supported_periods":  cs.config.SupportedPeriods,
+			"max_history":        cs.config.MaxHistory,
+			"cleanup_interval":   cs.config.CleanupInterval.String(),
+			"auto_build":         cs.config.AutoBuild,
+			"has_candle_tracker": cs.HasCandleTracker(),
 		},
-		"engine_stats":  engineStats,
-		"storage_stats": storageStats,
-		"storage_type":  "redis",
+		"engine_stats":   engineStats,
+		"storage_stats":  storageStats,
+		"candle_tracker": trackerStats, // Статистика трекера
+		"storage_type":   "redis",
 	}
 }
 

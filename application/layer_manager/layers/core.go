@@ -8,6 +8,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
+	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
@@ -395,14 +396,32 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 		return fmt.Errorf("ошибка создания хранилища свечей: %w", err)
 	}
 
-	// Создаем свечную систему с Redis хранилищем
-	candleFactory := candle.NewCandleSystemFactory().
-		WithSupportedPeriods(candleConfig.SupportedPeriods).
-		WithMaxHistory(candleConfig.MaxHistory).
-		WithCleanupInterval(candleConfig.CleanupInterval).
-		WithAutoBuild(candleConfig.AutoBuild)
+	// ⭐ ПОЛУЧАЕМ RedisService для создания CandleTracker
+	redisServiceComp, exists := cl.infraLayer.GetComponent("RedisService")
+	if !exists {
+		logger.Warn("⚠️ RedisService не найден, CandleSystem будет создана без CandleTracker")
+		cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+	} else {
+		redisServiceInterface, err := cl.getComponentValue(redisServiceComp)
+		if err != nil {
+			logger.Warn("⚠️ Не удалось получить RedisService: %v", err)
+			cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+		} else {
+			redisService, ok := redisServiceInterface.(*redis_service.RedisService)
+			if !ok {
+				logger.Warn("⚠️ Неверный тип RedisService")
+				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+			} else {
+				// ⭐ СОЗДАЕМ СВЕЧНУЮ СИСТЕМУ С ТРЕКЕРОМ
+				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystemWithRedis(
+					priceStorage,
+					candleStorage,
+					redisService,
+				)
+			}
+		}
+	}
 
-	cl.candleSystem, err = candleFactory.CreateSystem(priceStorage, candleStorage)
 	if err != nil {
 		return fmt.Errorf("ошибка создания свечной системы: %w", err)
 	}
@@ -414,7 +433,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 
 	// Регистрируем компонент
 	cl.registerComponent("CandleSystem", cl.candleSystem)
-	logger.Info("✅ Свечная система с Redis хранилищем создана и запущена")
+	logger.Info("✅ Свечная система создана и запущена")
 
 	return nil
 }

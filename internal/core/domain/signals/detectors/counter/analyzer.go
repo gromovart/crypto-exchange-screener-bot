@@ -20,13 +20,14 @@ type Dependencies struct {
 	CandleSystem        *candle.CandleSystem
 	MarketFetcher       interface{}
 	VolumeCalculator    *calculator.VolumeDeltaCalculator
-	TechnicalCalculator *calculator.TechnicalCalculator // ⭐ ДОБАВЛЕНО: для расчетов RSI/MACD
+	TechnicalCalculator *calculator.TechnicalCalculator
 }
 
 // CounterAnalyzer - анализатор счетчика сигналов
 type CounterAnalyzer struct {
 	config common.AnalyzerConfig
 	deps   Dependencies
+
 	// Статистика отправленных сигналов
 	stats              common.AnalyzerStats
 	sentStatsMu        sync.RWMutex

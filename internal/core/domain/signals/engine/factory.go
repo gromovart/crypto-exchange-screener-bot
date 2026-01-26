@@ -185,7 +185,7 @@ func (f *Factory) configureCounterAnalyzer(
 	engine *AnalysisEngine,
 	cfg *config.Config,
 ) {
-	logger.Info("🔧 Настройка CounterAnalyzer с TelegramNotifier...")
+	logger.Info("🔧 Настройка CounterAnalyzer с CandleTracker...")
 	analyzerConfigs := cfg.AnalyzerConfigs
 	customSettings := analyzerConfigs.CounterAnalyzer.CustomSettings
 
@@ -215,18 +215,23 @@ func (f *Factory) configureCounterAnalyzer(
 
 	storage := engine.GetStorage()
 
-	// Обновленный вызов с candleSystem
-	counterAnalyzer := counter.NewCounterAnalyzer(
-		counterConfig,
+	// Здесь нужно получить RedisService для создания трекера
+	// Пока создаем без трекера если не можем получить RedisService
+	// В реальном коде нужно будет передать RedisService из зависимостей
 
-		counter.Dependencies{
-			Storage:          storage,
-			EventBus:         engine.eventBus,
-			CandleSystem:     f.candleSystem,
-			MarketFetcher:    f.priceFetcher,
-			VolumeCalculator: calculator.NewVolumeDeltaCalculator(f.priceFetcher, storage),
-		},
-	)
+	logger.Warn("⚠️ CandleTracker временно не используется, нужен RedisService")
+
+	// Создаем зависимости
+	deps := counter.Dependencies{
+		Storage:          storage,
+		EventBus:         engine.eventBus,
+		CandleSystem:     f.candleSystem,
+		MarketFetcher:    f.priceFetcher,
+		VolumeCalculator: calculator.NewVolumeDeltaCalculator(f.priceFetcher, storage),
+	}
+
+	counterAnalyzer := counter.NewCounterAnalyzer(counterConfig, deps)
+
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {
 		logger.Warn("⚠️ Не удалось зарегистрировать CounterAnalyzer: %v", err)
 	} else {
