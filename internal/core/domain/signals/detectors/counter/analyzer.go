@@ -1,4 +1,3 @@
-// internal/core/domain/signals/detectors/counter/analyzer.go
 package counter
 
 import (
@@ -14,13 +13,14 @@ import (
 	"time"
 )
 
-// Dependencies зависимости для TelegramBot
+// Dependencies зависимости для CounterAnalyzer
 type Dependencies struct {
-	Storage          storage.PriceStorageInterface
-	EventBus         types.EventBus
-	CandleSystem     *candle.CandleSystem
-	MarketFetcher    interface{}
-	VolumeCalculator *calculator.VolumeDeltaCalculator // ⭐ ДОБАВЛЕНО
+	Storage             storage.PriceStorageInterface
+	EventBus            types.EventBus
+	CandleSystem        *candle.CandleSystem
+	MarketFetcher       interface{}
+	VolumeCalculator    *calculator.VolumeDeltaCalculator
+	TechnicalCalculator *calculator.TechnicalCalculator // ⭐ ДОБАВЛЕНО: для расчетов RSI/MACD
 }
 
 // CounterAnalyzer - анализатор счетчика сигналов
@@ -44,6 +44,12 @@ func NewCounterAnalyzer(
 	if deps.VolumeCalculator == nil && deps.MarketFetcher != nil && deps.Storage != nil {
 		logger.Info("🔧 Создаем VolumeDeltaCalculator для CounterAnalyzer")
 		deps.VolumeCalculator = calculator.NewVolumeDeltaCalculator(deps.MarketFetcher, deps.Storage)
+	}
+
+	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ TechnicalCalculator если не передан
+	if deps.TechnicalCalculator == nil {
+		logger.Info("🔧 Создаем TechnicalCalculator для CounterAnalyzer")
+		deps.TechnicalCalculator = calculator.NewTechnicalCalculator()
 	}
 
 	analyzer := &CounterAnalyzer{

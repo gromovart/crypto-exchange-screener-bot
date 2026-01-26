@@ -57,7 +57,10 @@ type CounterData struct {
 	VolumeDelta        float64
 	VolumeDeltaPercent float64
 	RSI                float64
+	RSIStatus          string // ⭐ НОВОЕ: статус RSI из расчета
 	MACDSignal         float64
+	MACDStatus         string // ⭐ НОВОЕ: статус MACD
+	MACDDescription    string // ⭐ НОВОЕ: полное описание MACD
 	DeltaSource        string
 	Confidence         float64
 	Timestamp          time.Time
@@ -135,12 +138,30 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	// RSI: 50.0 ⚪ (нейтральный)
 	if data.RSI > 0 || data.MACDSignal != 0 {
 		builder.WriteString("📊 Тех. анализ:\n")
+
+		// ⭐ ИСПОЛЬЗУЕМ РЕАЛЬНЫЕ ДАННЫЕ С СТАТУСАМИ
 		if data.RSI > 0 {
-			builder.WriteString(p.TechnicalFormatter.FormatRSI(data.RSI))
+			if data.RSIStatus != "" {
+				// Используем реальный статус из CounterAnalyzer
+				builder.WriteString(p.TechnicalFormatter.FormatRSIWithStatus(data.RSI, data.RSIStatus))
+			} else {
+				// Fallback: статический расчет (для обратной совместимости)
+				builder.WriteString(p.TechnicalFormatter.FormatRSI(data.RSI))
+			}
 			builder.WriteString("\n")
 		}
+
 		if data.MACDSignal != 0 {
-			builder.WriteString(p.TechnicalFormatter.FormatMACD(data.MACDSignal))
+			if data.MACDDescription != "" {
+				// Используем реальное описание из CounterAnalyzer
+				builder.WriteString(p.TechnicalFormatter.FormatMACDWithDescription(data.MACDDescription))
+			} else if data.MACDStatus != "" {
+				// Используем статус из CounterAnalyzer
+				builder.WriteString(fmt.Sprintf("MACD: %s", data.MACDStatus))
+			} else {
+				// Fallback: статический расчет (для обратной совместимости)
+				builder.WriteString(p.TechnicalFormatter.FormatMACD(data.MACDSignal))
+			}
 			builder.WriteString("\n")
 		}
 		builder.WriteString("\n")
@@ -172,7 +193,7 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	// 3.  📉 умеренная дельта продаж ($20762) - заметное давление продавцов
 	// 4.  ✅ Объемы подтверждают ценовое движение
 	//
-	// 🟢 ОТКРЫТЬ ЛОНГ: умеренные бычьи сигналы
+	// 🟢 ОТКРИТЬ ЛОНГ: умеренные бычьи сигналы
 	//
 	// 📊 УРОВНИ:
 	// Стоп-лосс: $0.8560 (2.0%)

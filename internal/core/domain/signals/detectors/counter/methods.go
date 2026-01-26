@@ -1,4 +1,3 @@
-// internal/core/domain/signals/detectors/counter/methods.go
 package counter
 
 import (
@@ -180,7 +179,95 @@ func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period
 	}
 }
 
-// CreateCounterEventData создает плоский map с 17 полями для контроллера
+// getPriceHistoryForAnalysis получает историю цен для технического анализа
+func (a *CounterAnalyzer) getPriceHistoryForAnalysis(symbol, period string, limit int) ([]redis_storage.PriceData, error) {
+	if a.deps.Storage == nil {
+		return nil, fmt.Errorf("хранилище не инициализировано")
+	}
+
+	// Получаем историю цен
+	history, err := a.deps.Storage.GetPriceHistory(symbol, limit)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения истории цен для %s: %w", symbol, err)
+	}
+
+	// Конвертируем интерфейсы в PriceData
+	var priceData []redis_storage.PriceData
+	for _, h := range history {
+		priceData = append(priceData, redis_storage.PriceData{
+			Symbol:       h.GetSymbol(),
+			Price:        h.GetPrice(),
+			Volume24h:    h.GetVolume24h(),
+			VolumeUSD:    h.GetVolumeUSD(),
+			Timestamp:    h.GetTimestamp(),
+			OpenInterest: h.GetOpenInterest(),
+			FundingRate:  h.GetFundingRate(),
+			Change24h:    h.GetChange24h(),
+			High24h:      h.GetHigh24h(),
+			Low24h:       h.GetLow24h(),
+		})
+	}
+
+	return priceData, nil
+}
+
+// calculateRSI рассчитывает RSI для символа и периода
+func (a *CounterAnalyzer) calculateRSI(symbol, period string) (float64, string) {
+	if a.deps.TechnicalCalculator == nil {
+		return 55.0, "нейтральный" // Заглушка если калькулятор не доступен
+	}
+
+	// Получаем историю цен (достаточно для RSI расчета)
+	priceHistory, err := a.getPriceHistoryForAnalysis(symbol, period, 30) // 30 точек достаточно
+	if err != nil {
+		logger.Warn("⚠️ Не удалось получить историю для расчета RSI %s/%s: %v", symbol, period, err)
+		return 55.0, "нейтральный"
+	}
+
+	if len(priceHistory) < 2 {
+		return 50.0, "недостаточно данных"
+	}
+
+	// Рассчитываем RSI
+	rsi := a.deps.TechnicalCalculator.CalculateRSI(priceHistory)
+	status := a.deps.TechnicalCalculator.GetRSIStatus(rsi)
+
+	return rsi, status
+}
+
+// calculateMACD рассчитывает MACD для символа и периода
+func (a *CounterAnalyzer) calculateMACD(symbol, period string) (float64, string, string) {
+	if a.deps.TechnicalCalculator == nil {
+		logger.Warn("⚠️ CounterAnalyzer: TechnicalCalculator не доступен для %s/%s", symbol, period)
+		return 0.01, "нейтральный", "⭕ калькулятор недоступен" // Заглушка
+	}
+
+	// Получаем историю цен (нужно больше точек для MACD)
+	priceHistory, err := a.getPriceHistoryForAnalysis(symbol, period, 50) // 50 точек для MACD
+	if err != nil {
+		logger.Warn("⚠️ CounterAnalyzer: Не удалось получить историю для расчета MACD %s/%s: %v", symbol, period, err)
+		return 0.01, "нейтральный", "⭕ недостаточно данных"
+	}
+
+	if len(priceHistory) < 2 {
+		logger.Warn("⚠️ CounterAnalyzer: недостаточно данных для MACD %s/%s: %d точек",
+			symbol, period, len(priceHistory))
+		return 0.01, "нейтральный", "⭕ недостаточно данных"
+	}
+
+	// Рассчитываем MACD
+	macdLine, _, _ := a.deps.TechnicalCalculator.CalculateMACD(priceHistory)
+	status := a.deps.TechnicalCalculator.GetMACDStatus(priceHistory)
+	description := a.deps.TechnicalCalculator.GetMACDDescription(priceHistory)
+
+	// ⭐ ДОБАВИМ ЛОГИРОВАНИЕ
+	logger.Info("📊 CounterAnalyzer: MACD для %s/%s = %.4f, статус: %s, описание: %s",
+		symbol, period, macdLine, status, description)
+
+	return macdLine, status, description
+}
+
+// CreateCounterEventData создает плоский map с реальными данными RSI/MACD
 func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period string) map[string]interface{} {
 	eventData := make(map[string]interface{})
 
@@ -203,7 +290,7 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	// 2. Подтверждения (1 поле) - заглушка
 	eventData["confirmations"] = 3
 
-	// 3. Данные из indicators (8 полей) - flat map
+	// 3. Данные из indicators (8 полей) - flat map с РЕАЛЬНЫМИ значениями
 	eventData["current_price"] = signal.EndPrice
 
 	// Получаем реальный объем 24ч из storage
@@ -215,17 +302,37 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	}
 	eventData["volume_24h"] = volume24h
 
-	// Получаем OI
+	// Получаем реальный OI
 	oi := a.GetOI(signal.Symbol)
-
 	eventData["open_interest"] = oi
-	eventData["funding_rate"] = 0.001 // Заглушка
 
-	// Получаем реальную дельту и процент через новый метод
+	// Получаем реальную ставку фандинга
+	fundingRate := 0.001 // Заглушка, можно доработать
+	if a.deps.Storage != nil {
+		if snapshot, exists := a.deps.Storage.GetCurrentSnapshot(signal.Symbol); exists {
+			fundingRate = snapshot.GetFundingRate()
+		}
+	}
+	eventData["funding_rate"] = fundingRate
+
+	// ⭐ РЕАЛЬНЫЙ RSI (вместо заглушки 55.0)
+	rsi, rsiStatus := a.calculateRSI(signal.Symbol, period)
+	eventData["rsi"] = rsi
+	eventData["rsi_status"] = rsiStatus // Добавляем статус для форматирования
+
+	// ⭐ РЕАЛЬНЫЙ MACD (вместо заглушки 0.01)
+	// ⭐ РЕАЛЬНЫЙ MACD (вместо заглушки 0.01)
+	macdSignal, macdStatus, macdDescription := a.calculateMACD(signal.Symbol, period)
+	eventData["macd_signal"] = macdSignal
+	eventData["macd_status"] = macdStatus
+	eventData["macd_description"] = macdDescription
+
+	// ⭐ ЛОГИРОВАНИЕ ЧТО МЫ ПЕРЕДАЕМ
+	logger.Info("📤 CounterAnalyzer: передаем в событие для %s/%s - MACD сигнал: %.4f",
+		signal.Symbol, period, macdSignal)
+
+	// Получаем реальную дельту и процент
 	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction)
-
-	eventData["rsi"] = 55.0         // Заглушка
-	eventData["macd_signal"] = 0.01 // Заглушка
 	eventData["volume_delta"] = deltaData.Delta
 	eventData["volume_delta_percent"] = deltaData.DeltaPercent
 
@@ -235,6 +342,9 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 		"total_groups":  6,    // Заглушка
 		"percentage":    50.0, // Заглушка
 	}
+
+	logger.Debug("📊 CounterAnalyzer: реальные индикаторы для %s/%s - RSI: %.1f (%s), MACD: %.4f (%s)",
+		signal.Symbol, period, rsi, rsiStatus, macdSignal, macdStatus)
 
 	return eventData
 }
