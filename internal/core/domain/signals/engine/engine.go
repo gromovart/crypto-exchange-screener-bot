@@ -160,20 +160,48 @@ func (e *AnalysisEngine) Start() error {
 }
 
 // Stop останавливает движок анализа
-func (e *AnalysisEngine) Stop() error {
+func (e *AnalysisEngine) Stop() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if !e.running {
-		return nil
+		return
 	}
 
 	e.running = false
 	close(e.stopChan)
+
+	logger.Info("🛑 Останавливаем AnalysisEngine...")
+
+	// ✅ ОСТАНАВЛИВАЕМ ВСЕ АНАЛИЗАТОРЫ
+	if e.analyzers != nil {
+		logger.Info("🔧 Останавливаем анализаторы...")
+		for name, analyzer := range e.analyzers {
+			logger.Debug("🛑 Останавливаем анализатор: %s", name)
+
+			// Пробуем разные сигнатуры Stop()
+			if stopper, ok := analyzer.(interface{ Stop() error }); ok {
+				if err := stopper.Stop(); err != nil {
+					logger.Warn("⚠️ Ошибка остановки анализатора %s: %v", name, err)
+				} else {
+					logger.Debug("✅ Анализатор %s остановлен", name)
+				}
+			} else if stopper, ok := analyzer.(interface{ Stop() }); ok {
+				stopper.Stop()
+				logger.Debug("✅ Анализатор %s остановлен", name)
+			} else {
+				logger.Debug("⚠️ Анализатор %s не имеет метода Stop()", name)
+			}
+		}
+	}
+
+		// Ждем завершения горутин анализа
 	e.wg.Wait()
 
-	// Сохраняем статистику
+	// Сохраняем статистику при остановке
 	e.saveStats()
 
-	logger.Info("🛑 AnalysisEngine остановлен")
-	return nil
+	logger.Info("✅ AnalysisEngine остановлен")
 }
 
 // RegisterAnalyzer регистрирует анализатор

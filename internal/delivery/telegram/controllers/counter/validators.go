@@ -2,9 +2,11 @@
 package counter
 
 import (
+	periodPkg "crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 )
 
+// ValidateEventData валидирует структуру данных события
 // ValidateEventData валидирует структуру данных события
 func ValidateEventData(eventData interface{}) error {
 	dataMap, ok := eventData.(map[string]interface{})
@@ -12,7 +14,7 @@ func ValidateEventData(eventData interface{}) error {
 		return fmt.Errorf("данные события должны быть map[string]interface{}, получен %T", eventData)
 	}
 
-	// Обязательные поля - ИЗМЕНЕНИЕ: period вместо period_string
+	// Обязательные поля
 	requiredFields := []string{"symbol", "direction", "change_percent", "period"}
 	for _, field := range requiredFields {
 		if _, exists := dataMap[field]; !exists {
@@ -33,9 +35,12 @@ func ValidateEventData(eventData interface{}) error {
 		return fmt.Errorf("поле change_percent должно быть числом float64")
 	}
 
-	// ИЗМЕНЕНИЕ: проверяем period вместо period_string
+	// ИСПРАВЛЕНИЕ: Валидация формата периода
 	if period, ok := dataMap["period"].(string); !ok || period == "" {
 		return fmt.Errorf("поле period должно быть непустой строкой")
+	} else if !periodPkg.IsValidPeriod(period) {
+		return fmt.Errorf("невалидный формат периода: %s. Допустимые значения: %v",
+			period, periodPkg.GetStandardPeriods())
 	}
 
 	return nil

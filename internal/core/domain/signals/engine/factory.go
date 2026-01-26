@@ -5,6 +5,7 @@ import (
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
@@ -219,10 +220,11 @@ func (f *Factory) configureCounterAnalyzer(
 		counterConfig,
 
 		counter.Dependencies{
-			Storage:       storage,
-			EventBus:      engine.eventBus,
-			CandleSystem:  f.candleSystem,
-			MarketFetcher: f.priceFetcher,
+			Storage:          storage,
+			EventBus:         engine.eventBus,
+			CandleSystem:     f.candleSystem,
+			MarketFetcher:    f.priceFetcher,
+			VolumeCalculator: calculator.NewVolumeDeltaCalculator(f.priceFetcher, storage),
 		},
 	)
 	if err := engine.RegisterAnalyzer(counterAnalyzer); err != nil {

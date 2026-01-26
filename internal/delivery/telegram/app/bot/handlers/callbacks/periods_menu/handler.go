@@ -160,10 +160,10 @@ func (h *periodsMenuHandler) isPeriodSelected(user *models.User, period string) 
 }
 
 // createPeriodButtonRow создает строку кнопки периода с индикатором
-func (h *periodsMenuHandler) createPeriodButtonRow(user *models.User, periodStr, callback, buttonText string) []map[string]string {
+func (h *periodsMenuHandler) createPeriodButtonRow(user *models.User, period, callback, buttonText string) []map[string]string {
 	isSelected := false
 	if user != nil {
-		periodMinutes := convertPeriodStrToMinutes(periodStr)
+		periodMinutes := convertPeriodStrToMinutes(period)
 		for _, p := range user.PreferredPeriods {
 			if p == periodMinutes {
 				isSelected = true
@@ -186,8 +186,8 @@ func (h *periodsMenuHandler) createPeriodButtonRow(user *models.User, periodStr,
 }
 
 // convertPeriodStrToMinutes конвертирует строку периода в минуты
-func convertPeriodStrToMinutes(periodStr string) int {
-	switch periodStr {
+func convertPeriodStrToMinutes(period string) int {
+	switch period {
 	case "5m":
 		return 5
 	case "15m":
@@ -202,18 +202,18 @@ func convertPeriodStrToMinutes(periodStr string) int {
 		return 1440
 	default:
 		// Пробуем распарсить
-		if strings.HasSuffix(periodStr, "m") {
-			numStr := strings.TrimSuffix(periodStr, "m")
+		if strings.HasSuffix(period, "m") {
+			numStr := strings.TrimSuffix(period, "m")
 			num, _ := strconv.Atoi(numStr)
 			return num
 		}
-		if strings.HasSuffix(periodStr, "h") {
-			numStr := strings.TrimSuffix(periodStr, "h")
+		if strings.HasSuffix(period, "h") {
+			numStr := strings.TrimSuffix(period, "h")
 			num, _ := strconv.Atoi(numStr)
 			return num * 60
 		}
-		if strings.HasSuffix(periodStr, "d") {
-			numStr := strings.TrimSuffix(periodStr, "d")
+		if strings.HasSuffix(period, "d") {
+			numStr := strings.TrimSuffix(period, "d")
 			num, _ := strconv.Atoi(numStr)
 			return num * 1440
 		}

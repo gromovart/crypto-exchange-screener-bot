@@ -88,12 +88,12 @@ func ParseIntervalToMinutes(interval string) (int, error) {
 }
 
 // ParsePeriodToMinutes преобразует строку периода в минуты
-func ParsePeriodToMinutes(periodStr string) int {
-	periodStr = strings.ToLower(periodStr)
+func ParsePeriodToMinutes(period string) int {
+	period = strings.ToLower(period)
 
 	// Удаляем все нецифровые символы для получения числа
 	re := regexp.MustCompile(`\d+`)
-	matches := re.FindString(periodStr)
+	matches := re.FindString(period)
 	if matches == "" {
 		return 15 // default
 	}
@@ -104,11 +104,11 @@ func ParsePeriodToMinutes(periodStr string) int {
 	}
 
 	// Определяем единицу измерения
-	if strings.Contains(periodStr, "h") || strings.Contains(periodStr, "час") {
+	if strings.Contains(period, "h") || strings.Contains(period, "час") {
 		return num * 60
-	} else if strings.Contains(periodStr, "d") || strings.Contains(periodStr, "д") || strings.Contains(periodStr, "день") {
+	} else if strings.Contains(period, "d") || strings.Contains(period, "д") || strings.Contains(period, "день") {
 		return num * 1440
-	} else if strings.Contains(periodStr, "m") || strings.Contains(periodStr, "мин") {
+	} else if strings.Contains(period, "m") || strings.Contains(period, "мин") {
 		return num
 	}
 

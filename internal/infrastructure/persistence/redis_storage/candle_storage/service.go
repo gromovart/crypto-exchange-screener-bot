@@ -517,7 +517,7 @@ func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*redis_storage.C
 		return nil, false
 	}
 	if err != nil {
-		logger.Warn("⚠️ Ошибка загрузки свечи из Redis: %v", err)
+		logger.Debug("⚠️ Ошибка загрузки свечи из Redis: %v", err)
 		return nil, false
 	}
 

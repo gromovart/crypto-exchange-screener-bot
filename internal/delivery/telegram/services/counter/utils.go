@@ -1,10 +1,7 @@
 // internal/delivery/telegram/services/counter/utils.go
 package counter
 
-import (
-	"fmt"
-	"strings"
-)
+import periodPkg "crypto-exchange-screener-bot/pkg/period"
 
 // GetRequiredConfirmations возвращает количество требуемых подтверждений для периода
 func GetRequiredConfirmations(period string) int {
@@ -32,22 +29,11 @@ func GetRequiredConfirmations(period string) int {
 
 // periodToMinutes конвертирует период строки в минуты
 func (s *serviceImpl) periodToMinutes(period string) int {
-	switch period {
-	case "5m":
-		return 5
-	case "15m":
-		return 15
-	case "30m":
-		return 30
-	case "1h":
-		return 60
-	case "4h":
-		return 240
-	case "1d":
-		return 1440
-	default:
-		return 15 // дефолт
+	minutes, err := periodPkg.StringToMinutes(period)
+	if err != nil {
+		return periodPkg.DefaultMinutes
 	}
+	return minutes
 }
 
 // containsString проверяет наличие подстроки в строке (вспомогательная функция)
@@ -68,25 +54,6 @@ func ContainsString(str, substr string) bool {
 }
 
 // convertPeriodToInt преобразует период из string в int
-func ConvertPeriodToInt(periodStr string) (int, error) {
-	// Нормализуем строку
-	periodStr = strings.ToLower(strings.TrimSpace(periodStr))
-
-	// ТОЛЬКО реальные форматы из CounterAnalyzer
-	switch periodStr {
-	case "5m":
-		return 5, nil
-	case "15m":
-		return 15, nil
-	case "30m":
-		return 30, nil
-	case "1h":
-		return 60, nil
-	case "4h":
-		return 240, nil
-	case "1d":
-		return 1440, nil
-	default:
-		return 0, fmt.Errorf("неизвестный формат периода: %s", periodStr)
-	}
+func ConvertPeriodToInt(period string) (int, error) {
+	return periodPkg.StringToMinutes(period)
 }

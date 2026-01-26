@@ -1,9 +1,11 @@
+// internal/core/domain/signals/detectors/counter/analyzer.go
 package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -13,10 +15,11 @@ import (
 
 // Dependencies зависимости для TelegramBot
 type Dependencies struct {
-	Storage       storage.PriceStorageInterface
-	EventBus      types.EventBus
-	CandleSystem  *candle.CandleSystem
-	MarketFetcher interface{}
+	Storage          storage.PriceStorageInterface
+	EventBus         types.EventBus
+	CandleSystem     *candle.CandleSystem
+	MarketFetcher    interface{}
+	VolumeCalculator *calculator.VolumeDeltaCalculator // ⭐ ДОБАВЛЕНО
 }
 
 // CounterAnalyzer - анализатор счетчика сигналов
@@ -36,6 +39,12 @@ func NewCounterAnalyzer(
 	config common.AnalyzerConfig,
 	deps Dependencies,
 ) *CounterAnalyzer {
+	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ VolumeCalculator если не передан
+	if deps.VolumeCalculator == nil && deps.MarketFetcher != nil && deps.Storage != nil {
+		logger.Info("🔧 Создаем VolumeDeltaCalculator для CounterAnalyzer")
+		deps.VolumeCalculator = calculator.NewVolumeDeltaCalculator(deps.MarketFetcher, deps.Storage)
+	}
+
 	analyzer := &CounterAnalyzer{
 		config: config,
 		deps:   deps,
@@ -63,7 +72,9 @@ func (a *CounterAnalyzer) Analyze(data []types.PriceData, config common.Analyzer
 	defer func() {
 		a.stats.LastCallTime = time.Now()
 		a.stats.TotalTime += time.Since(startTime)
-		a.stats.AverageTime = a.stats.TotalTime / time.Duration(a.stats.TotalCalls)
+		if a.stats.TotalCalls > 0 {
+			a.stats.AverageTime = a.stats.TotalTime / time.Duration(a.stats.TotalCalls)
+		}
 	}()
 
 	// Обновляем конфигурацию
@@ -126,7 +137,10 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded() {
 	// Логируем раз в 10 секунд
 	if timeSinceLastLog >= 10*time.Second && a.sentSignalsCount > 0 {
 		totalDuration := now.Sub(a.sentStatsStartTime)
-		signalsPerMinute := float64(a.sentSignalsCount) / totalDuration.Minutes()
+		var signalsPerMinute float64
+		if totalDuration.Minutes() > 0 {
+			signalsPerMinute = float64(a.sentSignalsCount) / totalDuration.Minutes()
+		}
 
 		logger.Info("📊 CounterAnalyzer - Агрегированная статистика: "+
 			"всего отправлено=%d, за период=%v, скорость=%.1f сигн/мин",
@@ -135,6 +149,37 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded() {
 		// Сбрасываем время последнего логирования
 		a.lastLogTime = now
 	}
+}
+
+// Stop останавливает анализатор счетчика
+func (a *CounterAnalyzer) Stop() error {
+	logger.Info("🛑 Останавливаем CounterAnalyzer")
+
+	// ✅ Останавливаем VolumeDeltaCalculator если есть
+	if a.deps.VolumeCalculator != nil {
+		logger.Info("🛑 Останавливаем VolumeDeltaCalculator")
+		a.deps.VolumeCalculator.Stop()
+	}
+
+	// Сбрасываем статистику
+	a.sentStatsMu.Lock()
+	a.sentSignalsCount = 0
+	a.sentStatsStartTime = time.Now()
+	a.lastLogTime = time.Now()
+	a.sentStatsMu.Unlock()
+
+	// Сбрасываем общую статистику
+	a.stats = common.AnalyzerStats{
+		TotalCalls:   0,
+		SuccessCount: 0,
+		ErrorCount:   0,
+		TotalTime:    0,
+		AverageTime:  0,
+		LastCallTime: time.Time{},
+	}
+
+	logger.Info("✅ CounterAnalyzer остановлен")
+	return nil
 }
 
 // GetConfig возвращает конфигурацию

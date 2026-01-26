@@ -3,6 +3,8 @@ package counter
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
+	"crypto-exchange-screener-bot/pkg/logger"
+	periodPkg "crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 	"strconv"
 	"strings"
@@ -292,21 +294,13 @@ func FormatPeriod(period string) string {
 	}
 }
 
+// GetPeriodMinutes конвертирует строковый период в минуты
 func GetPeriodMinutes(period string) int {
-	switch period {
-	case "5m":
-		return 5
-	case "15m":
-		return 15
-	case "30m":
-		return 30
-	case "1h":
-		return 60
-	case "4h":
-		return 240
-	case "1d":
-		return 1440
-	default:
-		return 15
+	minutes, err := periodPkg.StringToMinutes(period)
+	if err != nil {
+		logger.Warn("⚠️ Невалидный период '%s', используем дефолтный %s",
+			period, periodPkg.DefaultPeriod)
+		return periodPkg.DefaultMinutes
 	}
+	return minutes
 }

@@ -64,7 +64,7 @@ func (sm *SettingsManager) SetNotification(userID int, notificationType string, 
 // SetPreferredPeriod устанавливает предпочтительный период анализа
 func (sm *SettingsManager) SetPreferredPeriod(userID int, period string) (string, error) {
 	// Конвертируем строковый период в минуты
-	periodMinutes, err := sm.periodStringToMinutes(period)
+	periodMinutes, err := sm.periodingToMinutes(period)
 	if err != nil {
 		return "", err
 	}
@@ -158,8 +158,8 @@ func (sm *SettingsManager) GetUserNotificationSettings(userID int) (*models.User
 	}, nil
 }
 
-// periodStringToMinutes конвертирует строковый период в минуты
-func (sm *SettingsManager) periodStringToMinutes(period string) (int, error) {
+// periodingToMinutes конвертирует строковый период в минуты
+func (sm *SettingsManager) periodingToMinutes(period string) (int, error) {
 	switch period {
 	case "5m":
 		return 5, nil

@@ -4,6 +4,7 @@ package counter
 import (
 	counterService "crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/types"
+	periodPkg "crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 	"time"
 )
@@ -34,12 +35,19 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		timestamp = time.Now()
 	}
 
+	// Получаем и нормализуем период
+	period := getString(dataMap, "period")
+	if !periodPkg.IsValidPeriod(period) {
+		// Если период невалидный, логируем и используем дефолтный
+		period = periodPkg.DefaultPeriod
+	}
+
 	params := counterService.CounterParams{
-		// Базовые поля - ТОЛЬКО period, НЕ period_string
+		// Базовые поля
 		Symbol:        getString(dataMap, "symbol"),
 		Direction:     getString(dataMap, "direction"),
 		ChangePercent: getFloat64(dataMap, "change_percent"),
-		Period:        getString(dataMap, "period"), // ТОЛЬКО period
+		Period:        period, // Используем нормализованный период
 		Timestamp:     timestamp,
 	}
 

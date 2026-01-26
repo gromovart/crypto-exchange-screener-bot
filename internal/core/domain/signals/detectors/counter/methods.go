@@ -7,6 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
+	periodPkg "crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 	"time"
 
@@ -25,14 +26,30 @@ func (a *CounterAnalyzer) GetOI(symbol string) float64 {
 
 // GetVolumeDelta получает дельту объема
 func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.VolumeDeltaData {
-	volumeCalculator := calculator.NewVolumeDeltaCalculator(a.deps.MarketFetcher, a.deps.Storage)
-	return volumeCalculator.CalculateWithFallback(symbol, direction)
+	// ✅ Используем общий калькулятор из зависимостей
+	if a.deps.VolumeCalculator == nil {
+		// Создаем временно, если не передан в зависимостях
+		logger.Debug("⚠️ Создаем временный VolumeDeltaCalculator для %s", symbol)
+		tempCalculator := calculator.NewVolumeDeltaCalculator(a.deps.MarketFetcher, a.deps.Storage)
+		defer tempCalculator.Stop() // ✅ ВАЖНО: останавливаем временный калькулятор
+
+		return tempCalculator.CalculateWithFallback(symbol, direction)
+	}
+
+	return a.deps.VolumeCalculator.CalculateWithFallback(symbol, direction)
 }
 
-// analyzeCandle анализирует свечу
+// AnalyzeCandle анализирует свечу
 func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal, error) {
 	if a.deps.CandleSystem == nil {
 		return nil, fmt.Errorf("свечная система не инициализирована")
+	}
+
+	// Валидируем период
+	if !periodPkg.IsValidPeriod(period) {
+		logger.Warn("⚠️ Невалидный период '%s' для символа %s, используем %s",
+			period, symbol, periodPkg.DefaultPeriod)
+		period = periodPkg.DefaultPeriod
 	}
 
 	// Получаем свечу
@@ -79,7 +96,7 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 	return &signal, nil
 }
 
-// createSignal создает сигнал
+// CreateSignal создает сигнал
 func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changePercent float64,
 	candleData *redis_storage.Candle) analysis.Signal {
 
@@ -95,13 +112,21 @@ func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changeP
 		confidence = 65
 	}
 
+	// Конвертируем период в минуты
+	periodMinutes, err := periodPkg.StringToMinutes(period)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка конвертации периода '%s', используем дефолтный: %s",
+			period, periodPkg.DefaultPeriod)
+		periodMinutes = periodPkg.DefaultMinutes
+	}
+
 	signal := analysis.Signal{
 		ID:            uuid.New().String(),
 		Symbol:        symbol,
 		Type:          "counter_candle",
 		Direction:     direction,
 		ChangePercent: changePercent,
-		Period:        GetPeriodMinutes(period),
+		Period:        periodMinutes, // Используем конвертированные минуты
 		Confidence:    confidence,
 		DataPoints:    2,
 		StartPrice:    candleData.Open,
@@ -111,7 +136,10 @@ func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changeP
 		Metadata: analysis.Metadata{
 			Strategy: "counter_candle_analyzer",
 			Tags:     []string{"candle_analysis", period},
-			Custom:   make(map[string]interface{}), // Пустой, только для служебных данных
+			Custom: map[string]interface{}{
+				"period_minutes": periodMinutes, // Добавляем минуты
+				"period_string":  period,
+			},
 		},
 		Progress: nil,
 	}
@@ -119,11 +147,18 @@ func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changeP
 	return signal
 }
 
-// publishRawCounterSignal публикует сигнал (только отправка)
+// PublishRawCounterSignal публикует сигнал (только отправка)
 func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period string) {
 	if a.deps.EventBus == nil {
 		logger.Error("❌ EventBus не инициализирован")
 		return
+	}
+
+	// Валидируем период перед отправкой
+	if !periodPkg.IsValidPeriod(period) {
+		logger.Warn("⚠️ Невалидный период '%s' для публикации сигнала %s, используем %s",
+			period, signal.Symbol, periodPkg.DefaultPeriod)
+		period = periodPkg.DefaultPeriod
 	}
 
 	// Создаем данные через отдельный метод
@@ -140,12 +175,12 @@ func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period
 	if err := a.deps.EventBus.Publish(event); err != nil {
 		logger.Error("❌ Ошибка публикации сигнала %s: %v", signal.Symbol, err)
 	} else {
-		logger.Debug("✅ Сигнал опубликован: %s %s %.2f%%",
-			signal.Symbol, signal.Direction, signal.ChangePercent)
+		logger.Debug("✅ Сигнал опубликован: %s %s %.2f%% (%s)",
+			signal.Symbol, signal.Direction, signal.ChangePercent, period)
 	}
 }
 
-// createCounterEventData создает плоский map с 17 полями для контроллера
+// CreateCounterEventData создает плоский map с 17 полями для контроллера
 func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period string) map[string]interface{} {
 	eventData := make(map[string]interface{})
 
@@ -153,7 +188,16 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	eventData["symbol"] = signal.Symbol
 	eventData["direction"] = signal.Direction
 	eventData["change_percent"] = signal.ChangePercent
-	eventData["period"] = period // ТОЛЬКО period
+
+	// Нормализуем период
+	normalizedPeriod := period
+	if !periodPkg.IsValidPeriod(period) {
+		normalizedPeriod = periodPkg.DefaultPeriod
+		logger.Debug("⚠️ Нормализован период для %s: %s → %s",
+			signal.Symbol, period, normalizedPeriod)
+	}
+	eventData["period"] = normalizedPeriod
+
 	eventData["timestamp"] = signal.Timestamp
 
 	// 2. Подтверждения (1 поле) - заглушка

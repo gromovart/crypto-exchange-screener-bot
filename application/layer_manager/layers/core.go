@@ -533,13 +533,11 @@ func (cl *CoreLayer) Stop() error {
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
 
-	//Останавливаем AnalysisEngine если запущен
-	if cl.analysisEngine != nil && cl.analysisEngine.IsRunning() {
-		if err := cl.analysisEngine.Stop(); err != nil {
-			logger.Warn("⚠️ Ошибка остановки AnalysisEngine: %v", err)
-		} else {
-			logger.Info("🛑 AnalysisEngine остановлен")
-		}
+	// Останавливаем AnalysisEngine если запущен
+	if cl.analysisEngine != nil {
+		// ✅ ИСПРАВЛЕНИЕ: Вызываем Stop() без проверки возвращаемого значения
+		cl.analysisEngine.Stop() // Метод Stop() может не возвращать ошибку
+		logger.Info("🛑 AnalysisEngine остановлен")
 	}
 
 	// Останавливаем свечную систему если запущена
@@ -559,9 +557,6 @@ func (cl *CoreLayer) Stop() error {
 			logger.Info("🛑 BybitPriceFetcher остановлен")
 		}
 	}
-
-	// Останавливаем фабрику ядра если нужно
-	// (в текущей реализации нет метода Stop у CoreServiceFactory)
 
 	cl.running = false
 	cl.updateState(StateStopped)

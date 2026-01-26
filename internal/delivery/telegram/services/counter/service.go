@@ -8,7 +8,9 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
+	periodPkg "crypto-exchange-screener-bot/pkg/period"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
@@ -62,21 +64,31 @@ func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
 
 	sentCount := 0
 	rateLimitedCount := 0
+	bypassedCount := 0
 
 	for _, user := range usersToNotify {
-		allowed, period, currentCount, timeUntilNext, _ := s.checkRateLimitWithDetails(user, rawData)
+		allowed, signalPeriod, rateLimitPeriod, currentCount, timeUntilNext, limit := s.checkRateLimitWithDetails(user, rawData)
 
 		if !allowed {
 			rateLimitedCount++
-			logger.Info("⏸️ Rate limit: user=%d, symbol=%s, count=%d/5, next_in=%v",
-				user.ID, rawData.Symbol, currentCount, timeUntilNext.Round(time.Second))
+			// Уменьшаем логирование - только каждый 10-й раз или если высокий счетчик
+			if rateLimitedCount%10 == 0 || currentCount > limit/2 {
+				logger.Debug("⏸️ Rate limit: user=%d, symbol=%s, direction=%s, count=%d/%d, next_in=%v",
+					user.ID, rawData.Symbol, rawData.Direction, currentCount, limit, timeUntilNext.Round(time.Second))
+			}
 			continue
 		}
 
-		if err := s.sendNotificationWithGuard(user, counterData, period, currentCount); err != nil {
+		// Проверяем обход rate limiting для сильных движений
+		bypassRateLimit := s.shouldBypassRateLimit(rawData.ChangePercent)
+
+		if err := s.sendNotificationWithGuard(user, counterData, signalPeriod, rateLimitPeriod, currentCount, limit, bypassRateLimit); err != nil {
 			logger.Error("❌ Ошибка отправки уведомления: %v", err)
 		} else {
 			sentCount++
+			if bypassRateLimit {
+				bypassedCount++
+			}
 		}
 	}
 
@@ -84,35 +96,20 @@ func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
 		s.cleanupOldGuardEntries()
 	}
 
-	if rateLimitedCount > 0 {
-		logger.Info("📊 Rate limiting: %s - отправлено=%d, пропущено=%d",
-			rawData.Symbol, sentCount, rateLimitedCount)
+	if rateLimitedCount > 0 || bypassedCount > 0 {
+		// Логируем статистику только если есть пропущенные сигналы
+		logger.Debug("📊 Rate limiting статистика: %s %s - отправлено=%d, пропущено=%d, обходов=%d",
+			rawData.Symbol, rawData.Direction, sentCount, rateLimitedCount, bypassedCount)
 	}
 
 	return CounterResult{
 		Processed: true,
-		Message:   fmt.Sprintf("Отправлено %d уведомлений для %s", sentCount, rawData.Symbol),
+		Message:   fmt.Sprintf("Отправлено %d уведомлений для %s %s", sentCount, rawData.Symbol, rawData.Direction),
 		SentTo:    sentCount,
 	}, nil
 }
 
-func (s *serviceImpl) checkRateLimitWithDetails(user *models.User, data RawCounterData) (bool, time.Duration, int, time.Duration, time.Duration) {
-	s.guardMu.RLock()
-	defer s.guardMu.RUnlock()
-
-	period := s.getNotificationPeriod(user, data.Period)
-	userID64 := int64(user.ID)
-
-	currentCount := s.notificationGuard.GetCount(userID64, data.Symbol, period)
-	limit := s.notificationGuard.GetLimit()
-	minInterval := period / time.Duration(limit)
-	timeUntilNext := s.notificationGuard.GetTimeUntilNextAllowed(userID64, data.Symbol, period)
-	allowed := s.notificationGuard.Check(userID64, data.Symbol, period)
-
-	return allowed, period, currentCount, timeUntilNext, minInterval
-}
-
-func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatters.CounterData, period time.Duration, currentCount int) error {
+func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatters.CounterData, signalPeriod, rateLimitPeriod time.Duration, currentCount, limit int, bypassRateLimit bool) error {
 	formattedMessage := s.formatter.FormatCounterSignal(data)
 
 	if user.ChatID == "" {
@@ -136,12 +133,15 @@ func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatte
 			return fmt.Errorf("ошибка отправки в Telegram: %w", err)
 		}
 
-		s.guardMu.Lock()
-		userID64 := int64(user.ID)
-		s.notificationGuard.Record(userID64, data.Symbol, period)
-		s.guardMu.Unlock()
+		// Записываем в rate limiting только если не обход
+		if !bypassRateLimit {
+			s.guardMu.Lock()
+			userID64 := int64(user.ID)
+			s.notificationGuard.Record(userID64, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod)
+			s.guardMu.Unlock()
+		}
 
-		s.logSuccessfulNotification(user, data.Symbol, period, currentCount+1)
+		s.logSuccessfulNotification(user, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod, currentCount+1, limit, bypassRateLimit)
 
 		return nil
 	} else {
@@ -149,12 +149,19 @@ func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatte
 	}
 }
 
-func (s *serviceImpl) logSuccessfulNotification(user *models.User, symbol string, period time.Duration, newCount int) {
-	limit := s.notificationGuard.GetLimit()
-	minInterval := period / time.Duration(limit)
+func (s *serviceImpl) logSuccessfulNotification(user *models.User, symbol, direction string, signalPeriod, rateLimitPeriod time.Duration, newCount, limit int, bypassed bool) {
+	signalMinutes := int(signalPeriod.Minutes())
+	rateLimitMinutes := int(rateLimitPeriod.Minutes())
+	minInterval := rateLimitPeriod / time.Duration(limit)
 
-	logger.Info("📤 Уведомление: %s -> %s (ID: %d, счет: %d/%d, период: %v, интервал: %v)",
-		symbol, user.Username, user.ID, newCount, limit, period, minInterval)
+	bypassText := ""
+	if bypassed {
+		bypassText = " [ОБХОД РАТЕ ЛИМИТА]"
+	}
+
+	logger.Info("📤 Уведомление: %s %s (%s) → %s (ID: %d, счет: %d/%d, сигнал: %dм, rate limit: %dм, интервал: %v)%s",
+		symbol, direction, periodPkg.MinutesToString(signalMinutes), user.Username,
+		user.ID, newCount, limit, signalMinutes, rateLimitMinutes, minInterval, bypassText)
 }
 
 func (s *serviceImpl) cleanupOldGuardEntries() {
@@ -182,38 +189,132 @@ func (s *serviceImpl) getNotificationPeriod(user *models.User, signalPeriod stri
 // getMaxUserPeriod возвращает максимальный период из настроек пользователя
 func (s *serviceImpl) getMaxUserPeriod(user *models.User) time.Duration {
 	if user == nil {
-		return 5 * time.Minute
+		return periodPkg.DefaultDuration
 	}
 
 	// Если есть предпочтительные периоды - берем максимальный
 	if len(user.PreferredPeriods) > 0 {
-		maxPeriodMin := 0
-		for _, periodMin := range user.PreferredPeriods {
-			if periodMin > maxPeriodMin {
-				maxPeriodMin = periodMin
-			}
-		}
+		// Получаем максимальный период в минутах
+		maxMinutes := periodPkg.GetMaxPeriod(user.PreferredPeriods)
 
-		// Конвертируем минуты в Duration
-		if maxPeriodMin >= 5 {
-			return time.Duration(maxPeriodMin) * time.Minute
-		}
+		// Ограничиваем стандартными пределами (5м - 1день)
+		clampedMinutes := periodPkg.ClampPeriodStandard(maxMinutes)
+		// Конвертируем в Duration
+		return periodPkg.MinutesToDuration(clampedMinutes)
 	}
 
 	// Дефолтное значение
-	return 5 * time.Minute
+	return periodPkg.DefaultDuration
 }
 
 // clampPeriod ограничивает период разумными пределами
-func (s *serviceImpl) clampPeriod(period time.Duration) time.Duration {
-	minPeriod := 5 * time.Minute  // Минимум 5 минут
-	maxPeriod := 60 * time.Minute // Максимум 1 час
+func (s *serviceImpl) clampPeriod(periodDuration time.Duration) time.Duration {
+	minPeriod := periodPkg.MinutesToDuration(periodPkg.Minutes5)  // Минимум 5 минут
+	maxPeriod := periodPkg.MinutesToDuration(periodPkg.Minutes60) // Максимум 1 час
 
-	if period < minPeriod {
+	if periodDuration < minPeriod {
 		return minPeriod
 	}
-	if period > maxPeriod {
+	if periodDuration > maxPeriod {
 		return maxPeriod
 	}
-	return period
+	return periodDuration
+}
+
+// getRateLimit возвращает лимит уведомлений в зависимости от периода
+func (s *serviceImpl) getRateLimit(periodMinutes int) int {
+	switch periodMinutes {
+	case 5: // 5 минут
+		return 3 // Более строгий лимит для коротких периодов
+	case 15: // 15 минут
+		return 4
+	case 30: // 30 минут
+		return 5
+	case 60: // 1 час
+		return 6
+	case 240: // 4 часа
+		return 8
+	case 1440: // 1 день
+		return 10
+	default:
+		// Для нестандартных периодов используем пропорциональный расчет
+		// Базовый период 5 минут с лимитом 3
+		basePeriod := 5
+		baseLimit := 3
+
+		if periodMinutes <= basePeriod {
+			return baseLimit
+		}
+
+		// Увеличиваем лимит пропорционально, но с округлением вниз
+		multiplier := periodMinutes / basePeriod
+		return baseLimit * multiplier
+	}
+}
+
+// getSymbolSpecificLimit возвращает лимит с учетом специфики символа
+func (s *serviceImpl) getSymbolSpecificLimit(symbol string, periodMinutes int, direction string) int {
+	baseLimit := s.getRateLimit(periodMinutes)
+
+	// Учитываем направление - для падения можно давать больше сигналов
+	// так как падения обычно быстрее и важнее для трейдинга
+	if direction == SignalTypeFall {
+		baseLimit = int(float64(baseLimit) * 1.2) // +20% для сигналов падения
+	}
+
+	// В будущем можно добавить проверку волатильности символа
+	// if s.isHighVolatilitySymbol(symbol) {
+	//     return baseLimit * 2
+	// }
+
+	return baseLimit
+}
+
+// shouldBypassRateLimit проверяет, можно ли обойти rate limiting
+func (s *serviceImpl) shouldBypassRateLimit(changePercent float64) bool {
+	// Сильные движения (>5%) могут обходить rate limiting
+	// так как это важные сигналы для трейдинга
+	return math.Abs(changePercent) > 5.0
+}
+
+// checkRateLimitWithDetails проверяет rate limiting с учетом всех факторов
+func (s *serviceImpl) checkRateLimitWithDetails(user *models.User, data RawCounterData) (bool, time.Duration, time.Duration, int, time.Duration, int) {
+	s.guardMu.RLock()
+	defer s.guardMu.RUnlock()
+
+	// Получаем период для rate limiting из настроек пользователя
+	rateLimitPeriod := s.getNotificationPeriod(user, data.Period)
+
+	// Конвертируем период сигнала из строки в Duration
+	signalPeriod, err := periodPkg.StringToDuration(data.Period)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка конвертации периода сигнала '%s', используем дефолтный: %s",
+			data.Period, periodPkg.DefaultPeriod)
+		signalPeriod = periodPkg.DefaultDuration
+	}
+
+	userID64 := int64(user.ID)
+
+	// Конвертируем период в минуты для получения лимита
+	rateLimitMinutes := int(rateLimitPeriod.Minutes())
+
+	// Получаем лимит с учетом специфики символа и направления
+	limit := s.getSymbolSpecificLimit(data.Symbol, rateLimitMinutes, data.Direction)
+
+	// Если это сильное движение - пропускаем rate limiting
+	if s.shouldBypassRateLimit(data.ChangePercent) {
+		logger.Info("⚡ Обход rate limiting для %s %s: сильное движение %.2f%% (сигнал: %s, rate limit: %v)",
+			data.Symbol, data.Direction, data.ChangePercent, data.Period, rateLimitPeriod)
+		return true, signalPeriod, rateLimitPeriod, 0, 0, limit
+	}
+
+	currentCount := s.notificationGuard.GetCount(userID64, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod)
+	timeUntilNext := s.notificationGuard.GetTimeUntilNextAllowed(userID64, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod)
+	allowed := s.notificationGuard.Check(userID64, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod)
+
+	// Логируем детали rate limiting
+	logger.Debug("🔍 Rate limiting: user=%d, symbol=%s, direction=%s, signal=%s, rate_limit=%v, count=%d/%d, allowed=%v",
+		user.ID, data.Symbol, data.Direction, data.Period, rateLimitPeriod, currentCount, limit, allowed)
+
+	return allowed, signalPeriod, rateLimitPeriod, currentCount, timeUntilNext, limit
 }
