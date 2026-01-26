@@ -4,13 +4,13 @@ package continuous_analyzer
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
 // ContinuousCalculator интерфейс для всех калькуляторов непрерывности
 type ContinuousCalculator interface {
 	// Calculate вычисляет сигналы на основе данных
-	Calculate(data []types.PriceData, minPoints int) []analysis.Signal
+	Calculate(data []redis_storage.PriceData, minPoints int) []analysis.Signal
 
 	// UpdateConfig обновляет конфигурацию калькулятора
 	UpdateConfig(config common.AnalyzerConfig)
@@ -87,5 +87,3 @@ type SequenceAlgorithm struct {
 	MinPoints  int                `json:"min_points"`
 	Parameters map[string]float64 `json:"parameters"`
 }
-
-

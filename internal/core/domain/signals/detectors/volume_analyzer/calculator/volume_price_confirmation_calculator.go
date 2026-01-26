@@ -4,7 +4,7 @@ package calculator
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 	"time"
 )
@@ -24,7 +24,7 @@ func NewVolumePriceConfirmationCalculator(config common.AnalyzerConfig) *VolumeP
 }
 
 // Calculate вычисляет сигнал согласованности объема и цены
-func (c *VolumePriceConfirmationCalculator) Calculate(data []types.PriceData) *analysis.Signal {
+func (c *VolumePriceConfirmationCalculator) Calculate(data []redis_storage.PriceData) *analysis.Signal {
 	if len(data) < 2 {
 		return nil
 	}
@@ -133,7 +133,7 @@ func (c *VolumePriceConfirmationCalculator) getConfirmationThreshold() float64 {
 }
 
 // calculateVolumePriceCorrelation вычисляет корреляцию между ценой и объемом
-func (c *VolumePriceConfirmationCalculator) calculateVolumePriceCorrelation(data []types.PriceData) float64 {
+func (c *VolumePriceConfirmationCalculator) calculateVolumePriceCorrelation(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}

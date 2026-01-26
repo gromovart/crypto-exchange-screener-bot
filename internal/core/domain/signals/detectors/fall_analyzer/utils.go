@@ -7,13 +7,13 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer/config"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/fall_analyzer/manager"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // sortDataByTime сортирует данные по времени
-func (a *FallAnalyzer) sortDataByTime(data []types.PriceData) []types.PriceData {
-	sorted := make([]types.PriceData, len(data))
+func (a *FallAnalyzer) sortDataByTime(data []redis_storage.PriceData) []redis_storage.PriceData {
+	sorted := make([]redis_storage.PriceData, len(data))
 	copy(sorted, data)
 
 	sort.Slice(sorted, func(i, j int) bool {

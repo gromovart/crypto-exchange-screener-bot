@@ -26,37 +26,6 @@ type PriceFetcherConfig struct {
 	FuturesCategory     string
 }
 
-// PriceData данные о цене с улучшенной обработкой объемов
-type PriceData struct {
-	Symbol       string    `json:"symbol"`
-	Price        float64   `json:"price"`
-	Volume24h    float64   `json:"volume_24h"`
-	VolumeUSD    float64   `json:"volume_usd"`
-	Timestamp    time.Time `json:"timestamp"`
-	OpenInterest float64   `json:"open_interest,omitempty"`
-	FundingRate  float64   `json:"funding_rate,omitempty"`
-	Change24h    float64   `json:"change_24h,omitempty"`
-	High24h      float64   `json:"high_24h,omitempty"`
-	Low24h       float64   `json:"low_24h,omitempty"`
-}
-
-// Геттеры для обратной совместимости
-func (p PriceData) GetVolume() float64 {
-	return p.Volume24h
-}
-
-func (p PriceData) GetVolumeUSD() float64 {
-	return p.VolumeUSD
-}
-
-// Метод для получения нормализованного объема (использует VolumeUSD если доступен)
-func (p PriceData) GetNormalizedVolume() float64 {
-	if p.VolumeUSD > 0 {
-		return p.VolumeUSD
-	}
-	return p.Volume24h // fallback на старый формат
-}
-
 // TrendSignal сигнал тренда
 type TrendSignal struct {
 	Symbol        string    `json:"symbol"`

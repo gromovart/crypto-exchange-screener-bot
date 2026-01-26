@@ -4,7 +4,7 @@ package oianalyzer
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -65,7 +65,7 @@ func (a *Adapter) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные (реализация оригинального интерфейса Analyzer)
-func (a *Adapter) Analyze(data []types.PriceData, config AnalyzerConfigCopy) ([]analysis.Signal, error) {
+func (a *Adapter) Analyze(data []redis_storage.PriceData, config AnalyzerConfigCopy) ([]analysis.Signal, error) {
 	// Обновляем конфигурацию
 	a.config = config
 

@@ -8,12 +8,12 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer/config"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer/manager"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // countValidOIData подсчитывает количество точек с валидными данными OI
-func (a *OpenInterestAnalyzer) countValidOIData(data []types.PriceData) int {
+func (a *OpenInterestAnalyzer) countValidOIData(data []redis_storage.PriceData) int {
 	validCount := 0
 	for _, point := range data {
 		if point.OpenInterest > 0 {
@@ -106,7 +106,7 @@ func (a *OpenInterestAnalyzer) convertConfig(cfg map[string]interface{}) config.
 }
 
 // analyzeGrowthWithPrice анализирует рост OI вместе с ростом цены
-func (a *OpenInterestAnalyzer) analyzeGrowthWithPrice(data []types.PriceData, oiConfig config.OIConfig, state *manager.OIState) *OISignal {
+func (a *OpenInterestAnalyzer) analyzeGrowthWithPrice(data []redis_storage.PriceData, oiConfig config.OIConfig, state *manager.OIState) *OISignal {
 	if len(data) < 2 {
 		return nil
 	}
@@ -186,7 +186,7 @@ func (a *OpenInterestAnalyzer) analyzeGrowthWithPrice(data []types.PriceData, oi
 }
 
 // analyzeGrowthWithFall анализирует рост OI при падении цены
-func (a *OpenInterestAnalyzer) analyzeGrowthWithFall(data []types.PriceData, oiConfig config.OIConfig, state *manager.OIState) *OISignal {
+func (a *OpenInterestAnalyzer) analyzeGrowthWithFall(data []redis_storage.PriceData, oiConfig config.OIConfig, state *manager.OIState) *OISignal {
 	if len(data) < 2 {
 		return nil
 	}

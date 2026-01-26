@@ -3,7 +3,7 @@ package calculator
 
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 )
 
@@ -31,7 +31,7 @@ func NewSequenceFinder(config common.AnalyzerConfig) *SequenceFinder {
 }
 
 // FindBestSequence находит лучшую непрерывную последовательность
-func (s *SequenceFinder) FindBestSequence(data []types.PriceData) SequenceInfo {
+func (s *SequenceFinder) FindBestSequence(data []redis_storage.PriceData) SequenceInfo {
 	if len(data) < 2 {
 		return SequenceInfo{}
 	}
@@ -132,7 +132,7 @@ func (s *SequenceFinder) FindBestSequence(data []types.PriceData) SequenceInfo {
 }
 
 // FindAllSequences находит все последовательности в данных
-func (s *SequenceFinder) FindAllSequences(data []types.PriceData, minPoints int) []SequenceInfo {
+func (s *SequenceFinder) FindAllSequences(data []redis_storage.PriceData, minPoints int) []SequenceInfo {
 	var sequences []SequenceInfo
 	if len(data) < minPoints {
 		return sequences

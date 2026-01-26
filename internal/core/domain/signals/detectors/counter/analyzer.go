@@ -6,6 +6,7 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -66,7 +67,7 @@ func NewCounterAnalyzer(
 }
 
 // Analyze основной метод анализа
-func (a *CounterAnalyzer) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *CounterAnalyzer) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 	a.stats.TotalCalls++
 	defer func() {

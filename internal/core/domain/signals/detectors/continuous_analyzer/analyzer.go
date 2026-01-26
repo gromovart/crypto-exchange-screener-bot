@@ -5,7 +5,7 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/continuous_analyzer/calculator"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"fmt"
 	"sync"
 	"time"
@@ -46,7 +46,7 @@ func (a *ContinuousAnalyzer) Supports(symbol string) bool {
 	return true
 }
 
-func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *ContinuousAnalyzer) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 
 	minPoints := a.getMinContinuousPoints()
@@ -85,7 +85,7 @@ func (a *ContinuousAnalyzer) Analyze(data []types.PriceData, config common.Analy
 }
 
 // createSequenceSignal создает сигнал на основе найденной последовательности
-func (a *ContinuousAnalyzer) createSequenceSignal(data []types.PriceData, sequence calculator.SequenceInfo) analysis.Signal {
+func (a *ContinuousAnalyzer) createSequenceSignal(data []redis_storage.PriceData, sequence calculator.SequenceInfo) analysis.Signal {
 	symbol := data[0].Symbol
 	startIdx := sequence.StartIdx
 	endIdx := sequence.StartIdx + sequence.Length - 1

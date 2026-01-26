@@ -2,7 +2,7 @@
 package growth_analyzer
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"fmt"
 	"math"
 	"sort"
@@ -10,7 +10,7 @@ import (
 )
 
 // ValidatePriceData - валидирует данные о цене
-func ValidatePriceData(data []types.PriceData) error {
+func ValidatePriceData(data []redis_storage.PriceData) error {
 	if len(data) == 0 {
 		return fmt.Errorf("empty price data")
 	}
@@ -28,8 +28,8 @@ func ValidatePriceData(data []types.PriceData) error {
 }
 
 // SortPriceDataByTime - сортирует данные по времени
-func SortPriceDataByTime(data []types.PriceData) []types.PriceData {
-	sortedData := make([]types.PriceData, len(data))
+func SortPriceDataByTime(data []redis_storage.PriceData) []redis_storage.PriceData {
+	sortedData := make([]redis_storage.PriceData, len(data))
 	copy(sortedData, data)
 
 	sort.Slice(sortedData, func(i, j int) bool {
@@ -40,7 +40,7 @@ func SortPriceDataByTime(data []types.PriceData) []types.PriceData {
 }
 
 // CalculateMovingAverage - рассчитывает скользящую среднюю
-func CalculateMovingAverage(data []types.PriceData, period int) []float64 {
+func CalculateMovingAverage(data []redis_storage.PriceData, period int) []float64 {
 	if len(data) < period || period <= 0 {
 		return make([]float64, len(data))
 	}
@@ -63,7 +63,7 @@ func CalculateMovingAverage(data []types.PriceData, period int) []float64 {
 }
 
 // CalculateRSI - рассчитывает индекс относительной силы
-func CalculateRSI(data []types.PriceData, period int) []float64 {
+func CalculateRSI(data []redis_storage.PriceData, period int) []float64 {
 	if len(data) < period+1 || period <= 0 {
 		return make([]float64, len(data))
 	}
@@ -104,7 +104,7 @@ func CalculateRSI(data []types.PriceData, period int) []float64 {
 }
 
 // CalculateStandardDeviation - рассчитывает стандартное отклонение
-func CalculateStandardDeviation(data []types.PriceData) float64 {
+func CalculateStandardDeviation(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -125,7 +125,7 @@ func CalculateStandardDeviation(data []types.PriceData) float64 {
 }
 
 // FilterOutliers - фильтрует выбросы в данных
-func FilterOutliers(data []types.PriceData, threshold float64) []types.PriceData {
+func FilterOutliers(data []redis_storage.PriceData, threshold float64) []redis_storage.PriceData {
 	if len(data) < 3 {
 		return data
 	}
@@ -133,7 +133,7 @@ func FilterOutliers(data []types.PriceData, threshold float64) []types.PriceData
 	stdDev := CalculateStandardDeviation(data)
 	mean := calculateMean(data)
 
-	filtered := make([]types.PriceData, 0, len(data))
+	filtered := make([]redis_storage.PriceData, 0, len(data))
 	for _, point := range data {
 		if math.Abs(point.Price-mean) <= threshold*stdDev {
 			filtered = append(filtered, point)
@@ -152,20 +152,20 @@ func CalculatePriceChange(startPrice, endPrice float64) float64 {
 }
 
 // GroupDataByTimeInterval - группирует данные по временным интервалам
-func GroupDataByTimeInterval(data []types.PriceData, interval time.Duration) [][]types.PriceData {
+func GroupDataByTimeInterval(data []redis_storage.PriceData, interval time.Duration) [][]redis_storage.PriceData {
 	if len(data) == 0 {
-		return [][]types.PriceData{}
+		return [][]redis_storage.PriceData{}
 	}
 
 	sortedData := SortPriceDataByTime(data)
-	var groups [][]types.PriceData
-	var currentGroup []types.PriceData
+	var groups [][]redis_storage.PriceData
+	var currentGroup []redis_storage.PriceData
 	var groupStartTime time.Time
 
 	for i, point := range sortedData {
 		if i == 0 {
 			groupStartTime = point.Timestamp
-			currentGroup = []types.PriceData{point}
+			currentGroup = []redis_storage.PriceData{point}
 			continue
 		}
 
@@ -174,7 +174,7 @@ func GroupDataByTimeInterval(data []types.PriceData, interval time.Duration) [][
 		} else {
 			groups = append(groups, currentGroup)
 			groupStartTime = point.Timestamp
-			currentGroup = []types.PriceData{point}
+			currentGroup = []redis_storage.PriceData{point}
 		}
 	}
 
@@ -187,7 +187,7 @@ func GroupDataByTimeInterval(data []types.PriceData, interval time.Duration) [][
 }
 
 // CalculateVolumeWeightedAveragePrice - рассчитывает среднюю цену, взвешенную по объему
-func CalculateVolumeWeightedAveragePrice(data []types.PriceData) float64 {
+func CalculateVolumeWeightedAveragePrice(data []redis_storage.PriceData) float64 {
 	if len(data) == 0 {
 		return 0.0
 	}
@@ -231,7 +231,7 @@ func calculateAverage(values []float64, period int) float64 {
 	return sum / float64(period)
 }
 
-func calculateMean(data []types.PriceData) float64 {
+func calculateMean(data []redis_storage.PriceData) float64 {
 	var sum float64
 	for _, point := range data {
 		sum += point.Price

@@ -3,7 +3,7 @@ package manager
 
 import (
 	calculator "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer/calculator"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"sync"
 	"time"
 )
@@ -42,18 +42,18 @@ type symbolGrowthData struct {
 
 // GrowthAnalysisResult - результат анализа роста
 type GrowthAnalysisResult struct {
-	Symbol        string            `json:"symbol"`
-	GrowthPercent float64           `json:"growth_percent"`
-	SignalType    string            `json:"signal_type"`
-	Confidence    float64           `json:"confidence"`
-	IsContinuous  bool              `json:"is_continuous"`
-	TrendStrength float64           `json:"trend_strength"`
-	Volatility    float64           `json:"volatility"`
-	DataPoints    int               `json:"data_points"`
-	StartPrice    float64           `json:"start_price"`
-	EndPrice      float64           `json:"end_price"`
-	Timestamp     time.Time         `json:"timestamp"`
-	RawData       []types.PriceData `json:"-"` // Используем types.PriceData
+	Symbol        string                    `json:"symbol"`
+	GrowthPercent float64                   `json:"growth_percent"`
+	SignalType    string                    `json:"signal_type"`
+	Confidence    float64                   `json:"confidence"`
+	IsContinuous  bool                      `json:"is_continuous"`
+	TrendStrength float64                   `json:"trend_strength"`
+	Volatility    float64                   `json:"volatility"`
+	DataPoints    int                       `json:"data_points"`
+	StartPrice    float64                   `json:"start_price"`
+	EndPrice      float64                   `json:"end_price"`
+	Timestamp     time.Time                 `json:"timestamp"`
+	RawData       []redis_storage.PriceData `json:"-"` // Используем redis_storage.PriceData
 }
 
 // AnalyzerConfigWrapper - обертка для конфигурации (чтобы избежать импорта detectors)

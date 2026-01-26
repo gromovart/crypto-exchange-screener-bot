@@ -2,11 +2,10 @@
 package manager
 
 import (
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 	"sync"
 	"time"
-
-	"crypto-exchange-screener-bot/internal/types"
 )
 
 // FallState - состояние анализа падений для символа
@@ -60,7 +59,7 @@ func (sm *StateManager) GetState(symbol string) *FallState {
 }
 
 // UpdateState обновляет состояние для символа на основе новых данных
-func (sm *StateManager) UpdateState(symbol string, data []types.PriceData, config FallConfigForState) *FallState {
+func (sm *StateManager) UpdateState(symbol string, data []redis_storage.PriceData, config FallConfigForState) *FallState {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 

@@ -6,6 +6,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -670,7 +671,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	oiUpdatedFromTicker := 0
 
 	// Собираем все цены в массив
-	var priceDataList []types.PriceData
+	var priceDataList []redis_storage.PriceData
 
 	// Отладка: лог первых 5 тикеров
 	if len(tickers.Result.List) > 0 {
@@ -803,7 +804,7 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 		}
 
 		// Добавляем в массив с полными данными
-		priceDataList = append(priceDataList, types.PriceData{
+		priceDataList = append(priceDataList, redis_storage.PriceData{
 			Symbol:       ticker.Symbol,
 			Price:        price,
 			Volume24h:    volumeBase,

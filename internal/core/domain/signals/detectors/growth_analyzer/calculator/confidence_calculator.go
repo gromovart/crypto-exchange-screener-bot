@@ -2,7 +2,7 @@
 package calculator
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 )
 
@@ -24,7 +24,7 @@ type CalculatorResult struct {
 	SignalType      string
 	TrendStrength   float64
 	Volatility      float64
-	RawData         []types.PriceData
+	RawData         []redis_storage.PriceData
 }
 
 // CalculateConfidence - специализированный калькулятор уверенности для роста
@@ -73,7 +73,7 @@ func calculateBaseConfidenceFromResult(result CalculatorResult, config Calculato
 }
 
 // calculateContinuityScore - рассчитывает score непрерывности
-func calculateContinuityScore(data []types.PriceData, threshold float64) float64 {
+func calculateContinuityScore(data []redis_storage.PriceData, threshold float64) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -99,7 +99,7 @@ func calculateContinuityScore(data []types.PriceData, threshold float64) float64
 }
 
 // calculateVolumeFactor - рассчитывает фактор объема
-func calculateVolumeFactor(data []types.PriceData, volumeWeight float64) float64 {
+func calculateVolumeFactor(data []redis_storage.PriceData, volumeWeight float64) float64 {
 	if len(data) == 0 || volumeWeight <= 0 {
 		return 0.0
 	}

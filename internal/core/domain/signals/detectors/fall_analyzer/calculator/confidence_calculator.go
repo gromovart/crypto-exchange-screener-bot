@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -257,7 +257,7 @@ func (cc *ConfidenceCalculator) CalculateCompositeConfidence(factors map[string]
 }
 
 // AdjustConfidenceForMarketConditions корректирует уверенность с учетом рыночных условий
-func (cc *ConfidenceCalculator) AdjustConfidenceForMarketConditions(baseConfidence float64, marketData []types.PriceData) float64 {
+func (cc *ConfidenceCalculator) AdjustConfidenceForMarketConditions(baseConfidence float64, marketData []redis_storage.PriceData) float64 {
 	if len(marketData) < 3 {
 		return baseConfidence
 	}

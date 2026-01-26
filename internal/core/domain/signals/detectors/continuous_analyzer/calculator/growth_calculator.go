@@ -4,7 +4,7 @@ package calculator
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 	"time"
 )
@@ -24,7 +24,7 @@ func NewGrowthCalculator(config common.AnalyzerConfig) *GrowthCalculator {
 }
 
 // Calculate вычисляет сигналы непрерывного роста
-func (c *GrowthCalculator) Calculate(data []types.PriceData, minPoints int) []analysis.Signal {
+func (c *GrowthCalculator) Calculate(data []redis_storage.PriceData, minPoints int) []analysis.Signal {
 	var signals []analysis.Signal
 	symbol := data[0].Symbol
 

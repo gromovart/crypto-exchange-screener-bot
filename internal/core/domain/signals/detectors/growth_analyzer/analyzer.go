@@ -6,7 +6,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer/calculator"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer/manager"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"fmt"
 	"time"
 )
@@ -57,7 +57,7 @@ func (a *GrowthAnalyzer) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные на рост
-func (a *GrowthAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (a *GrowthAnalyzer) Analyze(data []redis_storage.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
 	success := false
 	var growthPercent float64

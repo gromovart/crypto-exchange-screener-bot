@@ -11,7 +11,7 @@ import (
 	growthanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/growth_analyzer"
 	oianalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/open_interest_analyzer"
 	volumeanalyzer "crypto-exchange-screener-bot/internal/core/domain/signals/detectors/volume_analyzer"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
 // growthAnalyzerWrapper - враппер для нового модульного GrowthAnalyzer
@@ -55,7 +55,7 @@ func (w *growthAnalyzerWrapper) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные
-func (w *growthAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *growthAnalyzerWrapper) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
 		w.analyzer = growthanalyzer.NewGrowthAnalyzer(w.config)
 	}
@@ -130,7 +130,7 @@ func (w *fallAnalyzerWrapper) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные
-func (w *fallAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *fallAnalyzerWrapper) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
 		w.analyzer = fallanalyzer.NewFallAnalyzer()
 	}
@@ -215,7 +215,7 @@ func (w *volumeAnalyzerWrapper) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные
-func (w *volumeAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *volumeAnalyzerWrapper) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
 		w.analyzer = volumeanalyzer.NewVolumeAnalyzer(w.config)
 	}
@@ -297,7 +297,7 @@ func (w *openInterestAnalyzerWrapper) Supports(symbol string) bool {
 	return w.adapter.Supports(symbol)
 }
 
-func (w *openInterestAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *openInterestAnalyzerWrapper) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	// Конвертируем common.AnalyzerConfig в common.AnalyzerConfigCopy
 	adapterConfig := oianalyzer.AnalyzerConfigCopy{
 		Enabled:        config.Enabled,
@@ -654,7 +654,7 @@ func (w *continuousAnalyzerWrapper) Supports(symbol string) bool {
 }
 
 // Analyze анализирует данные
-func (w *continuousAnalyzerWrapper) Analyze(data []types.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
+func (w *continuousAnalyzerWrapper) Analyze(data []redis_storage.PriceData, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	if w.analyzer == nil {
 		w.analyzer = continuousanalyzer.NewContinuousAnalyzer(w.config)
 	}

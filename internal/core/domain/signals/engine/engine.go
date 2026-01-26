@@ -5,6 +5,7 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -195,7 +196,7 @@ func (e *AnalysisEngine) Stop() {
 		}
 	}
 
-		// Ждем завершения горутин анализа
+	// Ждем завершения горутин анализа
 	e.wg.Wait()
 
 	// Сохраняем статистику при остановке
@@ -657,11 +658,11 @@ func (e *AnalysisEngine) setupDefaultFilters() {
 }
 
 // convertToPriceData конвертирует данные хранилища в формат анализа
-func convertToPriceData(storageData []storage.PriceDataInterface) []types.PriceData {
-	result := make([]types.PriceData, len(storageData))
+func convertToPriceData(storageData []storage.PriceDataInterface) []redis_storage.PriceData {
+	result := make([]redis_storage.PriceData, len(storageData))
 
 	for i, data := range storageData {
-		result[i] = types.PriceData{
+		result[i] = redis_storage.PriceData{
 			Symbol:       data.GetSymbol(),
 			Price:        data.GetPrice(),
 			Volume24h:    data.GetVolume24h(),

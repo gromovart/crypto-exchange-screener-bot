@@ -4,7 +4,7 @@ package calculator
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -23,7 +23,7 @@ func NewVolumeSpikeCalculator(config common.AnalyzerConfig) *VolumeSpikeCalculat
 }
 
 // Calculate вычисляет сигнал всплеска объема
-func (c *VolumeSpikeCalculator) Calculate(data []types.PriceData) *analysis.Signal {
+func (c *VolumeSpikeCalculator) Calculate(data []redis_storage.PriceData) *analysis.Signal {
 	if len(data) < 2 {
 		return nil
 	}

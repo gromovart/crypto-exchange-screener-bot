@@ -4,7 +4,7 @@ package manager
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/volume_analyzer"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"sync"
 	"time"
 )
@@ -130,7 +130,7 @@ func (sm *StateManager) GetSignalFrequency(signalType string, period time.Durati
 }
 
 // ShouldProcessSymbol проверяет, нужно ли обрабатывать символ
-func (sm *StateManager) ShouldProcessSymbol(symbol string, data []types.PriceData) bool {
+func (sm *StateManager) ShouldProcessSymbol(symbol string, data []redis_storage.PriceData) bool {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 

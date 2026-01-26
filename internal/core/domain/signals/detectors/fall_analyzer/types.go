@@ -5,7 +5,7 @@ import (
 	"time"
 
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 
 	"github.com/google/uuid"
 )
@@ -91,7 +91,7 @@ type FallDataPoint struct {
 // FallAnalysisParams - параметры анализа падений
 type FallAnalysisParams struct {
 	Symbol          string
-	Data            []types.PriceData
+	Data            []redis_storage.PriceData
 	Config          FallConfig
 	CurrentState    *FallState
 	GenerateSignal  bool // генерировать ли сигнал

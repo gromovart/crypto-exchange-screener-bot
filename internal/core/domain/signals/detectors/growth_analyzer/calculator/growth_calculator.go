@@ -2,7 +2,7 @@
 package calculator
 
 import (
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 	"sort"
 	"time"
@@ -10,9 +10,9 @@ import (
 
 // GrowthCalculatorInput - входные данные для калькулятора роста
 type GrowthCalculatorInput struct {
-	PriceData   []types.PriceData `json:"price_data"`
-	Config      CalculatorConfig  `json:"config"`
-	CurrentTime time.Time         `json:"current_time"`
+	PriceData   []redis_storage.PriceData `json:"price_data"`
+	Config      CalculatorConfig          `json:"config"`
+	CurrentTime time.Time                 `json:"current_time"`
 }
 
 // GrowthCalculatorOutput - выходные данные калькулятора роста
@@ -35,7 +35,7 @@ func CalculateGrowth(input GrowthCalculatorInput) (GrowthCalculatorOutput, error
 	}
 
 	// Сортируем данные по времени
-	sortedData := make([]types.PriceData, len(input.PriceData))
+	sortedData := make([]redis_storage.PriceData, len(input.PriceData))
 	copy(sortedData, input.PriceData)
 	sort.Slice(sortedData, func(i, j int) bool {
 		return sortedData[i].Timestamp.Before(sortedData[j].Timestamp)
@@ -78,7 +78,7 @@ func CalculateGrowth(input GrowthCalculatorInput) (GrowthCalculatorOutput, error
 }
 
 // calculateGrowthPercent - рассчитывает процент роста
-func calculateGrowthPercent(data []types.PriceData) float64 {
+func calculateGrowthPercent(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -88,7 +88,7 @@ func calculateGrowthPercent(data []types.PriceData) float64 {
 }
 
 // calculateContinuity - рассчитывает непрерывность роста
-func calculateContinuity(data []types.PriceData, threshold float64) (float64, bool) {
+func calculateContinuity(data []redis_storage.PriceData, threshold float64) (float64, bool) {
 	if len(data) < 2 {
 		return 0.0, false
 	}
@@ -107,7 +107,7 @@ func calculateContinuity(data []types.PriceData, threshold float64) (float64, bo
 }
 
 // calculateAcceleration - рассчитывает ускорение роста
-func calculateAcceleration(data []types.PriceData) float64 {
+func calculateAcceleration(data []redis_storage.PriceData) float64 {
 	if len(data) < 3 {
 		return 0.0
 	}
@@ -127,7 +127,7 @@ func calculateAcceleration(data []types.PriceData) float64 {
 }
 
 // calculateSegmentGrowth - рассчитывает рост для сегмента данных
-func calculateSegmentGrowth(data []types.PriceData, start, end int) float64 {
+func calculateSegmentGrowth(data []redis_storage.PriceData, start, end int) float64 {
 	if end <= start || start < 0 || end >= len(data) {
 		return 0.0
 	}
@@ -138,7 +138,7 @@ func calculateSegmentGrowth(data []types.PriceData, start, end int) float64 {
 }
 
 // calculateTrendStrength - рассчитывает силу тренда
-func calculateTrendStrength(data []types.PriceData) float64 {
+func calculateTrendStrength(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -153,7 +153,7 @@ func calculateTrendStrength(data []types.PriceData) float64 {
 }
 
 // calculateVolatility - рассчитывает волатильность
-func calculateVolatility(data []types.PriceData) float64 {
+func calculateVolatility(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}

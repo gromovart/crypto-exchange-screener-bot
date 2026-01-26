@@ -4,7 +4,7 @@ package calculator
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -23,7 +23,7 @@ func NewAverageVolumeCalculator(config common.AnalyzerConfig) *AverageVolumeCalc
 }
 
 // Calculate вычисляет сигнал на основе среднего объема
-func (c *AverageVolumeCalculator) Calculate(data []types.PriceData) *analysis.Signal {
+func (c *AverageVolumeCalculator) Calculate(data []redis_storage.PriceData) *analysis.Signal {
 	if len(data) == 0 {
 		return nil
 	}

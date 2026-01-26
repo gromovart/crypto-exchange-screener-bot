@@ -4,7 +4,7 @@ package growth_analyzer
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -39,18 +39,18 @@ type GrowthStats struct {
 
 // GrowthAnalysisResult - результат анализа роста
 type GrowthAnalysisResult struct {
-	Symbol        string            `json:"symbol"`
-	GrowthPercent float64           `json:"growth_percent"`
-	SignalType    GrowthSignalType  `json:"signal_type"`
-	Confidence    float64           `json:"confidence"`
-	IsContinuous  bool              `json:"is_continuous"`
-	TrendStrength float64           `json:"trend_strength"`
-	Volatility    float64           `json:"volatility"`
-	DataPoints    int               `json:"data_points"`
-	StartPrice    float64           `json:"start_price"`
-	EndPrice      float64           `json:"end_price"`
-	Timestamp     time.Time         `json:"timestamp"`
-	RawData       []types.PriceData `json:"-"`
+	Symbol        string                    `json:"symbol"`
+	GrowthPercent float64                   `json:"growth_percent"`
+	SignalType    GrowthSignalType          `json:"signal_type"`
+	Confidence    float64                   `json:"confidence"`
+	IsContinuous  bool                      `json:"is_continuous"`
+	TrendStrength float64                   `json:"trend_strength"`
+	Volatility    float64                   `json:"volatility"`
+	DataPoints    int                       `json:"data_points"`
+	StartPrice    float64                   `json:"start_price"`
+	EndPrice      float64                   `json:"end_price"`
+	Timestamp     time.Time                 `json:"timestamp"`
+	RawData       []redis_storage.PriceData `json:"-"`
 }
 
 // ToSignal - преобразует результат в общий сигнал
@@ -102,9 +102,9 @@ func mapGrowthSignalTypeToValue(signalType GrowthSignalType) float64 {
 
 // GrowthCalculatorInput - входные данные для калькулятора роста
 type GrowthCalculatorInput struct {
-	PriceData   []types.PriceData `json:"price_data"`
-	Config      GrowthConfig      `json:"config"`
-	CurrentTime time.Time         `json:"current_time"`
+	PriceData   []redis_storage.PriceData `json:"price_data"`
+	Config      GrowthConfig              `json:"config"`
+	CurrentTime time.Time                 `json:"current_time"`
 }
 
 // GrowthCalculatorOutput - выходные данные калькулятора роста

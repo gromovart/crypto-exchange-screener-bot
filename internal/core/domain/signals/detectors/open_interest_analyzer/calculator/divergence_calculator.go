@@ -4,7 +4,7 @@ package calculator
 import (
 	"math"
 
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -47,7 +47,7 @@ type DivergenceMetadata struct {
 }
 
 // AnalyzeDivergence анализирует дивергенции между OI и ценой
-func (dc *DivergenceCalculator) AnalyzeDivergence(data []types.PriceData, config OIConfigForDivergence) *OISignalForDivergence {
+func (dc *DivergenceCalculator) AnalyzeDivergence(data []redis_storage.PriceData, config OIConfigForDivergence) *OISignalForDivergence {
 	minPoints := config.DivergenceMinPoints
 	if minPoints < 4 {
 		minPoints = 4
@@ -239,7 +239,7 @@ func (dc *DivergenceCalculator) getDirection(changes []float64) string {
 }
 
 // calculatePriceChange рассчитывает общее изменение цены
-func (dc *DivergenceCalculator) calculatePriceChange(data []types.PriceData) float64 {
+func (dc *DivergenceCalculator) calculatePriceChange(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}

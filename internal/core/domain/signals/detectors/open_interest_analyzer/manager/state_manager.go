@@ -2,10 +2,9 @@
 package manager
 
 import (
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"sync"
 	"time"
-
-	"crypto-exchange-screener-bot/internal/types"
 )
 
 // OIState - состояние OI для символа
@@ -62,7 +61,7 @@ func (sm *StateManager) GetState(symbol string) *OIState {
 }
 
 // UpdateState обновляет состояние для символа на основе новых данных
-func (sm *StateManager) UpdateState(symbol string, data []types.PriceData, config OIConfigForState) *OIState {
+func (sm *StateManager) UpdateState(symbol string, data []redis_storage.PriceData, config OIConfigForState) *OIState {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 

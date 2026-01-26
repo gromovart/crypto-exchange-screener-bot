@@ -4,13 +4,13 @@ package volume_analyzer
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
 // VolumeCalculator интерфейс для всех калькуляторов объема
 type VolumeCalculator interface {
 	// Calculate вычисляет сигналы на основе данных
-	Calculate(data []types.PriceData) *analysis.Signal
+	Calculate(data []redis_storage.PriceData) *analysis.Signal
 
 	// UpdateConfig обновляет конфигурацию калькулятора
 	UpdateConfig(config common.AnalyzerConfig)

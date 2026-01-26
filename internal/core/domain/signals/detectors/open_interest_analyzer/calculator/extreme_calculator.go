@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -44,7 +44,7 @@ type ExtremeResult struct {
 }
 
 // AnalyzeExtremeOI анализирует экстремальные значения OI
-func (ec *ExtremeCalculator) AnalyzeExtremeOI(data []types.PriceData, config OIConfigForExtreme) *ExtremeResult {
+func (ec *ExtremeCalculator) AnalyzeExtremeOI(data []redis_storage.PriceData, config OIConfigForExtreme) *ExtremeResult {
 	if len(data) < 3 {
 		logger.Debug("📭 ExtremeCalculator: недостаточно точек для экстремального анализа (%d < 3)", len(data))
 		return nil
@@ -140,7 +140,7 @@ func (ec *ExtremeCalculator) AnalyzeExtremeOI(data []types.PriceData, config OIC
 }
 
 // calculatePriceChange рассчитывает изменение цены за период
-func (ec *ExtremeCalculator) calculatePriceChange(data []types.PriceData) float64 {
+func (ec *ExtremeCalculator) calculatePriceChange(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}

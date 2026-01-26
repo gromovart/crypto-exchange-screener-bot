@@ -4,7 +4,7 @@ package volume_analyzer
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"fmt"
 	"math"
 	"strings"
@@ -12,7 +12,7 @@ import (
 )
 
 // CalculateVolumeMetrics вычисляет метрики объема для данных
-func CalculateVolumeMetrics(data []types.PriceData) *VolumeMetrics {
+func CalculateVolumeMetrics(data []redis_storage.PriceData) *VolumeMetrics {
 	if len(data) == 0 {
 		return nil
 	}
@@ -62,7 +62,7 @@ func CalculateVolumeMetrics(data []types.PriceData) *VolumeMetrics {
 }
 
 // calculateCorrelation вычисляет корреляцию между ценой и объемом
-func calculateCorrelation(data []types.PriceData) float64 {
+func calculateCorrelation(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0
 	}
@@ -102,7 +102,7 @@ func CreateVolumeSignal(
 	direction string,
 	changePercent float64,
 	confidence float64,
-	data []types.PriceData,
+	data []redis_storage.PriceData,
 	metadata map[string]float64,
 	tags []string,
 ) *analysis.Signal {
@@ -140,7 +140,7 @@ func CreateVolumeSignal(
 }
 
 // ValidateVolumeData проверяет валидность данных для анализа объема
-func ValidateVolumeData(data []types.PriceData, minDataPoints int) error {
+func ValidateVolumeData(data []redis_storage.PriceData, minDataPoints int) error {
 	if len(data) < minDataPoints {
 		return fmt.Errorf("insufficient data points: got %d, need %d", len(data), minDataPoints)
 	}
@@ -236,7 +236,7 @@ func IsHighVolume(currentVolume, averageVolume, multiplier float64) bool {
 }
 
 // GetVolumeTrend определяет тренд объема
-func GetVolumeTrend(data []types.PriceData) string {
+func GetVolumeTrend(data []redis_storage.PriceData) string {
 	if len(data) < 2 {
 		return "stable"
 	}

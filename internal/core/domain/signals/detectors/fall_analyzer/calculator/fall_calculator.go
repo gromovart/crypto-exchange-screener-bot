@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -42,7 +42,7 @@ type FallResult struct {
 }
 
 // AnalyzeFalls анализирует падения в данных
-func (fc *FallCalculator) AnalyzeFalls(data []types.PriceData, config FallConfigForCalculator) []*FallResult {
+func (fc *FallCalculator) AnalyzeFalls(data []redis_storage.PriceData, config FallConfigForCalculator) []*FallResult {
 	if len(data) < 2 {
 		logger.Debug("📭 FallCalculator: недостаточно точек для анализа падений (%d < 2)", len(data))
 		return nil
@@ -73,7 +73,7 @@ func (fc *FallCalculator) AnalyzeFalls(data []types.PriceData, config FallConfig
 }
 
 // analyzeSingleFalls анализирует последовательные падения
-func (fc *FallCalculator) analyzeSingleFalls(data []types.PriceData, config FallConfigForCalculator) []*FallResult {
+func (fc *FallCalculator) analyzeSingleFalls(data []redis_storage.PriceData, config FallConfigForCalculator) []*FallResult {
 	var results []*FallResult
 
 	for i := 1; i < len(data); i++ {
@@ -116,7 +116,7 @@ func (fc *FallCalculator) analyzeSingleFalls(data []types.PriceData, config Fall
 }
 
 // analyzeIntervalFalls анализирует интервальные падения
-func (fc *FallCalculator) analyzeIntervalFalls(data []types.PriceData, config FallConfigForCalculator) []*FallResult {
+func (fc *FallCalculator) analyzeIntervalFalls(data []redis_storage.PriceData, config FallConfigForCalculator) []*FallResult {
 	var results []*FallResult
 
 	// Находим максимальные падения между любыми точками
@@ -183,7 +183,7 @@ func (fc *FallCalculator) analyzeIntervalFalls(data []types.PriceData, config Fa
 }
 
 // analyzeContinuousFalls анализирует непрерывные падения
-func (fc *FallCalculator) analyzeContinuousFalls(data []types.PriceData, config FallConfigForCalculator) []*FallResult {
+func (fc *FallCalculator) analyzeContinuousFalls(data []redis_storage.PriceData, config FallConfigForCalculator) []*FallResult {
 	var results []*FallResult
 
 	// Ищем последовательности непрерывных падений
@@ -241,7 +241,7 @@ func (fc *FallCalculator) analyzeContinuousFalls(data []types.PriceData, config 
 }
 
 // calculateSingleFallConfidence рассчитывает уверенность для одиночного падения
-func (fc *FallCalculator) calculateSingleFallConfidence(data []types.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
+func (fc *FallCalculator) calculateSingleFallConfidence(data []redis_storage.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -268,7 +268,7 @@ func (fc *FallCalculator) calculateSingleFallConfidence(data []types.PriceData, 
 }
 
 // calculateIntervalConfidence рассчитывает уверенность для интервального падения
-func (fc *FallCalculator) calculateIntervalConfidence(data []types.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
+func (fc *FallCalculator) calculateIntervalConfidence(data []redis_storage.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -293,7 +293,7 @@ func (fc *FallCalculator) calculateIntervalConfidence(data []types.PriceData, fa
 }
 
 // calculateContinuousFallConfidence рассчитывает уверенность для непрерывного падения
-func (fc *FallCalculator) calculateContinuousFallConfidence(data []types.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
+func (fc *FallCalculator) calculateContinuousFallConfidence(data []redis_storage.PriceData, fallPercent float64, config FallConfigForCalculator) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -316,7 +316,7 @@ func (fc *FallCalculator) calculateContinuousFallConfidence(data []types.PriceDa
 }
 
 // calculateVolumeFactor рассчитывает фактор объема
-func (fc *FallCalculator) calculateVolumeFactor(data []types.PriceData, volumeWeight float64) float64 {
+func (fc *FallCalculator) calculateVolumeFactor(data []redis_storage.PriceData, volumeWeight float64) float64 {
 	if len(data) == 0 || volumeWeight <= 0 {
 		return 0.0
 	}
@@ -347,7 +347,7 @@ func (fc *FallCalculator) calculateTimeFactor(startTime, endTime time.Time) floa
 }
 
 // calculateTrendStrength рассчитывает силу тренда
-func (fc *FallCalculator) calculateTrendStrength(data []types.PriceData) float64 {
+func (fc *FallCalculator) calculateTrendStrength(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -370,7 +370,7 @@ func (fc *FallCalculator) calculateTrendStrength(data []types.PriceData) float64
 }
 
 // calculateVolatility рассчитывает волатильность
-func (fc *FallCalculator) calculateVolatility(data []types.PriceData) float64 {
+func (fc *FallCalculator) calculateVolatility(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -392,7 +392,7 @@ func (fc *FallCalculator) calculateVolatility(data []types.PriceData) float64 {
 }
 
 // calculateAverageVolume рассчитывает средний объем
-func (fc *FallCalculator) calculateAverageVolume(data []types.PriceData) float64 {
+func (fc *FallCalculator) calculateAverageVolume(data []redis_storage.PriceData) float64 {
 	if len(data) == 0 {
 		return 0.0
 	}
@@ -405,7 +405,7 @@ func (fc *FallCalculator) calculateAverageVolume(data []types.PriceData) float64
 }
 
 // checkContinuity проверяет непрерывность падения
-func (fc *FallCalculator) checkContinuity(data []types.PriceData, threshold float64) bool {
+func (fc *FallCalculator) checkContinuity(data []redis_storage.PriceData, threshold float64) bool {
 	if len(data) < 2 {
 		return false
 	}
@@ -428,7 +428,7 @@ func (fc *FallCalculator) checkContinuity(data []types.PriceData, threshold floa
 }
 
 // calculateContinuityRatio рассчитывает коэффициент непрерывности
-func (fc *FallCalculator) calculateContinuityRatio(data []types.PriceData) float64 {
+func (fc *FallCalculator) calculateContinuityRatio(data []redis_storage.PriceData) float64 {
 	if len(data) < 2 {
 		return 0.0
 	}
@@ -450,7 +450,7 @@ func (fc *FallCalculator) calculateContinuityRatio(data []types.PriceData) float
 }
 
 // countContinuousPoints подсчитывает количество непрерывных падений
-func (fc *FallCalculator) countContinuousPoints(data []types.PriceData) int {
+func (fc *FallCalculator) countContinuousPoints(data []redis_storage.PriceData) int {
 	if len(data) < 2 {
 		return 0
 	}

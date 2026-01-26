@@ -3,6 +3,7 @@ package fetchers
 
 import (
 	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -100,7 +101,7 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 	updatedCount := 0
 
 	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
-	var priceDataList []types.PriceData
+	var priceDataList []redis_storage.PriceData
 
 	for _, ticker := range tickers.Result.List {
 		// Парсим цену
@@ -139,7 +140,7 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 		}
 
 		// Добавляем в массив для batch события
-		priceDataList = append(priceDataList, types.PriceData{
+		priceDataList = append(priceDataList, redis_storage.PriceData{
 			Symbol:       ticker.Symbol,
 			Price:        price,
 			Volume24h:    volumeBase,
