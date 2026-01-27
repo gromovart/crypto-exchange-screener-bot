@@ -5,7 +5,6 @@ import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -292,7 +291,7 @@ func (e *AnalysisEngine) AnalyzeSymbol(symbol string, periods []time.Duration) (
 // AnalyzeAll анализирует все символы
 func (e *AnalysisEngine) AnalyzeAll() (map[string]*analysis.AnalysisResult, error) {
 	startTime := time.Now()
-
+	logger.Info("✅ AnalysisEngine: цикл периодического анализа с интервалом %v", e.config.UpdateInterval)
 	// Получаем символы для анализа
 	symbols := e.getSymbolsToAnalyze()
 
@@ -415,6 +414,8 @@ func (e *AnalysisEngine) analyzeSequential(symbols []string) map[string]*analysi
 func (e *AnalysisEngine) getSymbolsToAnalyze() []string {
 	allSymbols := e.storage.GetSymbols()
 
+	logger.Debug("🔍 AnalysisEngine: всего символов в хранилище: %d", len(allSymbols))
+
 	// Фильтруем по объему
 	var filtered []string
 	for _, symbol := range allSymbols {
@@ -432,6 +433,7 @@ func (e *AnalysisEngine) getSymbolsToAnalyze() []string {
 
 	// Сортируем по алфавиту для детерминированности
 	sort.Strings(filtered)
+	logger.Debug("✅ AnalysisEngine: символов после фильтрации: %d", len(filtered))
 
 	return filtered
 }
@@ -512,6 +514,7 @@ func (e *AnalysisEngine) publishSignals(signals []analysis.Signal) {
 
 // publishAnalysisComplete публикует событие завершения анализа
 func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.AnalysisResult, duration time.Duration) {
+	// Считаем общее количество сигналов
 	totalSignals := 0
 	for _, result := range results {
 		totalSignals += len(result.Signals)
@@ -522,11 +525,15 @@ func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.An
 		Source: "analysis_engine",
 		Data: map[string]interface{}{
 			"symbols_analyzed": len(results),
-			"total_signals":    totalSignals,
+			"total_signals":    totalSignals, // ✅ Теперь переменная определена
 			"duration":         duration.String(),
 			"timestamp":        time.Now(),
 		},
 	})
+
+	// Дополнительное логирование для мониторинга
+	logger.Info("✅ AnalysisEngine: анализ завершен за %v, найдено %d сигналов в %d символах",
+		duration, totalSignals, len(results))
 }
 
 // analysisLoop цикл периодического анализа
@@ -555,31 +562,26 @@ func (e *AnalysisEngine) subscribeToEvents() {
 		"analysis_engine",
 		[]types.EventType{
 			types.EventPriceUpdated,
-			"analysis_request",
 		},
 		e.handleEvent,
 	)
 
 	e.eventBus.Subscribe(types.EventPriceUpdated, subscriber)
-	e.eventBus.Subscribe("analysis_request", subscriber)
 }
 
 // handleEvent обрабатывает события EventBus
 func (e *AnalysisEngine) handleEvent(event types.Event) error {
 	switch event.Type {
 	case types.EventPriceUpdated:
-		// Можно добавить реактивный анализ при обновлении цен
-		// Например, анализировать только обновленный символ
-		if data, ok := event.Data.(map[string]interface{}); ok {
-			if symbol, ok := data["symbol"].(string); ok {
-				e.AnalyzeSymbol(symbol, e.config.AnalysisPeriods)
-			}
-		}
-
-	case "analysis_request":
-		// Обработка запроса на анализ
-		if request, ok := event.Data.(analysis.AnalysisRequest); ok {
-			e.AnalyzeSymbol(request.Symbol, []time.Duration{request.Period})
+		// AnalysisEngine не анализирует на каждое обновление цены
+		// Анализ выполняется периодически через analysisLoop() каждые UpdateInterval
+		// Это предотвращает чрезмерную нагрузку при обновлении 650+ символов
+		// Логируем только для отладки
+		if priceDataList, ok := event.Data.([]storage.PriceData); ok {
+			logger.Debug("📈 AnalysisEngine: получено %d обновлений цен, периодический анализ через %v",
+				len(priceDataList), e.config.UpdateInterval)
+		} else {
+			logger.Debug("📈 AnalysisEngine: получено событие обновления цен")
 		}
 	}
 
@@ -614,24 +616,6 @@ func (e *AnalysisEngine) saveStats() {
 	logger.Info("💾 Сохранение статистики AnalysisEngine")
 }
 
-// registerDefaultAnalyzers регистрирует стандартные анализаторы
-func (e *AnalysisEngine) registerDefaultAnalyzers() {
-	e.mu.Lock()
-	e.analyzers = make(map[string]common.Analyzer)
-	e.stats.AnalyzerStats = make(map[string]common.AnalyzerStats)
-	e.stats.ActiveAnalyzers = 0
-	e.mu.Unlock()
-
-	// ВСЕ АНАЛИЗАТОРЫ ОТКЛЮЧЕНЫ
-
-	// CounterAnalyzer будет создан через фабрику с реальным marketFetcher
-	// Не создаем здесь CounterAnalyzer, чтобы избежать ошибок "MARKET FETCHER IS NIL"
-	// Фабрика создает CounterAnalyzer в методе configureCounterAnalyzer()
-
-	log.Printf("ℹ️ Все анализаторы отключены в registerDefaultAnalyzers()")
-	log.Printf("ℹ️ CounterAnalyzer будет создан через фабрику с реальным marketFetcher")
-}
-
 // setupDefaultFilters настраивает стандартные фильтры
 func (e *AnalysisEngine) setupDefaultFilters() {
 	// Очищаем цепочку фильтров
@@ -658,11 +642,11 @@ func (e *AnalysisEngine) setupDefaultFilters() {
 }
 
 // convertToPriceData конвертирует данные хранилища в формат анализа
-func convertToPriceData(storageData []storage.PriceDataInterface) []redis_storage.PriceData {
-	result := make([]redis_storage.PriceData, len(storageData))
+func convertToPriceData(storageData []storage.PriceDataInterface) []storage.PriceData {
+	result := make([]storage.PriceData, len(storageData))
 
 	for i, data := range storageData {
-		result[i] = redis_storage.PriceData{
+		result[i] = storage.PriceData{
 			Symbol:       data.GetSymbol(),
 			Price:        data.GetPrice(),
 			Volume24h:    data.GetVolume24h(),
@@ -676,8 +660,9 @@ func convertToPriceData(storageData []storage.PriceDataInterface) []redis_storag
 		}
 		// Логируем для отладки
 		if data.GetOpenInterest() > 0 {
-			logger.Debug("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
-				data.GetSymbol(), data.GetOpenInterest(), data.GetFundingRate()*100, data.GetChange24h())
+			//Раскомментировать для отладки
+			// logger.Debug("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
+			// 	data.GetSymbol(), data.GetOpenInterest(), data.GetFundingRate()*100, data.GetChange24h())
 		}
 	}
 

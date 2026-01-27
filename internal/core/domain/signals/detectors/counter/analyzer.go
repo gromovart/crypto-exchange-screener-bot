@@ -93,17 +93,19 @@ func (a *CounterAnalyzer) Analyze(data []redis_storage.PriceData, config common.
 
 	// Локальный счетчик для этого вызова
 	localSentCount := 0
+	//Расскомментировать для отладки
+	// logger.Debug("🔍 CounterAnalyzer.Analyze - анализ свечей")
 
-	logger.Debug("🔍 CounterAnalyzer.Analyze - анализ свечей")
-
-	for i, point := range data {
-		logger.Debug("📊 Анализ точки #%d: Символ: %s", i+1, point.Symbol)
+	for _, point := range data {
+		//Расскомментировать для отладки
+		// logger.Debug("📊 Анализ точки #%d: Символ: %s", i+1, point.Symbol)
 
 		// Анализируем каждый период
 		for _, period := range supportedPeriods {
 			signal, err := a.AnalyzeCandle(point.Symbol, period)
 			if err != nil {
-				logger.Warn("⚠️ Ошибка анализа свечи %s/%s: %v", point.Symbol, period, err)
+				// Расскомментировать для отладки
+				// logger.Warn("⚠️ Ошибка анализа свечи %s/%s: %v", point.Symbol, period, err)
 				continue
 			}
 

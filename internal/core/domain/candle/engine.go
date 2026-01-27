@@ -2,19 +2,23 @@
 package candle
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // CandleEngine - движок построения свечей
 type CandleEngine struct {
-	storage storage.CandleStorageInterface // Изменено на интерфейс
-	config  redis_storage.CandleConfig
+	storage  storage.CandleStorageInterface
+	config   redis_storage.CandleConfig
+	eventBus *events.EventBus
 
 	// Каналы для обработки
 	priceUpdates chan storage.PriceData
@@ -25,27 +29,46 @@ type CandleEngine struct {
 	buildErrors   int
 	buildSuccess  int
 	totalBuilds   int
-	closedCandles int           // Добавлено: счетчик закрытых свечей
-	lastStatsLog  time.Time     // Добавлено: время последнего логирования статистики
-	statsInterval time.Duration // Добавлено: интервал логирования статистики
+	closedCandles int
+	lastStatsLog  time.Time
+	statsInterval time.Duration
 	statsMu       sync.RWMutex
+
+	// Подписчик на события
+	priceSubscriber types.EventSubscriber
 }
 
 // NewCandleEngine создает новый движок свечей
-func NewCandleEngine(candleStorage storage.CandleStorageInterface, config redis_storage.CandleConfig) *CandleEngine {
-	return &CandleEngine{
+func NewCandleEngine(
+	candleStorage storage.CandleStorageInterface,
+	config redis_storage.CandleConfig,
+	eventBus *events.EventBus, // НОВЫЙ параметр
+) *CandleEngine {
+	engine := &CandleEngine{
 		storage:       candleStorage,
 		config:        config,
-		priceUpdates:  make(chan storage.PriceData, 10000),
+		eventBus:      eventBus, // НОВОЕ
+		priceUpdates:  make(chan storage.PriceData, 50000),
 		stopCh:        make(chan struct{}),
 		lastStatsLog:  time.Now(),
-		statsInterval: 60 * time.Second, // Логировать статистику раз в 60 секунд
+		statsInterval: 60 * time.Second,
 	}
+
+	// Создаем подписчика на события цен
+	engine.createPriceSubscriber()
+
+	return engine
 }
 
 // Start запускает движок
 func (ce *CandleEngine) Start() error {
 	logger.Info("🚀 Запуск CandleEngine...")
+
+	// Подписываемся на события цен
+	if ce.eventBus != nil && ce.priceSubscriber != nil {
+		ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
+		logger.Info("✅ CandleEngine подписался на EventPriceUpdated")
+	}
 
 	// Запускаем обработчики
 	ce.wg.Add(1)
@@ -65,6 +88,12 @@ func (ce *CandleEngine) Start() error {
 func (ce *CandleEngine) Stop() error {
 	logger.Info("🛑 Остановка CandleEngine...")
 
+	// Отписываемся от событий
+	if ce.eventBus != nil && ce.priceSubscriber != nil {
+		ce.eventBus.Unsubscribe(types.EventPriceUpdated, ce.priceSubscriber)
+		logger.Info("✅ CandleEngine отписался от EventPriceUpdated")
+	}
+
 	close(ce.stopCh)
 	ce.wg.Wait()
 
@@ -72,19 +101,38 @@ func (ce *CandleEngine) Stop() error {
 	return nil
 }
 
-// OnPriceUpdate вызывается при новой цене
-func (ce *CandleEngine) OnPriceUpdate(priceData storage.PriceData) {
-	select {
-	case ce.priceUpdates <- priceData:
-		// Успешно добавлено в очередь
-	default:
-		ce.statsMu.Lock()
-		ce.buildErrors++
-		ce.statsMu.Unlock()
+// createPriceSubscriber создает подписчика на события цен
+func (ce *CandleEngine) createPriceSubscriber() {
+	ce.priceSubscriber = events.NewBaseSubscriber(
+		"candle_engine",
+		[]types.EventType{types.EventPriceUpdated},
+		ce.handlePriceEvent,
+	)
+}
 
-		logger.Warn("⚠️ Очередь цен CandleEngine переполнена, пропускаем цену %s",
-			priceData.Symbol)
+// handlePriceEvent обрабатывает события цен из EventBus
+func (ce *CandleEngine) handlePriceEvent(event types.Event) error {
+	logger.Debug("🕯️ CandleEngine получил событие цены: %s", event.Type)
+
+	switch event.Type {
+	case types.EventPriceUpdated:
+		if priceData, ok := event.Data.(storage.PriceData); ok {
+			// Отправляем цену в канал для асинхронной обработки
+			select {
+			case ce.priceUpdates <- priceData:
+				// Успешно добавлено в очередь
+			default:
+				ce.statsMu.Lock()
+				ce.buildErrors++
+				ce.statsMu.Unlock()
+
+				logger.Warn("⚠️ Очередь цен CandleEngine переполнена, пропускаем цену %s",
+					priceData.Symbol)
+			}
+		}
 	}
+
+	return nil
 }
 
 // processPriceUpdates обрабатывает обновления цен
@@ -498,4 +546,34 @@ func (ce *CandleEngine) GetStats() map[string]interface{} {
 			"stats_interval": ce.statsInterval.String(),
 		},
 	}
+}
+
+// subscribeToEvents подписывается на события через EventBus
+func (ce *CandleEngine) subscribeToEvents() error {
+	if ce.eventBus == nil {
+		return fmt.Errorf("EventBus не инициализирован")
+	}
+
+	if ce.priceSubscriber == nil {
+		return fmt.Errorf("подписчик на события не создан")
+	}
+
+	// Подписываемся на событие обновления цен
+	ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
+	logger.Info("✅ CandleEngine подписался на EventPriceUpdated через EventBus")
+
+	return nil
+}
+
+// unsubscribeFromEvents отписывается от событий EventBus
+func (ce *CandleEngine) unsubscribeFromEvents() error {
+	if ce.eventBus == nil || ce.priceSubscriber == nil {
+		return nil // Ничего не делаем если EventBus не инициализирован
+	}
+
+	// Отписываемся от события обновления цен
+	ce.eventBus.Unsubscribe(types.EventPriceUpdated, ce.priceSubscriber)
+	logger.Info("✅ CandleEngine отписался от EventPriceUpdated")
+
+	return nil
 }

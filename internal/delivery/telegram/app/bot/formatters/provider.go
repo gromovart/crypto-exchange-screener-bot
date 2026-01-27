@@ -172,16 +172,16 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	// 🕐 Следующий анализ: 10:10
 	// ⏰ Следующий сигнал: 10:40 (через 20м)
 	// ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД с готовыми данными групп
-	builder.WriteString(p.ProgressFormatter.FormatConfirmationProgressWithGroups(
-		data.Confirmations,
-		data.RequiredConfirmations,
-		data.FilledSlots, // готовые данные заполненных групп
-		data.TotalSlots,  // готовые данные всех групп
-		data.Period,
-		data.NextAnalysis,
-		data.NextSignal,
-	))
-	builder.WriteString("\n\n")
+	// builder.WriteString(p.ProgressFormatter.FormatConfirmationProgressWithGroups(
+	// 	data.Confirmations,
+	// 	data.RequiredConfirmations,
+	// 	data.FilledSlots, // готовые данные заполненных групп
+	// 	data.TotalSlots,  // готовые данные всех групп
+	// 	data.Period,
+	// 	data.NextAnalysis,
+	// 	data.NextSignal,
+	// ))
+	// builder.WriteString("\n\n")
 
 	// 8. РЕКОМЕНДАЦИИ (если есть данные)
 	// 🎯 РЕКОМЕНДАЦИЯ:

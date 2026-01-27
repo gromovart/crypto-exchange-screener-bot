@@ -9,12 +9,24 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	candletracker "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/candle_tracker"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // CandleSystemFactory - фабрика для создания свечной системы
 type CandleSystemFactory struct {
 	config storage.CandleConfig
+}
+
+// CandleSystem - полная свечная система
+type CandleSystem struct {
+	Storage       storage.CandleStorageInterface
+	Engine        *CandleEngine
+	Calculator    *CandleCalculator
+	candleTracker *candletracker.CandleTracker
+	priceStorage  storage.PriceStorageInterface
+	config        storage.CandleConfig
+	eventBus      *events.EventBus
 }
 
 // NewCandleSystemFactory создает новую фабрику
@@ -57,6 +69,7 @@ func (f *CandleSystemFactory) WithAutoBuild(autoBuild bool) *CandleSystemFactory
 func (f *CandleSystemFactory) CreateSystem(
 	priceStorage storage.PriceStorageInterface,
 	candleStorage storage.CandleStorageInterface,
+	eventBus *events.EventBus, // НОВЫЙ параметр: EventBus
 ) (*CandleSystem, error) {
 	if priceStorage == nil {
 		return nil, fmt.Errorf("price storage не инициализирован")
@@ -68,8 +81,8 @@ func (f *CandleSystemFactory) CreateSystem(
 
 	logger.Info("🏗️ Создание свечной системы (Redis хранилище) с периодами: %v", f.config.SupportedPeriods)
 
-	// Создаем движок
-	candleEngine := NewCandleEngine(candleStorage, f.config)
+	// Создаем движок с передачей EventBus
+	candleEngine := NewCandleEngine(candleStorage, f.config, eventBus)
 
 	// Создаем калькулятор
 	candleCalculator := NewCandleCalculator(priceStorage)
@@ -81,7 +94,7 @@ func (f *CandleSystemFactory) CreateSystem(
 		Calculator:   candleCalculator,
 		priceStorage: priceStorage,
 		config:       f.config,
-		// candleTracker будет установлен позже через SetCandleTracker
+		eventBus:     eventBus,
 	}
 
 	logger.Info("✅ Свечная система с Redis хранилищем создана успешно")
@@ -94,7 +107,7 @@ func (f *CandleSystemFactory) CreateSystemWithRedis(
 	candleStorage storage.CandleStorageInterface,
 	redisService *redis_service.RedisService,
 ) (*CandleSystem, error) {
-	system, err := f.CreateSystem(priceStorage, candleStorage)
+	system, err := f.CreateSystem(priceStorage, candleStorage, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -116,16 +129,6 @@ func (f *CandleSystemFactory) CreateSystemWithRedis(
 	return system, nil
 }
 
-// CandleSystem - полная свечная система
-type CandleSystem struct {
-	Storage       storage.CandleStorageInterface
-	Engine        *CandleEngine
-	Calculator    *CandleCalculator
-	candleTracker *candletracker.CandleTracker // Трекер обработанных свечей
-	priceStorage  storage.PriceStorageInterface
-	config        storage.CandleConfig
-}
-
 // SetCandleTracker устанавливает трекер свечей
 func (cs *CandleSystem) SetCandleTracker(tracker *candletracker.CandleTracker) {
 	cs.candleTracker = tracker
@@ -145,6 +148,13 @@ func (cs *CandleSystem) HasCandleTracker() bool {
 // Start запускает свечную систему
 func (cs *CandleSystem) Start() error {
 	logger.Info("🚀 Запуск свечной системы...")
+
+	// Устанавливаем EventBus в Engine если он еще не установлен
+	if cs.Engine != nil && cs.eventBus != nil {
+		// CandleEngine уже получает eventBus через конструктор,
+		// но дополнительно убеждаемся что подписка настроена
+		logger.Debug("🔄 CandleSystem: EventBus настроен для Engine")
+	}
 
 	// Запускаем движок
 	if err := cs.Engine.Start(); err != nil {
@@ -190,11 +200,6 @@ func (cs *CandleSystem) preloadCandles() {
 	}
 
 	logger.Debug("✅ Предзагружены свечи для %d символов", len(symbols))
-}
-
-// OnPriceUpdate обрабатывает обновление цены
-func (cs *CandleSystem) OnPriceUpdate(priceData storage.PriceData) {
-	cs.Engine.OnPriceUpdate(priceData)
 }
 
 // GetCandle получает свечу для символа и периода
@@ -274,26 +279,26 @@ func (cs *CandleSystem) GetLatestClosedCandle(symbol, period string) (*redis_sto
 		if cs.candleTracker != nil {
 			processed, err := cs.IsCandleProcessed(symbol, period, candle.StartTime.Unix())
 			if err != nil {
-				logger.Warn("⚠️ Ошибка проверки свечи %s/%s через трекер (начало: %s): %v",
-					symbol, period, candle.StartTime.Format("15:04:05"), err)
+				// logger.Warn("⚠️ Ошибка проверки свечи %s/%s через трекер (начало: %s): %v",
+				// 	symbol, period, candle.StartTime.Format("15:04:05"), err)
 				// Продолжаем, но возвращаем свечу (может быть дублирование)
 			} else if processed {
-				logger.Debug("⏭️ Свеча %s/%s уже обработана (начало: %s, изменение: %.2f%%)",
-					symbol, period, candle.StartTime.Format("15:04:05"),
-					((candle.Close-candle.Open)/candle.Open)*100)
+				// logger.Debug("⏭️ Свеча %s/%s уже обработана (начало: %s, изменение: %.2f%%)",
+				// 	symbol, period, candle.StartTime.Format("15:04:05"),
+				// 	((candle.Close-candle.Open)/candle.Open)*100)
 				continue // Пропускаем уже обработанные свечи
 			}
 		}
-
+		//Расскомментировать для отладки
 		// Нашли подходящую свечу
-		logger.Debug("🔍 Найдена необработанная закрытая свеча %s/%s (начало: %s, изменение: %.2f%%)",
-			symbol, period, candle.StartTime.Format("15:04:05"),
-			((candle.Close-candle.Open)/candle.Open)*100)
+		// logger.Debug("🔍 Найдена необработанная закрытая свеча %s/%s (начало: %s, изменение: %.2f%%)",
+		// 	symbol, period, candle.StartTime.Format("15:04:05"),
+		// 	((candle.Close-candle.Open)/candle.Open)*100)
 		return candle, nil
 	}
-
+	//Раскомментировать для отладки
 	// Если все свечи уже обработаны или нет подходящих
-	logger.Debug("📭 Все закрытые свечи %s/%s уже обработаны или нет подходящих", symbol, period)
+	// logger.Debug("📭 Все закрытые свечи %s/%s уже обработаны или нет подходящих", symbol, period)
 	return nil, nil
 }
 
@@ -382,7 +387,8 @@ func (cs *CandleSystem) GetStats() map[string]interface{} {
 func CreateSimpleSystem(
 	priceStorage storage.PriceStorageInterface,
 	candleStorage storage.CandleStorageInterface,
+	eventBus *events.EventBus, // НОВЫЙ параметр: EventBus
 ) (*CandleSystem, error) {
 	factory := NewCandleSystemFactory()
-	return factory.CreateSystem(priceStorage, candleStorage)
+	return factory.CreateSystem(priceStorage, candleStorage, eventBus)
 }

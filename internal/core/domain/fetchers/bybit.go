@@ -2,7 +2,6 @@
 package fetchers
 
 import (
-	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/infrastructure/api"
 	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
@@ -19,15 +18,15 @@ import (
 
 // BybitPriceFetcher реализация
 type BybitPriceFetcher struct {
-	client       *bybit.BybitClient
-	storage      storage.PriceStorageInterface
-	eventBus     *events.EventBus
-	candleSystem *candle.CandleSystem // НОВОЕ: Свечная система
-	mu           sync.RWMutex
-	running      bool
-	stopChan     chan struct{}
-	wg           sync.WaitGroup
-	config       *config.Config
+	client   *bybit.BybitClient
+	storage  storage.PriceStorageInterface
+	eventBus *events.EventBus
+	// УДАЛЕНО: candleSystem *candle.CandleSystem
+	mu       sync.RWMutex
+	running  bool
+	stopChan chan struct{}
+	wg       sync.WaitGroup
+	config   *config.Config
 
 	// Кэш для Open Interest
 	oiCache   map[string]float64
@@ -69,17 +68,17 @@ type volumeDeltaCache struct {
 
 // NewPriceFetcher создает новый PriceFetcher (обновленный конструктор)
 func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorageInterface,
-	eventBus *events.EventBus, candleSystem *candle.CandleSystem) *BybitPriceFetcher { // НОВЫЙ параметр
+	eventBus *events.EventBus) *BybitPriceFetcher { // Убрали candleSystem
 
 	return &BybitPriceFetcher{
-		client:       apiClient,
-		storage:      storage,
-		eventBus:     eventBus,
-		candleSystem: candleSystem, // НОВОЕ
-		stopChan:     make(chan struct{}),
-		running:      false,
-		oiCache:      make(map[string]float64),
-		liqCache:     make(map[string]*bybit.LiquidationMetrics),
+		client:   apiClient,
+		storage:  storage,
+		eventBus: eventBus,
+		// УДАЛЕНО: candleSystem: candleSystem,
+		stopChan: make(chan struct{}),
+		running:  false,
+		oiCache:  make(map[string]float64),
+		liqCache: make(map[string]*bybit.LiquidationMetrics),
 
 		// Инициализация кэша дельты
 		volumeDeltaCache: make(map[string]*volumeDeltaCache),
@@ -712,11 +711,13 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			f.oiCacheMu.Unlock()
 
 			oiUpdatedFromTicker++
-			logger.Debug("📊 BybitFetcher: OI из тикера для %s: %.0f", ticker.Symbol, openInterest)
+			//Расскомментировать для отладки
+			// logger.Debug("📊 BybitFetcher: OI из тикера для %s: %.0f", ticker.Symbol, openInterest)
 		} else {
+			//Расскомментировать для отладки
 			// OI нет в тикере или ошибка парсинга - используем кэш или расчетное значение
 			openInterest = f.getCachedOrEstimatedOI(ticker.Symbol)
-			logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", ticker.Symbol, openInterest)
+			// logger.Debug("📊 BybitFetcher: расчетный OI для %s: %.0f", ticker.Symbol, openInterest)
 		}
 		// ==================== КОНЕЦ ИЗМЕНЕНИЯ ====================
 
@@ -725,8 +726,9 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			ratio := openInterest / volumeUSD
 			if ratio > 10 { // OI не должен быть больше 10x объема
 				correctedOI := volumeUSD * 0.05
-				logger.Debug("📉 Скорректированный OI для %s: %.0f (было %.0f)",
-					ticker.Symbol, correctedOI, openInterest)
+				//Расскомментировать для отладки
+				// logger.Warn("📉 Скорректированный OI для %s: %.0f (было %.0f)",
+				// 	ticker.Symbol, correctedOI, openInterest)
 				openInterest = correctedOI
 			}
 		}
@@ -738,7 +740,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			if err != nil {
 				logger.Debug("⚠️ Ошибка парсинга фандинга для %s: %v", ticker.Symbol, err)
 			} else {
-				logger.Debug("💰 BybitFetcher: %s фандинг = %.4f%%", ticker.Symbol, fundingRate*100)
+				//Расскомментировать для отладки
+				// logger.Debug("💰 BybitFetcher: %s фандинг = %.4f%%", ticker.Symbol, fundingRate*100)
 			}
 		}
 
@@ -779,29 +782,8 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 			continue
 		}
 
-		// НОВОЕ: Отправляем цену в свечной движок если он есть
-		if f.candleSystem != nil {
-			// Создаем PriceData структуру для отправки в свечной движок
-			priceData := &storage.PriceData{
-				Symbol:       ticker.Symbol,
-				Price:        price,
-				Volume24h:    volumeBase,
-				VolumeUSD:    volumeUSD,
-				Timestamp:    now,
-				OpenInterest: openInterest,
-				FundingRate:  fundingRate,
-				Change24h:    change24h,
-				High24h:      high24h,
-				Low24h:       low24h,
-			}
-
-			// Отправляем асинхронно чтобы не блокировать основной поток
-			go func(pd *storage.PriceData) {
-				f.candleSystem.OnPriceUpdate(*pd)
-				logger.Debug("🕯️ Цена отправлена в свечной движок: %s %.6f",
-					pd.Symbol, pd.Price)
-			}(priceData)
-		}
+		// УДАЛЕНО: Отправка цены в свечной движок (теперь через EventBus)
+		// CandleEngine сам подписывается на EventPriceUpdated
 
 		// Добавляем в массив с полными данными
 		priceDataList = append(priceDataList, redis_storage.PriceData{
@@ -826,13 +808,14 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 	}
 
 	// Логируем статистику OI
-	logger.Debug("📊 BybitFetcher: OI получено из тикеров: %d/%d символов",
-		oiUpdatedFromTicker, len(tickers.Result.List))
+	// logger.Debug("📊 BybitFetcher: OI получено из тикеров: %d/%d символов",
+	// 	oiUpdatedFromTicker, len(tickers.Result.List))
 
 	logger.Info("✅ BybitFetcher: успешно сохранено %d цен за %v, ошибок: %d",
 		updatedCount, time.Since(startTime).Round(time.Millisecond), errorCount)
 
-	// Публикуем одно событие со всеми ценами
+	// Публикуем одно событие со всеми ценами в EventBus
+	// CandleEngine подписан на это событие
 	if updatedCount > 0 && f.eventBus != nil {
 		event := types.Event{
 			Type:      types.EventPriceUpdated,
@@ -989,16 +972,6 @@ func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
 	liqCount := len(f.liqCache)
 	f.liqCacheMu.RUnlock()
 
-	// Добавляем статистику свечной системы
-	var candleSystemStats map[string]interface{}
-	if f.candleSystem != nil {
-		candleSystemStats = f.candleSystem.GetStats()
-	} else {
-		candleSystemStats = map[string]interface{}{
-			"status": "не инициализирована",
-		}
-	}
-
 	return map[string]interface{}{
 		"running":                 f.running,
 		"type":                    "bybit",
@@ -1013,31 +986,7 @@ func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
 		"max_retries":             f.maxRetries,
 		"error_count":             f.errorCount,
 		"last_fetch_error":        f.lastFetchError.Format("2006-01-02 15:04:05"),
-		"candle_system":           candleSystemStats,
 	}
-}
-
-// SetCandleSystem устанавливает свечную систему (дополнительный метод)
-func (f *BybitPriceFetcher) SetCandleSystem(candleSystem *candle.CandleSystem) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	f.candleSystem = candleSystem
-	logger.Info("✅ BybitFetcher: свечная система установлена")
-}
-
-// GetCandleSystemStats получает статистику свечной системы
-func (f *BybitPriceFetcher) GetCandleSystemStats() map[string]interface{} {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	if f.candleSystem == nil {
-		return map[string]interface{}{
-			"error": "свечная система не инициализирована",
-		}
-	}
-
-	return f.candleSystem.GetStats()
 }
 
 // Вспомогательная функция для парсинга

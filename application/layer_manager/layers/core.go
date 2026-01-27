@@ -396,23 +396,42 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 		return fmt.Errorf("ошибка создания хранилища свечей: %w", err)
 	}
 
+	// ⭐ ПОЛУЧАЕМ EventBus для свечной системы
+	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден")
+	}
+
+	eventBusInterface, err := cl.getComponentValue(eventBusComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить EventBus: %w", err)
+	}
+
+	eventBus, ok := eventBusInterface.(*events.EventBus)
+	if !ok {
+		return fmt.Errorf("неверный тип EventBus")
+	}
+
 	// ⭐ ПОЛУЧАЕМ RedisService для создания CandleTracker
 	redisServiceComp, exists := cl.infraLayer.GetComponent("RedisService")
 	if !exists {
 		logger.Warn("⚠️ RedisService не найден, CandleSystem будет создана без CandleTracker")
-		cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+		// Создаем свечную систему С EventBus
+		cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
 	} else {
 		redisServiceInterface, err := cl.getComponentValue(redisServiceComp)
 		if err != nil {
 			logger.Warn("⚠️ Не удалось получить RedisService: %v", err)
-			cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+			// Создаем свечную систему С EventBus
+			cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
 		} else {
 			redisService, ok := redisServiceInterface.(*redis_service.RedisService)
 			if !ok {
 				logger.Warn("⚠️ Неверный тип RedisService")
-				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage)
+				// Создаем свечную систему С EventBus
+				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
 			} else {
-				// ⭐ СОЗДАЕМ СВЕЧНУЮ СИСТЕМУ С ТРЕКЕРОМ
+				// ⭐ СОЗДАЕМ СВЕЧНУЮ СИСТЕМУ С ТРЕКЕРОМ И EventBus
 				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystemWithRedis(
 					priceStorage,
 					candleStorage,
@@ -433,7 +452,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 
 	// Регистрируем компонент
 	cl.registerComponent("CandleSystem", cl.candleSystem)
-	logger.Info("✅ Свечная система создана и запущена")
+	logger.Info("✅ Свечная система создана и запущена (с EventBus)")
 
 	return nil
 }
@@ -500,21 +519,11 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		return
 	}
 
-	var fetcher *fetchers.BybitPriceFetcher
-	if cl.candleSystem != nil {
-		// Используем фабрику с поддержкой свечной системы
-		fetcher, err = cl.fetcherFactory.CreateBybitFetcherWithCandleSystem(
-			priceStorage,
-			eventBus,
-			cl.candleSystem,
-		)
-	} else {
-		// Создаем фетчер без свечной системы
-		fetcher, err = cl.fetcherFactory.CreateBybitFetcher(
-			priceStorage,
-			eventBus,
-		)
-	}
+	// ⭐ Создаем фетчер БЕЗ CandleSystem (теперь взаимодействие через EventBus)
+	fetcher, err := cl.fetcherFactory.CreateBybitFetcher(
+		priceStorage,
+		eventBus, // EventBus для публикации цен
+	)
 
 	if err != nil {
 		logger.Error("❌ CoreLayer: ошибка создания BybitPriceFetcher: %v", err)
@@ -526,7 +535,7 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 
 	// Регистрируем компонент
 	cl.registerComponent("BybitPriceFetcher", fetcher)
-	logger.Info("✅ BybitPriceFetcher создан и зарегистрирован")
+	logger.Info("✅ BybitPriceFetcher создан и зарегистрирован (взаимодействие через EventBus)")
 
 	// Запускаем фетчер с интервалом из конфигурации
 	interval := time.Duration(cl.config.UpdateInterval) * time.Second

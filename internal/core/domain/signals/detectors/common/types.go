@@ -3,7 +3,7 @@ package common
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -31,7 +31,7 @@ type Analyzer interface {
 	Name() string
 	Version() string
 	Supports(symbol string) bool
-	Analyze(data []redis_storage.PriceData, config AnalyzerConfig) ([]analysis.Signal, error)
+	Analyze(data []storage.PriceDataInterface, config AnalyzerConfig) ([]analysis.Signal, error)
 	GetConfig() AnalyzerConfig
 	GetStats() AnalyzerStats
 }

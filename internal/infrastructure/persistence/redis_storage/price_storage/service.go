@@ -114,9 +114,9 @@ func (rps *PriceStorage) StorePrice(
 	if rps.client == nil {
 		return fmt.Errorf("клиент Redis не инициализирован")
 	}
-
-	logger.Debug("💾 RedisStorage: сохранение %s: цена=%.6f, OI=%.0f, фандинг=%.6f",
-		symbol, price, openInterest, fundingRate)
+	//Раскомментировать для отладки
+	// logger.Debug("💾 RedisStorage: сохранение %s: цена=%.6f, OI=%.0f, фандинг=%.6f",
+	// 	symbol, price, openInterest, fundingRate)
 
 	// Создаем снапшот
 	snapshot := &redis_storage.PriceSnapshot{

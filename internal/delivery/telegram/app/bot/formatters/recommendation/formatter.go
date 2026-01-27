@@ -31,7 +31,7 @@ func (f *Formatter) FormatResult(
 	result.WriteString("🎯 РЕКОМЕНДАЦИЯ:\n")
 
 	// Направление тренда с переносом строки
-	result.WriteString("📌 Направление:\n")
+	// result.WriteString("📌 Направление:\n")
 	result.WriteString(fmt.Sprintf("%s\n\n", primarySignal))
 
 	// Заголовок анализа

@@ -28,14 +28,6 @@ func NewFactory(priceFetcher interface{}, candleSystem *candle.CandleSystem) *Fa
 	}
 }
 
-// NewFactoryWithoutCandleSystem создает фабрику без свечной системы (для обратной совместимости)
-func NewFactoryWithoutCandleSystem(priceFetcher interface{}) *Factory {
-	return &Factory{
-		priceFetcher: priceFetcher,
-		candleSystem: nil,
-	}
-}
-
 func (f *Factory) NewAnalysisEngineFromConfig(
 	storage storage.PriceStorageInterface,
 	eventBus *events.EventBus,

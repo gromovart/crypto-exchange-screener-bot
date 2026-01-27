@@ -59,7 +59,8 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 	}
 
 	if candleData == nil {
-		logger.Debug("📭 Нет закрытых свечей для %s/%s", symbol, period)
+		//Раскомментировать для отладки
+		// logger.Debug("📭 Нет закрытых свечей для %s/%s", symbol, period)
 		return nil, nil
 	}
 
@@ -381,7 +382,7 @@ func (a *CounterAnalyzer) isCandleAlreadyProcessed(candleKey string) bool {
 	// Используем CandleSystem для проверки
 	processed, err := a.deps.CandleSystem.IsCandleProcessed(symbol, period, startTime)
 	if err != nil {
-		logger.Warn("⚠️ Ошибка проверки свечи %s через CandleSystem: %v", candleKey, err)
+		// logger.Warn("⚠️ Ошибка проверки свечи %s через CandleSystem: %v", candleKey, err)
 		return false
 	}
 
