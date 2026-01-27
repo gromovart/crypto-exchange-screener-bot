@@ -2,13 +2,14 @@
 package counter
 
 import (
-	"crypto-exchange-screener-bot/internal/core/domain/candle"
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,9 +32,46 @@ type CounterAnalyzer struct {
 	// Статистика отправленных сигналов
 	stats              common.AnalyzerStats
 	sentStatsMu        sync.RWMutex
-	sentSignalsCount   int       // Общее количество отправленных сигналов
-	sentStatsStartTime time.Time // Время начала сбора статистики
-	lastLogTime        time.Time // Время последнего логирования статистики
+	sentSignalsCount   int
+	sentStatsStartTime time.Time
+	lastLogTime        time.Time
+
+	// Статистика вызовов Analyze()
+	analyzeCallsCount  int
+	analyzeTotalPoints int
+	analyzeTotalTime   time.Duration
+	analyzeCallMu      sync.RWMutex
+
+	// Агрегированная статистика
+	aggregatedStats AggregatedStats
+
+	// ✅ СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle
+	candleStatsMu sync.RWMutex
+	candleStats   CandleAnalyzeStats
+}
+
+// CandleAnalyzeStats статистика анализа свечей для отладки
+type CandleAnalyzeStats struct {
+	TotalCalls       int // Всего вызовов AnalyzeCandle
+	NoCandleData     int // Нет свечей
+	UnrealCandle     int // Нереальные свечи
+	AlreadyProcessed int // Уже обработаны
+	BelowThreshold   int // Ниже порога
+	GrowthSignal     int // Ростовые сигналы
+	FallSignal       int // Падающие сигналы
+	MarkCandleError  int // Ошибки отметки свечи
+	GetCandleError   int // Ошибки получения свечи
+}
+
+// AggregatedStats структура для агрегированной статистики
+type AggregatedStats struct {
+	TotalSymbols       int
+	AnalyzeAttempts    int
+	SignalsFound       int
+	NoDataErrors       int
+	UnrealCandleErrors int
+	OtherErrors        int
+	SignalsCreated     int
 }
 
 // NewCounterAnalyzer создает новый анализатор счетчика
@@ -43,13 +81,13 @@ func NewCounterAnalyzer(
 ) *CounterAnalyzer {
 	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ VolumeCalculator если не передан
 	if deps.VolumeCalculator == nil && deps.MarketFetcher != nil && deps.Storage != nil {
-		logger.Info("🔧 Создаем VolumeDeltaCalculator для CounterAnalyzer")
+		logger.Warn("🔧 [CounterAnalyzer] Создаем VolumeDeltaCalculator")
 		deps.VolumeCalculator = calculator.NewVolumeDeltaCalculator(deps.MarketFetcher, deps.Storage)
 	}
 
 	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ TechnicalCalculator если не передан
 	if deps.TechnicalCalculator == nil {
-		logger.Info("🔧 Создаем TechnicalCalculator для CounterAnalyzer")
+		logger.Warn("🔧 [CounterAnalyzer] Создаем TechnicalCalculator")
 		deps.TechnicalCalculator = calculator.NewTechnicalCalculator()
 	}
 
@@ -67,15 +105,24 @@ func NewCounterAnalyzer(
 		sentSignalsCount:   0,
 		sentStatsStartTime: time.Now(),
 		lastLogTime:        time.Now(),
+		analyzeCallsCount:  0, // ✅ Инициализация счетчиков
+		analyzeTotalPoints: 0, // ✅
+		analyzeTotalTime:   0, // ✅
 	}
 
-	logger.Info("✅ CounterAnalyzer создан")
+	logger.Warn("✅ [CounterAnalyzer] Создан анализатор счетчика")
 	return analyzer
 }
 
 // Analyze основной метод анализа
 func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
+
+	a.analyzeCallMu.Lock()
+	a.analyzeCallsCount++
+	a.analyzeTotalPoints += len(data)
+	a.analyzeCallMu.Unlock()
+
 	a.stats.TotalCalls++
 	defer func() {
 		a.stats.LastCallTime = time.Now()
@@ -83,6 +130,10 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		if a.stats.TotalCalls > 0 {
 			a.stats.AverageTime = a.stats.TotalTime / time.Duration(a.stats.TotalCalls)
 		}
+
+		a.analyzeCallMu.Lock()
+		a.analyzeTotalTime += time.Since(startTime)
+		a.analyzeCallMu.Unlock()
 	}()
 
 	// Обновляем конфигурацию
@@ -93,23 +144,36 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 
 	// Локальный счетчик для этого вызова
 	localSentCount := 0
-	//Расскомментировать для отладки
-	// logger.Debug("🔍 CounterAnalyzer.Analyze - анализ свечей")
+	candleAnalyzeAttempts := 0
+	candleAnalyzeSuccess := 0
+	candleErrors := 0
+	candleNoDataErrors := 0
+	candleUnrealErrors := 0
 
+	// СЧЕТЧИК ДЛЯ АГРЕГИРОВАННОЙ СТАТИСТИКИ
+	symbolsProcessed := len(data)
+
+	// Анализируем каждую точку
 	for _, point := range data {
-		//Расскомментировать для отладки
-		// logger.Debug("📊 Анализ точки #%d: Символ: %s", i+1, point.Symbol)
-
 		// Анализируем каждый период
 		for _, period := range supportedPeriods {
+			candleAnalyzeAttempts++
 			signal, err := a.AnalyzeCandle(point.GetSymbol(), period)
 			if err != nil {
-				// Расскомментировать для отладки
-				// logger.Warn("⚠️ Ошибка анализа свечи %s/%s: %v", point.Symbol, period, err)
+				// АГРЕГИРУЕМ ОШИБКИ БЕЗ ЛОГОВ
+				errStr := err.Error()
+				if strings.Contains(errStr, "нет закрытых свечей") {
+					candleNoDataErrors++
+				} else if strings.Contains(errStr, "нереальная свеча") {
+					candleUnrealErrors++
+				} else {
+					candleErrors++
+				}
 				continue
 			}
 
 			if signal != nil {
+				candleAnalyzeSuccess++
 				signals = append(signals, *signal)
 
 				// Публикуем сигнал в EventBus
@@ -121,6 +185,19 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		}
 	}
 
+	// ✅ СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА (без вывода здесь)
+	a.analyzeCallMu.Lock()
+	a.aggregatedStats = AggregatedStats{
+		TotalSymbols:       symbolsProcessed,
+		AnalyzeAttempts:    candleAnalyzeAttempts,
+		SignalsFound:       candleAnalyzeSuccess,
+		NoDataErrors:       candleNoDataErrors,
+		UnrealCandleErrors: candleUnrealErrors,
+		OtherErrors:        candleErrors,
+		SignalsCreated:     localSentCount,
+	}
+	a.analyzeCallMu.Unlock()
+
 	a.stats.SuccessCount++
 
 	// Обновляем общую статистику отправленных сигналов
@@ -130,44 +207,161 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		a.sentStatsMu.Unlock()
 	}
 
-	// Логируем агрегированную статистику раз в 10 секунд
-	a.logAggregatedStatsIfNeeded()
+	// ✅ ТОЛЬКО АГРЕГИРОВАННОЕ ЛОГИРОВАНИЕ РАЗ В 5 СЕКУНД
+	a.logAggregatedStatsIfNeeded(5 * time.Second)
 
 	return signals, nil
 }
 
-// logAggregatedStatsIfNeeded логирует агрегированную статистику раз в 10 секунд
-func (a *CounterAnalyzer) logAggregatedStatsIfNeeded() {
-	a.sentStatsMu.RLock()
-	defer a.sentStatsMu.RUnlock()
-
+// logAggregatedAnalyzeStatsIfNeeded логирует агрегированную статистику вызовов Analyze() раз в 10 секунд
+func (a *CounterAnalyzer) logAggregatedAnalyzeStatsIfNeeded(interval time.Duration) {
 	now := time.Now()
-	timeSinceLastLog := now.Sub(a.lastLogTime)
+	a.analyzeCallMu.RLock()
+	shouldLog := now.Sub(a.lastLogTime) >= interval && a.analyzeCallsCount > 0
+	a.analyzeCallMu.RUnlock()
 
-	// Логируем раз в 10 секунд
-	if timeSinceLastLog >= 10*time.Second && a.sentSignalsCount > 0 {
-		totalDuration := now.Sub(a.sentStatsStartTime)
-		var signalsPerMinute float64
-		if totalDuration.Minutes() > 0 {
-			signalsPerMinute = float64(a.sentSignalsCount) / totalDuration.Minutes()
+	if !shouldLog {
+		return
+	}
+
+	a.analyzeCallMu.Lock()
+	defer a.analyzeCallMu.Unlock()
+
+	// Проверяем еще раз после блокировки
+	if now.Sub(a.lastLogTime) < interval || a.analyzeCallsCount == 0 {
+		return
+	}
+
+	// Рассчитываем статистику
+	var avgPointsPerCall float64
+	var avgTimePerCall time.Duration
+	if a.analyzeCallsCount > 0 {
+		avgPointsPerCall = float64(a.analyzeTotalPoints) / float64(a.analyzeCallsCount)
+		avgTimePerCall = a.analyzeTotalTime / time.Duration(a.analyzeCallsCount)
+	}
+
+	// ✅ ИСПОЛЬЗУЕМ WARN УРОВЕНЬ ДЛЯ АГРЕГИРОВАННЫХ ЛОГОВ
+	logger.Warn("📊 [CounterAnalyzer] Статистика за последние %v:", interval)
+	logger.Warn("   📞 Вызовов Analyze: %d", a.analyzeCallsCount)
+	logger.Warn("   📍 Обработано точек: %d", a.analyzeTotalPoints)
+	logger.Warn("   ⏱️  Среднее время: %v", avgTimePerCall.Round(time.Millisecond))
+	logger.Warn("   📈 Среднее точек/вызов: %.1f", avgPointsPerCall)
+	logger.Warn("   ⚡ Скорость: %.1f точек/сек",
+		float64(a.analyzeTotalPoints)/interval.Seconds())
+
+	// Сбрасываем статистику для следующего интервала
+	a.analyzeCallsCount = 0
+	a.analyzeTotalPoints = 0
+	a.analyzeTotalTime = 0
+	a.lastLogTime = now
+}
+
+// logAggregatedStatsIfNeeded логирует агрегированную статистику раз в 10 секунд
+func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
+	now := time.Now()
+	a.analyzeCallMu.RLock()
+	shouldLog := now.Sub(a.lastLogTime) >= interval && a.analyzeCallsCount > 0
+	a.analyzeCallMu.RUnlock()
+
+	if !shouldLog {
+		return
+	}
+
+	a.analyzeCallMu.Lock()
+	defer a.analyzeCallMu.Unlock()
+
+	// Проверяем еще раз после блокировки
+	if now.Sub(a.lastLogTime) < interval || a.analyzeCallsCount == 0 {
+		return
+	}
+
+	// Рассчитываем агрегированную статистику
+	var avgPointsPerCall float64
+	var avgTimePerCall time.Duration
+	if a.analyzeCallsCount > 0 {
+		avgPointsPerCall = float64(a.analyzeTotalPoints) / float64(a.analyzeCallsCount)
+		avgTimePerCall = a.analyzeTotalTime / time.Duration(a.analyzeCallsCount)
+	}
+
+	// ✅ ОСНОВНАЯ АГРЕГИРОВАННАЯ СТАТИСТИКА
+	logger.Warn("📊 [CounterAnalyzer] Статистика за последние %v:", interval)
+	logger.Warn("   📞 Вызовов Analyze: %d", a.analyzeCallsCount)
+	logger.Warn("   📍 Обработано символов: %d", a.analyzeTotalPoints)
+	logger.Warn("   ⏱️  Среднее время: %v", avgTimePerCall.Round(time.Millisecond))
+	logger.Warn("   📈 Среднее символов/вызов: %.1f", avgPointsPerCall)
+	logger.Warn("   ⚡ Скорость: %.1f символов/сек", float64(a.analyzeTotalPoints)/interval.Seconds())
+
+	// ✅ ДОБАВЛЯЕМ ОТЛАДОЧНУЮ СТАТИСТИКУ AnalyzeCandle
+	a.candleStatsMu.Lock()
+	candleStats := a.candleStats
+	a.candleStatsMu.Unlock()
+
+	if candleStats.TotalCalls > 0 {
+		logger.Warn("   🕯️  Анализ свечей (вызовов: %d):", candleStats.TotalCalls)
+
+		// Проценты для каждого типа результата
+		noDataPercent := float64(candleStats.NoCandleData) / float64(candleStats.TotalCalls) * 100
+		unrealPercent := float64(candleStats.UnrealCandle) / float64(candleStats.TotalCalls) * 100
+		processedPercent := float64(candleStats.AlreadyProcessed) / float64(candleStats.TotalCalls) * 100
+		belowThresholdPercent := float64(candleStats.BelowThreshold) / float64(candleStats.TotalCalls) * 100
+		growthPercent := float64(candleStats.GrowthSignal) / float64(candleStats.TotalCalls) * 100
+		fallPercent := float64(candleStats.FallSignal) / float64(candleStats.TotalCalls) * 100
+		markErrorPercent := float64(candleStats.MarkCandleError) / float64(candleStats.TotalCalls) * 100
+		getErrorPercent := float64(candleStats.GetCandleError) / float64(candleStats.TotalCalls) * 100
+
+		// Выводим только значимые категории (>0%)
+		if candleStats.NoCandleData > 0 {
+			logger.Warn("      • Нет свечей: %d (%.1f%%)", candleStats.NoCandleData, noDataPercent)
+		}
+		if candleStats.UnrealCandle > 0 {
+			logger.Warn("      • Нереальные свечи: %d (%.1f%%)", candleStats.UnrealCandle, unrealPercent)
+		}
+		if candleStats.AlreadyProcessed > 0 {
+			logger.Warn("      • Уже обработаны: %d (%.1f%%)", candleStats.AlreadyProcessed, processedPercent)
+		}
+		if candleStats.BelowThreshold > 0 {
+			logger.Warn("      • Ниже порога: %d (%.1f%%)", candleStats.BelowThreshold, belowThresholdPercent)
+		}
+		if candleStats.GrowthSignal > 0 {
+			logger.Warn("      • Ростовые сигналы: %d (%.1f%%)", candleStats.GrowthSignal, growthPercent)
+		}
+		if candleStats.FallSignal > 0 {
+			logger.Warn("      • Падающие сигналы: %d (%.1f%%)", candleStats.FallSignal, fallPercent)
+		}
+		if candleStats.MarkCandleError > 0 {
+			logger.Warn("      • Ошибки отметки: %d (%.1f%%)", candleStats.MarkCandleError, markErrorPercent)
+		}
+		if candleStats.GetCandleError > 0 {
+			logger.Warn("      • Ошибки получения: %d (%.1f%%)", candleStats.GetCandleError, getErrorPercent)
 		}
 
-		logger.Info("📊 CounterAnalyzer - Агрегированная статистика: "+
-			"всего отправлено=%d, за период=%v, скорость=%.1f сигн/мин",
-			a.sentSignalsCount, totalDuration.Round(time.Second), signalsPerMinute)
-
-		// Сбрасываем время последнего логирования
-		a.lastLogTime = now
+		// Проверка суммы процентов
+		totalPercent := noDataPercent + unrealPercent + processedPercent + belowThresholdPercent +
+			growthPercent + fallPercent + markErrorPercent + getErrorPercent
+		logger.Warn("      • Итого: %.1f%% (должно быть ~100%%)", totalPercent)
 	}
+
+	// Сбрасываем статистику для следующего интервала
+	a.analyzeCallsCount = 0
+	a.analyzeTotalPoints = 0
+	a.analyzeTotalTime = 0
+	a.aggregatedStats = AggregatedStats{}
+
+	// ✅ СБРАСЫВАЕМ СТАТИСТИКУ АНАЛИЗА СВЕЧЕЙ
+	a.candleStatsMu.Lock()
+	a.candleStats = CandleAnalyzeStats{}
+	a.candleStatsMu.Unlock()
+
+	a.lastLogTime = now
 }
 
 // Stop останавливает анализатор счетчика
 func (a *CounterAnalyzer) Stop() error {
-	logger.Info("🛑 Останавливаем CounterAnalyzer")
+	logger.Warn("🛑 [CounterAnalyzer] Остановка анализатора")
 
 	// ✅ Останавливаем VolumeDeltaCalculator если есть
 	if a.deps.VolumeCalculator != nil {
-		logger.Info("🛑 Останавливаем VolumeDeltaCalculator")
+		logger.Warn("🛑 [CounterAnalyzer] Остановка VolumeDeltaCalculator")
 		a.deps.VolumeCalculator.Stop()
 	}
 
@@ -188,7 +382,7 @@ func (a *CounterAnalyzer) Stop() error {
 		LastCallTime: time.Time{},
 	}
 
-	logger.Info("✅ CounterAnalyzer остановлен")
+	logger.Warn("✅ [CounterAnalyzer] Анализатор остановлен")
 	return nil
 }
 

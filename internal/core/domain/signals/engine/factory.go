@@ -1,4 +1,4 @@
-// internal/core/domain/signals/engine/factory.go (обновленный)
+// internal/core/domain/signals/engine/factory.go
 package engine
 
 import (

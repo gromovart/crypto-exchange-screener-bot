@@ -436,6 +436,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 					priceStorage,
 					candleStorage,
 					redisService,
+					eventBus,
 				)
 			}
 		}

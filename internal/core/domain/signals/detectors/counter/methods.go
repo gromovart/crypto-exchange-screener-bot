@@ -1,3 +1,4 @@
+// internal/core/domain/signals/detectors/counter/methods.go
 package counter
 
 import (
@@ -28,7 +29,7 @@ func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.Volume
 	// ✅ Используем общий калькулятор из зависимостей
 	if a.deps.VolumeCalculator == nil {
 		// Создаем временно, если не передан в зависимостях
-		logger.Debug("⚠️ Создаем временный VolumeDeltaCalculator для %s", symbol)
+		logger.Warn("⚠️ Создаем временный VolumeDeltaCalculator для %s", symbol)
 		tempCalculator := calculator.NewVolumeDeltaCalculator(a.deps.MarketFetcher, a.deps.Storage)
 		defer tempCalculator.Stop() // ✅ ВАЖНО: останавливаем временный калькулятор
 
@@ -40,48 +41,62 @@ func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.Volume
 
 // AnalyzeCandle анализирует свечу
 func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal, error) {
+	// ✅ ИНКРЕМЕНТИРУЕМ ОБЩИЙ СЧЕТЧИК
+	a.candleStatsMu.Lock()
+	a.candleStats.TotalCalls++
+	a.candleStatsMu.Unlock()
+
 	if a.deps.CandleSystem == nil {
 		return nil, fmt.Errorf("свечная система не инициализирована")
 	}
 
 	// Валидируем период
 	if !periodPkg.IsValidPeriod(period) {
-		logger.Warn("⚠️ Невалидный период '%s' для символа %s, используем %s",
-			period, symbol, periodPkg.DefaultPeriod)
 		period = periodPkg.DefaultPeriod
 	}
 
-	// ⭐ ПОЛУЧАЕМ ПОСЛЕДНЮЮ ЗАКРЫТУЮ СВЕЧУ ЧЕРЕЗ CANDLE SYSTEM
-	// CandleSystem сам проверит через трекер если он есть
+	// Получаем последнюю закрытую свечу
 	candleData, err := a.deps.CandleSystem.GetLatestClosedCandle(symbol, period)
 	if err != nil {
+		// ✅ АГРЕГИРУЕМ ОШИБКУ ПОЛУЧЕНИЯ
+		a.candleStatsMu.Lock()
+		a.candleStats.GetCandleError++
+		a.candleStatsMu.Unlock()
 		return nil, fmt.Errorf("ошибка получения закрытой свечи %s/%s: %w", symbol, period, err)
 	}
 
 	if candleData == nil {
-		//Раскомментировать для отладки
-		// logger.Debug("📭 Нет закрытых свечей для %s/%s", symbol, period)
+		// ✅ АГРЕГИРУЕМ ОТСУТСТВИЕ СВЕЧЕЙ
+		a.candleStatsMu.Lock()
+		a.candleStats.NoCandleData++
+		a.candleStatsMu.Unlock()
 		return nil, nil
 	}
 
 	if !candleData.IsRealFlag || candleData.Open == 0 {
-		logger.Debug("📭 Нереальная свеча для %s/%s", symbol, period)
+		// ✅ АГРЕГИРУЕМ НЕРЕАЛЬНЫЕ СВЕЧИ
+		a.candleStatsMu.Lock()
+		a.candleStats.UnrealCandle++
+		a.candleStatsMu.Unlock()
 		return nil, nil
 	}
 
-	// ⭐ АТОМАРНАЯ ПРОВЕРКА И ОТМЕТКА СВЕЧИ ЧЕРЕЗ CANDLE SYSTEM
+	// Атомарная проверка и отметка свечи
 	startTimeUnix := candleData.StartTime.Unix()
 	marked, err := a.deps.CandleSystem.MarkCandleProcessedAtomically(symbol, period, startTimeUnix)
 	if err != nil {
-		logger.Warn("⚠️ Ошибка атомарной отметки свечи %s/%s (начало: %s): %v",
-			symbol, period, candleData.StartTime.Format("15:04:05"), err)
-		// Продолжаем анализ, но могут быть дубликаты
-	} else if !marked {
-		// Свеча уже была обработана ранее
-		logger.Debug("⏭️ Пропускаем - свеча %s/%s уже обработана (начало: %s, конец: %s)",
-			symbol, period,
-			candleData.StartTime.Format("15:04:05"),
-			candleData.EndTime.Format("15:04:05"))
+		// ✅ АГРЕГИРУЕМ ОШИБКИ ОТМЕТКИ
+		a.candleStatsMu.Lock()
+		a.candleStats.MarkCandleError++
+		a.candleStatsMu.Unlock()
+		return nil, fmt.Errorf("ошибка отметки свечи %s/%s: %w", symbol, period, err)
+	}
+
+	if !marked {
+		// ✅ АГРЕГИРУЕМ УЖЕ ОБРАБОТАННЫЕ
+		a.candleStatsMu.Lock()
+		a.candleStats.AlreadyProcessed++
+		a.candleStatsMu.Unlock()
 		return nil, nil
 	}
 
@@ -95,28 +110,38 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 	}
 
 	// Проверяем пороги
-	growthThreshold := SafeGetFloat(a.config.CustomSettings, "growth_threshold", 0.1)
-	fallThreshold := SafeGetFloat(a.config.CustomSettings, "fall_threshold", 0.1)
+	growthThreshold := SafeGetFloat(a.config.CustomSettings, "growth_threshold", 0.01) // 0.01%
+	fallThreshold := SafeGetFloat(a.config.CustomSettings, "fall_threshold", 0.01)     // 0.01%
 
 	var shouldCreateSignal bool
 	if direction == "growth" && changePercent >= growthThreshold {
 		shouldCreateSignal = SafeGetBool(a.config.CustomSettings, "track_growth", true)
+		if shouldCreateSignal {
+			// ✅ АГРЕГИРУЕМ РОСТОВЫЕ СИГНАЛЫ
+			a.candleStatsMu.Lock()
+			a.candleStats.GrowthSignal++
+			a.candleStatsMu.Unlock()
+		}
 	} else if direction == "fall" && changePercent <= -fallThreshold {
 		shouldCreateSignal = SafeGetBool(a.config.CustomSettings, "track_fall", true)
+		if shouldCreateSignal {
+			// ✅ АГРЕГИРУЕМ ПАДАЮЩИЕ СИГНАЛЫ
+			a.candleStatsMu.Lock()
+			a.candleStats.FallSignal++
+			a.candleStatsMu.Unlock()
+		}
 	}
 
 	if !shouldCreateSignal {
+		// ✅ АГРЕГИРУЕМ НИЖЕ ПОРОГА
+		a.candleStatsMu.Lock()
+		a.candleStats.BelowThreshold++
+		a.candleStatsMu.Unlock()
 		return nil, nil
 	}
 
 	// Создаем сигнал
 	signal := a.CreateSignal(symbol, period, direction, changePercent, candleData)
-
-	logger.Info("📊 Анализ ЗАКРЫТОЙ свечи %s/%s: %.2f%% (начало: %s, конец: %s)",
-		symbol, period, changePercent,
-		candleData.StartTime.Format("15:04:05"),
-		candleData.EndTime.Format("15:04:05"))
-
 	return &signal, nil
 }
 

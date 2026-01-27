@@ -105,8 +105,9 @@ func (f *CandleSystemFactory) CreateSystemWithRedis(
 	priceStorage storage.PriceStorageInterface,
 	candleStorage storage.CandleStorageInterface,
 	redisService *redis_service.RedisService,
+	eventBus *events.EventBus, // ДОБАВЛЯЕМ параметр
 ) (*CandleSystem, error) {
-	system, err := f.CreateSystem(priceStorage, candleStorage, nil)
+	system, err := f.CreateSystem(priceStorage, candleStorage, eventBus)
 	if err != nil {
 		return nil, err
 	}

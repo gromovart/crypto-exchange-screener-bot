@@ -63,20 +63,36 @@ func NewCandleEngine(
 func (ce *CandleEngine) Start() error {
 	logger.Info("🚀 Запуск CandleEngine...")
 
-	// Подписываемся на события цен
-	if ce.eventBus != nil && ce.priceSubscriber != nil {
-		ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
-		logger.Info("✅ CandleEngine подписался на EventPriceUpdated")
+	// ДОБАВЛЯЕМ: Проверяем наличие EventBus
+	if ce.eventBus == nil {
+		logger.Error("❌ CandleEngine: EventBus не инициализирован!")
+		return fmt.Errorf("EventBus не инициализирован")
 	}
+
+	if ce.priceSubscriber == nil {
+		logger.Error("❌ CandleEngine: подписчик не создан!")
+		return fmt.Errorf("подписчик не создан")
+	}
+
+	// Подписываемся на события цен
+	logger.Info("🔗 CandleEngine: подписываемся на EventPriceUpdated через EventBus...")
+
+	// ИСПРАВЛЕНО: Subscribe не возвращает ошибку, просто вызываем
+	ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
+
+	// Проверяем подписку - просто логируем
+	logger.Info("✅ CandleEngine: успешно подписался на EventPriceUpdated")
 
 	// Запускаем обработчики
 	ce.wg.Add(1)
 	go ce.processPriceUpdates()
+	logger.Debug("🔄 CandleEngine: запущен обработчик цен")
 
 	// Запускаем очистку если настроено
 	if ce.config.CleanupInterval > 0 {
 		ce.wg.Add(1)
 		go ce.cleanupRoutine()
+		logger.Debug("🧹 CandleEngine: запущена очистка")
 	}
 
 	logger.Info("✅ CandleEngine запущен")
@@ -102,24 +118,40 @@ func (ce *CandleEngine) Stop() error {
 
 // createPriceSubscriber создает подписчика на события цен
 func (ce *CandleEngine) createPriceSubscriber() {
+	logger.Info("👤 CandleEngine: создание подписчика на события цен...")
+
 	ce.priceSubscriber = events.NewBaseSubscriber(
 		"candle_engine",
 		[]types.EventType{types.EventPriceUpdated},
 		ce.handlePriceEvent,
 	)
+
+	logger.Info("✅ CandleEngine: подписчик создан (имя: candle_engine)")
 }
 
 // handlePriceEvent обрабатывает события цен из EventBus
 func (ce *CandleEngine) handlePriceEvent(event types.Event) error {
-	logger.Debug("🕯️ CandleEngine получил событие цены: %s", event.Type)
+	logger.Warn("🕯️ CandleEngine получил событие цены: %s", event.Type)
+
+	// ДОБАВЛЯЕМ: Логирование деталей события
+	logger.Info("📨 CandleEngine: Событие %s в %v", event.Type, event.Timestamp.Format("15:04:05.000"))
 
 	switch event.Type {
 	case types.EventPriceUpdated:
+		// ДОБАВЛЯЕМ: Проверяем тип данных
+		logger.Debug("📊 CandleEngine: обработка EventPriceUpdated")
+
 		if priceData, ok := event.Data.(storage.PriceData); ok {
+			// ДОБАВЛЯЕМ: Логирование одной цены для примера
+			logger.Debug("💰 CandleEngine: цена %s: %.6f (объем: %.0f USD)",
+				priceData.Symbol, priceData.Price, priceData.VolumeUSD)
+
 			// Отправляем цену в канал для асинхронной обработки
 			select {
 			case ce.priceUpdates <- priceData:
 				// Успешно добавлено в очередь
+				logger.Debug("📥 CandleEngine: цена %s добавлена в очередь (размер очереди: %d)",
+					priceData.Symbol, len(ce.priceUpdates))
 			default:
 				ce.statsMu.Lock()
 				ce.buildErrors++
@@ -128,7 +160,42 @@ func (ce *CandleEngine) handlePriceEvent(event types.Event) error {
 				logger.Warn("⚠️ Очередь цен CandleEngine переполнена, пропускаем цену %s",
 					priceData.Symbol)
 			}
+		} else if priceDataList, ok := event.Data.([]storage.PriceData); ok {
+			// ДОБАВЛЯЕМ: Обработка массива цен
+			logger.Info("📦 CandleEngine: получен массив из %d цен", len(priceDataList))
+
+			// Обрабатываем первую цену для логирования
+			if len(priceDataList) > 0 {
+				logger.Debug("💰 CandleEngine: первая цена %s: %.6f",
+					priceDataList[0].Symbol, priceDataList[0].Price)
+			}
+
+			// Отправляем все цены в очередь
+			sentCount := 0
+			for _, priceData := range priceDataList {
+				select {
+				case ce.priceUpdates <- priceData:
+					sentCount++
+				default:
+					ce.statsMu.Lock()
+					ce.buildErrors++
+					ce.statsMu.Unlock()
+
+					logger.Warn("⚠️ Очередь переполнена, пропускаем цену %s", priceData.Symbol)
+					break // Прерываем цикл при переполнении
+				}
+			}
+
+			logger.Debug("📥 CandleEngine: отправлено %d/%d цен в очередь", sentCount, len(priceDataList))
+		} else {
+			// ДОБАВЛЯЕМ: Логирование неожиданного типа данных
+			logger.Warn("⚠️ CandleEngine: неожиданный тип данных в событии: %T", event.Data)
+
+			// Пробуем вывести структуру данных для отладки
+			logger.Debug("🔍 CandleEngine: данные события: %+v", event.Data)
 		}
+	default:
+		logger.Debug("📨 CandleEngine: неизвестный тип события: %s", event.Type)
 	}
 
 	return nil
