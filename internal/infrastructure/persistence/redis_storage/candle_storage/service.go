@@ -98,8 +98,8 @@ func (rcs *RedisCandleStorage) closeAndArchiveCandleInternal(candle *storage.Can
 	// Удаляем из активных
 	activeKey := rcs.getActiveCandleKey(candle.Symbol, candle.Period)
 	if err := rcs.client.Del(rcs.ctx, activeKey).Err(); err != nil {
-		logger.Warn("⚠️ Ошибка удаления активной свечи %s %s: %v",
-			candle.Symbol, candle.Period, err)
+		// logger.Warn("⚠️ Ошибка удаления активной свечи %s %s: %v",
+		// 	candle.Symbol, candle.Period, err)
 	}
 
 	// Увеличиваем счетчик закрытых свечей

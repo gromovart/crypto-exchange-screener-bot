@@ -9,7 +9,6 @@ import (
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
-	"strings"
 	"sync"
 	"time"
 )
@@ -45,22 +44,51 @@ type CounterAnalyzer struct {
 	// Агрегированная статистика
 	aggregatedStats AggregatedStats
 
-	// ✅ СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle
+	// ✅ СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle С РАЗДЕЛЕНИЕМ НА ЗАКРЫТЫЕ/АКТИВНЫЕ
 	candleStatsMu sync.RWMutex
 	candleStats   CandleAnalyzeStats
 }
 
-// CandleAnalyzeStats статистика анализа свечей для отладки
+// CandleAnalyzeStats статистика анализа свечей для отладки с разделением
 type CandleAnalyzeStats struct {
-	TotalCalls       int // Всего вызовов AnalyzeCandle
-	NoCandleData     int // Нет свечей
-	UnrealCandle     int // Нереальные свечи
-	AlreadyProcessed int // Уже обработаны
-	BelowThreshold   int // Ниже порога
-	GrowthSignal     int // Ростовые сигналы
-	FallSignal       int // Падающие сигналы
-	MarkCandleError  int // Ошибки отметки свечи
-	GetCandleError   int // Ошибки получения свечи
+	TotalCalls int // Всего вызовов AnalyzeCandle
+
+	// Статистика по ЗАКРЫТЫМ свечам
+	ClosedCandleStats struct {
+		Attempts         int // Попыток анализа
+		Success          int // Успешных анализов (сигнал создан)
+		NoData           int // Нет закрытых свечей
+		Unreal           int // Нереальные свечи
+		AlreadyProcessed int // Уже обработаны
+		BelowThreshold   int // Ниже порога
+		GetCandleError   int // Ошибки получения
+		MarkCandleError  int // Ошибки отметки
+		GrowthSignals    int // Ростовые сигналы
+		FallSignals      int // Падающие сигналы
+	}
+
+	// Статистика по АКТИВНЫМ свечам
+	ActiveCandleStats struct {
+		Attempts         int // Попыток анализа
+		Success          int // Успешных анализов (сигнал создан)
+		NoActiveCandle   int // Нет активной свечи
+		BelowMinTime     int // Меньше минимального времени
+		BelowThreshold   int // Ниже порога
+		GetCandleError   int // Ошибки получения
+		InsufficientData int // Недостаточно данных
+		GrowthSignals    int // Ростовые сигналы
+		FallSignals      int // Падающие сигналы
+	}
+
+	// Интервальная статистика сигналов
+	IntervalStats struct {
+		StartTime     time.Time
+		ClosedSignals int // Сигналов по закрытым свечам
+		ActiveSignals int // Сигналов по активным свечам
+		TotalSignals  int // Всего сигналов
+		GrowthSignals int // Ростовых сигналов
+		FallSignals   int // Падающих сигналов
+	}
 }
 
 // AggregatedStats структура для агрегированной статистики
@@ -105,12 +133,24 @@ func NewCounterAnalyzer(
 		sentSignalsCount:   0,
 		sentStatsStartTime: time.Now(),
 		lastLogTime:        time.Now(),
-		analyzeCallsCount:  0, // ✅ Инициализация счетчиков
-		analyzeTotalPoints: 0, // ✅
-		analyzeTotalTime:   0, // ✅
+		analyzeCallsCount:  0,
+		analyzeTotalPoints: 0,
+		analyzeTotalTime:   0,
+		candleStats: CandleAnalyzeStats{
+			IntervalStats: struct {
+				StartTime     time.Time
+				ClosedSignals int
+				ActiveSignals int
+				TotalSignals  int
+				GrowthSignals int
+				FallSignals   int
+			}{
+				StartTime: time.Now(),
+			},
+		},
 	}
 
-	logger.Warn("✅ [CounterAnalyzer] Создан анализатор счетчика")
+	logger.Warn("✅ [CounterAnalyzer] Создан анализатор счетчика с разделенной статистикой")
 	return analyzer
 }
 
@@ -162,9 +202,9 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 			if err != nil {
 				// АГРЕГИРУЕМ ОШИБКИ БЕЗ ЛОГОВ
 				errStr := err.Error()
-				if strings.Contains(errStr, "нет закрытых свечей") {
+				if errStr == "нет закрытых свечей" || errStr == "нет активной свечи" {
 					candleNoDataErrors++
-				} else if strings.Contains(errStr, "нереальная свеча") {
+				} else if errStr == "нереальная свеча" || errStr == "недостаточно данных" {
 					candleUnrealErrors++
 				} else {
 					candleErrors++
@@ -185,7 +225,7 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		}
 	}
 
-	// ✅ СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА (без вывода здесь)
+	// ✅ СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА
 	a.analyzeCallMu.Lock()
 	a.aggregatedStats = AggregatedStats{
 		TotalSymbols:       symbolsProcessed,
@@ -213,50 +253,7 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 	return signals, nil
 }
 
-// logAggregatedAnalyzeStatsIfNeeded логирует агрегированную статистику вызовов Analyze() раз в 10 секунд
-func (a *CounterAnalyzer) logAggregatedAnalyzeStatsIfNeeded(interval time.Duration) {
-	now := time.Now()
-	a.analyzeCallMu.RLock()
-	shouldLog := now.Sub(a.lastLogTime) >= interval && a.analyzeCallsCount > 0
-	a.analyzeCallMu.RUnlock()
-
-	if !shouldLog {
-		return
-	}
-
-	a.analyzeCallMu.Lock()
-	defer a.analyzeCallMu.Unlock()
-
-	// Проверяем еще раз после блокировки
-	if now.Sub(a.lastLogTime) < interval || a.analyzeCallsCount == 0 {
-		return
-	}
-
-	// Рассчитываем статистику
-	var avgPointsPerCall float64
-	var avgTimePerCall time.Duration
-	if a.analyzeCallsCount > 0 {
-		avgPointsPerCall = float64(a.analyzeTotalPoints) / float64(a.analyzeCallsCount)
-		avgTimePerCall = a.analyzeTotalTime / time.Duration(a.analyzeCallsCount)
-	}
-
-	// ✅ ИСПОЛЬЗУЕМ WARN УРОВЕНЬ ДЛЯ АГРЕГИРОВАННЫХ ЛОГОВ
-	logger.Warn("📊 [CounterAnalyzer] Статистика за последние %v:", interval)
-	logger.Warn("   📞 Вызовов Analyze: %d", a.analyzeCallsCount)
-	logger.Warn("   📍 Обработано точек: %d", a.analyzeTotalPoints)
-	logger.Warn("   ⏱️  Среднее время: %v", avgTimePerCall.Round(time.Millisecond))
-	logger.Warn("   📈 Среднее точек/вызов: %.1f", avgPointsPerCall)
-	logger.Warn("   ⚡ Скорость: %.1f точек/сек",
-		float64(a.analyzeTotalPoints)/interval.Seconds())
-
-	// Сбрасываем статистику для следующего интервала
-	a.analyzeCallsCount = 0
-	a.analyzeTotalPoints = 0
-	a.analyzeTotalTime = 0
-	a.lastLogTime = now
-}
-
-// logAggregatedStatsIfNeeded логирует агрегированную статистику раз в 10 секунд
+// logAggregatedStatsIfNeeded логирует агрегированную статистику с разделением закрытые/активные
 func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 	now := time.Now()
 	a.analyzeCallMu.RLock()
@@ -291,65 +288,79 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 	logger.Warn("   📈 Среднее символов/вызов: %.1f", avgPointsPerCall)
 	logger.Warn("   ⚡ Скорость: %.1f символов/сек", float64(a.analyzeTotalPoints)/interval.Seconds())
 
-	// ✅ ДОБАВЛЯЕМ ОТЛАДОЧНУЮ СТАТИСТИКУ AnalyzeCandle
+	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ И АКТИВНЫМ СВЕЧАМ
 	a.candleStatsMu.Lock()
 	candleStats := a.candleStats
 	a.candleStatsMu.Unlock()
 
-	if candleStats.TotalCalls > 0 {
-		logger.Warn("   🕯️  Анализ свечей (вызовов: %d):", candleStats.TotalCalls)
+	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ СВЕЧАМ
+	if candleStats.ClosedCandleStats.Attempts > 0 {
+		closedAttempts := candleStats.ClosedCandleStats.Attempts
+		closedSuccessRate := float64(candleStats.ClosedCandleStats.Success) / float64(closedAttempts) * 100
+		closedNoDataRate := float64(candleStats.ClosedCandleStats.NoData) / float64(closedAttempts) * 100
+		closedProcessedRate := float64(candleStats.ClosedCandleStats.AlreadyProcessed) / float64(closedAttempts) * 100
 
-		// Проценты для каждого типа результата
-		noDataPercent := float64(candleStats.NoCandleData) / float64(candleStats.TotalCalls) * 100
-		unrealPercent := float64(candleStats.UnrealCandle) / float64(candleStats.TotalCalls) * 100
-		processedPercent := float64(candleStats.AlreadyProcessed) / float64(candleStats.TotalCalls) * 100
-		belowThresholdPercent := float64(candleStats.BelowThreshold) / float64(candleStats.TotalCalls) * 100
-		growthPercent := float64(candleStats.GrowthSignal) / float64(candleStats.TotalCalls) * 100
-		fallPercent := float64(candleStats.FallSignal) / float64(candleStats.TotalCalls) * 100
-		markErrorPercent := float64(candleStats.MarkCandleError) / float64(candleStats.TotalCalls) * 100
-		getErrorPercent := float64(candleStats.GetCandleError) / float64(candleStats.TotalCalls) * 100
-
-		// Выводим только значимые категории (>0%)
-		if candleStats.NoCandleData > 0 {
-			logger.Warn("      • Нет свечей: %d (%.1f%%)", candleStats.NoCandleData, noDataPercent)
-		}
-		if candleStats.UnrealCandle > 0 {
-			logger.Warn("      • Нереальные свечи: %d (%.1f%%)", candleStats.UnrealCandle, unrealPercent)
-		}
-		if candleStats.AlreadyProcessed > 0 {
-			logger.Warn("      • Уже обработаны: %d (%.1f%%)", candleStats.AlreadyProcessed, processedPercent)
-		}
-		if candleStats.BelowThreshold > 0 {
-			logger.Warn("      • Ниже порога: %d (%.1f%%)", candleStats.BelowThreshold, belowThresholdPercent)
-		}
-		if candleStats.GrowthSignal > 0 {
-			logger.Warn("      • Ростовые сигналы: %d (%.1f%%)", candleStats.GrowthSignal, growthPercent)
-		}
-		if candleStats.FallSignal > 0 {
-			logger.Warn("      • Падающие сигналы: %d (%.1f%%)", candleStats.FallSignal, fallPercent)
-		}
-		if candleStats.MarkCandleError > 0 {
-			logger.Warn("      • Ошибки отметки: %d (%.1f%%)", candleStats.MarkCandleError, markErrorPercent)
-		}
-		if candleStats.GetCandleError > 0 {
-			logger.Warn("      • Ошибки получения: %d (%.1f%%)", candleStats.GetCandleError, getErrorPercent)
-		}
-
-		// Проверка суммы процентов
-		totalPercent := noDataPercent + unrealPercent + processedPercent + belowThresholdPercent +
-			growthPercent + fallPercent + markErrorPercent + getErrorPercent
-		logger.Warn("      • Итого: %.1f%% (должно быть ~100%%)", totalPercent)
+		logger.Warn("   🕯️  ЗАКРЫТЫЕ свечи (попыток: %d):", closedAttempts)
+		logger.Warn("      • Успешно: %d (%.1f%%)", candleStats.ClosedCandleStats.Success, closedSuccessRate)
+		logger.Warn("      • Нет данных: %d (%.1f%%)", candleStats.ClosedCandleStats.NoData, closedNoDataRate)
+		logger.Warn("      • Уже обработаны: %d (%.1f%%)", candleStats.ClosedCandleStats.AlreadyProcessed, closedProcessedRate)
+		logger.Warn("      • Ниже порога: %d", candleStats.ClosedCandleStats.BelowThreshold)
+		logger.Warn("      • Ошибки получения: %d", candleStats.ClosedCandleStats.GetCandleError)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.ClosedCandleStats.GrowthSignals,
+			candleStats.ClosedCandleStats.FallSignals)
 	}
 
-	// Сбрасываем статистику для следующего интервала
+	// ✅ СТАТИСТИКА ПО АКТИВНЫМ СВЕЧАМ
+	if candleStats.ActiveCandleStats.Attempts > 0 {
+		activeAttempts := candleStats.ActiveCandleStats.Attempts
+		activeSuccessRate := float64(candleStats.ActiveCandleStats.Success) / float64(activeAttempts) * 100
+		activeNoDataRate := float64(candleStats.ActiveCandleStats.NoActiveCandle) / float64(activeAttempts) * 100
+		activeBelowTimeRate := float64(candleStats.ActiveCandleStats.BelowMinTime) / float64(activeAttempts) * 100
+
+		logger.Warn("   🔥 АКТИВНЫЕ свечи (попыток: %d):", activeAttempts)
+		logger.Warn("      • Успешно: %d (%.1f%%)", candleStats.ActiveCandleStats.Success, activeSuccessRate)
+		logger.Warn("      • Нет активной свечи: %d (%.1f%%)", candleStats.ActiveCandleStats.NoActiveCandle, activeNoDataRate)
+		logger.Warn("      • Мало времени: %d (%.1f%%)", candleStats.ActiveCandleStats.BelowMinTime, activeBelowTimeRate)
+		logger.Warn("      • Ниже порога: %d", candleStats.ActiveCandleStats.BelowThreshold)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.ActiveCandleStats.GrowthSignals,
+			candleStats.ActiveCandleStats.FallSignals)
+	}
+
+	// ✅ ИНТЕРВАЛЬНАЯ СТАТИСТИКА СИГНАЛОВ
+	if candleStats.IntervalStats.TotalSignals > 0 {
+		intervalDuration := now.Sub(candleStats.IntervalStats.StartTime)
+		logger.Warn("   📈 СИГНАЛЫ за интервал (%v):", intervalDuration.Round(time.Second))
+		logger.Warn("      • Всего: %d", candleStats.IntervalStats.TotalSignals)
+		logger.Warn("      • По закрытым свечам: %d", candleStats.IntervalStats.ClosedSignals)
+		logger.Warn("      • По активным свечам: %d", candleStats.IntervalStats.ActiveSignals)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.IntervalStats.GrowthSignals,
+			candleStats.IntervalStats.FallSignals)
+	}
+
+	// Сбрасываем общую статистику для следующего интервала
 	a.analyzeCallsCount = 0
 	a.analyzeTotalPoints = 0
 	a.analyzeTotalTime = 0
 	a.aggregatedStats = AggregatedStats{}
 
-	// ✅ СБРАСЫВАЕМ СТАТИСТИКУ АНАЛИЗА СВЕЧЕЙ
+	// ✅ СБРАСЫВАЕМ СТАТИСТИКУ СВЕЧЕЙ (сохраняем только интервальную)
 	a.candleStatsMu.Lock()
-	a.candleStats = CandleAnalyzeStats{}
+	// Сохраняем интервальную статистику, сбрасываем остальное
+	a.candleStats = CandleAnalyzeStats{
+		IntervalStats: struct {
+			StartTime     time.Time
+			ClosedSignals int
+			ActiveSignals int
+			TotalSignals  int
+			GrowthSignals int
+			FallSignals   int
+		}{
+			StartTime: now, // Начинаем новый интервал
+		},
+	}
 	a.candleStatsMu.Unlock()
 
 	a.lastLogTime = now
