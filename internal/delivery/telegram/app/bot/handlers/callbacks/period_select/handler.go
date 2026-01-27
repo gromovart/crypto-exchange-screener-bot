@@ -37,15 +37,15 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 	}
 
 	// Определяем период из callback data (формат: "period_5m")
-	periodStr := params.Data
-	if periodStr == "" {
+	period := params.Data
+	if period == "" {
 		return h.showPeriodsMenu(params)
 	}
 
 	// Определяем действие
 	var action string
-	if strings.HasPrefix(periodStr, "period_manage_") {
-		action = strings.TrimPrefix(periodStr, "period_manage_")
+	if strings.HasPrefix(period, "period_manage_") {
+		action = strings.TrimPrefix(period, "period_manage_")
 		return h.handlePeriodManagement(params, action)
 	}
 
@@ -57,7 +57,7 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 		Action: action,
 		UserID: params.User.ID,
 		ChatID: params.ChatID,
-		Value:  periodStr,
+		Value:  period,
 	}
 
 	// Вызываем сервис
@@ -190,11 +190,11 @@ func (h *periodSelectHandler) showRemovePeriodMenu(params handlers.HandlerParams
 	var buttons [][]map[string]string
 
 	for _, period := range params.User.PreferredPeriods {
-		periodStr := formatMinutesToPeriod(period)
-		callbackData := fmt.Sprintf("period_%s", periodStr)
+		period := formatMinutesToPeriod(period)
+		callbackData := fmt.Sprintf("period_%s", period)
 
 		buttons = append(buttons, []map[string]string{
-			{"text": periodStr, "callback_data": callbackData},
+			{"text": period, "callback_data": callbackData},
 		})
 	}
 

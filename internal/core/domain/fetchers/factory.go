@@ -54,7 +54,7 @@ func (f *MarketFetcherFactory) CreateBybitFetcherWithCandleSystem(
 	}
 
 	// Создаем фетчер со свечной системой
-	fetcher := NewPriceFetcher(bybitClient, storage, eventBus, candleSystem)
+	fetcher := NewPriceFetcher(bybitClient, storage, eventBus)
 	return fetcher, nil
 }
 
@@ -65,7 +65,7 @@ func (f *MarketFetcherFactory) CreateBybitFetcherWithClient(
 	eventBus *events.EventBus,
 	candleSystem *candle.CandleSystem,
 ) *BybitPriceFetcher {
-	return NewPriceFetcher(client, storage, eventBus, candleSystem)
+	return NewPriceFetcher(client, storage, eventBus)
 }
 
 // CreateSimpleBybitFetcher создает простой Bybit фетчер

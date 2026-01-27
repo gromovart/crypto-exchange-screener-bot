@@ -1,3 +1,4 @@
+// internal/infrastructure/persistence/postgres/models/users.go
 package models
 
 import (
@@ -6,7 +7,7 @@ import (
 	"time"
 )
 
-// User - основная модель пользователя
+// / User - основная модель пользователя
 type User struct {
 	ID         int    `db:"id" json:"id"`
 	TelegramID int64  `db:"telegram_id" json:"telegram_id"`
@@ -30,12 +31,14 @@ type User struct {
 	// Настройки анализа (плоские поля для маппинга с БД)
 	MinGrowthThreshold float64 `db:"min_growth_threshold" json:"min_growth_threshold"`
 	MinFallThreshold   float64 `db:"min_fall_threshold" json:"min_fall_threshold"`
-	// PreferredPeriods будет обрабатываться отдельно через json/array
-	MinVolumeFilter float64 `db:"min_volume_filter" json:"min_volume_filter"`
-	// ExcludePatterns будет обрабатываться отдельно через json/array
-	Language    string `db:"language" json:"language"`
-	Timezone    string `db:"timezone" json:"timezone"`
-	DisplayMode string `db:"display_mode" json:"display_mode"`
+	// ИЗМЕНЕНИЕ: убираем db:"-", теперь sqlx будет маппить эти поля
+	PreferredPeriods []int   `db:"preferred_periods" json:"preferred_periods"`
+	MinVolumeFilter  float64 `db:"min_volume_filter" json:"min_volume_filter"`
+	// ИЗМЕНЕНИЕ: убираем db:"-", теперь sqlx будет маппить эти поля
+	ExcludePatterns []string `db:"exclude_patterns" json:"exclude_patterns"`
+	Language        string   `db:"language" json:"language"`
+	Timezone        string   `db:"timezone" json:"timezone"`
+	DisplayMode     string   `db:"display_mode" json:"display_mode"`
 
 	// Статус
 	Role             string `db:"role" json:"role"` // user, premium, admin
@@ -52,10 +55,6 @@ type User struct {
 	UpdatedAt    time.Time `db:"updated_at" json:"updated_at"`
 	LastLoginAt  time.Time `db:"last_login_at" json:"last_login_at,omitempty"`
 	LastSignalAt time.Time `db:"last_signal_at" json:"last_signal_at,omitempty"`
-
-	// Дополнительные поля для удобства (не маппятся на БД напрямую)
-	PreferredPeriods []int    `db:"-" json:"preferred_periods"`
-	ExcludePatterns  []string `db:"-" json:"exclude_patterns"`
 }
 
 // Константы ролей пользователей

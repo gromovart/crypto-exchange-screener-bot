@@ -3,6 +3,7 @@ package adapters
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 )
 
@@ -86,9 +87,9 @@ func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
 	}
 }
 
-// PriceDataToPriceDataPoint конвертирует types.PriceData в types.PriceDataPoint
-func PriceDataToPriceDataPoint(data types.PriceData) types.PriceDataPoint {
-	return types.PriceDataPoint{
+// PriceDataToPriceDataPoint конвертирует storage.PriceData в storage.PriceDataPoint
+func PriceDataToPriceDataPoint(data storage.PriceData) storage.PriceDataPoint {
+	return storage.PriceDataPoint{
 		Price:     data.Price,
 		Timestamp: data.Timestamp,
 		Volume:    data.Volume24h,

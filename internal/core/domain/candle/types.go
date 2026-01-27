@@ -1,24 +1,11 @@
 // internal/core/domain/candle/types.go
+
 package candle
 
-import "time"
-
-// Candle - свеча (OHLCV)
-type Candle struct {
-	Symbol    string
-	Period    string // "5m", "15m", "30m", "1h", "4h", "1d"
-	Open      float64
-	High      float64
-	Low       float64
-	Close     float64
-	Volume    float64 // Объем в базовой валюте
-	VolumeUSD float64 // Объем в USD
-	Trades    int     // Количество сделок
-	StartTime time.Time
-	EndTime   time.Time
-	IsClosed  bool // Закрыта ли свеча
-	IsReal    bool // Реальные данные или построенные
-}
+import (
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"time"
+)
 
 // PricePoint - точка цены для построения свечи
 type PricePoint struct {
@@ -39,7 +26,7 @@ type CandleConfig struct {
 
 // BuildResult - результат построения свечи
 type BuildResult struct {
-	Candle   *Candle
+	Candle   *storage.Candle // Изменено на storage.Candle
 	Error    error
 	IsNew    bool
 	Duration time.Duration

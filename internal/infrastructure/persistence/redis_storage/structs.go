@@ -90,6 +90,25 @@ type PriceData struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
+type PriceDataPoint struct {
+	Price     float64   `json:"price"`
+	Timestamp time.Time `json:"timestamp"`
+	Volume    float64   `json:"volume"`
+}
+
+type GrowthAnalysis struct {
+	Symbol        string           `json:"symbol"`
+	Period        int              `json:"period"`
+	DataPoints    []PriceDataPoint `json:"data_points"`
+	IsGrowing     bool             `json:"is_growing"`
+	IsFalling     bool             `json:"is_falling"`
+	GrowthPercent float64          `json:"growth_percent"`
+	FallPercent   float64          `json:"fall_percent"`
+	MinPrice      float64          `json:"min_price"`
+	MaxPrice      float64          `json:"max_price"`
+	Volatility    float64          `json:"volatility"`
+}
+
 // PriceSnapshot текущий снапшот цены
 type PriceSnapshot struct {
 	Symbol       string    `json:"symbol"`
@@ -102,4 +121,29 @@ type PriceSnapshot struct {
 	Change24h    float64   `json:"change_24h"`
 	High24h      float64   `json:"high_24h"`
 	Low24h       float64   `json:"low_24h"`
+}
+
+// CandleConfig - конфигурация построителя
+type CandleConfig struct {
+	SupportedPeriods []string      // Поддерживаемые периоды
+	MaxHistory       int           // Максимальная история свечей
+	CleanupInterval  time.Duration // Интервал очистки
+	AutoBuild        bool          // Автоматическое построение
+}
+
+// Candle - свеча (OHLCV)
+type Candle struct {
+	Symbol       string
+	Period       string // "5m", "15m", "30m", "1h", "4h", "1d"
+	Open         float64
+	High         float64
+	Low          float64
+	Close        float64
+	Volume       float64 // Объем в базовой валюте
+	VolumeUSD    float64 // Объем в USD
+	Trades       int     // Количество сделок
+	StartTime    time.Time
+	EndTime      time.Time
+	IsClosedFlag bool // Закрыта ли свеча
+	IsRealFlag   bool // Реальные данные или построенные
 }

@@ -54,20 +54,57 @@ func (c *VolumeDeltaCalculator) Stop() {
 	select {
 	case <-c.stopCh:
 		// Уже остановлен
+		logger.Debug("⚠️ VolumeDeltaCalculator уже остановлен")
 	default:
 		close(c.stopCh)
+		logger.Debug("🛑 VolumeDeltaCalculator: отправлен сигнал остановки")
 	}
 }
 
 // startDeletionHandler обрабатывает асинхронное удаление записей
 func (c *VolumeDeltaCalculator) startDeletionHandler() {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("❌ Паника в startDeletionHandler: %v", r)
+		}
+	}()
+
+	// ✅ ИСПРАВЛЕНИЕ: Добавляем тикер для периодической очистки
+	cleanupTicker := time.NewTicker(30 * time.Second)
+	defer cleanupTicker.Stop()
+
+	logger.Debug("🔄 VolumeDeltaCalculator: запущен обработчик удаления")
+
 	for {
 		select {
 		case symbol := <-c.deleteQueue:
 			c.safeDelete(symbol)
+		case <-cleanupTicker.C:
+			c.cleanupExpired() // ✅ ДОБАВЛЕНО: Периодическая очистка
 		case <-c.stopCh:
+			logger.Debug("🛑 VolumeDeltaCalculator: обработчик удаления остановлен")
 			return
 		}
+	}
+}
+
+// cleanupExpired очищает все просроченные записи в кэше
+func (c *VolumeDeltaCalculator) cleanupExpired() {
+	c.volumeDeltaCacheMu.Lock()
+	defer c.volumeDeltaCacheMu.Unlock()
+
+	now := time.Now()
+	deleted := 0
+
+	for symbol, cache := range c.volumeDeltaCache {
+		if now.After(cache.expiration) {
+			delete(c.volumeDeltaCache, symbol)
+			deleted++
+		}
+	}
+
+	if deleted > 0 {
+		logger.Debug("🧹 VolumeDeltaCalculator: очищено %d просроченных записей кэша", deleted)
 	}
 }
 

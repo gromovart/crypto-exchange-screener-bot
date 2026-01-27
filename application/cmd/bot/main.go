@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -119,6 +121,7 @@ func main() {
 	// Запускаем приложение через Bootstrap
 	logger.Info("🚀 Запуск Crypto Exchange Screener Bot (архитектура Bootstrap)...")
 	runBootstrapMode(cfg, testMode)
+
 }
 
 // runBootstrapMode запускает приложение через Bootstrap
@@ -221,7 +224,44 @@ func runBootstrapMode(cfg *config.Config, testMode bool) {
 		}
 		os.Exit(1)
 	}
+	// Мониторинг горутин - добавить ПЕРЕД select
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
 
+		for range ticker.C {
+			count := runtime.NumGoroutine()
+			if count > 100 {
+				// Записываем стек в файл
+				stackFile := fmt.Sprintf("logs/goroutine_stack_%s.log",
+					time.Now().Format("20060102_150405"))
+
+				f, err := os.Create(stackFile)
+				if err == nil {
+					debug.WriteHeapDump(f.Fd())
+					f.Close()
+					logger.Warn("⚠️  DUMP сохранен в %s", stackFile)
+				}
+
+				// Также логируем в консоль (первые 10 строк)
+				buf := make([]byte, 1024*1024) // 1MB
+				n := runtime.Stack(buf, true)
+				stack := string(buf[:n])
+
+				lines := strings.Split(stack, "\n")
+				if len(lines) > 50 {
+					lines = lines[:50] // Только первые 50 строк
+				}
+
+				logger.Warn("⚠️  %d ГОРУТИН! Примеры:\n%s",
+					count, strings.Join(lines, "\n"))
+			} else if count > 50 {
+				logger.Warn("🧵 Много горутин: %d", count)
+			} else {
+				logger.Info("🧵 Горутин: %d", count)
+			}
+		}
+	}()
 	// Главный цикл ожидания
 	logger.Info("✅ Приложение успешно инициализировано!")
 	logger.Info("🛑 Нажмите Ctrl+C для остановки")

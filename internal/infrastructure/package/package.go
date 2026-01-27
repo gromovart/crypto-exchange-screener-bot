@@ -7,7 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	database "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/database"
 	postgres_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/factory"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -99,7 +99,7 @@ func (f *InfrastructureFactory) Initialize() error {
 
 	// 5. Создаем фабрику хранилищ (redis_storage_factory)
 	storageFactoryConfig := &redis_storage_factory.StorageFactoryConfig{
-		DefaultStorageConfig: &redis_storage.StorageConfig{
+		DefaultStorageConfig: &storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * 60 * time.Second,
@@ -192,7 +192,6 @@ func (f *InfrastructureFactory) Start() error {
 
 	f.running = true
 	logger.Info("✅ Все инфраструктурные компоненты запущены")
-	logger.Info("🔧 ОТЛАДКА InfrastructureFactory.Start(): завершено успешно")
 	return nil
 }
 
@@ -259,14 +258,12 @@ func (f *InfrastructureFactory) startStorageFactory() error {
 	}
 
 	if !f.storageFactory.IsRunning() {
-		logger.Info("🔧 ОТЛАДКА: Перед запуском storageFactory")
 		if err := f.storageFactory.Start(); err != nil {
 			logger.Warn("⚠️ Не удалось запустить StorageFactory: %v", err)
 			logger.Warn("⚠️ Детали ошибки: %+v", err)
 			return fmt.Errorf("ошибка запуска StorageFactory: %w", err)
 		}
 		logger.Info("✅ StorageFactory запущена")
-		logger.Info("🔧 ОТЛАДКА: storageFactory успешно запущена")
 	} else {
 		logger.Info("✅ StorageFactory уже запущена, пропускаем")
 	}
@@ -473,7 +470,7 @@ func (f *InfrastructureFactory) CreateStorageFactory() (*StorageFactory, error) 
 
 	if f.storageFactory == nil {
 		storageFactoryConfig := &redis_storage_factory.StorageFactoryConfig{
-			DefaultStorageConfig: &redis_storage.StorageConfig{
+			DefaultStorageConfig: &storage.StorageConfig{
 				MaxHistoryPerSymbol: 10000,
 				MaxSymbols:          1000,
 				CleanupInterval:     5 * 60,

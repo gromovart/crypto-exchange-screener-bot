@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/formatters/header.go
 package formatters
 
 import (
@@ -35,21 +34,26 @@ func (f *HeaderFormatter) GetContractType(symbol string) string {
 
 // ExtractTimeframe извлекает таймфрейм из периода анализа
 func (f *HeaderFormatter) ExtractTimeframe(period string) string {
-	switch {
-	case strings.Contains(period, "5"):
+	// Нормализуем строку
+	period = strings.ToLower(strings.TrimSpace(period))
+
+	// ТОЛЬКО реальные форматы из CounterAnalyzer
+	switch period {
+	case "5m":
 		return "5мин"
-	case strings.Contains(period, "15"):
+	case "15m":
 		return "15мин"
-	case strings.Contains(period, "30"):
+	case "30m":
 		return "30мин"
-	case strings.Contains(period, "1 час"):
+	case "1h":
 		return "1ч"
-	case strings.Contains(period, "4"):
+	case "4h":
 		return "4ч"
-	case strings.Contains(period, "1 день"):
+	case "1d":
 		return "1д"
 	default:
-		return "1мин"
+		// На случай, если придет что-то неожиданное
+		return "Не удалось определить период"
 	}
 }
 

@@ -42,6 +42,27 @@ func (f *TechnicalFormatter) FormatRSI(rsi float64) string {
 	return fmt.Sprintf("RSI: %.1f %s (%s)", rsi, emoji, description)
 }
 
+// FormatRSIWithStatus форматирует RSI с готовым статусом (для реальных данных из CounterAnalyzer)
+func (f *TechnicalFormatter) FormatRSIWithStatus(rsi float64, rsiStatus string) string {
+	var emoji string
+
+	// Определяем эмодзи по статусу
+	switch rsiStatus {
+	case "сильная перекупленность", "перекупленность":
+		emoji = "🔴"
+	case "бычий настрой":
+		emoji = "🟢"
+	case "медвежий настрой":
+		emoji = "🟠"
+	case "сильная перепроданность":
+		emoji = "🔴"
+	default: // "нейтральный", "недостаточно данных"
+		emoji = "⚪"
+	}
+
+	return fmt.Sprintf("RSI: %.1f %s (%s)", rsi, emoji, rsiStatus)
+}
+
 // FormatMACD форматирует MACD с описанием сигнала
 func (f *TechnicalFormatter) FormatMACD(macdSignal float64) string {
 	var emoji, description string
@@ -66,4 +87,9 @@ func (f *TechnicalFormatter) FormatMACD(macdSignal float64) string {
 	}
 
 	return fmt.Sprintf("MACD: %s %s", emoji, description)
+}
+
+// FormatMACDWithDescription форматирует MACD с готовым описанием (для реальных данных из CounterAnalyzer)
+func (f *TechnicalFormatter) FormatMACDWithDescription(macdDescription string) string {
+	return fmt.Sprintf("MACD: %s", macdDescription)
 }

@@ -10,8 +10,8 @@ import (
 type PeriodCounter struct {
 	Symbol        string
 	Period        string // "5m", "15m", "30m", "1h", "4h", "1d"
-	Confirmations int    // текущее количество подтверждений
-	Required      int    // сколько нужно подтверждений
+	Direction     string // "growth" или "fall" - текущее направление
+	Confirmations int    // текущее количество подтверждений ПОДРЯД в одном направлении
 	LastUpdate    time.Time
 	LastReset     time.Time
 }
@@ -29,29 +29,21 @@ func NewConfirmationManager() *ConfirmationManager {
 	}
 }
 
-// GetRequiredConfirmations возвращает необходимое количество подтверждений для периода
+// GetRequiredConfirmations возвращает визуальное необходимое количество подтверждений
+// ВСЕГДА 6 для единой шкалы прогресса (100%)
 func GetRequiredConfirmations(period string) int {
-	switch period {
-	case "5m":
-		return 3 // 3 подтверждения за 5 минут
-	case "15m":
-		return 3 // 3 подтверждения за 15 минут
-	case "30m":
-		return 4 // 4 подтверждения за 30 минут
-	case "1h":
-		return 6 // 6 подтверждений за 1 час
-	case "4h":
-		return 8 // 8 подтверждений за 4 часа
-	case "1d":
-		return 12 // 12 подтверждений за 1 день
-	default:
-		return 3 // по умолчанию
-	}
+	return 6 // Визуальная цель всегда 6
+}
+
+// GetSignalThreshold возвращает порог отправки сигнала (каждые 3 подтверждения)
+func GetSignalThreshold() int {
+	return 3
 }
 
 // AddConfirmation добавляет подтверждение для символа и периода
-// Возвращает true, если достигнуто необходимое количество подтверждений
-func (cm *ConfirmationManager) AddConfirmation(symbol, period string) (bool, int) {
+// direction: "growth" (рост) или "fall" (падение)
+// Возвращает true, если достигнут порог сигнала (3, 6, 9... подтверждений ПОДРЯД)
+func (cm *ConfirmationManager) AddConfirmation(symbol, period, direction string) (bool, int) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -64,26 +56,32 @@ func (cm *ConfirmationManager) AddConfirmation(symbol, period string) (bool, int
 		counter = &PeriodCounter{
 			Symbol:     symbol,
 			Period:     period,
-			Required:   GetRequiredConfirmations(period),
+			Direction:  direction,
 			LastUpdate: now,
 			LastReset:  now,
 		}
 		cm.counters[key] = counter
 	}
 
-	// Проверяем, не нужно ли сбросить счетчик
-	// (если прошло больше времени чем период)
+	// Проверяем, не нужно ли сбросить счетчик (если прошло больше времени чем период)
 	if shouldResetCounter(counter, now) {
 		counter.Confirmations = 0
+		counter.Direction = direction
 		counter.LastReset = now
+	}
+
+	// Если направление изменилось → сбрасываем счетчик
+	if counter.Direction != direction {
+		counter.Confirmations = 0
+		counter.Direction = direction
 	}
 
 	// Добавляем подтверждение
 	counter.Confirmations++
 	counter.LastUpdate = now
 
-	// Проверяем, достигнуто ли необходимое количество
-	if counter.Confirmations >= counter.Required {
+	// Проверяем, достигнут ли порог сигнала (каждые 3 подтверждения)
+	if counter.Confirmations >= GetSignalThreshold() && counter.Confirmations%GetSignalThreshold() == 0 {
 		return true, counter.Confirmations
 	}
 
@@ -103,16 +101,16 @@ func (cm *ConfirmationManager) Reset(symbol, period string) {
 }
 
 // GetProgress возвращает текущий прогресс для символа и периода
-func (cm *ConfirmationManager) GetProgress(symbol, period string) (int, int) {
+func (cm *ConfirmationManager) GetProgress(symbol, period string) (int, string) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
 	key := symbol + ":" + period
 	if counter, exists := cm.counters[key]; exists {
-		return counter.Confirmations, counter.Required
+		return counter.Confirmations, counter.Direction
 	}
 
-	return 0, GetRequiredConfirmations(period)
+	return 0, ""
 }
 
 // shouldResetCounter проверяет, нужно ли сбросить счетчик
@@ -151,4 +149,16 @@ func (cm *ConfirmationManager) Cleanup(maxAge time.Duration) {
 			delete(cm.counters, key)
 		}
 	}
+}
+
+// GetDirection возвращает текущее направление для символа и периода
+func (cm *ConfirmationManager) GetDirection(symbol, period string) string {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	key := symbol + ":" + period
+	if counter, exists := cm.counters[key]; exists {
+		return counter.Direction
+	}
+	return ""
 }

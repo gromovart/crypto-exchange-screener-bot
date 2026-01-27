@@ -12,13 +12,13 @@ import (
 // selectPeriod обрабатывает выбор периода (5m, 15m, 30m, 1h, 4h, 1d)
 func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsResult, error) {
 	// Получаем строку периода
-	periodStr, ok := params.Value.(string)
+	period, ok := params.Value.(string)
 	if !ok {
 		return SignalSettingsResult{}, fmt.Errorf("неверный формат периода")
 	}
 
 	// Преобразуем период в минуты
-	periodInMinutes, err := convertPeriodToMinutes(periodStr)
+	periodInMinutes, err := convertPeriodToMinutes(period)
 	if err != nil {
 		return SignalSettingsResult{}, fmt.Errorf("неверный период: %w", err)
 	}
@@ -75,12 +75,12 @@ func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsR
 	// Сообщение в зависимости от действия
 	var message string
 	if action == "added" {
-		message = fmt.Sprintf("✅ Период %s добавлен", periodStr)
+		message = fmt.Sprintf("✅ Период %s добавлен", period)
 	} else {
-		message = fmt.Sprintf("❌ Период %s удален", periodStr)
+		message = fmt.Sprintf("❌ Период %s удален", period)
 	}
 
-	logger.Info("Период %s для пользователя %d: %s", action, params.UserID, periodStr)
+	logger.Info("Период %s для пользователя %d: %s", action, params.UserID, period)
 
 	return SignalSettingsResult{
 		Success:      true,
@@ -89,7 +89,7 @@ func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsR
 		NewValue:     newPeriods,
 		UserID:       params.UserID,
 		Metadata: map[string]interface{}{
-			"period":      periodStr,
+			"period":      period,
 			"period_min":  periodInMinutes,
 			"action":      action,
 			"total_count": len(newPeriods),
@@ -98,9 +98,9 @@ func (s *serviceImpl) selectPeriod(params SignalSettingsParams) (SignalSettingsR
 }
 
 // convertPeriodToMinutes преобразует строку периода в минуты
-func convertPeriodToMinutes(periodStr string) (int, error) {
+func convertPeriodToMinutes(period string) (int, error) {
 	// Убираем префикс "period_" если есть
-	cleanStr := strings.TrimPrefix(periodStr, "period_")
+	cleanStr := strings.TrimPrefix(period, "period_")
 
 	switch strings.ToLower(cleanStr) {
 	case "5m":
@@ -132,18 +132,18 @@ func convertPeriodToMinutes(periodStr string) (int, error) {
 				return num * 60, nil
 			}
 		}
-		return 0, fmt.Errorf("неподдерживаемый период: %s", periodStr)
+		return 0, fmt.Errorf("неподдерживаемый период: %s", period)
 	}
 }
 
 // removePeriod удаляет период из списка
 func (s *serviceImpl) removePeriod(params SignalSettingsParams) (SignalSettingsResult, error) {
-	periodStr, ok := params.Value.(string)
+	period, ok := params.Value.(string)
 	if !ok {
 		return SignalSettingsResult{}, fmt.Errorf("неверный формат периода")
 	}
 
-	periodInMinutes, err := convertPeriodToMinutes(periodStr)
+	periodInMinutes, err := convertPeriodToMinutes(period)
 	if err != nil {
 		return SignalSettingsResult{}, fmt.Errorf("неверный период: %w", err)
 	}
@@ -168,7 +168,7 @@ func (s *serviceImpl) removePeriod(params SignalSettingsParams) (SignalSettingsR
 	if !found {
 		return SignalSettingsResult{
 			Success:      true,
-			Message:      fmt.Sprintf("Период %s не найден в списке", periodStr),
+			Message:      fmt.Sprintf("Период %s не найден в списке", period),
 			UpdatedField: "preferred_periods",
 			NewValue:     user.PreferredPeriods,
 			UserID:       params.UserID,
@@ -189,11 +189,11 @@ func (s *serviceImpl) removePeriod(params SignalSettingsParams) (SignalSettingsR
 		return SignalSettingsResult{}, fmt.Errorf("ошибка обновления настроек: %w", err)
 	}
 
-	logger.Info("Период удален для пользователя %d: %s", params.UserID, periodStr)
+	logger.Info("Период удален для пользователя %d: %s", params.UserID, period)
 
 	return SignalSettingsResult{
 		Success:      true,
-		Message:      fmt.Sprintf("✅ Период %s успешно удален", periodStr),
+		Message:      fmt.Sprintf("✅ Период %s успешно удален", period),
 		UpdatedField: "preferred_periods",
 		NewValue:     newPeriods,
 		UserID:       params.UserID,

@@ -30,6 +30,11 @@ type CounterParams struct {
 	MACDSignal         float64
 	VolumeDelta        float64
 	VolumeDeltaPercent float64
+
+	// НОВЫЕ ПОЛЯ: Данные прогресса из сигнала
+	ProgressFilledGroups int     `json:"progress_filled_groups,omitempty"`
+	ProgressTotalGroups  int     `json:"progress_total_groups,omitempty"`
+	ProgressPercentage   float64 `json:"progress_percentage,omitempty"`
 }
 
 // CounterResult результат Exec

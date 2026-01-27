@@ -2,7 +2,7 @@
 package subscription_manager
 
 import (
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -23,13 +23,13 @@ func (f SubscriberFunc) OnSymbolRemoved(symbol string) {
 // NewSubscriptionManager создает нового менеджера подписок
 func NewSubscriptionManager() *SubscriptionManager {
 	return &SubscriptionManager{
-		subscribers:    make(map[string]map[redis_storage.SubscriberInterface]struct{}),
-		allSubscribers: make([]redis_storage.SubscriberInterface, 0),
+		subscribers:    make(map[string]map[storage.SubscriberInterface]struct{}),
+		allSubscribers: make([]storage.SubscriberInterface, 0),
 	}
 }
 
 // Subscribe подписывает на обновления символа
-func (sm *SubscriptionManager) Subscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
+func (sm *SubscriptionManager) Subscribe(symbol string, subscriber storage.SubscriberInterface) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -39,14 +39,14 @@ func (sm *SubscriptionManager) Subscribe(symbol string, subscriber redis_storage
 	}
 
 	if _, exists := sm.subscribers[symbol]; !exists {
-		sm.subscribers[symbol] = make(map[redis_storage.SubscriberInterface]struct{})
+		sm.subscribers[symbol] = make(map[storage.SubscriberInterface]struct{})
 	}
 	sm.subscribers[symbol][subscriber] = struct{}{}
 	return nil
 }
 
 // Unsubscribe отписывает от обновлений символа
-func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
+func (sm *SubscriptionManager) Unsubscribe(symbol string, subscriber storage.SubscriberInterface) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 

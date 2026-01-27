@@ -23,22 +23,3 @@ type GrowthSignal struct {
 	Type          string             `json:"type,omitempty"`     // Тип сигнала: "counter_growth", "counter_fall", "growth", "fall"
 	Metadata      *analysis.Metadata `json:"metadata,omitempty"` // Метаданные анализа
 }
-
-type PriceDataPoint struct {
-	Price     float64   `json:"price"`
-	Timestamp time.Time `json:"timestamp"`
-	Volume    float64   `json:"volume"`
-}
-
-type GrowthAnalysis struct {
-	Symbol        string           `json:"symbol"`
-	Period        int              `json:"period"`
-	DataPoints    []PriceDataPoint `json:"data_points"`
-	IsGrowing     bool             `json:"is_growing"`
-	IsFalling     bool             `json:"is_falling"`
-	GrowthPercent float64          `json:"growth_percent"`
-	FallPercent   float64          `json:"fall_percent"`
-	MinPrice      float64          `json:"min_price"`
-	MaxPrice      float64          `json:"max_price"`
-	Volatility    float64          `json:"volatility"`
-}

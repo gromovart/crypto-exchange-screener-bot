@@ -2,17 +2,22 @@
 package candle
 
 import (
+	"fmt"
+	"math"
 	"sync"
 	"time"
 
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // CandleEngine - движок построения свечей
 type CandleEngine struct {
-	storage *CandleStorage
-	config  CandleConfig
+	storage  storage.CandleStorageInterface
+	config   storage.CandleConfig
+	eventBus *events.EventBus
 
 	// Каналы для обработки
 	priceUpdates chan storage.PriceData
@@ -20,34 +25,74 @@ type CandleEngine struct {
 	wg           sync.WaitGroup
 
 	// Статистика
-	buildErrors  int
-	buildSuccess int
-	totalBuilds  int
-	statsMu      sync.RWMutex
+	buildErrors   int
+	buildSuccess  int
+	totalBuilds   int
+	closedCandles int
+	lastStatsLog  time.Time
+	statsInterval time.Duration
+	statsMu       sync.RWMutex
+
+	// Подписчик на события
+	priceSubscriber types.EventSubscriber
 }
 
 // NewCandleEngine создает новый движок свечей
-func NewCandleEngine(candleStorage *CandleStorage, config CandleConfig) *CandleEngine {
-	return &CandleEngine{
-		storage:      candleStorage,
-		config:       config,
-		priceUpdates: make(chan storage.PriceData, 10000),
-		stopCh:       make(chan struct{}),
+func NewCandleEngine(
+	candleStorage storage.CandleStorageInterface,
+	config storage.CandleConfig,
+	eventBus *events.EventBus, // НОВЫЙ параметр
+) *CandleEngine {
+	engine := &CandleEngine{
+		storage:       candleStorage,
+		config:        config,
+		eventBus:      eventBus, // НОВОЕ
+		priceUpdates:  make(chan storage.PriceData, 50000),
+		stopCh:        make(chan struct{}),
+		lastStatsLog:  time.Now(),
+		statsInterval: 60 * time.Second,
 	}
+
+	// Создаем подписчика на события цен
+	engine.createPriceSubscriber()
+
+	return engine
 }
 
 // Start запускает движок
 func (ce *CandleEngine) Start() error {
 	logger.Info("🚀 Запуск CandleEngine...")
 
+	// ДОБАВЛЯЕМ: Проверяем наличие EventBus
+	if ce.eventBus == nil {
+		logger.Error("❌ CandleEngine: EventBus не инициализирован!")
+		return fmt.Errorf("EventBus не инициализирован")
+	}
+
+	if ce.priceSubscriber == nil {
+		logger.Error("❌ CandleEngine: подписчик не создан!")
+		return fmt.Errorf("подписчик не создан")
+	}
+
+	// Подписываемся на события цен
+	logger.Info("🔗 CandleEngine: подписываемся на EventPriceUpdated через EventBus...")
+
+	// ИСПРАВЛЕНО: Subscribe не возвращает ошибку, просто вызываем
+	ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
+
+	// Проверяем подписку - просто логируем
+	logger.Info("✅ CandleEngine: успешно подписался на EventPriceUpdated")
+
 	// Запускаем обработчики
 	ce.wg.Add(1)
 	go ce.processPriceUpdates()
+	logger.Debug("🔄 CandleEngine: запущен обработчик цен")
 
 	// Запускаем очистку если настроено
 	if ce.config.CleanupInterval > 0 {
 		ce.wg.Add(1)
 		go ce.cleanupRoutine()
+		logger.Debug("🧹 CandleEngine: запущена очистка")
 	}
 
 	logger.Info("✅ CandleEngine запущен")
@@ -58,6 +103,12 @@ func (ce *CandleEngine) Start() error {
 func (ce *CandleEngine) Stop() error {
 	logger.Info("🛑 Остановка CandleEngine...")
 
+	// Отписываемся от событий
+	if ce.eventBus != nil && ce.priceSubscriber != nil {
+		ce.eventBus.Unsubscribe(types.EventPriceUpdated, ce.priceSubscriber)
+		logger.Info("✅ CandleEngine отписался от EventPriceUpdated")
+	}
+
 	close(ce.stopCh)
 	ce.wg.Wait()
 
@@ -65,19 +116,89 @@ func (ce *CandleEngine) Stop() error {
 	return nil
 }
 
-// OnPriceUpdate вызывается при новой цене
-func (ce *CandleEngine) OnPriceUpdate(priceData storage.PriceData) {
-	select {
-	case ce.priceUpdates <- priceData:
-		// Успешно добавлено в очередь
-	default:
-		ce.statsMu.Lock()
-		ce.buildErrors++
-		ce.statsMu.Unlock()
+// createPriceSubscriber создает подписчика на события цен
+func (ce *CandleEngine) createPriceSubscriber() {
+	logger.Info("👤 CandleEngine: создание подписчика на события цен...")
 
-		logger.Warn("⚠️ Очередь цен CandleEngine переполнена, пропускаем цену %s",
-			priceData.Symbol)
+	ce.priceSubscriber = events.NewBaseSubscriber(
+		"candle_engine",
+		[]types.EventType{types.EventPriceUpdated},
+		ce.handlePriceEvent,
+	)
+
+	logger.Info("✅ CandleEngine: подписчик создан (имя: candle_engine)")
+}
+
+// handlePriceEvent обрабатывает события цен из EventBus
+func (ce *CandleEngine) handlePriceEvent(event types.Event) error {
+	logger.Warn("🕯️ CandleEngine получил событие цены: %s", event.Type)
+
+	// ДОБАВЛЯЕМ: Логирование деталей события
+	logger.Info("📨 CandleEngine: Событие %s в %v", event.Type, event.Timestamp.Format("15:04:05.000"))
+
+	switch event.Type {
+	case types.EventPriceUpdated:
+		// ДОБАВЛЯЕМ: Проверяем тип данных
+		logger.Debug("📊 CandleEngine: обработка EventPriceUpdated")
+
+		if priceData, ok := event.Data.(storage.PriceData); ok {
+			// ДОБАВЛЯЕМ: Логирование одной цены для примера
+			logger.Debug("💰 CandleEngine: цена %s: %.6f (объем: %.0f USD)",
+				priceData.Symbol, priceData.Price, priceData.VolumeUSD)
+
+			// Отправляем цену в канал для асинхронной обработки
+			select {
+			case ce.priceUpdates <- priceData:
+				// Успешно добавлено в очередь
+				logger.Debug("📥 CandleEngine: цена %s добавлена в очередь (размер очереди: %d)",
+					priceData.Symbol, len(ce.priceUpdates))
+			default:
+				ce.statsMu.Lock()
+				ce.buildErrors++
+				ce.statsMu.Unlock()
+
+				logger.Warn("⚠️ Очередь цен CandleEngine переполнена, пропускаем цену %s",
+					priceData.Symbol)
+			}
+		} else if priceDataList, ok := event.Data.([]storage.PriceData); ok {
+			// ДОБАВЛЯЕМ: Обработка массива цен
+			logger.Info("📦 CandleEngine: получен массив из %d цен", len(priceDataList))
+
+			// Обрабатываем первую цену для логирования
+			if len(priceDataList) > 0 {
+				logger.Debug("💰 CandleEngine: первая цена %s: %.6f",
+					priceDataList[0].Symbol, priceDataList[0].Price)
+			}
+
+			// Отправляем все цены в очередь
+			sentCount := 0
+			for _, priceData := range priceDataList {
+				select {
+				case ce.priceUpdates <- priceData:
+					sentCount++
+				default:
+					ce.statsMu.Lock()
+					ce.buildErrors++
+					ce.statsMu.Unlock()
+
+					logger.Warn("⚠️ Очередь переполнена, пропускаем цену %s", priceData.Symbol)
+					break // Прерываем цикл при переполнении
+				}
+			}
+
+			logger.Debug("📥 CandleEngine: отправлено %d/%d цен в очередь", sentCount, len(priceDataList))
+		} else {
+			// ДОБАВЛЯЕМ: Логирование неожиданного типа данных
+			logger.Warn("⚠️ CandleEngine: неожиданный тип данных в событии: %T", event.Data)
+
+			// Пробуем вывести структуру данных для отладки
+			logger.Debug("🔍 CandleEngine: данные события: %+v", event.Data)
+		}
+	default:
+		logger.Debug("📨 CandleEngine: неизвестный тип события: %s", event.Type)
 	}
+
+	return nil
 }
 
 // processPriceUpdates обрабатывает обновления цен
@@ -131,6 +252,20 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 
 	// Проверяем, не нужно ли закрыть свечу
 	if ce.shouldCloseCandle(candle, period) {
+		// Логируем информацию о закрытии
+		elapsed := time.Now().Sub(candle.StartTime)
+		expectedDuration := ce.getExpectedDuration(period)
+		completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+		if completionPercent >= 95.0 {
+			changePercent := ((candle.Close - candle.Open) / candle.Open) * 100
+			// Вариант B: Только значимые изменения
+			if math.Abs(changePercent) > 0.05 { // > 0.05%
+				logger.Debug("📊 CandleEngine: значимое закрытие %s %s: %.2f%%",
+					symbol, period, changePercent)
+			}
+		}
+
 		ce.closeCandle(candle)
 		candle = ce.createNewCandle(symbol, period, priceData)
 		ce.storage.SaveActiveCandle(candle)
@@ -146,6 +281,16 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 	ce.updateCandle(candle, priceData)
 	ce.storage.SaveActiveCandle(candle)
 
+	// Логируем обновление если свеча почти завершена
+	elapsed := time.Now().Sub(candle.StartTime)
+	expectedDuration := ce.getExpectedDuration(period)
+	completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+	if completionPercent >= 80.0 && completionPercent < 95.0 {
+		logger.Debug("⏳ CandleEngine: обновляем почти завершенную свечу %s %s (%.0f%% завершено)",
+			symbol, period, completionPercent)
+	}
+
 	return BuildResult{
 		Candle:   candle,
 		IsNew:    false,
@@ -155,20 +300,44 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 
 // getOrCreateCandle получает или создает свечу
 func (ce *CandleEngine) getOrCreateCandle(symbol, period string,
-	priceData storage.PriceData) (*Candle, error) {
+	priceData storage.PriceData) (*storage.Candle, error) {
 
 	// Пробуем получить активную свечу
-	if candle, exists := ce.storage.GetActiveCandle(symbol, period); exists {
-		return candle, nil
+	if candleInterface, exists := ce.storage.GetActiveCandle(symbol, period); exists {
+		// Конвертируем интерфейс в *Candle
+		if candle, ok := candleInterface.(*storage.Candle); ok {
+			return candle, nil
+		}
+		// Если это не *Candle, создаем новый из интерфейса
+		return ce.convertCandleInterface(candleInterface), nil
 	}
 
 	// Создаем новую свечу
 	return ce.createNewCandle(symbol, period, priceData), nil
 }
 
+// convertCandleInterface конвертирует интерфейс в *Candle
+func (ce *CandleEngine) convertCandleInterface(candleInterface storage.CandleInterface) *storage.Candle {
+	return &storage.Candle{
+		Symbol:       candleInterface.GetSymbol(),
+		Period:       candleInterface.GetPeriod(),
+		Open:         candleInterface.GetOpen(),
+		High:         candleInterface.GetHigh(),
+		Low:          candleInterface.GetLow(),
+		Close:        candleInterface.GetClose(),
+		Volume:       candleInterface.GetVolume(),
+		VolumeUSD:    candleInterface.GetVolumeUSD(),
+		Trades:       candleInterface.GetTrades(),
+		StartTime:    candleInterface.GetStartTime(),
+		EndTime:      candleInterface.GetEndTime(),
+		IsClosedFlag: candleInterface.IsClosed(),
+		IsRealFlag:   candleInterface.IsReal(),
+	}
+}
+
 // createNewCandle создает новую свечу
 func (ce *CandleEngine) createNewCandle(symbol, period string,
-	priceData storage.PriceData) *Candle {
+	priceData storage.PriceData) *storage.Candle {
 
 	now := time.Now()
 	price := priceData.Price
@@ -177,20 +346,20 @@ func (ce *CandleEngine) createNewCandle(symbol, period string,
 	startTime := ce.calculateCandleStartTime(now, period)
 	endTime := ce.calculateCandleEndTime(startTime, period)
 
-	return &Candle{
-		Symbol:    symbol,
-		Period:    period,
-		Open:      price,
-		High:      price,
-		Low:       price,
-		Close:     price,
-		Volume:    priceData.Volume24h,
-		VolumeUSD: priceData.VolumeUSD,
-		Trades:    1,
-		StartTime: startTime,
-		EndTime:   endTime,
-		IsClosed:  false,
-		IsReal:    price > 0,
+	return &storage.Candle{
+		Symbol:       symbol,
+		Period:       period,
+		Open:         price,
+		High:         price,
+		Low:          price,
+		Close:        price,
+		Volume:       priceData.Volume24h,
+		VolumeUSD:    priceData.VolumeUSD,
+		Trades:       1,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		IsClosedFlag: false,
+		IsRealFlag:   price > 0,
 	}
 }
 
@@ -258,26 +427,72 @@ func (ce *CandleEngine) calculateCandleEndTime(startTime time.Time, period strin
 }
 
 // shouldCloseCandle проверяет, нужно ли закрыть свечу
-func (ce *CandleEngine) shouldCloseCandle(candle *Candle, period string) bool {
-	if candle.IsClosed {
+func (ce *CandleEngine) shouldCloseCandle(candle *storage.Candle, period string) bool {
+	// 1. Если свеча уже закрыта - да
+	if candle.IsClosedFlag {
 		return true
 	}
 
-	// Если текущее время после времени окончания свечи
-	if time.Now().After(candle.EndTime) {
+	now := time.Now()
+
+	// 2. Если текущее время после времени окончания свечи - закрываем
+	if now.After(candle.EndTime) {
+		logger.Debug("🕐 CandleEngine: закрываем свечу %s %s (время окончания: %s, сейчас: %s)",
+			candle.Symbol, period,
+			candle.EndTime.Format("15:04:05"), now.Format("15:04:05"))
 		return true
 	}
 
-	// Для тестирования: закрываем если свеча слишком старая
-	if !candle.IsReal && time.Since(candle.StartTime) > 2*time.Minute {
+	// 3. Если свеча слишком старая (больше чем 2 периода) - закрываем как бракованную
+	elapsed := now.Sub(candle.StartTime)
+	expectedDuration := ce.getExpectedDuration(period)
+
+	if elapsed > expectedDuration*2 {
+		logger.Warn("⚠️ CandleEngine: закрываем бракованную свечу %s %s (слишком старая: %v, ожидалось: %v)",
+			candle.Symbol, period, elapsed.Round(time.Second), expectedDuration)
+		return true
+	}
+
+	// 4. Для тестового режима: если свеча ненастоящая и старая
+	if !candle.IsRealFlag && elapsed > 2*time.Minute {
+		return true
+	}
+
+	// 5. НОВОЕ: если прошло >95% времени свечи, закрываем её заранее
+	// Это гарантирует что свеча будет закрыта даже если цена пришла чуть раньше
+	completionPercent := float64(elapsed) / float64(expectedDuration) * 100
+
+	if completionPercent >= 95.0 {
+		logger.Debug("⚡ CandleEngine: досрочно закрываем свечу %s %s (%.0f%% завершено)",
+			candle.Symbol, period, completionPercent)
 		return true
 	}
 
 	return false
 }
 
+// getExpectedDuration возвращает ожидаемую длительность периода
+func (ce *CandleEngine) getExpectedDuration(period string) time.Duration {
+	switch period {
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "30m":
+		return 30 * time.Minute
+	case "1h":
+		return 1 * time.Hour
+	case "4h":
+		return 4 * time.Hour
+	case "1d":
+		return 24 * time.Hour
+	default:
+		return 15 * time.Minute
+	}
+}
+
 // updateCandle обновляет свечу новой ценой
-func (ce *CandleEngine) updateCandle(candle *Candle, priceData storage.PriceData) {
+func (ce *CandleEngine) updateCandle(candle *storage.Candle, priceData storage.PriceData) {
 	price := priceData.Price
 
 	// Обновляем high/low
@@ -297,14 +512,15 @@ func (ce *CandleEngine) updateCandle(candle *Candle, priceData storage.PriceData
 	candle.Trades++
 }
 
-// closeCandle закрывает свечу
-func (ce *CandleEngine) closeCandle(candle *Candle) {
+// closeCandle закрывает свечу - УБРАНО ЛОГИРОВАНИЕ
+func (ce *CandleEngine) closeCandle(candle *storage.Candle) {
 	candle.EndTime = time.Now()
-	candle.IsClosed = true
+	candle.IsClosedFlag = true
 	ce.storage.CloseAndArchiveCandle(candle)
+	// Убрано логирование каждой закрытой свечи
 }
 
-// recordBuildResult записывает результат построения
+// recordBuildResult записывает результат построения и логирует статистику раз в statsInterval
 func (ce *CandleEngine) recordBuildResult(result BuildResult) {
 	ce.statsMu.Lock()
 	defer ce.statsMu.Unlock()
@@ -313,8 +529,36 @@ func (ce *CandleEngine) recordBuildResult(result BuildResult) {
 
 	if result.Error != nil {
 		ce.buildErrors++
+		logger.Debug("❌ CandleEngine: ошибка построения свечи: %v", result.Error)
 	} else {
 		ce.buildSuccess++
+		// Если свеча новая (была закрыта старая и создана новая)
+		if result.IsNew {
+			ce.closedCandles++
+			// Логируем закрытие свечи только для статистики
+			if ce.closedCandles%100 == 0 { // Каждую 100-ю свечу
+				logger.Info("📊 CandleEngine: закрыто %d свечей", ce.closedCandles)
+			}
+		}
+	}
+
+	// Логировать агрегированную статистику раз в statsInterval
+	now := time.Now()
+	if now.Sub(ce.lastStatsLog) >= ce.statsInterval {
+		var successRate float64
+		if ce.totalBuilds > 0 {
+			successRate = float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100
+		}
+
+		logger.Info("📊 Статистика CandleEngine за %v: обработано %d свечей, закрыто %d, успешно: %.2f%%",
+			ce.statsInterval, ce.totalBuilds, ce.closedCandles, successRate)
+
+		// Сбросить счетчики для следующего интервала
+		ce.totalBuilds = 0
+		ce.buildSuccess = 0
+		ce.buildErrors = 0
+		ce.closedCandles = 0
+		ce.lastStatsLog = now
 	}
 }
 
@@ -346,16 +590,56 @@ func (ce *CandleEngine) GetStats() map[string]interface{} {
 	ce.statsMu.RLock()
 	defer ce.statsMu.RUnlock()
 
-	storageStats := ce.storage.GetStats()
+	var storageStats interface{}
+	if stats := ce.storage.GetStats(); stats != nil {
+		storageStats = stats
+	}
+
+	var successRate float64
+	if ce.totalBuilds > 0 {
+		successRate = float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100
+	}
 
 	return map[string]interface{}{
 		"storage_stats": storageStats,
 		"engine_stats": map[string]interface{}{
-			"total_builds":  ce.totalBuilds,
-			"build_success": ce.buildSuccess,
-			"build_errors":  ce.buildErrors,
-			"queue_size":    len(ce.priceUpdates),
-			"success_rate":  float64(ce.buildSuccess) / float64(ce.totalBuilds) * 100,
+			"total_builds":   ce.totalBuilds,
+			"build_success":  ce.buildSuccess,
+			"build_errors":   ce.buildErrors,
+			"closed_candles": ce.closedCandles, // Добавлено в статистику
+			"queue_size":     len(ce.priceUpdates),
+			"success_rate":   successRate,
+			"stats_interval": ce.statsInterval.String(),
 		},
 	}
+}
+
+// subscribeToEvents подписывается на события через EventBus
+func (ce *CandleEngine) subscribeToEvents() error {
+	if ce.eventBus == nil {
+		return fmt.Errorf("EventBus не инициализирован")
+	}
+
+	if ce.priceSubscriber == nil {
+		return fmt.Errorf("подписчик на события не создан")
+	}
+
+	// Подписываемся на событие обновления цен
+	ce.eventBus.Subscribe(types.EventPriceUpdated, ce.priceSubscriber)
+	logger.Info("✅ CandleEngine подписался на EventPriceUpdated через EventBus")
+
+	return nil
+}
+
+// unsubscribeFromEvents отписывается от событий EventBus
+func (ce *CandleEngine) unsubscribeFromEvents() error {
+	if ce.eventBus == nil || ce.priceSubscriber == nil {
+		return nil // Ничего не делаем если EventBus не инициализирован
+	}
+
+	// Отписываемся от события обновления цен
+	ce.eventBus.Unsubscribe(types.EventPriceUpdated, ce.priceSubscriber)
+	logger.Info("✅ CandleEngine отписался от EventPriceUpdated")
+
+	return nil
 }

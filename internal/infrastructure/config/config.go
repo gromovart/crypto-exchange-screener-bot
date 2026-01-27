@@ -512,7 +512,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ШИНА СОБЫТИЙ
 	// ======================
 	cfg.EventBus.BufferSize = getEnvInt("EVENT_BUS_BUFFER_SIZE", 1000)
-	cfg.EventBus.WorkerCount = getEnvInt("EVENT_BUS_WORKER_COUNT", 10)
+	cfg.EventBus.WorkerCount = getEnvInt("EVENT_BUS_WORKER_COUNT", 5)
 	cfg.EventBus.EnableMetrics = getEnvBool("EVENT_BUS_ENABLE_METRICS", true)
 	cfg.EventBus.EnableLogging = getEnvBool("EVENT_BUS_ENABLE_LOGGING", true)
 

@@ -3,7 +3,7 @@ package cache_manager
 
 import (
 	"context"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"encoding/json"
 	"sort"
@@ -18,7 +18,7 @@ func NewCacheManager() *CacheManager {
 	return &CacheManager{
 		prefix:       "price:",
 		ctx:          context.Background(),
-		localCache:   make(map[string]redis_storage.PriceSnapshotInterface),
+		localCache:   make(map[string]storage.PriceSnapshotInterface),
 		localCacheMu: sync.RWMutex{},
 	}
 }
@@ -29,7 +29,7 @@ func (cm *CacheManager) Initialize(client *redis.Client) {
 }
 
 // SaveSnapshot сохраняет снапшот в Redis
-func (cm *CacheManager) SaveSnapshot(pipe redis.Pipeliner, symbol string, snapshot redis_storage.PriceSnapshotInterface) {
+func (cm *CacheManager) SaveSnapshot(pipe redis.Pipeliner, symbol string, snapshot storage.PriceSnapshotInterface) {
 	if cm.client == nil {
 		return
 	}
@@ -40,7 +40,7 @@ func (cm *CacheManager) SaveSnapshot(pipe redis.Pipeliner, symbol string, snapsh
 	cm.localCacheMu.Unlock()
 
 	// Преобразуем в конкретный тип для сериализации
-	priceSnapshot := &redis_storage.PriceSnapshot{
+	priceSnapshot := &storage.PriceSnapshot{
 		Symbol:       snapshot.GetSymbol(),
 		Price:        snapshot.GetPrice(),
 		Volume24h:    snapshot.GetVolume24h(),
@@ -65,7 +65,7 @@ func (cm *CacheManager) SaveSnapshot(pipe redis.Pipeliner, symbol string, snapsh
 }
 
 // GetSnapshot получает снапшот из кэша
-func (cm *CacheManager) GetSnapshot(symbol string) (redis_storage.PriceSnapshotInterface, bool) {
+func (cm *CacheManager) GetSnapshot(symbol string) (storage.PriceSnapshotInterface, bool) {
 	// Сначала проверяем локальный кэш
 	cm.localCacheMu.RLock()
 	if snapshot, exists := cm.localCache[symbol]; exists {
@@ -79,7 +79,7 @@ func (cm *CacheManager) GetSnapshot(symbol string) (redis_storage.PriceSnapshotI
 }
 
 // loadFromRedis загружает снапшот из Redis
-func (cm *CacheManager) loadFromRedis(symbol string) (redis_storage.PriceSnapshotInterface, bool) {
+func (cm *CacheManager) loadFromRedis(symbol string) (storage.PriceSnapshotInterface, bool) {
 	if cm.client == nil {
 		return nil, false
 	}
@@ -94,7 +94,7 @@ func (cm *CacheManager) loadFromRedis(symbol string) (redis_storage.PriceSnapsho
 		return nil, false
 	}
 
-	var snapshot redis_storage.PriceSnapshot
+	var snapshot storage.PriceSnapshot
 	if err := json.Unmarshal([]byte(data), &snapshot); err != nil {
 		logger.Warn("⚠️ Ошибка парсинга снапшота для %s: %v", symbol, err)
 		return nil, false
@@ -109,11 +109,11 @@ func (cm *CacheManager) loadFromRedis(symbol string) (redis_storage.PriceSnapsho
 }
 
 // GetAllSnapshots возвращает все снапшоты
-func (cm *CacheManager) GetAllSnapshots() map[string]redis_storage.PriceSnapshotInterface {
+func (cm *CacheManager) GetAllSnapshots() map[string]storage.PriceSnapshotInterface {
 	cm.localCacheMu.RLock()
 	defer cm.localCacheMu.RUnlock()
 
-	result := make(map[string]redis_storage.PriceSnapshotInterface)
+	result := make(map[string]storage.PriceSnapshotInterface)
 	for symbol, snapshot := range cm.localCache {
 		result[symbol] = snapshot
 	}
@@ -138,12 +138,12 @@ func (cm *CacheManager) GetSymbols() []string {
 // ClearCache очищает локальный кэш
 func (cm *CacheManager) ClearCache() {
 	cm.localCacheMu.Lock()
-	cm.localCache = make(map[string]redis_storage.PriceSnapshotInterface)
+	cm.localCache = make(map[string]storage.PriceSnapshotInterface)
 	cm.localCacheMu.Unlock()
 }
 
 // UpdateLocalCache обновляет локальный кэш
-func (cm *CacheManager) UpdateLocalCache(symbol string, snapshot redis_storage.PriceSnapshotInterface) {
+func (cm *CacheManager) UpdateLocalCache(symbol string, snapshot storage.PriceSnapshotInterface) {
 	cm.localCacheMu.Lock()
 	cm.localCache[symbol] = snapshot
 	cm.localCacheMu.Unlock()

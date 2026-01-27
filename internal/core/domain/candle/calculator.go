@@ -21,7 +21,7 @@ func NewCandleCalculator(priceStorage storage.PriceStorageInterface) *CandleCalc
 }
 
 // BuildCandleFromHistory строит свечу из истории цен
-func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*Candle, error) {
+func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*storage.Candle, error) {
 	// Определяем период
 	duration := periodToDuration(period)
 	endTime := time.Now()
@@ -35,13 +35,13 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*Cand
 
 	if len(prices) == 0 {
 		// Если нет данных, возвращаем пустую свечу
-		return &Candle{
-			Symbol:    symbol,
-			Period:    period,
-			StartTime: startTime,
-			EndTime:   endTime,
-			IsClosed:  true,
-			IsReal:    false,
+		return &storage.Candle{
+			Symbol:       symbol,
+			Period:       period,
+			StartTime:    startTime,
+			EndTime:      endTime,
+			IsClosedFlag: true,
+			IsRealFlag:   false,
 		}, nil
 	}
 
@@ -51,18 +51,18 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*Cand
 
 // buildCandleFromPriceData строит свечу из массива PriceDataInterface
 func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
-	prices []storage.PriceDataInterface) *Candle {
+	prices []storage.PriceDataInterface) *storage.Candle {
 
 	// Сортируем цены по времени
 	sortedPrices := sortPriceDataInterfaceByTime(prices)
 
 	// Если после сортировки нет данных
 	if len(sortedPrices) == 0 {
-		return &Candle{
-			Symbol:   symbol,
-			Period:   period,
-			IsClosed: true,
-			IsReal:   false,
+		return &storage.Candle{
+			Symbol:       symbol,
+			Period:       period,
+			IsClosedFlag: true,
+			IsRealFlag:   false,
 		}
 	}
 
@@ -103,25 +103,25 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 	minDuration := duration * 8 / 10 // 80% от периода
 	coversFullPeriod := endTime.Sub(startTime) >= minDuration
 
-	return &Candle{
-		Symbol:    symbol,
-		Period:    period,
-		Open:      open,
-		High:      high,
-		Low:       low,
-		Close:     close,
-		Volume:    volume,
-		VolumeUSD: volumeUSD,
-		Trades:    len(sortedPrices),
-		StartTime: startTime,
-		EndTime:   endTime,
-		IsClosed:  true,
-		IsReal:    coversFullPeriod,
+	return &storage.Candle{
+		Symbol:       symbol,
+		Period:       period,
+		Open:         open,
+		High:         high,
+		Low:          low,
+		Close:        close,
+		Volume:       volume,
+		VolumeUSD:    volumeUSD,
+		Trades:       len(sortedPrices),
+		StartTime:    startTime,
+		EndTime:      endTime,
+		IsClosedFlag: true,
+		IsRealFlag:   coversFullPeriod,
 	}
 }
 
 // CalculateChangePercent рассчитывает процент изменения свечи
-func (cc *CandleCalculator) CalculateChangePercent(candle *Candle) float64 {
+func (cc *CandleCalculator) CalculateChangePercent(candle *storage.Candle) float64 {
 	if candle.Open == 0 {
 		return 0
 	}
@@ -129,7 +129,7 @@ func (cc *CandleCalculator) CalculateChangePercent(candle *Candle) float64 {
 }
 
 // CalculateAverageCandle строит среднюю свечу из массива свечей
-func (cc *CandleCalculator) CalculateAverageCandle(candles []*Candle) *Candle {
+func (cc *CandleCalculator) CalculateAverageCandle(candles []*storage.Candle) *storage.Candle {
 	if len(candles) == 0 {
 		return nil
 	}
@@ -150,25 +150,25 @@ func (cc *CandleCalculator) CalculateAverageCandle(candles []*Candle) *Candle {
 
 	count := float64(len(candles))
 
-	return &Candle{
-		Symbol:    candles[0].Symbol,
-		Period:    candles[0].Period,
-		Open:      totalOpen / count,
-		High:      totalHigh / count,
-		Low:       totalLow / count,
-		Close:     totalClose / count,
-		Volume:    totalVolume / count,
-		VolumeUSD: totalVolumeUSD / count,
-		Trades:    totalTrades / len(candles),
-		StartTime: candles[0].StartTime,
-		EndTime:   candles[len(candles)-1].EndTime,
-		IsClosed:  true,
-		IsReal:    true,
+	return &storage.Candle{
+		Symbol:       candles[0].Symbol,
+		Period:       candles[0].Period,
+		Open:         totalOpen / count,
+		High:         totalHigh / count,
+		Low:          totalLow / count,
+		Close:        totalClose / count,
+		Volume:       totalVolume / count,
+		VolumeUSD:    totalVolumeUSD / count,
+		Trades:       totalTrades / len(candles),
+		StartTime:    candles[0].StartTime,
+		EndTime:      candles[len(candles)-1].EndTime,
+		IsClosedFlag: true,
+		IsRealFlag:   true,
 	}
 }
 
 // MergeCandles объединяет свечи в более крупный период
-func (cc *CandleCalculator) MergeCandles(candles []*Candle, targetPeriod string) *Candle {
+func (cc *CandleCalculator) MergeCandles(candles []*storage.Candle, targetPeriod string) *storage.Candle {
 	if len(candles) == 0 {
 		return nil
 	}
@@ -202,25 +202,25 @@ func (cc *CandleCalculator) MergeCandles(candles []*Candle, targetPeriod string)
 		totalTrades += candle.Trades
 	}
 
-	return &Candle{
-		Symbol:    candles[0].Symbol,
-		Period:    targetPeriod,
-		Open:      open,
-		High:      high,
-		Low:       low,
-		Close:     close,
-		Volume:    volume,
-		VolumeUSD: volumeUSD,
-		Trades:    totalTrades,
-		StartTime: startTime,
-		EndTime:   endTime,
-		IsClosed:  true,
-		IsReal:    true,
+	return &storage.Candle{
+		Symbol:       candles[0].Symbol,
+		Period:       targetPeriod,
+		Open:         open,
+		High:         high,
+		Low:          low,
+		Close:        close,
+		Volume:       volume,
+		VolumeUSD:    volumeUSD,
+		Trades:       totalTrades,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		IsClosedFlag: true,
+		IsRealFlag:   true,
 	}
 }
 
 // AnalyzeCandleTrend анализирует тренд свечи
-func (cc *CandleCalculator) AnalyzeCandleTrend(candle *Candle) string {
+func (cc *CandleCalculator) AnalyzeCandleTrend(candle *storage.Candle) string {
 	changePercent := cc.CalculateChangePercent(candle)
 
 	if changePercent > 5.0 {

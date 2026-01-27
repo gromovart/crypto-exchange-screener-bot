@@ -8,7 +8,9 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
+	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -359,13 +361,12 @@ func (cl *CoreLayer) ensureBybitPriceFetcher() error {
 func (cl *CoreLayer) setupAndStartCandleSystem() error {
 	logger.Info("🕯️ CoreLayer: настройка свечной системы...")
 
-	// Получаем StorageFactory для создания priceStorage
+	// Получаем StorageFactory
 	storageFactoryComp, exists := cl.infraLayer.GetComponent("StorageFactory")
 	if !exists {
 		return fmt.Errorf("StorageFactory не найден")
 	}
 
-	// Получаем StorageFactory из LazyComponent
 	storageInterface, err := cl.getComponentValue(storageFactoryComp)
 	if err != nil {
 		return fmt.Errorf("не удалось получить StorageFactory: %w", err)
@@ -382,14 +383,65 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 		return fmt.Errorf("ошибка создания хранилища цен: %w", err)
 	}
 
-	// Создаем свечную систему
-	candleFactory := candle.NewCandleSystemFactory().
-		WithSupportedPeriods([]string{"5m", "15m", "30m", "1h", "4h", "1d"}).
-		WithMaxHistory(1000).
-		WithCleanupInterval(5 * time.Minute).
-		WithAutoBuild(true)
+	// Создаем хранилище свечей Redis
+	candleConfig := storage.CandleConfig{
+		SupportedPeriods: []string{"5m", "15m", "30m", "1h", "4h", "1d"},
+		MaxHistory:       1000,
+		CleanupInterval:  5 * time.Minute,
+		AutoBuild:        true,
+	}
 
-	cl.candleSystem, err = candleFactory.CreateSystem(priceStorage)
+	candleStorage, err := storageFactory.CreateCandleStorage(candleConfig)
+	if err != nil {
+		return fmt.Errorf("ошибка создания хранилища свечей: %w", err)
+	}
+
+	// ⭐ ПОЛУЧАЕМ EventBus для свечной системы
+	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден")
+	}
+
+	eventBusInterface, err := cl.getComponentValue(eventBusComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить EventBus: %w", err)
+	}
+
+	eventBus, ok := eventBusInterface.(*events.EventBus)
+	if !ok {
+		return fmt.Errorf("неверный тип EventBus")
+	}
+
+	// ⭐ ПОЛУЧАЕМ RedisService для создания CandleTracker
+	redisServiceComp, exists := cl.infraLayer.GetComponent("RedisService")
+	if !exists {
+		logger.Warn("⚠️ RedisService не найден, CandleSystem будет создана без CandleTracker")
+		// Создаем свечную систему С EventBus
+		cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
+	} else {
+		redisServiceInterface, err := cl.getComponentValue(redisServiceComp)
+		if err != nil {
+			logger.Warn("⚠️ Не удалось получить RedisService: %v", err)
+			// Создаем свечную систему С EventBus
+			cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
+		} else {
+			redisService, ok := redisServiceInterface.(*redis_service.RedisService)
+			if !ok {
+				logger.Warn("⚠️ Неверный тип RedisService")
+				// Создаем свечную систему С EventBus
+				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystem(priceStorage, candleStorage, eventBus)
+			} else {
+				// ⭐ СОЗДАЕМ СВЕЧНУЮ СИСТЕМУ С ТРЕКЕРОМ И EventBus
+				cl.candleSystem, err = candle.NewCandleSystemFactory().CreateSystemWithRedis(
+					priceStorage,
+					candleStorage,
+					redisService,
+					eventBus,
+				)
+			}
+		}
+	}
+
 	if err != nil {
 		return fmt.Errorf("ошибка создания свечной системы: %w", err)
 	}
@@ -401,7 +453,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 
 	// Регистрируем компонент
 	cl.registerComponent("CandleSystem", cl.candleSystem)
-	logger.Info("✅ Свечная система создана и запущена")
+	logger.Info("✅ Свечная система создана и запущена (с EventBus)")
 
 	return nil
 }
@@ -409,9 +461,6 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 // startBybitPriceFetcher запуск BybitPriceFetcher
 func (cl *CoreLayer) startBybitPriceFetcher() {
 	logger.Info("🔄 CoreLayer: инициализация BybitPriceFetcher...")
-	logger.Info("🔧 ОТЛАДКА: startBybitPriceFetcher ВЫЗВАН!")
-	logger.Info("   - Время: %s", time.Now().Format("15:04:05.000"))
-	logger.Info("   - Telegram.Enabled: %v", cl.config.Telegram.Enabled)
 
 	// Получаем EventBus из инфраструктуры
 	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
@@ -471,21 +520,11 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		return
 	}
 
-	var fetcher *fetchers.BybitPriceFetcher
-	if cl.candleSystem != nil {
-		// Используем фабрику с поддержкой свечной системы
-		fetcher, err = cl.fetcherFactory.CreateBybitFetcherWithCandleSystem(
-			priceStorage,
-			eventBus,
-			cl.candleSystem,
-		)
-	} else {
-		// Создаем фетчер без свечной системы
-		fetcher, err = cl.fetcherFactory.CreateBybitFetcher(
-			priceStorage,
-			eventBus,
-		)
-	}
+	// ⭐ Создаем фетчер БЕЗ CandleSystem (теперь взаимодействие через EventBus)
+	fetcher, err := cl.fetcherFactory.CreateBybitFetcher(
+		priceStorage,
+		eventBus, // EventBus для публикации цен
+	)
 
 	if err != nil {
 		logger.Error("❌ CoreLayer: ошибка создания BybitPriceFetcher: %v", err)
@@ -497,7 +536,7 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 
 	// Регистрируем компонент
 	cl.registerComponent("BybitPriceFetcher", fetcher)
-	logger.Info("✅ BybitPriceFetcher создан и зарегистрирован")
+	logger.Info("✅ BybitPriceFetcher создан и зарегистрирован (взаимодействие через EventBus)")
 
 	// Запускаем фетчер с интервалом из конфигурации
 	interval := time.Duration(cl.config.UpdateInterval) * time.Second
@@ -523,13 +562,11 @@ func (cl *CoreLayer) Stop() error {
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
 
-	//Останавливаем AnalysisEngine если запущен
-	if cl.analysisEngine != nil && cl.analysisEngine.IsRunning() {
-		if err := cl.analysisEngine.Stop(); err != nil {
-			logger.Warn("⚠️ Ошибка остановки AnalysisEngine: %v", err)
-		} else {
-			logger.Info("🛑 AnalysisEngine остановлен")
-		}
+	// Останавливаем AnalysisEngine если запущен
+	if cl.analysisEngine != nil {
+		// ✅ ИСПРАВЛЕНИЕ: Вызываем Stop() без проверки возвращаемого значения
+		cl.analysisEngine.Stop() // Метод Stop() может не возвращать ошибку
+		logger.Info("🛑 AnalysisEngine остановлен")
 	}
 
 	// Останавливаем свечную систему если запущена
@@ -549,9 +586,6 @@ func (cl *CoreLayer) Stop() error {
 			logger.Info("🛑 BybitPriceFetcher остановлен")
 		}
 	}
-
-	// Останавливаем фабрику ядра если нужно
-	// (в текущей реализации нет метода Stop у CoreServiceFactory)
 
 	cl.running = false
 	cl.updateState(StateStopped)

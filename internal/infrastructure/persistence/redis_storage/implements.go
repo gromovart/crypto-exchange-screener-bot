@@ -83,3 +83,19 @@ func (ps *PriceSnapshot) GetFundingRate() float64  { return ps.FundingRate }
 func (ps *PriceSnapshot) GetChange24h() float64    { return ps.Change24h }
 func (ps *PriceSnapshot) GetHigh24h() float64      { return ps.High24h }
 func (ps *PriceSnapshot) GetLow24h() float64       { return ps.Low24h }
+
+// Добавляем методы к Candle
+
+func (c *Candle) GetSymbol() string       { return c.Symbol }
+func (c *Candle) GetPeriod() string       { return c.Period }
+func (c *Candle) GetOpen() float64        { return c.Open }
+func (c *Candle) GetHigh() float64        { return c.High }
+func (c *Candle) GetLow() float64         { return c.Low }
+func (c *Candle) GetClose() float64       { return c.Close }
+func (c *Candle) GetVolume() float64      { return c.Volume }
+func (c *Candle) GetVolumeUSD() float64   { return c.VolumeUSD }
+func (c *Candle) GetTrades() int          { return c.Trades }
+func (c *Candle) GetStartTime() time.Time { return c.StartTime }
+func (c *Candle) GetEndTime() time.Time   { return c.EndTime }
+func (c *Candle) IsClosed() bool          { return c.IsClosedFlag }
+func (c *Candle) IsReal() bool            { return c.IsRealFlag }

@@ -4,7 +4,7 @@ package price_storage
 import (
 	"context"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/cache_manager"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/history_manager"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/subscription_manager"
@@ -26,24 +26,24 @@ type PriceStorage struct {
 	ctx          context.Context
 
 	// Подсистемы (используем интерфейсы)
-	cacheManager    redis_storage.CacheManagerInterface
-	subscriptionMgr redis_storage.SubscriptionManagerInterface
-	historyManager  redis_storage.HistoryManagerInterface
+	cacheManager    storage.CacheManagerInterface
+	subscriptionMgr storage.SubscriptionManagerInterface
+	historyManager  storage.HistoryManagerInterface
 
 	// Конфигурация
-	config *redis_storage.StorageConfig
+	config *storage.StorageConfig
 }
 
 // NewPriceStorage создает новое Redis хранилище цен
 func NewPriceStorage(
 	redisService *redis_service.RedisService,
-	config *redis_storage.StorageConfig,
-	cacheManager redis_storage.CacheManagerInterface,
-	subscriptionMgr redis_storage.SubscriptionManagerInterface,
-	historyManager redis_storage.HistoryManagerInterface,
+	config *storage.StorageConfig,
+	cacheManager storage.CacheManagerInterface,
+	subscriptionMgr storage.SubscriptionManagerInterface,
+	historyManager storage.HistoryManagerInterface,
 ) *PriceStorage {
 	if config == nil {
-		config = &redis_storage.StorageConfig{
+		config = &storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * time.Minute,
@@ -63,9 +63,9 @@ func NewPriceStorage(
 }
 
 // NewPriceStorageSimple создает новое Redis хранилище цен (упрощенная версия)
-func NewPriceStorageSimple(redisService *redis_service.RedisService, config *redis_storage.StorageConfig) *PriceStorage {
+func NewPriceStorageSimple(redisService *redis_service.RedisService, config *storage.StorageConfig) *PriceStorage {
 	if config == nil {
-		config = &redis_storage.StorageConfig{
+		config = &storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * time.Minute,
@@ -114,12 +114,12 @@ func (rps *PriceStorage) StorePrice(
 	if rps.client == nil {
 		return fmt.Errorf("клиент Redis не инициализирован")
 	}
-
-	logger.Debug("💾 RedisStorage: сохранение %s: цена=%.6f, OI=%.0f, фандинг=%.6f",
-		symbol, price, openInterest, fundingRate)
+	//Раскомментировать для отладки
+	// logger.Debug("💾 RedisStorage: сохранение %s: цена=%.6f, OI=%.0f, фандинг=%.6f",
+	// 	symbol, price, openInterest, fundingRate)
 
 	// Создаем снапшот
-	snapshot := &redis_storage.PriceSnapshot{
+	snapshot := &storage.PriceSnapshot{
 		Symbol:       symbol,
 		Price:        price,
 		Volume24h:    volume24h,
@@ -168,7 +168,7 @@ func (rps *PriceStorage) StorePrice(
 }
 
 // StorePriceData сохраняет готовый объект PriceData
-func (rps *PriceStorage) StorePriceData(priceData redis_storage.PriceDataInterface) error {
+func (rps *PriceStorage) StorePriceData(priceData storage.PriceDataInterface) error {
 	return rps.StorePrice(
 		priceData.GetSymbol(),
 		priceData.GetPrice(),
@@ -193,12 +193,12 @@ func (rps *PriceStorage) GetCurrentPrice(symbol string) (float64, bool) {
 }
 
 // GetCurrentSnapshot возвращает текущий снапшот
-func (rps *PriceStorage) GetCurrentSnapshot(symbol string) (redis_storage.PriceSnapshotInterface, bool) {
+func (rps *PriceStorage) GetCurrentSnapshot(symbol string) (storage.PriceSnapshotInterface, bool) {
 	return rps.cacheManager.GetSnapshot(symbol)
 }
 
 // GetAllCurrentPrices возвращает все текущие цены
-func (rps *PriceStorage) GetAllCurrentPrices() map[string]redis_storage.PriceSnapshotInterface {
+func (rps *PriceStorage) GetAllCurrentPrices() map[string]storage.PriceSnapshotInterface {
 	return rps.cacheManager.GetAllSnapshots()
 }
 
@@ -214,17 +214,17 @@ func (rps *PriceStorage) SymbolExists(symbol string) bool {
 }
 
 // GetPriceHistory возвращает историю цен
-func (rps *PriceStorage) GetPriceHistory(symbol string, limit int) ([]redis_storage.PriceDataInterface, error) {
+func (rps *PriceStorage) GetPriceHistory(symbol string, limit int) ([]storage.PriceDataInterface, error) {
 	return rps.historyManager.GetHistory(symbol, limit)
 }
 
 // GetPriceHistoryRange возвращает историю за период
-func (rps *PriceStorage) GetPriceHistoryRange(symbol string, start, end time.Time) ([]redis_storage.PriceDataInterface, error) {
+func (rps *PriceStorage) GetPriceHistoryRange(symbol string, start, end time.Time) ([]storage.PriceDataInterface, error) {
 	return rps.historyManager.GetHistoryRange(symbol, start, end)
 }
 
 // GetLatestPrice возвращает последнюю цену
-func (rps *PriceStorage) GetLatestPrice(symbol string) (redis_storage.PriceDataInterface, bool) {
+func (rps *PriceStorage) GetLatestPrice(symbol string) (storage.PriceDataInterface, bool) {
 	history, err := rps.GetPriceHistory(symbol, 1)
 	if err != nil || len(history) == 0 {
 		return nil, false
@@ -233,10 +233,10 @@ func (rps *PriceStorage) GetLatestPrice(symbol string) (redis_storage.PriceDataI
 }
 
 // CalculatePriceChange рассчитывает изменение цены
-func (rps *PriceStorage) CalculatePriceChange(symbol string, interval time.Duration) (redis_storage.PriceChangeInterface, error) {
+func (rps *PriceStorage) CalculatePriceChange(symbol string, interval time.Duration) (storage.PriceChangeInterface, error) {
 	currentSnapshot, exists := rps.GetCurrentSnapshot(symbol)
 	if !exists {
-		return nil, redis_storage.ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Ищем цену за указанный интервал назад
@@ -247,11 +247,11 @@ func (rps *PriceStorage) CalculatePriceChange(symbol string, interval time.Durat
 	}
 
 	if len(history) == 0 {
-		return nil, redis_storage.ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Находим ближайшую цену к targetTime
-	var previousPrice redis_storage.PriceDataInterface
+	var previousPrice storage.PriceDataInterface
 	var minDiff time.Duration = 24 * time.Hour
 
 	for i := range history {
@@ -263,7 +263,7 @@ func (rps *PriceStorage) CalculatePriceChange(symbol string, interval time.Durat
 	}
 
 	if previousPrice == nil {
-		return nil, redis_storage.ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Рассчитываем изменение
@@ -291,7 +291,7 @@ func (rps *PriceStorage) GetAveragePrice(symbol string, period time.Duration) (f
 	}
 
 	if len(history) == 0 {
-		return 0, redis_storage.ErrSymbolNotFound
+		return 0, storage.ErrSymbolNotFound
 	}
 
 	var sum float64
@@ -311,7 +311,7 @@ func (rps *PriceStorage) GetMinMaxPrice(symbol string, period time.Duration) (mi
 	}
 
 	if len(history) == 0 {
-		return 0, 0, redis_storage.ErrSymbolNotFound
+		return 0, 0, storage.ErrSymbolNotFound
 	}
 
 	min = history[0].GetPrice()
@@ -349,7 +349,7 @@ func (rps *PriceStorage) GetFundingRate(symbol string) (float64, bool) {
 }
 
 // GetSymbolMetrics возвращает все метрики символа
-func (rps *PriceStorage) GetSymbolMetrics(symbol string) (redis_storage.SymbolMetricsInterface, bool) {
+func (rps *PriceStorage) GetSymbolMetrics(symbol string) (storage.SymbolMetricsInterface, bool) {
 	snapshot, exists := rps.GetCurrentSnapshot(symbol)
 	if !exists {
 		return nil, false
@@ -361,7 +361,7 @@ func (rps *PriceStorage) GetSymbolMetrics(symbol string) (redis_storage.SymbolMe
 	logger.Debug("💾 RedisStorage.GetSymbolMetrics: %s - OI=%.0f, Funding=%.6f",
 		symbol, snapshot.GetOpenInterest(), snapshot.GetFundingRate())
 
-	return &redis_storage.SymbolMetrics{
+	return &storage.SymbolMetrics{
 		Symbol:        snapshot.GetSymbol(),
 		Price:         snapshot.GetPrice(),
 		Volume24h:     snapshot.GetVolume24h(),
@@ -412,12 +412,12 @@ func (rps *PriceStorage) calculateChanges(symbol string) (float64, float64) {
 }
 
 // Subscribe подписывает на обновления
-func (rps *PriceStorage) Subscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
+func (rps *PriceStorage) Subscribe(symbol string, subscriber storage.SubscriberInterface) error {
 	return rps.subscriptionMgr.Subscribe(symbol, subscriber)
 }
 
 // Unsubscribe отписывает от обновлений
-func (rps *PriceStorage) Unsubscribe(symbol string, subscriber redis_storage.SubscriberInterface) error {
+func (rps *PriceStorage) Unsubscribe(symbol string, subscriber storage.SubscriberInterface) error {
 	return rps.subscriptionMgr.Unsubscribe(symbol, subscriber)
 }
 
@@ -429,7 +429,7 @@ func (rps *PriceStorage) GetSubscriberCount(symbol string) int {
 // CleanOldData очищает старые данные
 func (rps *PriceStorage) CleanOldData(maxAge time.Duration) (int, error) {
 	if rps.client == nil {
-		return 0, redis_storage.ErrRedisNotReady
+		return 0, storage.ErrRedisNotReady
 	}
 
 	// Очищаем историю
@@ -452,7 +452,7 @@ func (rps *PriceStorage) TruncateHistory(symbol string, maxPoints int) error {
 // RemoveSymbol удаляет символ
 func (rps *PriceStorage) RemoveSymbol(symbol string) error {
 	if rps.client == nil {
-		return redis_storage.ErrRedisNotReady
+		return storage.ErrRedisNotReady
 	}
 
 	// Удаляем все ключи связанные с символом
@@ -483,7 +483,7 @@ func (rps *PriceStorage) RemoveSymbol(symbol string) error {
 // Clear очищает все данные
 func (rps *PriceStorage) Clear() error {
 	if rps.client == nil {
-		return redis_storage.ErrRedisNotReady
+		return storage.ErrRedisNotReady
 	}
 
 	// Удаляем все ключи с префиксом
@@ -522,9 +522,9 @@ func (rps *PriceStorage) Clear() error {
 }
 
 // GetStats возвращает статистику
-func (rps *PriceStorage) GetStats() redis_storage.StorageStatsInterface {
+func (rps *PriceStorage) GetStats() storage.StorageStatsInterface {
 	if rps.client == nil {
-		return &redis_storage.StorageStats{
+		return &storage.StorageStats{
 			StorageType:  "redis",
 			TotalSymbols: 0,
 		}
@@ -576,7 +576,7 @@ func (rps *PriceStorage) GetStats() redis_storage.StorageStatsInterface {
 		}
 	}
 
-	return &redis_storage.StorageStats{
+	return &storage.StorageStats{
 		TotalSymbols:        len(symbols),
 		TotalDataPoints:     estimatedDataPoints,
 		MemoryUsageBytes:    memoryUsage,
@@ -592,15 +592,15 @@ func (rps *PriceStorage) GetStats() redis_storage.StorageStatsInterface {
 }
 
 // GetSymbolStats возвращает статистику по символу
-func (rps *PriceStorage) GetSymbolStats(symbol string) (redis_storage.SymbolStatsInterface, error) {
+func (rps *PriceStorage) GetSymbolStats(symbol string) (storage.SymbolStatsInterface, error) {
 	snapshot, exists := rps.GetCurrentSnapshot(symbol)
 	if !exists {
-		return nil, redis_storage.ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	history, err := rps.GetPriceHistory(symbol, 10000)
 	if err != nil || len(history) == 0 {
-		return nil, redis_storage.ErrSymbolNotFound
+		return nil, storage.ErrSymbolNotFound
 	}
 
 	// Рассчитываем средний объем
@@ -624,7 +624,7 @@ func (rps *PriceStorage) GetSymbolStats(symbol string) (redis_storage.SymbolStat
 	// Рассчитываем изменения OI и фандинга
 	oiChange24h, fundingChange := rps.calculateChanges(symbol)
 
-	return &redis_storage.SymbolStats{
+	return &storage.SymbolStats{
 		Symbol:         symbol,
 		DataPoints:     len(history),
 		FirstTimestamp: history[0].GetTimestamp(),
@@ -643,9 +643,9 @@ func (rps *PriceStorage) GetSymbolStats(symbol string) (redis_storage.SymbolStat
 }
 
 // GetTopSymbolsByVolumeUSD возвращает топ символов по объему в USDT
-func (rps *PriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]redis_storage.SymbolVolumeInterface, error) {
+func (rps *PriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]storage.SymbolVolumeInterface, error) {
 	if rps.client == nil {
-		return nil, redis_storage.ErrRedisNotReady
+		return nil, storage.ErrRedisNotReady
 	}
 
 	sortedSetKey := "prices:sorted_by_volume"
@@ -656,7 +656,7 @@ func (rps *PriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]redis_storage.Sy
 		return nil, err
 	}
 
-	var symbols []redis_storage.SymbolVolumeInterface
+	var symbols []storage.SymbolVolumeInterface
 	for _, result := range results {
 		symbol := result.Member.(string)
 		volumeUSD := result.Score
@@ -667,7 +667,7 @@ func (rps *PriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]redis_storage.Sy
 			volume24h = snapshot.GetVolume24h()
 		}
 
-		symbols = append(symbols, &redis_storage.SymbolVolume{
+		symbols = append(symbols, &storage.SymbolVolume{
 			Symbol:    symbol,
 			Volume:    volume24h,
 			VolumeUSD: volumeUSD,
@@ -678,13 +678,13 @@ func (rps *PriceStorage) GetTopSymbolsByVolumeUSD(limit int) ([]redis_storage.Sy
 }
 
 // GetTopSymbolsByVolume возвращает топ символов по объему
-func (rps *PriceStorage) GetTopSymbolsByVolume(limit int) ([]redis_storage.SymbolVolumeInterface, error) {
+func (rps *PriceStorage) GetTopSymbolsByVolume(limit int) ([]storage.SymbolVolumeInterface, error) {
 	symbols := rps.GetSymbols()
-	var symbolVolumes []redis_storage.SymbolVolumeInterface
+	var symbolVolumes []storage.SymbolVolumeInterface
 
 	for _, symbol := range symbols {
 		if snapshot, exists := rps.GetCurrentSnapshot(symbol); exists {
-			symbolVolumes = append(symbolVolumes, &redis_storage.SymbolVolume{
+			symbolVolumes = append(symbolVolumes, &storage.SymbolVolume{
 				Symbol:    symbol,
 				Volume:    snapshot.GetVolume24h(),
 				VolumeUSD: snapshot.GetVolumeUSD(),

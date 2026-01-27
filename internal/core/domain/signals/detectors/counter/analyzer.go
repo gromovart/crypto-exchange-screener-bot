@@ -2,352 +2,422 @@
 package counter
 
 import (
-	"fmt"
-	"math"
-	"sync"
-	"time"
-
 	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
-	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/confirmation"
-	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/manager"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
+	"sync"
+	"time"
 )
 
-// CounterAnalyzer - анализатор счетчика сигналов (обновлен с поддержкой свечного движка)
-type CounterAnalyzer struct {
-	config        common.AnalyzerConfig
-	stats         common.AnalyzerStats
-	marketFetcher interface{}
-	storage       storage.PriceStorageInterface
-	eventBus      types.EventBus
-	candleSystem  *candle.CandleSystem // НОВОЕ: Свечная система
-
-	// Компоненты
-	counterManager      *manager.CounterManager
-	periodManager       *manager.PeriodManager
-	volumeCalculator    *calculator.VolumeDeltaCalculator
-	metricsCalculator   *calculator.MarketMetricsCalculator
-	techCalculator      *calculator.TechnicalCalculator
-	confirmationManager *confirmation.ConfirmationManager
-
-	mu                  sync.RWMutex
-	notificationEnabled bool
-	chartProvider       string
-	baseThreshold       float64
+// Dependencies зависимости для CounterAnalyzer
+type Dependencies struct {
+	Storage             storage.PriceStorageInterface
+	EventBus            types.EventBus
+	CandleSystem        *candle.CandleSystem
+	MarketFetcher       interface{}
+	VolumeCalculator    *calculator.VolumeDeltaCalculator
+	TechnicalCalculator *calculator.TechnicalCalculator
 }
 
-// NewCounterAnalyzer создает новый анализатор счетчика (обновленный конструктор)
+// CounterAnalyzer - анализатор счетчика сигналов
+type CounterAnalyzer struct {
+	config common.AnalyzerConfig
+	deps   Dependencies
+
+	// Статистика отправленных сигналов
+	stats              common.AnalyzerStats
+	sentStatsMu        sync.RWMutex
+	sentSignalsCount   int
+	sentStatsStartTime time.Time
+	lastLogTime        time.Time
+
+	// Статистика вызовов Analyze()
+	analyzeCallsCount  int
+	analyzeTotalPoints int
+	analyzeTotalTime   time.Duration
+	analyzeCallMu      sync.RWMutex
+
+	// Агрегированная статистика
+	aggregatedStats AggregatedStats
+
+	// ✅ СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle С РАЗДЕЛЕНИЕМ НА ЗАКРЫТЫЕ/АКТИВНЫЕ
+	candleStatsMu sync.RWMutex
+	candleStats   CandleAnalyzeStats
+}
+
+// CandleAnalyzeStats статистика анализа свечей для отладки с разделением
+type CandleAnalyzeStats struct {
+	TotalCalls int // Всего вызовов AnalyzeCandle
+
+	// Статистика по ЗАКРЫТЫМ свечам
+	ClosedCandleStats struct {
+		Attempts         int // Попыток анализа
+		Success          int // Успешных анализов (сигнал создан)
+		NoData           int // Нет закрытых свечей
+		Unreal           int // Нереальные свечи
+		AlreadyProcessed int // Уже обработаны
+		BelowThreshold   int // Ниже порога
+		GetCandleError   int // Ошибки получения
+		MarkCandleError  int // Ошибки отметки
+		GrowthSignals    int // Ростовые сигналы
+		FallSignals      int // Падающие сигналы
+	}
+
+	// Статистика по АКТИВНЫМ свечам
+	ActiveCandleStats struct {
+		Attempts         int // Попыток анализа
+		Success          int // Успешных анализов (сигнал создан)
+		NoActiveCandle   int // Нет активной свечи
+		BelowMinTime     int // Меньше минимального времени
+		BelowThreshold   int // Ниже порога
+		GetCandleError   int // Ошибки получения
+		InsufficientData int // Недостаточно данных
+		GrowthSignals    int // Ростовые сигналы
+		FallSignals      int // Падающие сигналы
+	}
+
+	// Интервальная статистика сигналов
+	IntervalStats struct {
+		StartTime     time.Time
+		ClosedSignals int // Сигналов по закрытым свечам
+		ActiveSignals int // Сигналов по активным свечам
+		TotalSignals  int // Всего сигналов
+		GrowthSignals int // Ростовых сигналов
+		FallSignals   int // Падающих сигналов
+	}
+}
+
+// AggregatedStats структура для агрегированной статистики
+type AggregatedStats struct {
+	TotalSymbols       int
+	AnalyzeAttempts    int
+	SignalsFound       int
+	NoDataErrors       int
+	UnrealCandleErrors int
+	OtherErrors        int
+	SignalsCreated     int
+}
+
+// NewCounterAnalyzer создает новый анализатор счетчика
 func NewCounterAnalyzer(
 	config common.AnalyzerConfig,
-	storage storage.PriceStorageInterface,
-	eventBus types.EventBus,
-	marketFetcher interface{},
-	candleSystem *candle.CandleSystem, // НОВЫЙ параметр
+	deps Dependencies,
 ) *CounterAnalyzer {
-	chartProvider := "coinglass"
-	if custom, ok := config.CustomSettings["chart_provider"].(string); ok {
-		chartProvider = custom
+	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ VolumeCalculator если не передан
+	if deps.VolumeCalculator == nil && deps.MarketFetcher != nil && deps.Storage != nil {
+		logger.Warn("🔧 [CounterAnalyzer] Создаем VolumeDeltaCalculator")
+		deps.VolumeCalculator = calculator.NewVolumeDeltaCalculator(deps.MarketFetcher, deps.Storage)
 	}
 
-	baseThreshold := 0.1
-	if val, ok := config.CustomSettings["base_threshold"].(float64); ok {
-		baseThreshold = val
+	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ TechnicalCalculator если не передан
+	if deps.TechnicalCalculator == nil {
+		logger.Warn("🔧 [CounterAnalyzer] Создаем TechnicalCalculator")
+		deps.TechnicalCalculator = calculator.NewTechnicalCalculator()
 	}
 
-	// Создаем компоненты
-	counterManager := manager.NewCounterManager()
-	periodManager := manager.NewPeriodManager()
-	volumeCalculator := calculator.NewVolumeDeltaCalculator(marketFetcher, storage)
-	metricsCalculator := calculator.NewMarketMetricsCalculator(marketFetcher, storage)
-	techCalculator := calculator.NewTechnicalCalculator()
-	confirmationManager := confirmation.NewConfirmationManager()
-
-	// Создаем анализатор
 	analyzer := &CounterAnalyzer{
-		config:              config,
-		marketFetcher:       marketFetcher,
-		storage:             storage,
-		eventBus:            eventBus,
-		candleSystem:        candleSystem, // НОВОЕ
-		counterManager:      counterManager,
-		periodManager:       periodManager,
-		volumeCalculator:    volumeCalculator,
-		metricsCalculator:   metricsCalculator,
-		techCalculator:      techCalculator,
-		confirmationManager: confirmationManager,
-		notificationEnabled: true,
-		chartProvider:       chartProvider,
-		baseThreshold:       baseThreshold,
-		stats:               common.AnalyzerStats{},
+		config: config,
+		deps:   deps,
+		stats: common.AnalyzerStats{
+			TotalCalls:   0,
+			SuccessCount: 0,
+			ErrorCount:   0,
+			TotalTime:    0,
+			AverageTime:  0,
+			LastCallTime: time.Time{},
+		},
+		sentSignalsCount:   0,
+		sentStatsStartTime: time.Now(),
+		lastLogTime:        time.Now(),
+		analyzeCallsCount:  0,
+		analyzeTotalPoints: 0,
+		analyzeTotalTime:   0,
+		candleStats: CandleAnalyzeStats{
+			IntervalStats: struct {
+				StartTime     time.Time
+				ClosedSignals int
+				ActiveSignals int
+				TotalSignals  int
+				GrowthSignals int
+				FallSignals   int
+			}{
+				StartTime: time.Now(),
+			},
+		},
 	}
 
-	logger.Info("✅ CounterAnalyzer создан с поддержкой свечного движка")
+	logger.Warn("✅ [CounterAnalyzer] Создан анализатор счетчика с разделенной статистикой")
 	return analyzer
 }
 
-// AnalyzeAllSymbols анализирует все символы каждую минуту
-func (a *CounterAnalyzer) AnalyzeAllSymbols(symbols []string) error {
+// Analyze основной метод анализа
+func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config common.AnalyzerConfig) ([]analysis.Signal, error) {
 	startTime := time.Now()
-	totalSignals := 0
 
-	logger.Info("🔍 Начало анализа %d символов", len(symbols))
+	a.analyzeCallMu.Lock()
+	a.analyzeCallsCount++
+	a.analyzeTotalPoints += len(data)
+	a.analyzeCallMu.Unlock()
 
-	// Определяем все периоды для анализа
-	periods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
+	a.stats.TotalCalls++
+	defer func() {
+		a.stats.LastCallTime = time.Now()
+		a.stats.TotalTime += time.Since(startTime)
+		if a.stats.TotalCalls > 0 {
+			a.stats.AverageTime = a.stats.TotalTime / time.Duration(a.stats.TotalCalls)
+		}
 
-	// Для каждого символа
-	for i, symbol := range symbols {
-		logger.Debug("  [%d/%d] Анализ %s", i+1, len(symbols), symbol)
-		symbolSignals := 0
+		a.analyzeCallMu.Lock()
+		a.analyzeTotalTime += time.Since(startTime)
+		a.analyzeCallMu.Unlock()
+	}()
 
-		// Для каждого периода
-		for _, period := range periods {
-			// Получаем данные за период
-			data, err := a.getDataForPeriod(symbol, period)
+	// Обновляем конфигурацию
+	a.config = config
+
+	var signals []analysis.Signal
+	supportedPeriods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
+
+	// Локальный счетчик для этого вызова
+	localSentCount := 0
+	candleAnalyzeAttempts := 0
+	candleAnalyzeSuccess := 0
+	candleErrors := 0
+	candleNoDataErrors := 0
+	candleUnrealErrors := 0
+
+	// СЧЕТЧИК ДЛЯ АГРЕГИРОВАННОЙ СТАТИСТИКИ
+	symbolsProcessed := len(data)
+
+	// Анализируем каждую точку
+	for _, point := range data {
+		// Анализируем каждый период
+		for _, period := range supportedPeriods {
+			candleAnalyzeAttempts++
+			signal, err := a.AnalyzeCandle(point.GetSymbol(), period)
 			if err != nil {
-				logger.Debug("    ⚠️ %s: %v", period, err)
-				continue
-			}
-
-			// Анализируем
-			signal, err := a.analyzeSymbolPeriod(symbol, period, data)
-			if err != nil {
-				logger.Debug("    ⚠️ %s: ошибка анализа - %v", period, err)
+				// АГРЕГИРУЕМ ОШИБКИ БЕЗ ЛОГОВ
+				errStr := err.Error()
+				if errStr == "нет закрытых свечей" || errStr == "нет активной свечи" {
+					candleNoDataErrors++
+				} else if errStr == "нереальная свеча" || errStr == "недостаточно данных" {
+					candleUnrealErrors++
+				} else {
+					candleErrors++
+				}
 				continue
 			}
 
 			if signal != nil {
-				totalSignals++
-				symbolSignals++
-				logger.Info("    🚀 %s: сигнал обнаружен (%.2f%%)",
-					period, signal.ChangePercent)
-			} else {
-				logger.Debug("    📊 %s: сигнал не обнаружен", period)
-			}
-		}
+				candleAnalyzeSuccess++
+				signals = append(signals, *signal)
 
-		if symbolSignals > 0 {
-			logger.Info("  📈 %s: найдено %d сигналов", symbol, symbolSignals)
+				// Публикуем сигнал в EventBus
+				a.PublishRawCounterSignal(*signal, period)
+
+				// Увеличиваем локальный счетчик
+				localSentCount++
+			}
 		}
 	}
 
-	// Отправляем статистику
-	a.updateStats(time.Since(startTime), totalSignals > 0)
+	// ✅ СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА
+	a.analyzeCallMu.Lock()
+	a.aggregatedStats = AggregatedStats{
+		TotalSymbols:       symbolsProcessed,
+		AnalyzeAttempts:    candleAnalyzeAttempts,
+		SignalsFound:       candleAnalyzeSuccess,
+		NoDataErrors:       candleNoDataErrors,
+		UnrealCandleErrors: candleUnrealErrors,
+		OtherErrors:        candleErrors,
+		SignalsCreated:     localSentCount,
+	}
+	a.analyzeCallMu.Unlock()
 
-	logger.Info("✅ Анализ завершен: %d символов, %d сигналов, время: %v",
-		len(symbols), totalSignals, time.Since(startTime))
+	a.stats.SuccessCount++
 
+	// Обновляем общую статистику отправленных сигналов
+	if localSentCount > 0 {
+		a.sentStatsMu.Lock()
+		a.sentSignalsCount += localSentCount
+		a.sentStatsMu.Unlock()
+	}
+
+	// ✅ ТОЛЬКО АГРЕГИРОВАННОЕ ЛОГИРОВАНИЕ РАЗ В 5 СЕКУНД
+	a.logAggregatedStatsIfNeeded(5 * time.Second)
+
+	return signals, nil
+}
+
+// logAggregatedStatsIfNeeded логирует агрегированную статистику с разделением закрытые/активные
+func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
+	now := time.Now()
+	a.analyzeCallMu.RLock()
+	shouldLog := now.Sub(a.lastLogTime) >= interval && a.analyzeCallsCount > 0
+	a.analyzeCallMu.RUnlock()
+
+	if !shouldLog {
+		return
+	}
+
+	a.analyzeCallMu.Lock()
+	defer a.analyzeCallMu.Unlock()
+
+	// Проверяем еще раз после блокировки
+	if now.Sub(a.lastLogTime) < interval || a.analyzeCallsCount == 0 {
+		return
+	}
+
+	// Рассчитываем агрегированную статистику
+	var avgPointsPerCall float64
+	var avgTimePerCall time.Duration
+	if a.analyzeCallsCount > 0 {
+		avgPointsPerCall = float64(a.analyzeTotalPoints) / float64(a.analyzeCallsCount)
+		avgTimePerCall = a.analyzeTotalTime / time.Duration(a.analyzeCallsCount)
+	}
+
+	// ✅ ОСНОВНАЯ АГРЕГИРОВАННАЯ СТАТИСТИКА
+	logger.Warn("📊 [CounterAnalyzer] Статистика за последние %v:", interval)
+	logger.Warn("   📞 Вызовов Analyze: %d", a.analyzeCallsCount)
+	logger.Warn("   📍 Обработано символов: %d", a.analyzeTotalPoints)
+	logger.Warn("   ⏱️  Среднее время: %v", avgTimePerCall.Round(time.Millisecond))
+	logger.Warn("   📈 Среднее символов/вызов: %.1f", avgPointsPerCall)
+	logger.Warn("   ⚡ Скорость: %.1f символов/сек", float64(a.analyzeTotalPoints)/interval.Seconds())
+
+	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ И АКТИВНЫМ СВЕЧАМ
+	a.candleStatsMu.Lock()
+	candleStats := a.candleStats
+	a.candleStatsMu.Unlock()
+
+	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ СВЕЧАМ
+	if candleStats.ClosedCandleStats.Attempts > 0 {
+		closedAttempts := candleStats.ClosedCandleStats.Attempts
+		closedSuccessRate := float64(candleStats.ClosedCandleStats.Success) / float64(closedAttempts) * 100
+		closedNoDataRate := float64(candleStats.ClosedCandleStats.NoData) / float64(closedAttempts) * 100
+		closedProcessedRate := float64(candleStats.ClosedCandleStats.AlreadyProcessed) / float64(closedAttempts) * 100
+
+		logger.Warn("   🕯️  ЗАКРЫТЫЕ свечи (попыток: %d):", closedAttempts)
+		logger.Warn("      • Успешно: %d (%.1f%%)", candleStats.ClosedCandleStats.Success, closedSuccessRate)
+		logger.Warn("      • Нет данных: %d (%.1f%%)", candleStats.ClosedCandleStats.NoData, closedNoDataRate)
+		logger.Warn("      • Уже обработаны: %d (%.1f%%)", candleStats.ClosedCandleStats.AlreadyProcessed, closedProcessedRate)
+		logger.Warn("      • Ниже порога: %d", candleStats.ClosedCandleStats.BelowThreshold)
+		logger.Warn("      • Ошибки получения: %d", candleStats.ClosedCandleStats.GetCandleError)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.ClosedCandleStats.GrowthSignals,
+			candleStats.ClosedCandleStats.FallSignals)
+	}
+
+	// ✅ СТАТИСТИКА ПО АКТИВНЫМ СВЕЧАМ
+	if candleStats.ActiveCandleStats.Attempts > 0 {
+		activeAttempts := candleStats.ActiveCandleStats.Attempts
+		activeSuccessRate := float64(candleStats.ActiveCandleStats.Success) / float64(activeAttempts) * 100
+		activeNoDataRate := float64(candleStats.ActiveCandleStats.NoActiveCandle) / float64(activeAttempts) * 100
+		activeBelowTimeRate := float64(candleStats.ActiveCandleStats.BelowMinTime) / float64(activeAttempts) * 100
+
+		logger.Warn("   🔥 АКТИВНЫЕ свечи (попыток: %d):", activeAttempts)
+		logger.Warn("      • Успешно: %d (%.1f%%)", candleStats.ActiveCandleStats.Success, activeSuccessRate)
+		logger.Warn("      • Нет активной свечи: %d (%.1f%%)", candleStats.ActiveCandleStats.NoActiveCandle, activeNoDataRate)
+		logger.Warn("      • Мало времени: %d (%.1f%%)", candleStats.ActiveCandleStats.BelowMinTime, activeBelowTimeRate)
+		logger.Warn("      • Ниже порога: %d", candleStats.ActiveCandleStats.BelowThreshold)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.ActiveCandleStats.GrowthSignals,
+			candleStats.ActiveCandleStats.FallSignals)
+	}
+
+	// ✅ ИНТЕРВАЛЬНАЯ СТАТИСТИКА СИГНАЛОВ
+	if candleStats.IntervalStats.TotalSignals > 0 {
+		intervalDuration := now.Sub(candleStats.IntervalStats.StartTime)
+		logger.Warn("   📈 СИГНАЛЫ за интервал (%v):", intervalDuration.Round(time.Second))
+		logger.Warn("      • Всего: %d", candleStats.IntervalStats.TotalSignals)
+		logger.Warn("      • По закрытым свечам: %d", candleStats.IntervalStats.ClosedSignals)
+		logger.Warn("      • По активным свечам: %d", candleStats.IntervalStats.ActiveSignals)
+		logger.Warn("      • Ростовые: %d, Падающие: %d",
+			candleStats.IntervalStats.GrowthSignals,
+			candleStats.IntervalStats.FallSignals)
+	}
+
+	// Сбрасываем общую статистику для следующего интервала
+	a.analyzeCallsCount = 0
+	a.analyzeTotalPoints = 0
+	a.analyzeTotalTime = 0
+	a.aggregatedStats = AggregatedStats{}
+
+	// ✅ СБРАСЫВАЕМ СТАТИСТИКУ СВЕЧЕЙ (сохраняем только интервальную)
+	a.candleStatsMu.Lock()
+	// Сохраняем интервальную статистику, сбрасываем остальное
+	a.candleStats = CandleAnalyzeStats{
+		IntervalStats: struct {
+			StartTime     time.Time
+			ClosedSignals int
+			ActiveSignals int
+			TotalSignals  int
+			GrowthSignals int
+			FallSignals   int
+		}{
+			StartTime: now, // Начинаем новый интервал
+		},
+	}
+	a.candleStatsMu.Unlock()
+
+	a.lastLogTime = now
+}
+
+// Stop останавливает анализатор счетчика
+func (a *CounterAnalyzer) Stop() error {
+	logger.Warn("🛑 [CounterAnalyzer] Остановка анализатора")
+
+	// ✅ Останавливаем VolumeDeltaCalculator если есть
+	if a.deps.VolumeCalculator != nil {
+		logger.Warn("🛑 [CounterAnalyzer] Остановка VolumeDeltaCalculator")
+		a.deps.VolumeCalculator.Stop()
+	}
+
+	// Сбрасываем статистику
+	a.sentStatsMu.Lock()
+	a.sentSignalsCount = 0
+	a.sentStatsStartTime = time.Now()
+	a.lastLogTime = time.Now()
+	a.sentStatsMu.Unlock()
+
+	// Сбрасываем общую статистику
+	a.stats = common.AnalyzerStats{
+		TotalCalls:   0,
+		SuccessCount: 0,
+		ErrorCount:   0,
+		TotalTime:    0,
+		AverageTime:  0,
+		LastCallTime: time.Time{},
+	}
+
+	logger.Warn("✅ [CounterAnalyzer] Анализатор остановлен")
 	return nil
 }
 
-// Analyze - совместимый метод для AnalysisEngine
-func (a *CounterAnalyzer) Analyze(data []types.PriceData, cfg common.AnalyzerConfig) ([]analysis.Signal, error) {
-	// ВРЕМЕННОЕ РЕШЕНИЕ для совместимости с AnalysisEngine
-
-	if len(data) < 2 {
-		return nil, fmt.Errorf("недостаточно точек данных")
-	}
-
-	symbol := data[0].Symbol
-
-	// Рассчитываем изменение
-	change := a.calculateCandleChange(data, "15m") // Используем дефолтный период
-
-	// Используем период из конфига или дефолтный
-	period := "15m"
-	if customPeriod, ok := cfg.CustomSettings["analysis_period"].(string); ok {
-		period = customPeriod
-	}
-
-	// Проверяем порог
-	if math.Abs(change) < a.baseThreshold {
-		return nil, nil
-	}
-
-	// Добавляем подтверждение
-	isReady, confirmations := a.confirmationManager.AddConfirmation(symbol, period)
-
-	if !isReady {
-		// Еще не готов, ждем больше подтверждений
-		logger.Debug("⏳ %s %s: подтверждений %d/%d, ждем еще",
-			symbol, period, confirmations, confirmation.GetRequiredConfirmations(period))
-		return nil, nil
-	}
-
-	// Создаем сигнал через новую систему
-	signal := a.createRawSignal(symbol, period, change, confirmations, data)
-
-	// Публикуем в EventBus
-	a.publishRawCounterSignal(signal)
-
-	// Сбрасываем счетчик подтверждений
-	a.confirmationManager.Reset(symbol, period)
-
-	return []analysis.Signal{signal}, nil
+// GetConfig возвращает конфигурацию
+func (a *CounterAnalyzer) GetConfig() common.AnalyzerConfig {
+	return a.config
 }
 
-// Старые методы для обратной совместимости
-func (a *CounterAnalyzer) Name() string                { return "counter_analyzer" }
-func (a *CounterAnalyzer) Version() string             { return "2.5.0" }
-func (a *CounterAnalyzer) Supports(symbol string) bool { return true }
-
-func (a *CounterAnalyzer) GetConfig() common.AnalyzerConfig { return a.config }
+// GetStats возвращает статистику
 func (a *CounterAnalyzer) GetStats() common.AnalyzerStats {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	return a.stats
 }
 
-func (a *CounterAnalyzer) updateStats(duration time.Duration, success bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.stats.TotalCalls++
-	a.stats.TotalTime += duration
-	a.stats.LastCallTime = time.Now()
-
-	if success {
-		a.stats.SuccessCount++
-	} else {
-		a.stats.ErrorCount++
-	}
-
-	if a.stats.TotalCalls > 0 {
-		a.stats.AverageTime = time.Duration(
-			int64(a.stats.TotalTime) / int64(a.stats.TotalCalls),
-		)
-	}
+// Name возвращает имя анализатора
+func (a *CounterAnalyzer) Name() string {
+	return "counter"
 }
 
-// Методы для обратной совместимости
-func (a *CounterAnalyzer) SetNotificationEnabled(enabled bool) {
-	a.notificationEnabled = enabled
+// Version возвращает версию анализатора
+func (a *CounterAnalyzer) Version() string {
+	return "1.0.0"
 }
 
-func (a *CounterAnalyzer) SetChartProvider(provider string) {
-	a.chartProvider = provider
-}
-
-func (a *CounterAnalyzer) SetAnalysisPeriod(period string) {
-	custom := make(map[string]interface{})
-	for k, v := range a.config.CustomSettings {
-		custom[k] = v
-	}
-	custom["analysis_period"] = period
-	a.config.CustomSettings = custom
-	a.counterManager.ResetAllCounters(period)
-}
-
-func (a *CounterAnalyzer) GetAllCounters() map[string]manager.SignalCounter {
-	return a.counterManager.GetAllCounters()
-}
-
-func (a *CounterAnalyzer) GetCounterStats(symbol string) (manager.SignalCounter, bool) {
-	return a.counterManager.GetCounterStats(symbol)
-}
-
-func (a *CounterAnalyzer) SetTrackingOptions(symbol string, trackGrowth, trackFall bool) error {
-	counter, exists := a.counterManager.GetCounter(symbol)
-	if !exists {
-		return fmt.Errorf("counter for symbol %s not found", symbol)
-	}
-
-	counter.Lock()
-	counter.Settings.TrackGrowth = trackGrowth
-	counter.Settings.TrackFall = trackFall
-	counter.Unlock()
-	return nil
-}
-
-// TestVolumeDeltaConnection тестирует подключение к API дельты
-func (a *CounterAnalyzer) TestVolumeDeltaConnection(symbol string) error {
-	if a.volumeCalculator == nil {
-		return fmt.Errorf("volume calculator not initialized")
-	}
-	return a.volumeCalculator.TestConnection(symbol)
-}
-
-// GetVolumeDeltaCacheInfo возвращает информацию о кэше дельты
-func (a *CounterAnalyzer) GetVolumeDeltaCacheInfo() map[string]interface{} {
-	if a.volumeCalculator == nil {
-		return map[string]interface{}{"error": "volume calculator not initialized"}
-	}
-	return a.volumeCalculator.GetCacheInfo()
-}
-
-// ClearVolumeDeltaCache очищает кэш дельты
-func (a *CounterAnalyzer) ClearVolumeDeltaCache() {
-	if a.volumeCalculator != nil {
-		a.volumeCalculator.ClearCache()
-	}
-}
-
-// TestNotification отправляет тестовое уведомление через EventBus
-func (a *CounterAnalyzer) TestNotification(symbol string) error {
-	if a.eventBus == nil {
-		return fmt.Errorf("eventBus not initialized")
-	}
-
-	// Создаем тестовый Counter сигнал
-	testData := map[string]interface{}{
-		"symbol":        symbol,
-		"direction":     "growth",
-		"change":        2.5,
-		"signal_count":  1,
-		"max_signals":   5,
-		"current_price": 100.0,
-		"volume_24h":    1000000.0,
-		"open_interest": 500000.0,
-		"funding_rate":  0.0005,
-		"period":        "15 минут",
-		"timestamp":     time.Now(),
-	}
-
-	event := types.Event{
-		Type:      types.EventCounterSignalDetected,
-		Source:    "counter_analyzer",
-		Data:      testData,
-		Timestamp: time.Now(),
-	}
-
-	return a.eventBus.Publish(event)
-}
-
-// GetNotifierStats возвращает статистику нотификатора (теперь через EventBus)
-func (a *CounterAnalyzer) GetNotifierStats() map[string]interface{} {
-	if a.eventBus == nil {
-		return map[string]interface{}{"error": "eventBus not initialized"}
-	}
-
-	// Получаем метрики EventBus
-	metrics := a.eventBus.GetMetrics()
-
-	return map[string]interface{}{
-		"event_bus_metrics": map[string]interface{}{
-			"events_published": metrics.EventsPublished,
-			"events_processed": metrics.EventsProcessed,
-			"events_failed":    metrics.EventsFailed,
-		},
-		"notification_enabled": a.notificationEnabled,
-		"chart_provider":       a.chartProvider,
-	}
-}
-
-// TestDeltaConnection тестирует подключение к API дельты
-func (a *CounterAnalyzer) TestDeltaConnection(symbol string) string {
-	if a.volumeCalculator == nil {
-		return "❌ VolumeCalculator не инициализирован"
-	}
-	err := a.volumeCalculator.TestConnection(symbol)
-	if err != nil {
-		return fmt.Sprintf("❌ Ошибка тестирования дельты для %s:\n%s", symbol, err.Error())
-	}
-	cacheInfo := a.volumeCalculator.GetCacheInfo()
-	cacheSize := cacheInfo["cache_size"].(int)
-	return fmt.Sprintf("✅ Тест дельты для %s пройден!\n📦 Размер кэша: %d", symbol, cacheSize)
+// Supports проверяет, поддерживается ли символ
+func (a *CounterAnalyzer) Supports(symbol string) bool {
+	return true
 }
