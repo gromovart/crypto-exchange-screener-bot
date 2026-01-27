@@ -2,11 +2,10 @@
 package engine
 
 import (
-	candle "crypto-exchange-screener-bot/internal/core/domain/candle" // НОВЫЙ импорт
+	candle "crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
-	"crypto-exchange-screener-bot/internal/core/domain/signals/filters"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -17,14 +16,14 @@ import (
 
 type Factory struct {
 	priceFetcher interface{}
-	candleSystem *candle.CandleSystem // НОВОЕ: Свечная система
+	candleSystem *candle.CandleSystem
 }
 
-// NewFactory создает фабрику (обновленный конструктор)
+// NewFactory создает фабрику
 func NewFactory(priceFetcher interface{}, candleSystem *candle.CandleSystem) *Factory {
 	return &Factory{
 		priceFetcher: priceFetcher,
-		candleSystem: candleSystem, // НОВОЕ
+		candleSystem: candleSystem,
 	}
 }
 
@@ -57,18 +56,12 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 				Enabled: analyzerConfigs.CounterAnalyzer.Enabled,
 			},
 		},
-		FilterConfigs: FilterConfigs{
-			SignalFilters: SignalFilterConfig{
-				Enabled:          cfg.SignalFilters.Enabled,
-				MinConfidence:    cfg.SignalFilters.MinConfidence,
-				MaxSignalsPerMin: cfg.SignalFilters.MaxSignalsPerMin,
-			},
-		},
+		// УДАЛЕНО: FilterConfigs - AnalysisEngine теперь только оркестратор
 	}
 
 	engine := NewAnalysisEngine(storage, eventBus, engineConfig)
 	f.configureAnalyzers(engine, cfg)
-	f.configureFilters(engine, cfg)
+	// УДАЛЕНО: f.configureFilters(engine, cfg) - фильтров больше нет
 	return engine
 }
 
@@ -122,7 +115,6 @@ func (f *Factory) configureAnalyzers(
 	engine *AnalysisEngine,
 	cfg *config.Config,
 ) {
-	// minDataPoints := cfg.AnalysisEngine.MinDataPoints
 	analyzerConfigs := cfg.AnalyzerConfigs
 
 	// Оставляем только CounterAnalyzer если он включен
@@ -200,21 +192,7 @@ func (f *Factory) configureCounterAnalyzer(
 	}
 }
 
-func (f *Factory) configureFilters(engine *AnalysisEngine, cfg *config.Config) {
-	if cfg.SignalFilters.Enabled && cfg.SignalFilters.MinConfidence > 0 {
-		confidenceFilter := filters.NewConfidenceFilter(cfg.SignalFilters.MinConfidence)
-		engine.AddFilter(confidenceFilter)
-	}
-	if cfg.MinVolumeFilter > 0 {
-		volumeFilter := filters.NewVolumeFilter(cfg.MinVolumeFilter)
-		engine.AddFilter(volumeFilter)
-	}
-	if cfg.SignalFilters.Enabled && cfg.SignalFilters.MaxSignalsPerMin > 0 {
-		minDelay := time.Minute / time.Duration(cfg.SignalFilters.MaxSignalsPerMin)
-		rateLimitFilter := filters.NewRateLimitFilter(minDelay)
-		engine.AddFilter(rateLimitFilter)
-	}
-}
+// УДАЛЕНО: configureFilters метод - AnalysisEngine теперь только оркестратор
 
 func (e *AnalysisEngine) GetStorage() storage.PriceStorageInterface {
 	return e.storage
