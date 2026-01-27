@@ -27,7 +27,7 @@ func (b *ButtonBuilder) CreateSignalKeyboard(symbol string) telegram.InlineKeybo
 				},
 				{
 					Text: constants.ButtonTexts.Chart,
-					URL:  b.getTradingViewURL(symbol),
+					URL:  b.getCoinglassURL(symbol),
 				},
 			},
 		},
@@ -192,13 +192,12 @@ func (b *ButtonBuilder) getCoinGeckoURL(symbol string) string {
 	baseSymbol := strings.ToLower(strings.Split(symbol, "/")[0])
 	return fmt.Sprintf("https://www.coingecko.com/en/coins/%s", baseSymbol)
 }
-
 func (b *ButtonBuilder) getTradingViewURL(symbol string) string {
 	cleanSymbol := strings.ReplaceAll(symbol, "/", "")
-	return fmt.Sprintf("https://www.tradingview.com/symbols/%s/?exchange=BYBIT", cleanSymbol)
+	return fmt.Sprintf("https://ru.tradingview.com/chart/3pY8apxb/?symbol=BYBIT%%3A%s", cleanSymbol)
 }
 
 func (b *ButtonBuilder) getCoinglassURL(symbol string) string {
 	cleanSymbol := strings.ReplaceAll(symbol, "/", "")
-	return fmt.Sprintf("https://www.coinglass.com/t/%s", cleanSymbol)
+	return fmt.Sprintf("https://www.coinglass.com/tv/ru/Bybit_%s", cleanSymbol)
 }
