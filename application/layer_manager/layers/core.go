@@ -10,7 +10,7 @@ import (
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -384,7 +384,7 @@ func (cl *CoreLayer) setupAndStartCandleSystem() error {
 	}
 
 	// Создаем хранилище свечей Redis
-	candleConfig := redis_storage.CandleConfig{
+	candleConfig := storage.CandleConfig{
 		SupportedPeriods: []string{"5m", "15m", "30m", "1h", "4h", "1d"},
 		MaxHistory:       1000,
 		CleanupInterval:  5 * time.Minute,

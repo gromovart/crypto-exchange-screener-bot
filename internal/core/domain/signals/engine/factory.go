@@ -53,33 +53,6 @@ func (f *Factory) NewAnalysisEngineFromConfig(
 		EnableCache:      cfg.AnalysisEngine.EnableCache,
 		MinDataPoints:    3,
 		AnalyzerConfigs: AnalyzerConfigs{
-			GrowthAnalyzer: AnalyzerConfig{
-				Enabled:       analyzerConfigs.GrowthAnalyzer.Enabled,
-				MinConfidence: analyzerConfigs.GrowthAnalyzer.MinConfidence,
-				MinGrowth:     analyzerConfigs.GrowthAnalyzer.MinGrowth,
-				CustomSettings: map[string]interface{}{
-					"continuity_threshold": getFloatFromCustomSettings(analyzerConfigs.GrowthAnalyzer.CustomSettings, "continuity_threshold", 0.7),
-				},
-			},
-			FallAnalyzer: AnalyzerConfig{
-				Enabled:       analyzerConfigs.FallAnalyzer.Enabled,
-				MinConfidence: analyzerConfigs.FallAnalyzer.MinConfidence,
-				MinFall:       analyzerConfigs.FallAnalyzer.MinFall,
-				CustomSettings: map[string]interface{}{
-					"continuity_threshold": getFloatFromCustomSettings(analyzerConfigs.FallAnalyzer.CustomSettings, "continuity_threshold", 0.7),
-				},
-			},
-			ContinuousAnalyzer: AnalyzerConfig{
-				Enabled: analyzerConfigs.ContinuousAnalyzer.Enabled,
-			},
-			VolumeAnalyzer: AnalyzerConfig{
-				Enabled:       analyzerConfigs.VolumeAnalyzer.Enabled,
-				MinConfidence: analyzerConfigs.VolumeAnalyzer.MinConfidence,
-			},
-			OpenInterestAnalyzer: AnalyzerConfig{
-				Enabled:       analyzerConfigs.OpenInterestAnalyzer.Enabled,
-				MinConfidence: analyzerConfigs.OpenInterestAnalyzer.MinConfidence,
-			},
 			CounterAnalyzer: AnalyzerConfig{
 				Enabled: analyzerConfigs.CounterAnalyzer.Enabled,
 			},
@@ -151,13 +124,6 @@ func (f *Factory) configureAnalyzers(
 ) {
 	// minDataPoints := cfg.AnalysisEngine.MinDataPoints
 	analyzerConfigs := cfg.AnalyzerConfigs
-
-	// ОТКЛЮЧАЕМ АНАЛИЗАТОРЫ:
-	// GrowthAnalyzer - ОТКЛЮЧЕН
-	// FallAnalyzer - ОТКЛЮЧЕН
-	// ContinuousAnalyzer - ОТКЛЮЧЕН
-	// VolumeAnalyzer - ОТКЛЮЧЕН
-	// OpenInterestAnalyzer - ОТКЛЮЧЕН
 
 	// Оставляем только CounterAnalyzer если он включен
 	if analyzerConfigs.CounterAnalyzer.Enabled {

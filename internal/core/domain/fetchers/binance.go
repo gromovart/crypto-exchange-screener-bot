@@ -3,8 +3,8 @@ package fetchers
 
 import (
 	binance "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/binance"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
-	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	price_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
@@ -17,7 +17,7 @@ import (
 // BinancePriceFetcher реализация фетчера для Binance
 type BinancePriceFetcher struct {
 	client   *binance.BinanceClient
-	storage  storage.PriceStorage
+	storage  price_storage.PriceStorage
 	eventBus *events.EventBus
 	mu       sync.RWMutex
 	running  bool
@@ -26,7 +26,7 @@ type BinancePriceFetcher struct {
 }
 
 // NewBinancePriceFetcher создает новый BinancePriceFetcher
-func NewBinancePriceFetcher(client *binance.BinanceClient, storage storage.PriceStorage, eventBus *events.EventBus) *BinancePriceFetcher {
+func NewBinancePriceFetcher(client *binance.BinanceClient, storage price_storage.PriceStorage, eventBus *events.EventBus) *BinancePriceFetcher {
 	return &BinancePriceFetcher{
 		client:   client,
 		storage:  storage,
@@ -101,7 +101,7 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 	updatedCount := 0
 
 	// 🔴 СОБИРАЕМ ВСЕ ЦЕНЫ В МАССИВ
-	var priceDataList []redis_storage.PriceData
+	var priceDataList []storage.PriceData
 
 	for _, ticker := range tickers.Result.List {
 		// Парсим цену
@@ -140,7 +140,7 @@ func (f *BinancePriceFetcher) fetchPrices() error {
 		}
 
 		// Добавляем в массив для batch события
-		priceDataList = append(priceDataList, redis_storage.PriceData{
+		priceDataList = append(priceDataList, storage.PriceData{
 			Symbol:       ticker.Symbol,
 			Price:        price,
 			Volume24h:    volumeBase,

@@ -3,7 +3,7 @@ package cache_manager
 
 import (
 	"context"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"sync"
 
 	"github.com/go-redis/redis/v8"
@@ -16,6 +16,6 @@ type CacheManager struct {
 	prefix string
 
 	// Локальный кэш для быстрого доступа
-	localCache   map[string]redis_storage.PriceSnapshotInterface
+	localCache   map[string]storage.PriceSnapshotInterface
 	localCacheMu sync.RWMutex
 }

@@ -3,7 +3,7 @@ package counter
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	periodPkg "crypto-exchange-screener-bot/pkg/period"
@@ -122,7 +122,7 @@ func (a *CounterAnalyzer) AnalyzeCandle(symbol, period string) (*analysis.Signal
 
 // CreateSignal создает сигнал
 func (a *CounterAnalyzer) CreateSignal(symbol, period, direction string, changePercent float64,
-	candleData *redis_storage.Candle) analysis.Signal {
+	candleData *storage.Candle) analysis.Signal {
 
 	// Упрощенный расчет уверенности
 	confidence := 50.0
@@ -205,7 +205,7 @@ func (a *CounterAnalyzer) PublishRawCounterSignal(signal analysis.Signal, period
 }
 
 // getPriceHistoryForAnalysis получает историю цен для технического анализа
-func (a *CounterAnalyzer) getPriceHistoryForAnalysis(symbol, period string, limit int) ([]redis_storage.PriceData, error) {
+func (a *CounterAnalyzer) getPriceHistoryForAnalysis(symbol, period string, limit int) ([]storage.PriceData, error) {
 	if a.deps.Storage == nil {
 		return nil, fmt.Errorf("хранилище не инициализировано")
 	}
@@ -217,9 +217,9 @@ func (a *CounterAnalyzer) getPriceHistoryForAnalysis(symbol, period string, limi
 	}
 
 	// Конвертируем интерфейсы в PriceData
-	var priceData []redis_storage.PriceData
+	var priceData []storage.PriceData
 	for _, h := range history {
-		priceData = append(priceData, redis_storage.PriceData{
+		priceData = append(priceData, storage.PriceData{
 			Symbol:       h.GetSymbol(),
 			Price:        h.GetPrice(),
 			Volume24h:    h.GetVolume24h(),

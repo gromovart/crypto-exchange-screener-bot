@@ -3,7 +3,7 @@ package adapters
 
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 )
 
@@ -87,9 +87,9 @@ func TrendSignalToGrowthSignal(signal types.TrendSignal) types.GrowthSignal {
 	}
 }
 
-// PriceDataToPriceDataPoint конвертирует redis_storage.PriceData в redis_storage.PriceDataPoint
-func PriceDataToPriceDataPoint(data redis_storage.PriceData) redis_storage.PriceDataPoint {
-	return redis_storage.PriceDataPoint{
+// PriceDataToPriceDataPoint конвертирует storage.PriceData в storage.PriceDataPoint
+func PriceDataToPriceDataPoint(data storage.PriceData) storage.PriceDataPoint {
+	return storage.PriceDataPoint{
 		Price:     data.Price,
 		Timestamp: data.Timestamp,
 		Volume:    data.Volume24h,

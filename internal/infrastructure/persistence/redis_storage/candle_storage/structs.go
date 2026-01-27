@@ -3,7 +3,7 @@ package candle_storage
 
 import (
 	"context"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"sync"
 	"time"
 
@@ -18,7 +18,7 @@ type RedisCandleStorage struct {
 	candlePrefix string
 
 	// Конфигурация
-	config redis_storage.CandleConfig
+	config storage.CandleConfig
 
 	// Статистика для агрегированного логирования
 	closedCandlesCount int           // счетчик закрытых свечей

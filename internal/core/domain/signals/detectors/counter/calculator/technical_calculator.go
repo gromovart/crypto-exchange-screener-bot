@@ -2,7 +2,7 @@
 package calculator
 
 import (
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"math"
 )
 
@@ -15,7 +15,7 @@ func NewTechnicalCalculator() *TechnicalCalculator {
 }
 
 // CalculateRSI рассчитывает RSI
-func (c *TechnicalCalculator) CalculateRSI(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) CalculateRSI(prices []storage.PriceData) float64 {
 	if len(prices) < 14 {
 		return c.calculateSimpleRSI(prices)
 	}
@@ -55,7 +55,7 @@ func (c *TechnicalCalculator) CalculateRSI(prices []redis_storage.PriceData) flo
 }
 
 // calculateSimpleRSI упрощенный расчет RSI для малого количества данных
-func (c *TechnicalCalculator) calculateSimpleRSI(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) calculateSimpleRSI(prices []storage.PriceData) float64 {
 	if len(prices) < 2 {
 		return 50.0
 	}
@@ -88,7 +88,7 @@ func (c *TechnicalCalculator) calculateSimpleRSI(prices []redis_storage.PriceDat
 }
 
 // CalculateMACD рассчитывает MACD (возвращает 3 значения: линия, сигнал, гистограмма)
-func (c *TechnicalCalculator) CalculateMACD(prices []redis_storage.PriceData) (macdLine, signalLine, histogram float64) {
+func (c *TechnicalCalculator) CalculateMACD(prices []storage.PriceData) (macdLine, signalLine, histogram float64) {
 	// Минимум 2 точки для расчета
 	if len(prices) < 2 {
 		// Возвращаем значимые значения которые отобразятся как не-0.00
@@ -169,7 +169,7 @@ func (c *TechnicalCalculator) CalculateMACD(prices []redis_storage.PriceData) (m
 }
 
 // calculateSimpleMACD упрощенный расчет MACD для малого количества данных
-func (c *TechnicalCalculator) calculateSimpleMACD(prices []redis_storage.PriceData) (macdLine, signalLine, histogram float64) {
+func (c *TechnicalCalculator) calculateSimpleMACD(prices []storage.PriceData) (macdLine, signalLine, histogram float64) {
 	if len(prices) < 2 {
 		// Возвращаем значимые значения
 		return 0.01, 0.007, 0.003
@@ -216,7 +216,7 @@ func (c *TechnicalCalculator) calculateSimpleMACD(prices []redis_storage.PriceDa
 }
 
 // calculateEMA рассчитывает Exponential Moving Average
-func (c *TechnicalCalculator) calculateEMA(prices []redis_storage.PriceData, period int) float64 {
+func (c *TechnicalCalculator) calculateEMA(prices []storage.PriceData, period int) float64 {
 	if len(prices) < period {
 		// Адаптируем период
 		actualPeriod := len(prices)
@@ -250,7 +250,7 @@ func (c *TechnicalCalculator) calculateEMA(prices []redis_storage.PriceData, per
 }
 
 // calculateSMA рассчитывает Simple Moving Average
-func (c *TechnicalCalculator) calculateSMA(prices []redis_storage.PriceData, period int) float64 {
+func (c *TechnicalCalculator) calculateSMA(prices []storage.PriceData, period int) float64 {
 	if len(prices) < period {
 		return 0
 	}
@@ -296,7 +296,7 @@ func (c *TechnicalCalculator) calculateEMAFromValues(values []float64, period in
 }
 
 // calculateMACDHistory рассчитывает историю MACD для сигнальной линии
-func (c *TechnicalCalculator) calculateMACDHistory(prices []redis_storage.PriceData, signalPeriod int) []float64 {
+func (c *TechnicalCalculator) calculateMACDHistory(prices []storage.PriceData, signalPeriod int) []float64 {
 	if len(prices) < signalPeriod {
 		return []float64{}
 	}
@@ -333,7 +333,7 @@ func (c *TechnicalCalculator) calculateMACDHistory(prices []redis_storage.PriceD
 }
 
 // CalculateNormalizedMACD рассчитывает нормализованный MACD (в процентах)
-func (c *TechnicalCalculator) CalculateNormalizedMACD(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) CalculateNormalizedMACD(prices []storage.PriceData) float64 {
 	macdLine, _, _ := c.CalculateMACD(prices)
 
 	if len(prices) == 0 {
@@ -363,7 +363,7 @@ func (c *TechnicalCalculator) CalculateNormalizedMACD(prices []redis_storage.Pri
 }
 
 // GetMACDStatus возвращает статус MACD на основе нормализованного значения
-func (c *TechnicalCalculator) GetMACDStatus(prices []redis_storage.PriceData) string {
+func (c *TechnicalCalculator) GetMACDStatus(prices []storage.PriceData) string {
 	if len(prices) < 2 {
 		return "недостаточно данных"
 	}
@@ -386,7 +386,7 @@ func (c *TechnicalCalculator) GetMACDStatus(prices []redis_storage.PriceData) st
 }
 
 // GetMACDDescription возвращает текстовое описание MACD
-func (c *TechnicalCalculator) GetMACDDescription(prices []redis_storage.PriceData) string {
+func (c *TechnicalCalculator) GetMACDDescription(prices []storage.PriceData) string {
 	if len(prices) < 2 {
 		return "⭕ недостаточно данных"
 	}
@@ -422,7 +422,7 @@ func (c *TechnicalCalculator) GetMACDDescription(prices []redis_storage.PriceDat
 }
 
 // CalculateVolatility рассчитывает волатильность
-func (c *TechnicalCalculator) CalculateVolatility(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) CalculateVolatility(prices []storage.PriceData) float64 {
 	if len(prices) < 2 {
 		return 0
 	}
@@ -444,7 +444,7 @@ func (c *TechnicalCalculator) CalculateVolatility(prices []redis_storage.PriceDa
 }
 
 // CalculateTrendStrength рассчитывает силу тренда
-func (c *TechnicalCalculator) CalculateTrendStrength(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) CalculateTrendStrength(prices []storage.PriceData) float64 {
 	if len(prices) < 2 {
 		return 0
 	}
@@ -460,7 +460,7 @@ func (c *TechnicalCalculator) CalculateTrendStrength(prices []redis_storage.Pric
 }
 
 // CalculateAverageChange рассчитывает среднее изменение
-func (c *TechnicalCalculator) CalculateAverageChange(prices []redis_storage.PriceData) float64 {
+func (c *TechnicalCalculator) CalculateAverageChange(prices []storage.PriceData) float64 {
 	if len(prices) < 2 {
 		return 0
 	}
@@ -476,7 +476,7 @@ func (c *TechnicalCalculator) CalculateAverageChange(prices []redis_storage.Pric
 }
 
 // IsContinuousGrowth проверяет непрерывный рост
-func (c *TechnicalCalculator) IsContinuousGrowth(prices []redis_storage.PriceData, threshold float64) bool {
+func (c *TechnicalCalculator) IsContinuousGrowth(prices []storage.PriceData, threshold float64) bool {
 	if len(prices) < 2 {
 		return false
 	}
@@ -496,7 +496,7 @@ func (c *TechnicalCalculator) IsContinuousGrowth(prices []redis_storage.PriceDat
 }
 
 // IsContinuousFall проверяет непрерывное падение
-func (c *TechnicalCalculator) IsContinuousFall(prices []redis_storage.PriceData, threshold float64) bool {
+func (c *TechnicalCalculator) IsContinuousFall(prices []storage.PriceData, threshold float64) bool {
 	if len(prices) < 2 {
 		return false
 	}
@@ -516,7 +516,7 @@ func (c *TechnicalCalculator) IsContinuousFall(prices []redis_storage.PriceData,
 }
 
 // CalculateMinMax рассчитывает минимум и максимум
-func (c *TechnicalCalculator) CalculateMinMax(prices []redis_storage.PriceData) (float64, float64) {
+func (c *TechnicalCalculator) CalculateMinMax(prices []storage.PriceData) (float64, float64) {
 	if len(prices) == 0 {
 		return 0, 0
 	}

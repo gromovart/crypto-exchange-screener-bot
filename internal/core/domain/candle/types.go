@@ -3,7 +3,7 @@
 package candle
 
 import (
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"time"
 )
 
@@ -26,7 +26,7 @@ type CandleConfig struct {
 
 // BuildResult - результат построения свечи
 type BuildResult struct {
-	Candle   *redis_storage.Candle // Изменено на redis_storage.Candle
+	Candle   *storage.Candle // Изменено на storage.Candle
 	Error    error
 	IsNew    bool
 	Duration time.Duration

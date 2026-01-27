@@ -3,7 +3,7 @@ package redis_storage_factory
 
 import (
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/candle_storage"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/price_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -13,11 +13,11 @@ import (
 )
 
 // PriceStorage алиас для интерфейса
-type PriceStorage = redis_storage.PriceStorageInterface
+type PriceStorage = storage.PriceStorageInterface
 
 // StorageFactoryConfig конфигурация фабрики хранилищ
 type StorageFactoryConfig struct {
-	DefaultStorageConfig *redis_storage.StorageConfig
+	DefaultStorageConfig *storage.StorageConfig
 	EnableCleanupRoutine bool
 	CleanupInterval      time.Duration
 	MaxCustomStorages    int
@@ -89,7 +89,7 @@ func (sf *StorageFactory) CreateDefaultStorage() (PriceStorage, error) {
 		// Создаем RedisStorage
 		storageConfig := sf.config.DefaultStorageConfig
 		if storageConfig == nil {
-			storageConfig = &redis_storage.StorageConfig{
+			storageConfig = &storage.StorageConfig{
 				MaxHistoryPerSymbol: 10000,
 				MaxSymbols:          1000,
 				CleanupInterval:     5 * time.Minute,
@@ -161,7 +161,7 @@ func (sf *StorageFactory) createDefaultStorageUnsafe() (PriceStorage, error) {
 	// Создаем RedisStorage
 	storageConfig := sf.config.DefaultStorageConfig
 	if storageConfig == nil {
-		storageConfig = &redis_storage.StorageConfig{
+		storageConfig = &storage.StorageConfig{
 			MaxHistoryPerSymbol: 10000,
 			MaxSymbols:          1000,
 			CleanupInterval:     5 * time.Minute,
@@ -289,7 +289,7 @@ func (sf *StorageFactory) Reset() {
 	sf.customStorages = make(map[string]PriceStorage)
 	sf.redisClient = nil
 }
-func (sf *StorageFactory) CreateCandleStorage(config redis_storage.CandleConfig) (redis_storage.CandleStorageInterface, error) {
+func (sf *StorageFactory) CreateCandleStorage(config storage.CandleConfig) (storage.CandleStorageInterface, error) {
 	sf.mu.RLock()
 	defer sf.mu.RUnlock()
 

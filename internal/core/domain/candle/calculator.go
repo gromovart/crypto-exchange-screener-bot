@@ -5,7 +5,6 @@ import (
 	"sort"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 )
 
@@ -22,7 +21,7 @@ func NewCandleCalculator(priceStorage storage.PriceStorageInterface) *CandleCalc
 }
 
 // BuildCandleFromHistory строит свечу из истории цен
-func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*redis_storage.Candle, error) {
+func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*storage.Candle, error) {
 	// Определяем период
 	duration := periodToDuration(period)
 	endTime := time.Now()
@@ -36,7 +35,7 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*redi
 
 	if len(prices) == 0 {
 		// Если нет данных, возвращаем пустую свечу
-		return &redis_storage.Candle{
+		return &storage.Candle{
 			Symbol:       symbol,
 			Period:       period,
 			StartTime:    startTime,
@@ -52,14 +51,14 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*redi
 
 // buildCandleFromPriceData строит свечу из массива PriceDataInterface
 func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
-	prices []storage.PriceDataInterface) *redis_storage.Candle {
+	prices []storage.PriceDataInterface) *storage.Candle {
 
 	// Сортируем цены по времени
 	sortedPrices := sortPriceDataInterfaceByTime(prices)
 
 	// Если после сортировки нет данных
 	if len(sortedPrices) == 0 {
-		return &redis_storage.Candle{
+		return &storage.Candle{
 			Symbol:       symbol,
 			Period:       period,
 			IsClosedFlag: true,
@@ -104,7 +103,7 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 	minDuration := duration * 8 / 10 // 80% от периода
 	coversFullPeriod := endTime.Sub(startTime) >= minDuration
 
-	return &redis_storage.Candle{
+	return &storage.Candle{
 		Symbol:       symbol,
 		Period:       period,
 		Open:         open,
@@ -122,7 +121,7 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 }
 
 // CalculateChangePercent рассчитывает процент изменения свечи
-func (cc *CandleCalculator) CalculateChangePercent(candle *redis_storage.Candle) float64 {
+func (cc *CandleCalculator) CalculateChangePercent(candle *storage.Candle) float64 {
 	if candle.Open == 0 {
 		return 0
 	}
@@ -130,7 +129,7 @@ func (cc *CandleCalculator) CalculateChangePercent(candle *redis_storage.Candle)
 }
 
 // CalculateAverageCandle строит среднюю свечу из массива свечей
-func (cc *CandleCalculator) CalculateAverageCandle(candles []*redis_storage.Candle) *redis_storage.Candle {
+func (cc *CandleCalculator) CalculateAverageCandle(candles []*storage.Candle) *storage.Candle {
 	if len(candles) == 0 {
 		return nil
 	}
@@ -151,7 +150,7 @@ func (cc *CandleCalculator) CalculateAverageCandle(candles []*redis_storage.Cand
 
 	count := float64(len(candles))
 
-	return &redis_storage.Candle{
+	return &storage.Candle{
 		Symbol:       candles[0].Symbol,
 		Period:       candles[0].Period,
 		Open:         totalOpen / count,
@@ -169,7 +168,7 @@ func (cc *CandleCalculator) CalculateAverageCandle(candles []*redis_storage.Cand
 }
 
 // MergeCandles объединяет свечи в более крупный период
-func (cc *CandleCalculator) MergeCandles(candles []*redis_storage.Candle, targetPeriod string) *redis_storage.Candle {
+func (cc *CandleCalculator) MergeCandles(candles []*storage.Candle, targetPeriod string) *storage.Candle {
 	if len(candles) == 0 {
 		return nil
 	}
@@ -203,7 +202,7 @@ func (cc *CandleCalculator) MergeCandles(candles []*redis_storage.Candle, target
 		totalTrades += candle.Trades
 	}
 
-	return &redis_storage.Candle{
+	return &storage.Candle{
 		Symbol:       candles[0].Symbol,
 		Period:       targetPeriod,
 		Open:         open,
@@ -221,7 +220,7 @@ func (cc *CandleCalculator) MergeCandles(candles []*redis_storage.Candle, target
 }
 
 // AnalyzeCandleTrend анализирует тренд свечи
-func (cc *CandleCalculator) AnalyzeCandleTrend(candle *redis_storage.Candle) string {
+func (cc *CandleCalculator) AnalyzeCandleTrend(candle *storage.Candle) string {
 	changePercent := cc.CalculateChangePercent(candle)
 
 	if changePercent > 5.0 {

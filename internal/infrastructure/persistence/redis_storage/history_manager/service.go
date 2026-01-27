@@ -3,7 +3,7 @@ package history_manager
 
 import (
 	"context"
-	redis_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"encoding/json"
 	"fmt"
@@ -14,8 +14,6 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-
-
 // NewHistoryManager создает нового менеджера истории
 func NewHistoryManager() *HistoryManager {
 	return &HistoryManager{
@@ -25,13 +23,13 @@ func NewHistoryManager() *HistoryManager {
 }
 
 // Initialize инициализирует менеджер истории
-func (hm *HistoryManager) Initialize(client *redis.Client, config *redis_storage.StorageConfig) {
+func (hm *HistoryManager) Initialize(client *redis.Client, config *storage.StorageConfig) {
 	hm.client = client
 	hm.config = config
 }
 
 // AddToHistory добавляет цену в историю
-func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snapshot redis_storage.PriceSnapshotInterface) error {
+func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snapshot storage.PriceSnapshotInterface) error {
 	if hm.client == nil {
 		return fmt.Errorf("клиент Redis не инициализирован")
 	}
@@ -79,7 +77,7 @@ func (hm *HistoryManager) AddToHistory(pipe redis.Pipeliner, symbol string, snap
 }
 
 // GetHistory возвращает историю цен
-func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]redis_storage.PriceDataInterface, error) {
+func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]storage.PriceDataInterface, error) {
 	if hm.client == nil {
 		return nil, fmt.Errorf("клиент Redis не инициализирован")
 	}
@@ -105,7 +103,7 @@ func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]redis_storage.
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var history []redis_storage.PriceDataInterface
+	var history []storage.PriceDataInterface
 	for _, result := range results {
 		var data struct {
 			Symbol       string    `json:"symbol"`
@@ -122,7 +120,7 @@ func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]redis_storage.
 
 		if err := json.Unmarshal([]byte(result), &data); err == nil {
 			// Создаем PriceData структуру
-			priceData := &redis_storage.PriceData{
+			priceData := &storage.PriceData{
 				Symbol:       data.Symbol,
 				Price:        data.Price,
 				Volume24h:    data.Volume24h,
@@ -147,7 +145,7 @@ func (hm *HistoryManager) GetHistory(symbol string, limit int) ([]redis_storage.
 }
 
 // GetHistoryRange возвращает историю за период
-func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) ([]redis_storage.PriceDataInterface, error) {
+func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) ([]storage.PriceDataInterface, error) {
 	if hm.client == nil {
 		return nil, fmt.Errorf("клиент Redis не инициализирован")
 	}
@@ -164,7 +162,7 @@ func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) (
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var history []redis_storage.PriceDataInterface
+	var history []storage.PriceDataInterface
 	for _, result := range results {
 		var data struct {
 			Symbol       string    `json:"symbol"`
@@ -181,7 +179,7 @@ func (hm *HistoryManager) GetHistoryRange(symbol string, start, end time.Time) (
 
 		if err := json.Unmarshal([]byte(result), &data); err == nil {
 			// Создаем PriceData структуру
-			priceData := &redis_storage.PriceData{
+			priceData := &storage.PriceData{
 				Symbol:       data.Symbol,
 				Price:        data.Price,
 				Volume24h:    data.Volume24h,

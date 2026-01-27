@@ -324,8 +324,8 @@ func (e *AnalysisEngine) analyzePeriod(symbol string, period time.Duration) ([]a
 		return nil, fmt.Errorf("insufficient data for %s", symbol)
 	}
 
-	// Конвертируем в формат анализа
-	data := convertToPriceData(priceDataInterfaces)
+	// ИСПРАВЛЕНО: используем данные напрямую, без конвертации
+	data := priceDataInterfaces // уже []storage.PriceDataInterface
 
 	// Запускаем все анализаторы
 	var allSignals []analysis.Signal
@@ -525,7 +525,7 @@ func (e *AnalysisEngine) publishAnalysisComplete(results map[string]*analysis.An
 		Source: "analysis_engine",
 		Data: map[string]interface{}{
 			"symbols_analyzed": len(results),
-			"total_signals":    totalSignals, // ✅ Теперь переменная определена
+			"total_signals":    totalSignals,
 			"duration":         duration.String(),
 			"timestamp":        time.Now(),
 		},
@@ -639,34 +639,6 @@ func (e *AnalysisEngine) setupDefaultFilters() {
 		rateLimitFilter := filters.NewRateLimitFilter(minDelay)
 		e.AddFilter(rateLimitFilter)
 	}
-}
-
-// convertToPriceData конвертирует данные хранилища в формат анализа
-func convertToPriceData(storageData []storage.PriceDataInterface) []storage.PriceData {
-	result := make([]storage.PriceData, len(storageData))
-
-	for i, data := range storageData {
-		result[i] = storage.PriceData{
-			Symbol:       data.GetSymbol(),
-			Price:        data.GetPrice(),
-			Volume24h:    data.GetVolume24h(),
-			VolumeUSD:    data.GetVolumeUSD(),
-			Timestamp:    data.GetTimestamp(),
-			OpenInterest: data.GetOpenInterest(),
-			FundingRate:  data.GetFundingRate(),
-			Change24h:    data.GetChange24h(),
-			High24h:      data.GetHigh24h(),
-			Low24h:       data.GetLow24h(),
-		}
-		// Логируем для отладки
-		if data.GetOpenInterest() > 0 {
-			//Раскомментировать для отладки
-			// logger.Debug("🔍 Engine.convertToPriceData: %s OI=%.0f, Funding=%.4f%%, Change24h=%.2f%%",
-			// 	data.GetSymbol(), data.GetOpenInterest(), data.GetFundingRate()*100, data.GetChange24h())
-		}
-	}
-
-	return result
 }
 
 // FilterChain - цепочка фильтров

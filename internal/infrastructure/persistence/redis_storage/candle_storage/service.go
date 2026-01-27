@@ -3,22 +3,21 @@ package candle_storage
 
 import (
 	"context"
+	"crypto-exchange-screener-bot/internal/core/domain/candle"
+	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/core/domain/candle"
-	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
-	"crypto-exchange-screener-bot/pkg/logger"
-
 	"github.com/go-redis/redis/v8"
 )
 
 // NewRedisCandleStorage создает новое Redis хранилище свечей
-func NewRedisCandleStorage(redisService *redis_service.RedisService, config redis_storage.CandleConfig) (*RedisCandleStorage, error) {
+func NewRedisCandleStorage(redisService *redis_service.RedisService, config storage.CandleConfig) (*RedisCandleStorage, error) {
 	if redisService == nil {
 		return nil, fmt.Errorf("сервис Redis не инициализирован")
 	}
@@ -47,7 +46,7 @@ func NewRedisCandleStorage(redisService *redis_service.RedisService, config redi
 }
 
 // SaveActiveCandle сохраняет активную свечу (реализация интерфейса)
-func (rcs *RedisCandleStorage) SaveActiveCandle(candleInterface redis_storage.CandleInterface) error {
+func (rcs *RedisCandleStorage) SaveActiveCandle(candleInterface storage.CandleInterface) error {
 	// Конвертируем интерфейс в *candle.Candle
 	candle := rcs.convertToCandle(candleInterface)
 	logger.Debug("🕯️ Сохранена активная свеча %s %s: O=%.6f, H=%.6f, L=%.6f, C=%.6f",
@@ -57,13 +56,13 @@ func (rcs *RedisCandleStorage) SaveActiveCandle(candleInterface redis_storage.Ca
 }
 
 // saveActiveCandleInternal внутренний метод для сохранения
-func (rcs *RedisCandleStorage) saveActiveCandleInternal(candle *redis_storage.Candle) error {
+func (rcs *RedisCandleStorage) saveActiveCandleInternal(candle *storage.Candle) error {
 	key := rcs.getActiveCandleKey(candle.Symbol, candle.Period)
 	return rcs.saveCandleToRedis(key, candle, 1*time.Hour) // TTL 1 час для активных свечей
 }
 
 // GetActiveCandle получает активную свечу (реализация интерфейса)
-func (rcs *RedisCandleStorage) GetActiveCandle(symbol, period string) (redis_storage.CandleInterface, bool) {
+func (rcs *RedisCandleStorage) GetActiveCandle(symbol, period string) (storage.CandleInterface, bool) {
 	candle, exists := rcs.getActiveCandleInternal(symbol, period)
 	if !exists {
 		return nil, false
@@ -72,13 +71,13 @@ func (rcs *RedisCandleStorage) GetActiveCandle(symbol, period string) (redis_sto
 }
 
 // getActiveCandleInternal внутренний метод получения
-func (rcs *RedisCandleStorage) getActiveCandleInternal(symbol, period string) (*redis_storage.Candle, bool) {
+func (rcs *RedisCandleStorage) getActiveCandleInternal(symbol, period string) (*storage.Candle, bool) {
 	key := rcs.getActiveCandleKey(symbol, period)
 	return rcs.loadCandleFromRedis(key)
 }
 
 // CloseAndArchiveCandle закрывает свечу и архивирует (реализация интерфейса)
-func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candleInterface redis_storage.CandleInterface) error {
+func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candleInterface storage.CandleInterface) error {
 	// Конвертируем интерфейс в *candle.Candle
 	candle := rcs.convertToCandle(candleInterface)
 
@@ -91,7 +90,7 @@ func (rcs *RedisCandleStorage) CloseAndArchiveCandle(candleInterface redis_stora
 }
 
 // closeAndArchiveCandleInternal внутренний метод закрытия
-func (rcs *RedisCandleStorage) closeAndArchiveCandleInternal(candle *redis_storage.Candle) error {
+func (rcs *RedisCandleStorage) closeAndArchiveCandleInternal(candle *storage.Candle) error {
 	// Закрываем свечу
 	candle.IsClosedFlag = true
 	candle.EndTime = time.Now()
@@ -113,14 +112,14 @@ func (rcs *RedisCandleStorage) closeAndArchiveCandleInternal(candle *redis_stora
 }
 
 // GetHistory возвращает историю свечей (реализация интерфейса)
-func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]redis_storage.CandleInterface, error) {
+func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]storage.CandleInterface, error) {
 	candles, err := rcs.getHistoryInternal(symbol, period, limit)
 	if err != nil {
 		return nil, err
 	}
 
-	// Конвертируем []*candle.Candle в []redis_storage.CandleInterface
-	result := make([]redis_storage.CandleInterface, len(candles))
+	// Конвертируем []*candle.Candle в []storage.CandleInterface
+	result := make([]storage.CandleInterface, len(candles))
 	for i, c := range candles {
 		result[i] = c
 	}
@@ -128,7 +127,7 @@ func (rcs *RedisCandleStorage) GetHistory(symbol, period string, limit int) ([]r
 }
 
 // getHistoryInternal внутренний метод получения истории
-func (rcs *RedisCandleStorage) getHistoryInternal(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
+func (rcs *RedisCandleStorage) getHistoryInternal(symbol, period string, limit int) ([]*storage.Candle, error) {
 	historyKey := rcs.getHistoryKey(symbol, period)
 
 	// Получаем последние N записей
@@ -143,7 +142,7 @@ func (rcs *RedisCandleStorage) getHistoryInternal(symbol, period string, limit i
 		return nil, fmt.Errorf("ошибка получения истории из Redis: %w", err)
 	}
 
-	var candles []*redis_storage.Candle
+	var candles []*storage.Candle
 	for _, result := range results {
 		candle, err := rcs.unmarshalCandle(result)
 		if err == nil {
@@ -160,7 +159,7 @@ func (rcs *RedisCandleStorage) getHistoryInternal(symbol, period string, limit i
 }
 
 // GetLatestCandle возвращает последнюю свечу (реализация интерфейса)
-func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (redis_storage.CandleInterface, bool) {
+func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (storage.CandleInterface, bool) {
 	candle, exists := rcs.getLatestCandleInternal(symbol, period)
 	if !exists {
 		return nil, false
@@ -169,7 +168,7 @@ func (rcs *RedisCandleStorage) GetLatestCandle(symbol, period string) (redis_sto
 }
 
 // getLatestCandleInternal внутренний метод получения последней свечи
-func (rcs *RedisCandleStorage) getLatestCandleInternal(symbol, period string) (*redis_storage.Candle, bool) {
+func (rcs *RedisCandleStorage) getLatestCandleInternal(symbol, period string) (*storage.Candle, bool) {
 	// Сначала проверяем активные свечи
 	if candle, exists := rcs.getActiveCandleInternal(symbol, period); exists {
 		return candle, true
@@ -185,7 +184,7 @@ func (rcs *RedisCandleStorage) getLatestCandleInternal(symbol, period string) (*
 }
 
 // GetCandle получает свечу (реализация интерфейса)
-func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (redis_storage.CandleInterface, error) {
+func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (storage.CandleInterface, error) {
 	candle, err := rcs.getCandleInternal(symbol, period)
 	if err != nil {
 		return nil, err
@@ -194,7 +193,7 @@ func (rcs *RedisCandleStorage) GetCandle(symbol, period string) (redis_storage.C
 }
 
 // getCandleInternal внутренний метод получения свечи
-func (rcs *RedisCandleStorage) getCandleInternal(symbol, period string) (*redis_storage.Candle, error) {
+func (rcs *RedisCandleStorage) getCandleInternal(symbol, period string) (*storage.Candle, error) {
 	// Сначала активную
 	if candle, exists := rcs.getActiveCandleInternal(symbol, period); exists {
 		return candle, nil
@@ -412,7 +411,7 @@ func (rcs *RedisCandleStorage) getPeriodsForSymbolInternal(symbol string) []stri
 }
 
 // GetStats возвращает статистику (реализация интерфейса)
-func (rcs *RedisCandleStorage) GetStats() redis_storage.CandleStatsInterface {
+func (rcs *RedisCandleStorage) GetStats() storage.CandleStatsInterface {
 	stats := rcs.getStatsInternal()
 	return &CandleStatsData{
 		TotalCandles:  stats.TotalCandles,
@@ -476,14 +475,14 @@ func (rcs *RedisCandleStorage) getStatsInternal() candle.CandleStats {
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ====================
 
-// convertToCandle конвертирует интерфейс в *redis_storage.Candle
-func (rcs *RedisCandleStorage) convertToCandle(candleInterface redis_storage.CandleInterface) *redis_storage.Candle {
-	if c, ok := candleInterface.(*redis_storage.Candle); ok {
+// convertToCandle конвертирует интерфейс в *storage.Candle
+func (rcs *RedisCandleStorage) convertToCandle(candleInterface storage.CandleInterface) *storage.Candle {
+	if c, ok := candleInterface.(*storage.Candle); ok {
 		return c
 	}
 
-	// Создаем новый *redis_storage.Candle из интерфейса
-	return &redis_storage.Candle{
+	// Создаем новый *storage.Candle из интерфейса
+	return &storage.Candle{
 		Symbol:       candleInterface.GetSymbol(),
 		Period:       candleInterface.GetPeriod(),
 		Open:         candleInterface.GetOpen(),
@@ -501,7 +500,7 @@ func (rcs *RedisCandleStorage) convertToCandle(candleInterface redis_storage.Can
 }
 
 // saveCandleToRedis сохраняет свечу в Redis
-func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *redis_storage.Candle, ttl time.Duration) error {
+func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *storage.Candle, ttl time.Duration) error {
 	data, err := json.Marshal(candle)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга свечи: %w", err)
@@ -511,7 +510,7 @@ func (rcs *RedisCandleStorage) saveCandleToRedis(key string, candle *redis_stora
 }
 
 // loadCandleFromRedis загружает свечу из Redis
-func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*redis_storage.Candle, bool) {
+func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*storage.Candle, bool) {
 	data, err := rcs.client.Get(rcs.ctx, key).Result()
 	if err == redis.Nil {
 		return nil, false
@@ -530,8 +529,8 @@ func (rcs *RedisCandleStorage) loadCandleFromRedis(key string) (*redis_storage.C
 }
 
 // unmarshalCandle преобразует JSON в свечу
-func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*redis_storage.Candle, error) {
-	var candle redis_storage.Candle
+func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*storage.Candle, error) {
+	var candle storage.Candle
 	if err := json.Unmarshal([]byte(data), &candle); err != nil {
 		return nil, fmt.Errorf("ошибка парсинга свечи: %w", err)
 	}
@@ -539,7 +538,7 @@ func (rcs *RedisCandleStorage) unmarshalCandle(data string) (*redis_storage.Cand
 }
 
 // addToHistory добавляет свечу в историю
-func (rcs *RedisCandleStorage) addToHistory(candle *redis_storage.Candle) error {
+func (rcs *RedisCandleStorage) addToHistory(candle *storage.Candle) error {
 	data, err := json.Marshal(candle)
 	if err != nil {
 		return fmt.Errorf("ошибка маршалинга свечи для истории: %w", err)

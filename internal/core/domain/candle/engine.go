@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
@@ -17,7 +16,7 @@ import (
 // CandleEngine - движок построения свечей
 type CandleEngine struct {
 	storage  storage.CandleStorageInterface
-	config   redis_storage.CandleConfig
+	config   storage.CandleConfig
 	eventBus *events.EventBus
 
 	// Каналы для обработки
@@ -41,7 +40,7 @@ type CandleEngine struct {
 // NewCandleEngine создает новый движок свечей
 func NewCandleEngine(
 	candleStorage storage.CandleStorageInterface,
-	config redis_storage.CandleConfig,
+	config storage.CandleConfig,
 	eventBus *events.EventBus, // НОВЫЙ параметр
 ) *CandleEngine {
 	engine := &CandleEngine{
@@ -234,12 +233,12 @@ func (ce *CandleEngine) buildCandleForPeriod(symbol, period string,
 
 // getOrCreateCandle получает или создает свечу
 func (ce *CandleEngine) getOrCreateCandle(symbol, period string,
-	priceData storage.PriceData) (*redis_storage.Candle, error) {
+	priceData storage.PriceData) (*storage.Candle, error) {
 
 	// Пробуем получить активную свечу
 	if candleInterface, exists := ce.storage.GetActiveCandle(symbol, period); exists {
 		// Конвертируем интерфейс в *Candle
-		if candle, ok := candleInterface.(*redis_storage.Candle); ok {
+		if candle, ok := candleInterface.(*storage.Candle); ok {
 			return candle, nil
 		}
 		// Если это не *Candle, создаем новый из интерфейса
@@ -251,8 +250,8 @@ func (ce *CandleEngine) getOrCreateCandle(symbol, period string,
 }
 
 // convertCandleInterface конвертирует интерфейс в *Candle
-func (ce *CandleEngine) convertCandleInterface(candleInterface storage.CandleInterface) *redis_storage.Candle {
-	return &redis_storage.Candle{
+func (ce *CandleEngine) convertCandleInterface(candleInterface storage.CandleInterface) *storage.Candle {
+	return &storage.Candle{
 		Symbol:       candleInterface.GetSymbol(),
 		Period:       candleInterface.GetPeriod(),
 		Open:         candleInterface.GetOpen(),
@@ -271,7 +270,7 @@ func (ce *CandleEngine) convertCandleInterface(candleInterface storage.CandleInt
 
 // createNewCandle создает новую свечу
 func (ce *CandleEngine) createNewCandle(symbol, period string,
-	priceData storage.PriceData) *redis_storage.Candle {
+	priceData storage.PriceData) *storage.Candle {
 
 	now := time.Now()
 	price := priceData.Price
@@ -280,7 +279,7 @@ func (ce *CandleEngine) createNewCandle(symbol, period string,
 	startTime := ce.calculateCandleStartTime(now, period)
 	endTime := ce.calculateCandleEndTime(startTime, period)
 
-	return &redis_storage.Candle{
+	return &storage.Candle{
 		Symbol:       symbol,
 		Period:       period,
 		Open:         price,
@@ -361,7 +360,7 @@ func (ce *CandleEngine) calculateCandleEndTime(startTime time.Time, period strin
 }
 
 // shouldCloseCandle проверяет, нужно ли закрыть свечу
-func (ce *CandleEngine) shouldCloseCandle(candle *redis_storage.Candle, period string) bool {
+func (ce *CandleEngine) shouldCloseCandle(candle *storage.Candle, period string) bool {
 	// 1. Если свеча уже закрыта - да
 	if candle.IsClosedFlag {
 		return true
@@ -426,7 +425,7 @@ func (ce *CandleEngine) getExpectedDuration(period string) time.Duration {
 }
 
 // updateCandle обновляет свечу новой ценой
-func (ce *CandleEngine) updateCandle(candle *redis_storage.Candle, priceData storage.PriceData) {
+func (ce *CandleEngine) updateCandle(candle *storage.Candle, priceData storage.PriceData) {
 	price := priceData.Price
 
 	// Обновляем high/low
@@ -447,7 +446,7 @@ func (ce *CandleEngine) updateCandle(candle *redis_storage.Candle, priceData sto
 }
 
 // closeCandle закрывает свечу - УБРАНО ЛОГИРОВАНИЕ
-func (ce *CandleEngine) closeCandle(candle *redis_storage.Candle) {
+func (ce *CandleEngine) closeCandle(candle *storage.Candle) {
 	candle.EndTime = time.Now()
 	candle.IsClosedFlag = true
 	ce.storage.CloseAndArchiveCandle(candle)

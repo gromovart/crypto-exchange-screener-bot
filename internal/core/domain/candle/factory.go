@@ -6,7 +6,6 @@ import (
 	"time"
 
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	candletracker "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/candle_tracker"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -203,7 +202,7 @@ func (cs *CandleSystem) preloadCandles() {
 }
 
 // GetCandle получает свечу для символа и периода
-func (cs *CandleSystem) GetCandle(symbol, period string) (*redis_storage.Candle, error) {
+func (cs *CandleSystem) GetCandle(symbol, period string) (*storage.Candle, error) {
 	// Получаем свечу из Redis хранилища
 	candleInterface, err := cs.Storage.GetCandle(symbol, period)
 	if err != nil {
@@ -211,12 +210,12 @@ func (cs *CandleSystem) GetCandle(symbol, period string) (*redis_storage.Candle,
 	}
 
 	// Конвертируем интерфейс в *Candle
-	if candle, ok := candleInterface.(*redis_storage.Candle); ok {
+	if candle, ok := candleInterface.(*storage.Candle); ok {
 		return candle, nil
 	}
 
 	// Создаем *Candle из интерфейса
-	return &redis_storage.Candle{
+	return &storage.Candle{
 		Symbol:       candleInterface.GetSymbol(),
 		Period:       candleInterface.GetPeriod(),
 		Open:         candleInterface.GetOpen(),
@@ -250,7 +249,7 @@ func (cs *CandleSystem) IsCandleProcessed(symbol, period string, startTime int64
 }
 
 // GetLatestClosedCandle получает последнюю закрытую свечу с проверкой трекера
-func (cs *CandleSystem) GetLatestClosedCandle(symbol, period string) (*redis_storage.Candle, error) {
+func (cs *CandleSystem) GetLatestClosedCandle(symbol, period string) (*storage.Candle, error) {
 	// Получаем историю (последние 5 свечей)
 	history, err := cs.GetHistory(symbol, period, 10) // Увеличиваем лимит для надежности
 	if err != nil {
@@ -303,7 +302,7 @@ func (cs *CandleSystem) GetLatestClosedCandle(symbol, period string) (*redis_sto
 }
 
 // GetCandleOrLatestClosed получает свечу (активную или последнюю закрытую)
-func (cs *CandleSystem) GetCandleOrLatestClosed(symbol, period string) (*redis_storage.Candle, error) {
+func (cs *CandleSystem) GetCandleOrLatestClosed(symbol, period string) (*storage.Candle, error) {
 	// Сначала пробуем получить активную свечу
 	candle, err := cs.GetCandle(symbol, period)
 	if err != nil {
@@ -320,20 +319,20 @@ func (cs *CandleSystem) GetCandleOrLatestClosed(symbol, period string) (*redis_s
 }
 
 // GetHistory возвращает историю свечей
-func (cs *CandleSystem) GetHistory(symbol, period string, limit int) ([]*redis_storage.Candle, error) {
+func (cs *CandleSystem) GetHistory(symbol, period string, limit int) ([]*storage.Candle, error) {
 	historyInterfaces, err := cs.Storage.GetHistory(symbol, period, limit)
 	if err != nil {
 		return nil, err
 	}
 
 	// Конвертируем интерфейсы в *Candle
-	candles := make([]*redis_storage.Candle, len(historyInterfaces))
+	candles := make([]*storage.Candle, len(historyInterfaces))
 	for i, candleInterface := range historyInterfaces {
-		if candle, ok := candleInterface.(*redis_storage.Candle); ok {
+		if candle, ok := candleInterface.(*storage.Candle); ok {
 			candles[i] = candle
 		} else {
 			// Создаем *Candle из интерфейса
-			candles[i] = &redis_storage.Candle{
+			candles[i] = &storage.Candle{
 				Symbol:       candleInterface.GetSymbol(),
 				Period:       candleInterface.GetPeriod(),
 				Open:         candleInterface.GetOpen(),
