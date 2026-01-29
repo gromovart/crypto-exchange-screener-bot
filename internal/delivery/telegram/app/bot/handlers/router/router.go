@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/handlers/router/router.go
 package router
 
 import (
@@ -89,6 +88,24 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 
 // Handle обрабатывает команду/callback
 func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult, error) {
+	// Если команда начинается с / и содержит пробел (параметры)
+	if strings.HasPrefix(command, "/") && strings.Contains(command, " ") {
+		// Разделяем команду и параметры
+		parts := strings.SplitN(command, " ", 2)
+		baseCommand := parts[0]
+		payload := parts[1]
+
+		// Пробуем найти обработчик для базовой команды
+		if handler, exists := r.handlers[baseCommand]; exists {
+			// Передаем полный текст в params для обработки параметров
+			params.Text = command
+			params.Data = payload // Дополнительно сохраняем payload в Data
+			logger.Debug("Обработка команды с параметрами: %s → %s (payload: %s)",
+				command, baseCommand, payload)
+			return r.executeHandler(handler, command, params)
+		}
+	}
+
 	// Пробуем найти точное совпадение
 	handler, exists := r.handlers[command]
 	if exists {
@@ -97,6 +114,19 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 
 	// Проверяем, является ли command параметризованным callback (содержит :)
 	if strings.Contains(command, ":") {
+		// Определяем префикс (часть до :)
+		prefix := strings.Split(command, ":")[0]
+
+		// Проверяем специальные платежные префиксы
+		if prefix == "payment_plan" || prefix == "payment_confirm" {
+			// Пробуем найти обработчик по префиксу
+			if handler, exists := r.handlers[prefix+":"]; exists {
+				params.Data = command
+				logger.Debug("Перенаправление платежного callback '%s' в %s", command, prefix+":")
+				return r.executeHandler(handler, command, params)
+			}
+		}
+
 		// Перенаправляем в универсальный обработчик with_params
 		if handler, exists := r.handlers["with_params"]; exists {
 			// Сохраняем полный callback data для обработки
@@ -130,6 +160,13 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 			// Обновляем data в params для передачи параметров
 			params.Data = command
 			logger.Debug("Перенаправление по префиксу '%s' в %s", command, key)
+			return r.executeHandler(h, command, params)
+		}
+
+		// Проверяем специальные случаи с префиксами в конце (payment_plan:)
+		if strings.HasSuffix(key, ":") && strings.HasPrefix(command, key) {
+			params.Data = command
+			logger.Debug("Перенаправление по префиксу с двоеточием '%s' в %s", command, key)
 			return r.executeHandler(h, command, params)
 		}
 	}

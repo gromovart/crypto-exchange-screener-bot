@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm/handler.go
 package payment_confirm
 
 import (
@@ -7,21 +6,24 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 )
 
 // paymentConfirmHandler обработчик подтверждения платежа
 type paymentConfirmHandler struct {
 	*base.BaseHandler
+	config *config.Config // Конфигурация приложения
 }
 
 // NewHandler создает новый обработчик подтверждения платежа
-func NewHandler() handlers.Handler {
+func NewHandler(cfg *config.Config) handlers.Handler {
 	return &paymentConfirmHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "payment_confirm_handler",
 			Command: constants.PaymentConstants.CallbackPaymentConfirm,
 			Type:    handlers.TypeCallback,
 		},
+		config: cfg,
 	}
 }
 
@@ -89,11 +91,21 @@ func (h *paymentConfirmHandler) getPlanByID(planID string) *SubscriptionPlan {
 	return plans[planID]
 }
 
-// createInvoiceLink создает ссылку для оплаты (заглушка)
+// createInvoiceLink создает ссылку для оплаты
 func (h *paymentConfirmHandler) createInvoiceLink(userID int, plan *SubscriptionPlan) string {
-	// TODO: Интеграция с Telegram Stars API
-	// Временная заглушка
-	return fmt.Sprintf("https://t.me/bot?start=pay_%d_%s", userID, plan.ID)
+	// Получаем username бота из конфигурации
+	botUsername := h.config.Telegram.BotUsername
+
+	if botUsername == "" {
+		// Если username не указан в конфиге, используем универсальный deep link
+		// В реальном приложении можно получить username через Bot API
+		return fmt.Sprintf("https://t.me/?start=pay_%d_%s", userID, plan.ID)
+	}
+
+	// Правильный формат deep link для Telegram бота
+	// Формат: https://t.me/{bot_username}?start={payload}
+	return fmt.Sprintf("https://t.me/%s?start=pay_%d_%s",
+		botUsername, userID, plan.ID)
 }
 
 // createPaymentMessage создает сообщение с инструкцией по оплате

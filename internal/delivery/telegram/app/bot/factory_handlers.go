@@ -43,6 +43,7 @@ import (
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -51,6 +52,7 @@ func InitHandlerFactory(
 	factory *handlers.HandlerFactory,
 	notificationsToggleService notifications_toggle_service.Service,
 	signalSettingsService signal_settings_service.Service, // Добавляем
+	cfg *config.Config,
 ) {
 	logger.Info("🔧 Инициализация создателей хэндлеров...")
 
@@ -197,7 +199,7 @@ func InitHandlerFactory(
 		return payment_plan_handler.NewHandler()
 	})
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
-		return payment_confirm_handler.NewHandler()
+		return payment_confirm_handler.NewHandler(cfg)
 	})
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ

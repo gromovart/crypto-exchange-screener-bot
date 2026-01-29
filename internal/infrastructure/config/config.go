@@ -204,6 +204,7 @@ type Config struct {
 	Telegram struct {
 		Enabled         bool    `mapstructure:"TELEGRAM_ENABLED"`
 		BotToken        string  `mapstructure:"TG_API_KEY"`
+		BotUsername     string  `mapstructure:"TG_BOT_USERNAME"`
 		ChatID          string  `mapstructure:"TG_CHAT_ID"`
 		NotifyGrowth    bool    `mapstructure:"TELEGRAM_NOTIFY_GROWTH"`
 		NotifyFall      bool    `mapstructure:"TELEGRAM_NOTIFY_FALL"`
@@ -541,6 +542,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Telegram.Enabled = getEnvBool("TELEGRAM_ENABLED", false)
 	cfg.Telegram.BotToken = getEnv("TG_API_KEY", "")
+	cfg.Telegram.BotUsername = getEnv("TG_BOT_USERNAME", "")
 	cfg.Telegram.ChatID = getEnv("TG_CHAT_ID", "")
 	cfg.Telegram.NotifyGrowth = getEnvBool("TELEGRAM_NOTIFY_GROWTH", true)
 	cfg.Telegram.NotifyFall = getEnvBool("TELEGRAM_NOTIFY_FALL", true)

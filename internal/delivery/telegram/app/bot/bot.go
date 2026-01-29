@@ -71,7 +71,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	signalSettingsService := signal_settings_service.NewServiceWithDependencies(deps.UserService)
 
 	// Инициализируем фабрику с сервисом
-	InitHandlerFactory(handlerFactory, notificationsToggleService, signalSettingsService)
+	InitHandlerFactory(handlerFactory, notificationsToggleService, signalSettingsService, config)
 
 	// Регистрируем все хэндлеры
 	router := handlerFactory.RegisterAllHandlers()
