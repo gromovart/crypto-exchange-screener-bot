@@ -325,3 +325,56 @@ var CommandDescriptions = struct {
 	Commands:      "Список всех команд",
 	Stats:         "Статистика системы",
 }
+
+// PaymentButtonTexts содержит тексты для кнопок платежей
+var PaymentButtonTexts = struct {
+	Buy         string
+	Plans       string
+	Confirm     string
+	Cancel      string
+	History     string
+	BackToPlans string
+	SelectPlan  string
+	PayNow      string
+	CheckStatus string
+}{
+	Buy:         "💎 Купить подписку",
+	Plans:       "📋 Тарифные планы",
+	Confirm:     "✅ Подтвердить оплату",
+	Cancel:      "❌ Отмена",
+	History:     "📊 История платежей",
+	BackToPlans: "← К планам",
+	SelectPlan:  "📋 Выбрать план",
+	PayNow:      "💳 Оплатить сейчас",
+	CheckStatus: "🔄 Проверить статус",
+}
+
+// PaymentConstants содержит callback'и и команды для платежей
+var PaymentConstants = struct {
+	CommandBuy             string
+	CallbackPaymentPlan    string
+	CallbackPaymentConfirm string
+	CallbackPaymentSuccess string
+	CallbackPaymentFailed  string
+	CallbackPaymentCancel  string
+	CallbackPaymentHistory string
+	CallbackPaymentCheck   string
+	CallbackPaymentSupport string
+}{
+	CommandBuy:             "buy",
+	CallbackPaymentPlan:    "payment_plan:",
+	CallbackPaymentConfirm: "payment_confirm:",
+	CallbackPaymentSuccess: "payment_success:",
+	CallbackPaymentFailed:  "payment_failed:",
+	CallbackPaymentCancel:  "payment_cancel",
+	CallbackPaymentHistory: "payment_history",
+	CallbackPaymentCheck:   "payment_check",
+	CallbackPaymentSupport: "payment_support",
+}
+
+// PaymentDescriptions содержит описания для платежных команд
+var PaymentDescriptions = struct {
+	Buy string
+}{
+	Buy: "Покупка подписки через Telegram Stars",
+}

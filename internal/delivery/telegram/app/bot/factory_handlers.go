@@ -13,6 +13,8 @@ import (
 	notify_both_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_both"
 	notify_fall_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only"
 	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
+	payment_confirm_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm"
+	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
 	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
 	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
@@ -30,6 +32,7 @@ import (
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
 	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
 	with_params_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/with_params"
+	buy_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/buy"
 	commands_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/commands"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
@@ -83,6 +86,10 @@ func InitHandlerFactory(
 
 	factory.RegisterHandlerCreator("periods", func() handlers.Handler {
 		return periods_command.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
+		return buy_command.NewHandler()
 	})
 
 	// Регистрируем создателей CALLBACKS
@@ -184,6 +191,13 @@ func InitHandlerFactory(
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
 		return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
+	})
+
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
+		return payment_plan_handler.NewHandler()
+	})
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
+		return payment_confirm_handler.NewHandler()
 	})
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
