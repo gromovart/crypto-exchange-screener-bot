@@ -602,8 +602,6 @@ func (s *Service) sendSubscriptionNotification(userID int, plan *models.Plan, tr
 		apiRequestsStr = "100" // Бесплатный тариф
 	case models.PlanBasic:
 		apiRequestsStr = "1000" // Базовый тариф
-	case models.PlanPro:
-		apiRequestsStr = "5000" // Про тариф
 	default:
 		apiRequestsStr = "1000" // По умолчанию
 	}
