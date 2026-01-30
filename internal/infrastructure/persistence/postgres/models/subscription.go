@@ -7,8 +7,10 @@ import (
 
 // Типы подписок
 const (
-	PlanFree  = "free"
-	PlanBasic = "basic"
+	PlanFree       = "free"
+	PlanBasic      = "basic"
+	PlanPro        = "pro"
+	PlanEnterprise = "enterprise"
 )
 
 // Состояния подписки
