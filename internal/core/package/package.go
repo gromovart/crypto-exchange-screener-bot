@@ -82,13 +82,13 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		// Не падаем, если Redis не доступен - сервисы могут создаваться позже
 	}
 
-	repositoryFactory, err := deps.InfrastructureFactory.CreateRepositoryFactory()
-
+	planRepo, err := deps.InfrastructureFactory.GetPlanRepository()
 	if err != nil {
-		logger.Warn("⚠️ Не удалось создать RepositoryFactory: %v", err)
+		logger.Warn("⚠️ Не удалось получить PlanRepository: %v", err)
+	} else {
+		logger.Info("✅ PlanRepository получен через InfrastructureFactory")
+		// Используем planRepo для создания SubscriptionServiceFactory
 	}
-
-	planRepository, _ := repositoryFactory.CreatePlanRepository()
 
 	// Создаем фабрику UserService
 	userFactory, err := users.NewUserServiceFactory(users.UserServiceDependencies{
@@ -97,6 +97,7 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		RedisService: redisService,
 		Notifier:     deps.UserNotifier,
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику UserService: %w", err)
 	}
@@ -105,11 +106,12 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(
 		subscription.Dependencies{
 			Config:    deps.Config.SubscriptionConfig,
-			PlanRepo:  planRepository,
+			PlanRepo:  planRepo,
 			Cache:     redisService.GetCache(),
 			Analytics: deps.Analytics,
 		},
 	)
+
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику SubscriptionService: %w", err)
 	}
@@ -236,8 +238,8 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	// Обновляем зависимости фабрик
 	f.userFactory.SetDatabase(databaseService)
 	f.userFactory.SetRedisService(redisService)
-	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
-	f.subscriptionFactory.SetRedisService(redisService)
+	// f.subscriptionFactory.SetDatabase(databaseService.GetDB())
+	// f.subscriptionFactory.SetRedisService(redisService)
 
 	// Создаем UserService
 	userService, err := f.userFactory.CreateUserService()
@@ -248,15 +250,15 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	logger.Info("✅ UserService создан")
 
 	// Создаем SubscriptionService
-	subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
-	if err != nil {
-		// Не падаем, если SubscriptionService не создан
-		logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
-		services["SubscriptionService"] = nil
-	} else {
-		services["SubscriptionService"] = subscriptionService
-		logger.Info("✅ SubscriptionService создан")
-	}
+	// subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
+	// if err != nil {
+	// 	// Не падаем, если SubscriptionService не создан
+	// 	logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
+	// 	services["SubscriptionService"] = nil
+	// } else {
+	// 	services["SubscriptionService"] = subscriptionService
+	// 	logger.Info("✅ SubscriptionService создан")
+	// }
 
 	logger.Info("✅ Все сервисы ядра созданы")
 	return services, nil

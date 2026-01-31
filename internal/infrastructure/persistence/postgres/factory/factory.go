@@ -197,10 +197,6 @@ func (rf *RepositoryFactory) CreateSubscriptionRepository() (subscription.Subscr
 			return nil, fmt.Errorf("соединение с базой данных не установлено")
 		}
 
-		if rf.cache == nil {
-			return nil, fmt.Errorf("кэш Redis не инициализирован")
-		}
-
 		rf.subscriptionRepository = subscription.NewSubscriptionRepository(db)
 		logger.Info("✅ SubscriptionRepository создан")
 	}
@@ -223,12 +219,8 @@ func (rf *RepositoryFactory) CreateInvoiceRepository() (invoice.InvoiceRepositor
 			return nil, fmt.Errorf("соединение с базой данных не установлено")
 		}
 
-		if rf.cache == nil {
-			return nil, fmt.Errorf("кэш Redis не инициализирован")
-		}
-
 		rf.invoiceRepository = invoice.NewInvoiceRepository(db)
-		logger.Info("✅ SubscriptionRepository создан")
+		logger.Info("✅ InvoiceRepository создан")
 	}
 
 	return rf.invoiceRepository, nil
@@ -249,12 +241,8 @@ func (rf *RepositoryFactory) CreatePaymentRepository() (payment.PaymentRepositor
 			return nil, fmt.Errorf("соединение с базой данных не установлено")
 		}
 
-		if rf.cache == nil {
-			return nil, fmt.Errorf("кэш Redis не инициализирован")
-		}
-
 		rf.paymentRepository = payment.NewPaymentRepository(db)
-		logger.Info("✅ SubscriptionRepository создан")
+		logger.Info("✅ PaymentRepository создан")
 	}
 
 	return rf.paymentRepository, nil
@@ -275,12 +263,8 @@ func (rf *RepositoryFactory) CreatePlanRepository() (plan.PlanRepository, error)
 			return nil, fmt.Errorf("соединение с базой данных не установлено")
 		}
 
-		if rf.cache == nil {
-			return nil, fmt.Errorf("кэш Redis не инициализирован")
-		}
-
 		rf.planRepository = plan.NewPlanRepository(db)
-		logger.Info("✅ SubscriptionRepository создан")
+		logger.Info("✅ PlanRepository создан")
 	}
 
 	return rf.planRepository, nil
@@ -423,4 +407,90 @@ func (rf *RepositoryFactory) Reset() {
 	rf.initialized = false
 
 	logger.Info("🔄 Фабрика репозиториев сброшена")
+}
+
+// GetRepository возвращает репозиторий по имени, если он уже был создан
+func (rf *RepositoryFactory) GetRepository(name string) (interface{}, error) {
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
+
+	if !rf.initialized {
+		return nil, fmt.Errorf("фабрика репозиториев не инициализирована")
+	}
+
+	switch name {
+	case "UserRepository":
+		if rf.userRepository == nil {
+			return nil, fmt.Errorf("UserRepository еще не создан")
+		}
+		return rf.userRepository, nil
+	case "ActivityRepository":
+		if rf.activityRepository == nil {
+			return nil, fmt.Errorf("ActivityRepository еще не создан")
+		}
+		return rf.activityRepository, nil
+	case "APIKeyRepository":
+		if rf.apiKeyRepository == nil {
+			return nil, fmt.Errorf("APIKeyRepository еще не создан")
+		}
+		return rf.apiKeyRepository, nil
+	case "SessionRepository":
+		if rf.sessionRepository == nil {
+			return nil, fmt.Errorf("SessionRepository еще не создан")
+		}
+		return rf.sessionRepository, nil
+	case "SubscriptionRepository":
+		if rf.subscriptionRepository == nil {
+			return nil, fmt.Errorf("SubscriptionRepository еще не создан")
+		}
+		return rf.subscriptionRepository, nil
+	case "InvoiceRepository":
+		if rf.invoiceRepository == nil {
+			return nil, fmt.Errorf("InvoiceRepository еще не создан")
+		}
+		return rf.invoiceRepository, nil
+	case "PaymentRepository":
+		if rf.paymentRepository == nil {
+			return nil, fmt.Errorf("PaymentRepository еще не создан")
+		}
+		return rf.paymentRepository, nil
+	case "PlanRepository":
+		if rf.planRepository == nil {
+			return nil, fmt.Errorf("PlanRepository еще не создан")
+		}
+		return rf.planRepository, nil
+	default:
+		return nil, fmt.Errorf("неизвестный репозиторий: %s", name)
+	}
+}
+
+// HasRepository проверяет, был ли репозиторий создан
+func (rf *RepositoryFactory) HasRepository(name string) bool {
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
+
+	if !rf.initialized {
+		return false
+	}
+
+	switch name {
+	case "UserRepository":
+		return rf.userRepository != nil
+	case "ActivityRepository":
+		return rf.activityRepository != nil
+	case "APIKeyRepository":
+		return rf.apiKeyRepository != nil
+	case "SessionRepository":
+		return rf.sessionRepository != nil
+	case "SubscriptionRepository":
+		return rf.subscriptionRepository != nil
+	case "InvoiceRepository":
+		return rf.invoiceRepository != nil
+	case "PaymentRepository":
+		return rf.paymentRepository != nil
+	case "PlanRepository":
+		return rf.planRepository != nil
+	default:
+		return false
+	}
 }
