@@ -13,9 +13,11 @@ func (s *StarsService) createInvoice(request CreateInvoiceRequest) (*StarsInvoic
 		return nil, err
 	}
 
+	// Генерируем данные инвойса
 	starsAmount := s.calculateStarsAmount(request.SubscriptionPlan.GetPriceCents())
 	payload := s.generateInvoicePayload(request.UserID, request.SubscriptionPlan.GetID())
 
+	// Создаем объект инвойса
 	invoice := &StarsInvoice{
 		ID:                 s.generateInvoiceID(),
 		UserID:             request.UserID,
@@ -29,12 +31,47 @@ func (s *StarsService) createInvoice(request CreateInvoiceRequest) (*StarsInvoic
 		ExpiresAt:          time.Now().Add(24 * time.Hour),
 	}
 
-	s.logger.Info("Создан инвойс Stars",
-		"invoiceId", invoice.ID,
-		"userId", request.UserID,
-		"starsAmount", starsAmount,
-		"plan", request.SubscriptionPlan.GetName(),
-	)
+	// Если есть starsClient, создаем реальный инвойс через Telegram API
+	if s.starsClient != nil {
+		// Подготавливаем данные для Telegram инвойса
+		title := fmt.Sprintf("Подписка: %s", request.SubscriptionPlan.GetName())
+		description := fmt.Sprintf("Оплата подписки через Telegram Stars (%d Stars)", starsAmount)
+
+		// Создаем инвойс через Telegram API
+		invoiceLink, err := s.starsClient.CreateSubscriptionInvoice(title, description, payload, starsAmount)
+		if err != nil {
+			s.logger.Error("Ошибка создания инвойса через Telegram API",
+				"error", err,
+				"userId", request.UserID,
+				"plan", request.SubscriptionPlan.GetName(),
+			)
+			return nil, fmt.Errorf("ошибка создания Telegram инвойса: %w", err)
+		}
+
+		// Сохраняем ссылку на инвойс
+		invoice.InvoiceURL = invoiceLink
+
+		s.logger.Info("Создан Telegram Stars инвойс",
+			"invoiceId", invoice.ID,
+			"userId", request.UserID,
+			"starsAmount", starsAmount,
+			"plan", request.SubscriptionPlan.GetName(),
+			"invoiceLink", invoiceLink,
+		)
+	} else {
+		// Заглушка для разработки (без реального клиента)
+		invoice.InvoiceURL = fmt.Sprintf("https://t.me/%s?start=%s",
+			s.botUsername,
+			payload,
+		)
+
+		s.logger.Warn("Создан локальный инвойс (Telegram клиент не доступен)",
+			"invoiceId", invoice.ID,
+			"userId", request.UserID,
+			"starsAmount", starsAmount,
+			"invoiceUrl", invoice.InvoiceURL,
+		)
+	}
 
 	return invoice, nil
 }

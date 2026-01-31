@@ -2,28 +2,34 @@
 package payment
 
 import (
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	event_bus "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
-// / StarsService сервис обработки платежей через Telegram Stars
+// StarsService сервис обработки платежей через Telegram Stars
 type StarsService struct {
 	logger      logger.Logger
 	userManager UserManager
-	eventBus    event_bus.EventBus
-	// Убрали зависимость от subscriptionService
+	eventBus    *event_bus.EventBus
+	starsClient *http_client.StarsClient
+	botUsername string
 }
 
 // NewStarsService создает новый сервис оплаты Stars
 func NewStarsService(
 	userManager UserManager,
-	eventBus event_bus.EventBus,
+	eventBus *event_bus.EventBus,
 	logger logger.Logger,
+	starsClient *http_client.StarsClient,
+	botUsername string,
 ) *StarsService {
 	return &StarsService{
 		logger:      logger,
 		userManager: userManager,
 		eventBus:    eventBus,
+		starsClient: starsClient,
+		botUsername: botUsername,
 	}
 }
 

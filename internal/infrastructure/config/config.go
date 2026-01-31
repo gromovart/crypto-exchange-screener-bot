@@ -242,6 +242,14 @@ type Config struct {
 		RetryInterval int `mapstructure:"POLLING_RETRY_INTERVAL"` // интервал переподключения
 	} `mapstructure:",squash"`
 
+	// =============================
+	// TELEGRAM STARS КОНФИГУРАЦИЯ
+	// =============================
+	TelegramStars struct {
+		ProviderToken string `mapstructure:"TELEGRAM_STARS_PROVIDER_TOKEN"`
+		BotUsername   string `mapstructure:"TELEGRAM_STARS_BOT_USERNAME"`
+	}
+
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
 	// ======================
@@ -574,6 +582,12 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Polling.Timeout = getEnvInt("POLLING_TIMEOUT", 30)
 	cfg.Polling.Limit = getEnvInt("POLLING_LIMIT", 100)
 	cfg.Polling.RetryInterval = getEnvInt("POLLING_RETRY_INTERVAL", 5)
+
+	// =============================
+	// TELEGRAM STARS КОНФИГУРАЦИЯ
+	// =============================
+	cfg.TelegramStars.ProviderToken = getEnv("TELEGRAM_STARS_PROVIDER_TOKEN", "")
+	cfg.TelegramStars.BotUsername = getEnv("TELEGRAM_STARS_BOT_USERNAME", "")
 
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ

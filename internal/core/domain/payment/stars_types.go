@@ -50,6 +50,7 @@ type StarsInvoice struct {
 	FiatAmount         int
 	Currency           string
 	Payload            string
+	InvoiceURL         string
 	Status             PaymentStatus
 	CreatedAt          time.Time
 	ExpiresAt          time.Time
