@@ -1,7 +1,8 @@
-// internal/core/services/payment/stars_processor.go
+// internal/core/domain/payment/stars_processor.go
 package payment
 
 import (
+	types "crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"time"
 )
@@ -38,7 +39,7 @@ func (s *StarsService) createInvoice(request CreateInvoiceRequest) (*StarsInvoic
 	return invoice, nil
 }
 
-// processPayment реализация обработки платежа
+// processPayment реализация обработки платежа (упрощенная версия без вызова subscription)
 func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaymentResult, error) {
 	if err := s.validatePaymentRequest(request); err != nil {
 		return nil, err
@@ -62,15 +63,7 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		return nil, fmt.Errorf("валидация платежа не пройдена")
 	}
 
-	result, err := s.activateSubscription(
-		invoiceData.UserID,
-		invoiceData.SubscriptionPlanID,
-		request.TelegramPaymentID,
-	)
-	if err != nil {
-		return nil, err
-	}
-
+	// Записываем транзакцию
 	if err := s.recordPaymentTransaction(
 		request.TelegramPaymentID,
 		invoiceData.UserID,
@@ -84,20 +77,37 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		"paymentId", request.TelegramPaymentID,
 		"userId", invoiceData.UserID,
 		"starsAmount", request.StarsAmount,
+		"planId", invoiceData.SubscriptionPlanID,
 	)
 
-	if err := s.publishPaymentSuccessEvent(
-		invoiceData.UserID,
-		request.TelegramPaymentID,
-		request.StarsAmount,
-	); err != nil {
-		s.logger.Error("Не удалось опубликовать событие", "error", err)
+	// Публикуем событие
+	eventData := map[string]interface{}{
+		"payment_id":   request.TelegramPaymentID,
+		"user_id":      invoiceData.UserID,
+		"plan_id":      invoiceData.SubscriptionPlanID,
+		"stars_amount": request.StarsAmount,
+		"payment_type": "stars",
+		"timestamp":    time.Now(),
+		"invoice_id":   invoiceData.InvoiceID,
+	}
+
+	event := types.Event{
+		Type:      types.EventPaymentComplete,
+		Source:    "stars_processor",
+		Data:      eventData,
+		Timestamp: time.Now(),
+	}
+
+	if err := s.eventBus.Publish(event); err != nil {
+		s.logger.Error("Не удалось опубликовать событие платежа", "error", err)
 	}
 
 	return &StarsPaymentResult{
-		Success:                 true,
-		PaymentID:               request.TelegramPaymentID,
-		SubscriptionActiveUntil: result.ActiveUntil,
-		InvoiceID:               invoiceData.InvoiceID,
+		Success:   true,
+		PaymentID: request.TelegramPaymentID,
+		UserID:    invoiceData.UserID,
+		PlanID:    invoiceData.SubscriptionPlanID,
+		InvoiceID: invoiceData.InvoiceID,
+		Timestamp: time.Now(),
 	}, nil
 }

@@ -92,10 +92,8 @@ func (cl *CoreLayer) Initialize() error {
 			MaxSessionsPerUser:        5,
 		},
 		SubscriptionConfig: subscription.Config{
-			StripeSecretKey:  "",
-			StripeWebhookKey: "",
 			DefaultPlan:      "free",
-			TrialPeriodDays:  7,
+			TrialPeriodDays:  1,
 			GracePeriodDays:  3,
 			AutoRenew:        true,
 		},
@@ -106,7 +104,6 @@ func (cl *CoreLayer) Initialize() error {
 		InfrastructureFactory: infraFactory,
 		Config:                coreConfig,
 		UserNotifier:          nil,
-		SubNotifier:           nil,
 		Analytics:             nil,
 	}
 

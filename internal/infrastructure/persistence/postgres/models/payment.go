@@ -6,17 +6,18 @@ import (
 	"time"
 )
 
-// PaymentStatus статус платежа
+// PaymentStatus статус платежа (совместимость с payment.PaymentStatus)
 type PaymentStatus string
 
 const (
-	PaymentStatusPending    PaymentStatus = "pending"    // Ожидает оплаты
-	PaymentStatusProcessing PaymentStatus = "processing" // В обработке
-	PaymentStatusCompleted  PaymentStatus = "completed"  // Успешно завершен
-	PaymentStatusFailed     PaymentStatus = "failed"     // Ошибка оплаты
-	PaymentStatusRefunded   PaymentStatus = "refunded"   // Возврат средств
-	PaymentStatusExpired    PaymentStatus = "expired"    // Истек срок оплаты
-	PaymentStatusCancelled  PaymentStatus = "cancelled"  // Отменен пользователем
+	PaymentStatusPending   PaymentStatus = "pending"
+	PaymentStatusCompleted PaymentStatus = "completed"
+	PaymentStatusFailed    PaymentStatus = "failed"
+	PaymentStatusRefunded  PaymentStatus = "refunded"
+	// Дополнительные статусы
+	PaymentStatusProcessing PaymentStatus = "processing"
+	PaymentStatusExpired    PaymentStatus = "expired"
+	PaymentStatusCancelled  PaymentStatus = "cancelled"
 )
 
 // PaymentType тип платежа
@@ -37,39 +38,35 @@ const (
 	CurrencyRUB Currency = "RUB" // Рубли
 )
 
-// Payment модель платежа в системе
+// Payment модель платежа в системе (совместимость с текущей реализацией)
 type Payment struct {
-	ID             int64  `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID         int64  `gorm:"index;not null" json:"user_id"`          // ID пользователя
-	SubscriptionID *int64 `gorm:"index" json:"subscription_id,omitempty"` // ID подписки (если есть)
-	InvoiceID      *int64 `gorm:"index" json:"invoice_id,omitempty"`      // ID инвойса (если есть)
+	ID             int64  `db:"id" json:"id"`
+	UserID         int64  `db:"user_id" json:"user_id"`                           // ID пользователя (числовой)
+	SubscriptionID *int64 `db:"subscription_id" json:"subscription_id,omitempty"` // ID подписки
+	InvoiceID      *int64 `db:"invoice_id" json:"invoice_id,omitempty"`           // ID инвойса
 
-	// Основная информация
-	ExternalID  string   `gorm:"index;size:255" json:"external_id"`                      // ID платежа во внешней системе
-	Amount      float64  `gorm:"type:decimal(10,2);not null" json:"amount"`              // Сумма платежа
-	Currency    Currency `gorm:"type:varchar(3);not null;default:'USD'" json:"currency"` // Валюта
-	StarsAmount int      `gorm:"not null" json:"stars_amount"`                           // Количество Stars
+	// Основная информация (совместимость с stars_types.go)
+	ExternalID  string   `db:"external_id" json:"external_id"`   // TelegramPaymentID в системе
+	Amount      float64  `db:"amount" json:"amount"`             // Сумма в USD
+	Currency    Currency `db:"currency" json:"currency"`         // Валюта
+	StarsAmount int      `db:"stars_amount" json:"stars_amount"` // Количество Stars
+	FiatAmount  int      `db:"fiat_amount" json:"fiat_amount"`   // Сумма в центах (для совместимости)
 
 	// Тип и статус
-	PaymentType PaymentType   `gorm:"type:varchar(20);not null" json:"payment_type"`             // Тип платежа
-	Status      PaymentStatus `gorm:"type:varchar(20);not null;default:'pending'" json:"status"` // Текущий статус
-	Provider    string        `gorm:"type:varchar(50);not null" json:"provider"`                 // Платежный провайдер (telegram, stripe, etc)
+	PaymentType PaymentType   `db:"payment_type" json:"payment_type"` // Тип платежа
+	Status      PaymentStatus `db:"status" json:"status"`             // Текущий статус
+	Provider    string        `db:"provider" json:"provider"`         // Платежный провайдер
 
 	// Детали платежа
-	Description string `gorm:"type:text" json:"description,omitempty"` // Описание платежа
-	Metadata    string `gorm:"type:jsonb" json:"metadata,omitempty"`   // Дополнительные данные (JSON)
+	Description string `db:"description" json:"description,omitempty"` // Описание платежа
+	Payload     string `db:"payload" json:"payload,omitempty"`         // Payload из инвойса
+	Metadata    string `db:"metadata" json:"metadata,omitempty"`       // Дополнительные данные (JSON)
 
 	// Временные метки
-	CreatedAt time.Time  `gorm:"autoCreateTime" json:"created_at"` // Дата создания
-	UpdatedAt time.Time  `gorm:"autoUpdateTime" json:"updated_at"` // Дата обновления
-	PaidAt    *time.Time `json:"paid_at,omitempty"`                // Дата оплаты
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`             // Срок действия платежа
-
-	// Связи
-	User User `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	// Subscription и Invoice будут добавлены позже, когда создадим эти модели
-	// Subscription Subscription  `gorm:"foreignKey:SubscriptionID" json:"subscription,omitempty"`
-	// Invoice      Invoice       `gorm:"foreignKey:InvoiceID" json:"invoice,omitempty"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`           // Дата создания
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`           // Дата обновления
+	PaidAt    *time.Time `db:"paid_at" json:"paid_at,omitempty"`       // Дата оплаты
+	ExpiresAt *time.Time `db:"expires_at" json:"expires_at,omitempty"` // Срок действия платежа
 }
 
 // TableName задает имя таблицы в БД
@@ -144,4 +141,19 @@ func NewPaymentFilter() PaymentFilter {
 		Limit:  50,
 		Offset: 0,
 	}
+}
+
+// GetTelegramPaymentID возвращает ExternalID как TelegramPaymentID (для совместимости)
+func (p *Payment) GetTelegramPaymentID() string {
+	return p.ExternalID
+}
+
+// GetUserIDString возвращает UserID как строку (для совместимости)
+func (p *Payment) GetUserIDString() string {
+	return fmt.Sprintf("%d", p.UserID)
+}
+
+// SetTelegramPaymentID устанавливает TelegramPaymentID
+func (p *Payment) SetTelegramPaymentID(paymentID string) {
+	p.ExternalID = paymentID
 }

@@ -1,4 +1,4 @@
-// internal/core/services/payment/stars_utils.go
+// internal/core/domain/payment/stars_utils.go
 package payment
 
 import (
@@ -102,20 +102,6 @@ func (s *StarsService) validateTelegramPayment(
 	return true, nil
 }
 
-// activateSubscription активирует подписку пользователя
-func (s *StarsService) activateSubscription(
-	userID, planID, paymentID string,
-) (*ActivationResult, error) {
-	user, err := s.userManager.GetUser(userID)
-	if err != nil {
-		return nil, fmt.Errorf("пользователь не найден: %w", err)
-	}
-	if user == nil {
-		return nil, fmt.Errorf("пользователь не найден")
-	}
-	return s.subscriptionService.ActivateSubscription(userID, planID, paymentID)
-}
-
 // recordPaymentTransaction записывает транзакцию платежа
 func (s *StarsService) recordPaymentTransaction(
 	paymentID, userID string,
@@ -133,16 +119,19 @@ func (s *StarsService) recordPaymentTransaction(
 
 // publishPaymentSuccessEvent публикует событие об успешном платеже
 func (s *StarsService) publishPaymentSuccessEvent(
-	userID, paymentID string,
+	paymentID, userID, planID, invoiceID string,
 	starsAmount int,
 ) error {
 	event := types.Event{
-		Type: "payment.success",
+		Type: "payment.completed",
 		Data: map[string]interface{}{
-			"userId":    userID,
-			"paymentId": paymentID,
-			"amount":    starsAmount,
-			"timestamp": time.Now(),
+			"payment_id":   paymentID,
+			"user_id":      userID,
+			"plan_id":      planID,
+			"stars_amount": starsAmount,
+			"payment_type": "stars",
+			"timestamp":    time.Now(),
+			"invoice_id":   invoiceID,
 		},
 	}
 	return s.eventBus.Publish(event)

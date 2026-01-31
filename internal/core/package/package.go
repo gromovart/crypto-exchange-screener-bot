@@ -33,7 +33,6 @@ type CoreServiceDependencies struct {
 	InfrastructureFactory *infrastructure_factory.InfrastructureFactory
 	// Остальные зависимости остаются без изменений
 	UserNotifier users.NotificationService
-	SubNotifier  subscription.NotificationService
 	Analytics    subscription.AnalyticsService
 	Config       *Config
 }
@@ -62,12 +61,10 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 				MaxSessionsPerUser:        5,
 			},
 			SubscriptionConfig: subscription.Config{
-				StripeSecretKey:  "",
-				StripeWebhookKey: "",
-				DefaultPlan:      "free",
-				TrialPeriodDays:  7,
-				GracePeriodDays:  3,
-				AutoRenew:        true,
+				DefaultPlan:     "free",
+				TrialPeriodDays: 7,
+				GracePeriodDays: 3,
+				AutoRenew:       true,
 			},
 		}
 	}
@@ -85,6 +82,14 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		// Не падаем, если Redis не доступен - сервисы могут создаваться позже
 	}
 
+	repositoryFactory, err := deps.InfrastructureFactory.CreateRepositoryFactory()
+
+	if err != nil {
+		logger.Warn("⚠️ Не удалось создать RepositoryFactory: %v", err)
+	}
+
+	planRepository, _ := repositoryFactory.CreatePlanRepository()
+
 	// Создаем фабрику UserService
 	userFactory, err := users.NewUserServiceFactory(users.UserServiceDependencies{
 		Config:       deps.Config.UserConfig,
@@ -98,12 +103,11 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 
 	// Создаем фабрику SubscriptionService
 	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(
-		subscription.SubscriptionServiceDependencies{
-			Config:       deps.Config.SubscriptionConfig,
-			Database:     databaseService,
-			RedisService: redisService,
-			Notifier:     deps.SubNotifier,
-			Analytics:    deps.Analytics,
+		subscription.Dependencies{
+			Config:    deps.Config.SubscriptionConfig,
+			PlanRepo:  planRepository,
+			Cache:     redisService.GetCache(),
+			Analytics: deps.Analytics,
 		},
 	)
 	if err != nil {
@@ -199,10 +203,10 @@ func (f *CoreServiceFactory) CreateSubscriptionService() (*subscription.Service,
 	}
 
 	// Обновляем зависимости фабрики SubscriptionService
-	f.subscriptionFactory.SetDatabase(databaseService)
+	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 	f.subscriptionFactory.SetRedisService(redisService)
 
-	return f.subscriptionFactory.CreateSubscriptionService()
+	return f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
 }
 
 // CreateAllServices создает все сервисы ядра
@@ -232,7 +236,7 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	// Обновляем зависимости фабрик
 	f.userFactory.SetDatabase(databaseService)
 	f.userFactory.SetRedisService(redisService)
-	f.subscriptionFactory.SetDatabase(databaseService)
+	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 	f.subscriptionFactory.SetRedisService(redisService)
 
 	// Создаем UserService
@@ -244,7 +248,7 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	logger.Info("✅ UserService создан")
 
 	// Создаем SubscriptionService
-	subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService()
+	subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
 	if err != nil {
 		// Не падаем, если SubscriptionService не создан
 		logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
@@ -476,7 +480,7 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 		// Получаем сервисы из новой инфраструктурной фабрики
 		databaseService, err := deps.InfrastructureFactory.CreateDatabaseService()
 		if err == nil && databaseService != nil {
-			f.subscriptionFactory.SetDatabase(databaseService)
+			f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 		}
 
 		redisService, err := deps.InfrastructureFactory.CreateRedisService()
@@ -484,9 +488,6 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 			f.subscriptionFactory.SetRedisService(redisService)
 		}
 
-		if deps.SubNotifier != nil {
-			f.subscriptionFactory.SetNotifier(deps.SubNotifier)
-		}
 		if deps.Analytics != nil {
 			f.subscriptionFactory.SetAnalytics(deps.Analytics)
 		}

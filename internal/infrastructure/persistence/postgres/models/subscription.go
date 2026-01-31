@@ -5,14 +5,6 @@ import (
 	"time"
 )
 
-// Типы подписок
-const (
-	PlanFree       = "free"
-	PlanBasic      = "basic"
-	PlanPro        = "pro"
-	PlanEnterprise = "enterprise"
-)
-
 // Состояния подписки
 const (
 	StatusPending    = "pending"
@@ -24,26 +16,12 @@ const (
 	StatusIncomplete = "incomplete"
 )
 
-// План подписки
-type Plan struct {
-	ID               int                    `db:"id" json:"id"`
-	Name             string                 `db:"name" json:"name"`
-	Code             string                 `db:"code" json:"code"`
-	Description      string                 `db:"description" json:"description"`
-	PriceMonthly     float64                `db:"price_monthly" json:"price_monthly"`
-	PriceYearly      float64                `db:"price_yearly" json:"price_yearly"`
-	MaxSymbols       int                    `db:"max_symbols" json:"max_symbols"`                 // -1 = неограниченно
-	MaxSignalsPerDay int                    `db:"max_signals_per_day" json:"max_signals_per_day"` // -1 = неограниченно
-	Features         map[string]interface{} `db:"features" json:"features"`
-	IsActive         bool                   `db:"is_active" json:"is_active"`
-	CreatedAt        time.Time              `db:"created_at" json:"created_at"`
-}
-
 // Подписка пользователя
 type UserSubscription struct {
 	ID                   int                    `db:"id" json:"id"`
 	UserID               int                    `db:"user_id" json:"user_id"`
 	PlanID               int                    `db:"plan_id" json:"plan_id"`
+	PaymentID            *int64                 `db:"payment_id" json:"payment_id,omitempty"`                         // Связь с платежом
 	StripeSubscriptionID *string                `db:"stripe_subscription_id" json:"stripe_subscription_id,omitempty"` // NULLable
 	Status               string                 `db:"status" json:"status"`
 	CurrentPeriodStart   *time.Time             `db:"current_period_start" json:"current_period_start,omitempty"` // NULLable
@@ -79,14 +57,6 @@ type MonthlyBreakdown struct {
 	Subscribers int       `json:"subscribers"`
 }
 
-// Лимиты по тарифам
-type PlanLimits struct {
-	MaxSymbols       int
-	MaxSignalsPerDay int
-	MaxAPIRequests   int
-	Features         map[string]interface{}
-}
-
 // События подписки
 type SubscriptionEvent struct {
 	Type           string                 `json:"type"`
@@ -97,4 +67,14 @@ type SubscriptionEvent struct {
 	Status         string                 `json:"status"`
 	Timestamp      time.Time              `json:"timestamp"`
 	Metadata       map[string]interface{} `json:"metadata"`
+}
+
+// IsActive проверяет активна ли подписка
+func (s *UserSubscription) IsActive() bool {
+	return s.Status == StatusActive || s.Status == StatusTrialing
+}
+
+// HasPayment связана ли подписка с платежом
+func (s *UserSubscription) HasPayment() bool {
+	return s.PaymentID != nil && *s.PaymentID > 0
 }

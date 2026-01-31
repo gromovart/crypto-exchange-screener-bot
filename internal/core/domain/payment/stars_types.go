@@ -1,15 +1,10 @@
-// internal/core/services/payment/stars_types.go
+// internal/core/payment/stars_types.go
 package payment
 
 import "time"
 
 // StarsCommissionRate комиссия Telegram Stars (5%)
 const StarsCommissionRate = 0.05
-
-// SubscriptionService интерфейс сервиса подписок
-type SubscriptionService interface {
-	ActivateSubscription(userID, planID, paymentID string) (*ActivationResult, error)
-}
 
 // UserManager интерфейс менеджера пользователей
 type UserManager interface {
@@ -72,10 +67,12 @@ const (
 
 // StarsPaymentResult результат обработки платежа
 type StarsPaymentResult struct {
-	Success                 bool
-	PaymentID               string
-	SubscriptionActiveUntil time.Time
-	InvoiceID               string
+	Success   bool
+	PaymentID string
+	InvoiceID string
+	UserID    string
+	PlanID    string
+	Timestamp time.Time
 }
 
 // InvoiceData данные из парсинга payload

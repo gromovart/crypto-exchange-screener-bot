@@ -86,4 +86,5 @@ const (
 	EventCounterSignalDetected      EventType = "counter_signal_detected"
 	EventCounterNotificationRequest EventType = "counter_notification_request"
 	EventUserNotification           EventType = "user_notification"
+	EventPaymentComplete            EventType = "payment.completed"
 )

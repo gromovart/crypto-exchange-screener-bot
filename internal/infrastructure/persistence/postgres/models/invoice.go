@@ -1,10 +1,12 @@
+// internal/infrastructure/persistence/postgres/models/invoice.go
 package models
 
 import (
+	"fmt"
 	"time"
 )
 
-// InvoiceStatus статус инвойса
+// InvoiceStatus статус инвойса (совместимость с текущей реализацией)
 type InvoiceStatus string
 
 const (
@@ -27,37 +29,35 @@ const (
 
 // Invoice модель инвойса (счета на оплату)
 type Invoice struct {
-	ID     int64  `gorm:"primaryKey;autoIncrement" json:"id"`
-	UserID int64  `gorm:"index;not null" json:"user_id"`            // ID пользователя
-	PlanID string `gorm:"type:varchar(50);not null" json:"plan_id"` // ID плана подписки (basic, pro, enterprise)
+	ID     int64  `db:"id" json:"id"`
+	UserID int64  `db:"user_id" json:"user_id"` // ID пользователя
+	PlanID string `db:"plan_id" json:"plan_id"` // ID плана подписки
 
 	// Основная информация
-	ExternalID  string `gorm:"index;size:255" json:"external_id"`       // ID инвойса во внешней системе
-	Title       string `gorm:"type:varchar(255);not null" json:"title"` // Название инвойса
-	Description string `gorm:"type:text" json:"description,omitempty"`  // Описание
+	ExternalID  string `db:"external_id" json:"external_id"`           // Внешний ID инвойса
+	Title       string `db:"title" json:"title"`                       // Название инвойса
+	Description string `db:"description" json:"description,omitempty"` // Описание
 
-	// Сумма и валюта
-	AmountUSD   float64 `gorm:"type:decimal(10,2);not null" json:"amount_usd"` // Сумма в USD
-	StarsAmount int     `gorm:"not null" json:"stars_amount"`                  // Количество Stars
+	// Сумма и валюта (совместимость со StarsInvoice)
+	AmountUSD   float64 `db:"amount_usd" json:"amount_usd"`     // Сумма в USD
+	StarsAmount int     `db:"stars_amount" json:"stars_amount"` // Количество Stars
+	FiatAmount  int     `db:"fiat_amount" json:"fiat_amount"`   // Сумма в центах (для совместимости)
+	Currency    string  `db:"currency" json:"currency"`         // Валюта (USD, EUR, RUB)
 
 	// Статус и провайдер
-	Status   InvoiceStatus   `gorm:"type:varchar(20);not null;default:'created'" json:"status"` // Текущий статус
-	Provider InvoiceProvider `gorm:"type:varchar(20);not null" json:"provider"`                 // Провайдер платежа
+	Status   InvoiceStatus   `db:"status" json:"status"`     // Текущий статус
+	Provider InvoiceProvider `db:"provider" json:"provider"` // Провайдер платежа
 
 	// Ссылки и данные
-	InvoiceURL string `gorm:"type:text;not null" json:"invoice_url"` // Ссылка на оплату
-	Payload    string `gorm:"type:text" json:"payload,omitempty"`    // Данные для deep link (start parameter)
-	Metadata   string `gorm:"type:jsonb" json:"metadata,omitempty"`  // Дополнительные данные (JSON)
+	InvoiceURL string `db:"invoice_url" json:"invoice_url"`     // Ссылка на оплату
+	Payload    string `db:"payload" json:"payload,omitempty"`   // Данные для deep link
+	Metadata   string `db:"metadata" json:"metadata,omitempty"` // Дополнительные данные
 
 	// Временные метки
-	CreatedAt time.Time  `gorm:"autoCreateTime" json:"created_at"` // Дата создания
-	UpdatedAt time.Time  `gorm:"autoUpdateTime" json:"updated_at"` // Дата обновления
-	ExpiresAt time.Time  `gorm:"not null" json:"expires_at"`       // Срок действия
-	PaidAt    *time.Time `json:"paid_at,omitempty"`                // Дата оплаты
-
-	// Связи
-	User    User    `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	Payment Payment `gorm:"foreignKey:InvoiceID" json:"payment,omitempty"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`     // Дата создания
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`     // Дата обновления
+	ExpiresAt time.Time  `db:"expires_at" json:"expires_at"`     // Срок действия
+	PaidAt    *time.Time `db:"paid_at" json:"paid_at,omitempty"` // Дата оплаты
 }
 
 // TableName задает имя таблицы в БД
@@ -172,4 +172,29 @@ type InvoiceSummary struct {
 	PaidCount      int     `json:"paid_count"`
 	PendingCount   int     `json:"pending_count"`
 	ExpiredCount   int     `json:"expired_count"`
+}
+
+// GetIDString возвращает ID как строку (для совместимости)
+func (i *Invoice) GetIDString() string {
+	return fmt.Sprintf("%d", i.ID)
+}
+
+// GetUserIDString возвращает UserID как строку (для совместимости)
+func (i *Invoice) GetUserIDString() string {
+	return fmt.Sprintf("%d", i.UserID)
+}
+
+// GetSubscriptionPlanID возвращает PlanID (для совместимости со StarsInvoice)
+func (i *Invoice) GetSubscriptionPlanID() string {
+	return i.PlanID
+}
+
+// GetFiatAmountCents возвращает сумму в центах (для совместимости)
+func (i *Invoice) GetFiatAmountCents() int {
+	return i.FiatAmount
+}
+
+// SetFiatAmountFromUSD устанавливает FiatAmount из суммы в USD
+func (i *Invoice) SetFiatAmountFromUSD(amountUSD float64) {
+	i.FiatAmount = int(amountUSD * 100)
 }
