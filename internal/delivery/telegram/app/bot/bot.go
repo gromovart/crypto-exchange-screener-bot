@@ -10,6 +10,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
+	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
@@ -19,6 +20,11 @@ import (
 	"sync"
 	"time"
 )
+
+// Dependencies зависимости для TelegramBot
+type Dependencies struct {
+	ServiceFactory *services_factory.ServiceFactory
+}
 
 // TelegramBot - бот для отправки уведомлений в Telegram
 type TelegramBot struct {
@@ -31,8 +37,7 @@ type TelegramBot struct {
 	// MessageSender для отправки сообщений
 	messageSender message_sender.MessageSender
 
-	// Новая система хэндлеров
-	handlerFactory *handlers.HandlerFactory
+	// Роутер для обработки команд
 	router         router.Router
 	authMiddleware *middlewares.AuthMiddleware
 
@@ -42,11 +47,6 @@ type TelegramBot struct {
 	mu             sync.RWMutex
 	startupTime    time.Time
 	currentMode    string // "polling" или "webhook"
-}
-
-// Dependencies зависимости для TelegramBot
-type Dependencies struct {
-	UserService *users.Service
 }
 
 // NewTelegramBot создает новый экземпляр TelegramBot
@@ -59,26 +59,40 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	telegramClient := telegram_http.NewTelegramClient(baseURL)
 	pollingClient := telegram_http.NewPollingClient(baseURL)
 
-	// Создаем middleware аутентификации
-	authMiddleware := middlewares.NewAuthMiddleware(deps.UserService)
+	// Получаем UserService из ServiceFactory
+	var userService *users.Service
+	if deps.ServiceFactory != nil {
+		// GetUserService должен возвращать *users.Service
+		userService = deps.ServiceFactory.GetUserService()
+	} else {
+		logger.Error("❌ ServiceFactory не предоставлена в зависимостях")
+		userService = nil
+	}
 
-	// Создаем фабрику хэндлеров
+	// Создаем middleware аутентификации
+	authMiddleware := middlewares.NewAuthMiddleware(userService)
+
+	// Создаем фабрику хэндлеров и роутер
 	handlerFactory := handlers.NewHandlerFactory()
 
-	// Создаем сервис для переключения уведомлений
-	notificationsToggleService := notifications_toggle.NewService(deps.UserService)
+	// Создаем сервисы для хэндлеров
+	notificationsToggleService := notifications_toggle.NewService(userService)
+	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
 
-	// Создаем сервис настройки сигналов
-	signalSettingsService := signal_settings_service.NewServiceWithDependencies(deps.UserService)
-
-	// Пока передаем nil, чтобы сборка прошла
-	var paymentService payment_service.Service = nil
+	// Получаем PaymentService из ServiceFactory
+	var paymentService payment_service.Service
+	if deps.ServiceFactory != nil {
+		paymentService = deps.ServiceFactory.CreatePaymentService()
+	} else {
+		logger.Warn("⚠️ ServiceFactory не предоставлена, PaymentService будет nil")
+		paymentService = nil
+	}
 
 	// Создаем структуру сервисов
 	services := &Services{
 		signalSettingsService:      signalSettingsService,
 		notificationsToggleService: notificationsToggleService,
-		paymentService:             paymentService, // nil пока
+		paymentService:             paymentService,
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -92,7 +106,6 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		telegramClient: telegramClient,
 		pollingClient:  pollingClient,
 		messageSender:  ms,
-		handlerFactory: handlerFactory,
 		router:         router,
 		authMiddleware: authMiddleware,
 		startupTime:    time.Now(),
@@ -333,11 +346,6 @@ func (b *TelegramBot) sendAuthError(chatID int64, message string) error {
 	}
 
 	return b.messageSender.SendTextMessage(chatID, errorMessage, keyboard)
-}
-
-// GetHandlerFactory возвращает фабрику хэндлеров
-func (b *TelegramBot) GetHandlerFactory() *handlers.HandlerFactory {
-	return b.handlerFactory
 }
 
 // GetRouter возвращает роутер

@@ -120,3 +120,8 @@ func (f *ServiceFactory) Validate() bool {
 	logger.Info("✅ ServiceFactory валидирована")
 	return true
 }
+
+// GetUserService возвращает UserService (геттер для приватного поля)
+func (f *ServiceFactory) GetUserService() *users.Service {
+	return f.userService
+}

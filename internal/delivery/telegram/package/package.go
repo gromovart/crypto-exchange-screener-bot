@@ -340,20 +340,14 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 		return nil
 	}
 
-	// Получаем UserService
-	userService, err := p.getUserService()
-	if err != nil {
-		return fmt.Errorf("UserService не создан для бота: %w", err)
-	}
-
-	// Получаем ServiceFactory для бота
+	// Проверяем что ServiceFactory создана
 	if p.serviceFactory == nil {
 		return fmt.Errorf("ServiceFactory не создана")
 	}
 
-	// Зависимости для бота
+	// Создаем зависимости для бота
 	deps := &bot.Dependencies{
-		UserService: userService,
+		ServiceFactory: p.serviceFactory,
 	}
 
 	// Создаем бота
@@ -361,10 +355,12 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 
 	// Создаем транспорт на основе конфигурации
 	transportFactory := transport.NewTransportFactory(p.config, p.bot)
-	p.transport, err = transportFactory.CreateTransport()
+	transport, err := transportFactory.CreateTransport()
 	if err != nil {
 		return fmt.Errorf("ошибка создания транспорта: %w", err)
 	}
+
+	p.transport = transport
 
 	logger.Info("✅ Telegram бот создан (режим: %s)", p.config.TelegramMode)
 	logger.Info("✅ Транспорт создан: %s", p.transport.Name())
