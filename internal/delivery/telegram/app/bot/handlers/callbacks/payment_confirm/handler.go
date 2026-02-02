@@ -1,13 +1,15 @@
 // internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm/handler.go
 package payment_confirm
 
-import (	
+import (
 	"fmt"
+	"strings"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // paymentConfirmHandler обработчик подтверждения платежа
@@ -95,18 +97,36 @@ func (h *paymentConfirmHandler) getPlanByID(planID string) *SubscriptionPlan {
 // createInvoiceLink создает ссылку для оплаты
 func (h *paymentConfirmHandler) createInvoiceLink(userID int, plan *SubscriptionPlan) string {
 	// Получаем username бота из конфигурации
-	botUsername := h.config.Telegram.BotUsername
+	botUsername := ""
+
+	// Пробуем разные возможные поля из конфигурации
+	if h.config.Telegram.BotUsername != "" {
+		botUsername = h.config.Telegram.BotUsername
+	} else if h.config.TelegramStars.BotUsername != "" {
+		botUsername = h.config.TelegramStars.BotUsername
+	} else if h.config.TelegramStars.BotUsername != "" {
+		botUsername = h.config.TelegramStars.BotUsername
+	}
 
 	if botUsername == "" {
-		// Если username не указан в конфиге, используем универсальный deep link
-		// В реальном приложении можно получить username через Bot API
-		return fmt.Sprintf("https://t.me/?start=pay_%d_%s", userID, plan.ID)
+		// Если username не указан в конфиге, логируем предупреждение
+		logger.Warn("BotUsername не найден в конфигурации, используется универсальная ссылка")
+		invoiceLink := fmt.Sprintf("https://t.me/?start=pay_%d_%s", userID, plan.ID)
+		logger.Info("Универсальная платежная ссылка: %s", invoiceLink)
+		return invoiceLink
 	}
+
+	// Убираем @ если есть в начале
+	botUsername = strings.TrimPrefix(botUsername, "@")
 
 	// Правильный формат deep link для Telegram бота
 	// Формат: https://t.me/{bot_username}?start={payload}
-	return fmt.Sprintf("https://t.me/%s?start=pay_%d_%s",
+	invoiceLink := fmt.Sprintf("https://t.me/%s?start=pay_%d_%s",
 		botUsername, userID, plan.ID)
+
+	logger.Info("Создана платежная ссылка: %s (бот: %s, пользователь: %d, план: %s)",
+		invoiceLink, botUsername, userID, plan.ID)
+	return invoiceLink
 }
 
 // createPaymentMessage создает сообщение с инструкцией по оплате

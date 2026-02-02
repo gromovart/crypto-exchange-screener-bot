@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/handlers/start/handler.go
 package start
 
 import (
@@ -83,36 +84,85 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 	// Извлекаем параметры: pay_{user_id}_{plan_id}
 	parts := strings.Split(payload, "_")
 	if len(parts) != 3 {
-		// Неверный формат
-		return h.handleStandardStart(user)
+		// Неверный формат - возвращаем стандартное приветствие без сообщения об оплате
+		logger.Warn("Неверный формат платежного payload: %s", payload)
+		message := h.formatWelcomeMessage(user)
+		message += "\n\n⚠️ *Неверный формат платежной ссылки*"
+		return handlers.HandlerResult{
+			Message:  message,
+			Keyboard: h.createWelcomeKeyboard(),
+			Metadata: map[string]interface{}{
+				"user_id":   user.ID,
+				"payload":   payload,
+				"timestamp": time.Now(),
+			},
+		}, nil
 	}
 
-	// userIDStr := parts[1] // Комментируем, так как не используется
+	userIDStr := parts[1]
 	planID := parts[2]
 
 	// Проверяем что user_id совпадает с текущим пользователем
-	// (это базовая проверка, можно расширить)
+	userID, err := h.parseUserID(userIDStr)
+	if err != nil {
+		logger.Warn("Неверный user_id в payload: %s", userIDStr)
+		message := h.formatWelcomeMessage(user)
+		message += "\n\n⚠️ *Ошибка в платежной ссылке*"
+		return handlers.HandlerResult{
+			Message:  message,
+			Keyboard: h.createWelcomeKeyboard(),
+			Metadata: map[string]interface{}{
+				"user_id":   user.ID,
+				"payload":   payload,
+				"timestamp": time.Now(),
+			},
+		}, nil
+	}
 
-	logger.Info("Обработка платежа: пользователь=%d, план=%s", user.ID, planID)
+	if userID != user.ID {
+		logger.Warn("UserID в payload (%d) не совпадает с текущим пользователем (%d)", userID, user.ID)
+		message := h.formatWelcomeMessage(user)
+		message += "\n\n⚠️ *Ссылка предназначена для другого пользователя*"
+		return handlers.HandlerResult{
+			Message:  message,
+			Keyboard: h.createWelcomeKeyboard(),
+			Metadata: map[string]interface{}{
+				"user_id":   user.ID,
+				"payload":   payload,
+				"timestamp": time.Now(),
+			},
+		}, nil
+	}
 
-	// TODO: Интеграция с системой платежей
-	// Здесь должна быть логика активации подписки после оплаты
+	logger.Info("Начало процесса оплаты: пользователь=%d, план=%s", user.ID, planID)
 
-	// Временное сообщение об успешной оплате
-	message := h.formatWelcomeMessage(user)
-	message += "\n\n🎉 *Оплата успешно обработана!*\n"
-	message += fmt.Sprintf("План: *%s* активирован.\n", h.getPlanName(planID))
-	message += "Все функции плана теперь доступны.\n\n"
-	message += "Спасибо за использование нашего сервиса! 🚀"
+	// Показываем ТОЛЬКО сообщение о начале оплаты, НЕ стандартное приветствие
+	message := "💳 *Начинаем процесс оплаты*\n\n"
+	message += fmt.Sprintf("План: *%s*\n", h.getPlanName(planID))
+	message += "Для продолжения оплаты используйте команду /buy\n\n"
+	message += "Или нажмите кнопку ниже:"
+
+	// Создаем клавиатуру с кнопкой для оплаты
+	keyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{
+				{"text": "💳 Перейти к оплате", "callback_data": constants.PaymentConstants.CommandBuy},
+			},
+			{
+				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+			},
+		},
+	}
 
 	return handlers.HandlerResult{
 		Message:  message,
-		Keyboard: h.createWelcomeKeyboard(),
+		Keyboard: keyboard,
 		Metadata: map[string]interface{}{
-			"user_id":        user.ID,
-			"plan_id":        planID,
-			"payment_status": "processed",
-			"timestamp":      time.Now(),
+			"user_id":         user.ID,
+			"plan_id":         planID,
+			"payment_status":  "pending", // Ожидание оплаты
+			"payment_started": true,
+			"timestamp":       time.Now(),
 		},
 	}, nil
 }
@@ -131,6 +181,17 @@ func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.Hand
 			"timestamp":  time.Now(),
 		},
 	}, nil
+}
+
+// parseUserID парсит user_id из строки
+func (h *startHandlerImpl) parseUserID(userIDStr string) (int, error) {
+	// Пытаемся распарсить как число
+	var userID int
+	_, err := fmt.Sscanf(userIDStr, "%d", &userID)
+	if err != nil {
+		return 0, fmt.Errorf("не удалось распарсить user_id: %w", err)
+	}
+	return userID, nil
 }
 
 // getPlanName возвращает читаемое название плана по ID
