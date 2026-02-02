@@ -8,7 +8,7 @@ const StarsCommissionRate = 0.05
 
 // UserManager интерфейс менеджера пользователей
 type UserManager interface {
-	GetUser(userID string) (User, error)
+	GetUserByStringID(userID string) (User, error)
 }
 
 // User интерфейс пользователя

@@ -9,7 +9,7 @@ import (
 
 // StarsService сервис обработки платежей через Telegram Stars
 type StarsService struct {
-	logger      logger.Logger
+	logger      *logger.Logger
 	userManager UserManager
 	eventBus    *event_bus.EventBus
 	starsClient *http_client.StarsClient
@@ -20,7 +20,7 @@ type StarsService struct {
 func NewStarsService(
 	userManager UserManager,
 	eventBus *event_bus.EventBus,
-	logger logger.Logger,
+	logger *logger.Logger,
 	starsClient *http_client.StarsClient,
 	botUsername string,
 ) *StarsService {
