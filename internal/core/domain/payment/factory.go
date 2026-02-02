@@ -13,7 +13,7 @@ type StarsServiceFactory struct {
 	config      *Config
 	userManager UserManager
 	eventBus    *event_bus.EventBus
-	logger      logger.Logger
+	logger      *logger.Logger
 	starsClient *http_client.StarsClient
 	botUsername string
 	initialized bool
@@ -31,7 +31,7 @@ type Dependencies struct {
 	Config      *Config
 	UserManager UserManager
 	EventBus    *event_bus.EventBus
-	Logger      logger.Logger
+	Logger      *logger.Logger
 }
 
 // NewStarsServiceFactory создает новую фабрику StarsService
@@ -175,6 +175,6 @@ func (f *StarsServiceFactory) SetEventBus(eventBus *event_bus.EventBus) {
 }
 
 // SetLogger устанавливает Logger
-func (f *StarsServiceFactory) SetLogger(logger logger.Logger) {
+func (f *StarsServiceFactory) SetLogger(logger *logger.Logger) {
 	f.logger = logger
 }
