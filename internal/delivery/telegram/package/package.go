@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
@@ -175,16 +176,31 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	logger.Debug("🏭 Создание ServiceFactory...")
 
-	// ПОЛУЧАЕМ UserService из CoreFactory перед созданием ServiceFactory
+	// Получаем UserService из CoreFactory
 	userService, err := p.getUserService()
 	if err != nil {
 		return fmt.Errorf("не удалось получить UserService: %w", err)
 	}
 
+	// Получаем SubscriptionService
+	subscriptionService, err := p.getSubscriptionService()
+	if err != nil {
+		logger.Warn("⚠️ SubscriptionService не доступен: %v", err)
+		// Можно продолжать без subscriptionService
+	}
+
+	// Получаем PaymentCoreService (StarsService)
+	paymentCoreService, err := p.getPaymentCoreService()
+	if err != nil {
+		logger.Warn("⚠️ PaymentCoreService не доступен: %v", err)
+		// Можно продолжать без paymentCoreService
+	}
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
-			UserService:         userService, // ✅ Теперь не nil
-			SubscriptionService: nil,         // Может быть nil
+			UserService:         userService,
+			SubscriptionService: subscriptionService,
+			PaymentCoreService:  paymentCoreService,
 			MessageSender:       p.components.MessageSender,
 			ButtonBuilder:       p.components.ButtonBuilder,
 			FormatterProvider:   p.components.FormatterProvider,
@@ -220,6 +236,35 @@ func (p *TelegramDeliveryPackage) getUserService() (*users.Service, error) {
 	return p.userService, nil
 }
 
+// getSubscriptionService получает SubscriptionService из CoreFactory
+func (p *TelegramDeliveryPackage) getSubscriptionService() (*subscription.Service, error) {
+	if p.subscriptionService != nil {
+		return p.subscriptionService, nil
+	}
+
+	if p.coreFactory == nil {
+		return nil, fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	// Создаем SubscriptionService через фабрику
+	subscriptionService, err := p.coreFactory.CreateSubscriptionService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать SubscriptionService: %w", err)
+	}
+
+	p.subscriptionService = subscriptionService
+	logger.Info("✅ SubscriptionService создан и сохранен в пакете")
+	return p.subscriptionService, nil
+}
+
+// getPaymentCoreService получает PaymentCoreService (StarsService) из CoreFactory
+func (p *TelegramDeliveryPackage) getPaymentCoreService() (*payment.StarsService, error) {
+	// TODO: Реализовать создание payment.StarsService через CoreFactory
+	// Пока возвращаем nil, так как нужно настроить создание в core factory
+	logger.Info("ℹ️ PaymentCoreService пока не реализован в CoreFactory")
+	return nil, fmt.Errorf("PaymentCoreService не реализован")
+}
+
 // createServices создает все сервисы Telegram
 func (p *TelegramDeliveryPackage) createServices() error {
 	logger.Debug("🔧 Создание сервисов Telegram...")
@@ -229,10 +274,13 @@ func (p *TelegramDeliveryPackage) createServices() error {
 	p.services["NotificationToggleService"] = p.serviceFactory.CreateNotificationToggleService()
 	p.services["SignalSettingsService"] = p.serviceFactory.CreateSignalSettingsService()
 
+	// Создаем PaymentService
+	p.services["PaymentService"] = p.serviceFactory.CreatePaymentService()
+
 	// Проверяем что сервисы созданы
 	for name, service := range p.services {
 		if service == nil {
-			return fmt.Errorf("сервис %s не создан", name)
+			logger.Warn("⚠️ Сервис %s не создан", name)
 		}
 	}
 
@@ -292,10 +340,15 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 		return nil
 	}
 
-	// ПОЛУЧАЕМ UserService
+	// Получаем UserService
 	userService, err := p.getUserService()
 	if err != nil {
 		return fmt.Errorf("UserService не создан для бота: %w", err)
+	}
+
+	// Получаем ServiceFactory для бота
+	if p.serviceFactory == nil {
+		return fmt.Errorf("ServiceFactory не создана")
 	}
 
 	// Зависимости для бота
@@ -460,6 +513,7 @@ func (p *TelegramDeliveryPackage) GetHealthStatus() map[string]interface{} {
 		"core_factory_ready":   p.coreFactory != nil && p.coreFactory.IsReady(),
 		"user_service":         p.userService != nil,
 		"subscription_service": p.subscriptionService != nil,
+		"payment_service":      p.services["PaymentService"] != nil,
 		"telegram_mode":        p.config.TelegramMode,
 	}
 

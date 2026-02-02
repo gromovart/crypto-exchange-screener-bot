@@ -2,6 +2,7 @@
 package services_factory
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
@@ -9,6 +10,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -18,6 +20,7 @@ import (
 type ServiceFactory struct {
 	userService         *users.Service
 	subscriptionService *subscription.Service
+	paymentCoreService  *payment.StarsService // Добавляем сервис платежей из core
 	messageSender       message_sender.MessageSender
 	buttonBuilder       *buttons.ButtonBuilder
 	formatterProvider   *formatters.FormatterProvider
@@ -27,6 +30,7 @@ type ServiceFactory struct {
 type ServiceDependencies struct {
 	UserService         *users.Service
 	SubscriptionService *subscription.Service
+	PaymentCoreService  *payment.StarsService // Добавляем
 	MessageSender       message_sender.MessageSender
 	ButtonBuilder       *buttons.ButtonBuilder
 	FormatterProvider   *formatters.FormatterProvider
@@ -39,6 +43,7 @@ func NewServiceFactory(deps ServiceDependencies) *ServiceFactory {
 	return &ServiceFactory{
 		userService:         deps.UserService,
 		subscriptionService: deps.SubscriptionService,
+		paymentCoreService:  deps.PaymentCoreService,
 		messageSender:       deps.MessageSender,
 		buttonBuilder:       deps.ButtonBuilder,
 		formatterProvider:   deps.FormatterProvider,
@@ -68,6 +73,41 @@ func (f *ServiceFactory) CreateNotificationToggleService() notifications_toggle.
 // CreateSignalSettingsService создает SignalSettingsService
 func (f *ServiceFactory) CreateSignalSettingsService() signal_settings.Service {
 	return signal_settings.NewService(f.userService)
+}
+
+// CreatePaymentService создает PaymentService
+func (f *ServiceFactory) CreatePaymentService() payment_service.Service {
+	if f.paymentCoreService == nil {
+		logger.Warn("⚠️ PaymentCoreService не доступен, создается заглушка")
+		return f.createPaymentServiceStub()
+	}
+
+	// Создаем зависимости для payment service
+	deps := payment_service.Dependencies{
+		PaymentService:      f.paymentCoreService,
+		SubscriptionService: f.subscriptionService,
+		UserService:         f.userService,
+	}
+
+	// Используем NewServiceWithDependencies
+	return payment_service.NewServiceWithDependencies(deps)
+}
+
+// createPaymentServiceStub создает заглушку для PaymentService
+func (f *ServiceFactory) createPaymentServiceStub() payment_service.Service {
+	return &paymentServiceStub{}
+}
+
+// paymentServiceStub заглушка для PaymentService
+type paymentServiceStub struct{}
+
+func (p *paymentServiceStub) Exec(params payment_service.PaymentParams) (payment_service.PaymentResult, error) {
+	logger.Warn("🔄 PaymentService заглушка: %s для пользователя %d", params.Action, params.UserID)
+
+	return payment_service.PaymentResult{
+		Success: false,
+		Message: "Payment service не инициализирован. Необходимо настроить зависимости в application layer.",
+	}, nil
 }
 
 // Validate проверяет доступность зависимостей

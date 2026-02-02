@@ -2,7 +2,7 @@
 package payment
 
 import (
-	types "crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"time"
 )
@@ -117,25 +117,17 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		"planId", invoiceData.SubscriptionPlanID,
 	)
 
-	// Публикуем событие
-	eventData := map[string]interface{}{
-		"payment_id":   request.TelegramPaymentID,
-		"user_id":      invoiceData.UserID,
-		"plan_id":      invoiceData.SubscriptionPlanID,
-		"stars_amount": request.StarsAmount,
-		"payment_type": "stars",
-		"timestamp":    time.Now(),
-		"invoice_id":   invoiceData.InvoiceID,
-	}
+	// Публикуем событие через интерфейс
+	eventData := CreatePaymentEventData(
+		request.TelegramPaymentID,
+		invoiceData.UserID,
+		invoiceData.SubscriptionPlanID,
+		request.StarsAmount,
+		"stars",
+		invoiceData.InvoiceID,
+	)
 
-	event := types.Event{
-		Type:      types.EventPaymentComplete,
-		Source:    "stars_processor",
-		Data:      eventData,
-		Timestamp: time.Now(),
-	}
-
-	if err := s.eventBus.Publish(event); err != nil {
+	if err := s.eventPublisher.PublishPaymentEvent(types.EventPaymentComplete, eventData.ToMap()); err != nil {
 		s.logger.Error("Не удалось опубликовать событие платежа", "error", err)
 	}
 
@@ -147,4 +139,18 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		InvoiceID: invoiceData.InvoiceID,
 		Timestamp: time.Now(),
 	}, nil
+}
+
+// ToMap конвертирует PaymentEventData в map
+func (d PaymentEventData) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"payment_id":   d.PaymentID,
+		"user_id":      d.UserID,
+		"plan_id":      d.PlanID,
+		"stars_amount": d.StarsAmount,
+		"payment_type": d.PaymentType,
+		"timestamp":    d.Timestamp,
+		"invoice_id":   d.InvoiceID,
+		"metadata":     d.Metadata,
+	}
 }

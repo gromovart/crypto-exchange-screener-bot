@@ -2,11 +2,9 @@
 package payment
 
 import (
+	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"strings"
-	"time"
-
-	types "crypto-exchange-screener-bot/internal/types"
 
 	"github.com/google/uuid"
 )
@@ -117,24 +115,21 @@ func (s *StarsService) recordPaymentTransaction(
 	return nil
 }
 
-// publishPaymentSuccessEvent публикует событие об успешном платеже
+// publishPaymentSuccessEvent публикует событие об успешном платеже через EventPublisher
 func (s *StarsService) publishPaymentSuccessEvent(
 	paymentID, userID, planID, invoiceID string,
 	starsAmount int,
 ) error {
-	event := types.Event{
-		Type: "payment.completed",
-		Data: map[string]interface{}{
-			"payment_id":   paymentID,
-			"user_id":      userID,
-			"plan_id":      planID,
-			"stars_amount": starsAmount,
-			"payment_type": "stars",
-			"timestamp":    time.Now(),
-			"invoice_id":   invoiceID,
-		},
-	}
-	return s.eventBus.Publish(event)
+	eventData := CreatePaymentEventData(
+		paymentID,
+		userID,
+		planID,
+		starsAmount,
+		"stars",
+		invoiceID,
+	)
+
+	return s.eventPublisher.PublishPaymentEvent(types.EventPaymentComplete, eventData.ToMap())
 }
 
 // validateWebhook проверяет валидность webhook от Telegram
@@ -157,7 +152,7 @@ func (s *StarsService) validateWebhook(data map[string]interface{}) (bool, error
 	return isValidSignature && hasRequiredFields && !isDuplicate, nil
 }
 
-// validateTelegramSignature валидирует HMAC подпись от Telegram
+// validateTelegramSignature валидирует HMAC подписи от Telegram
 func (s *StarsService) validateTelegramSignature(data map[string]interface{}) (bool, error) {
 	// TODO: реализация валидации HMAC подписи
 	// временная заглушка для разработки

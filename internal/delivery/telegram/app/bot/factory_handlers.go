@@ -40,24 +40,31 @@ import (
 	profile_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/profile"
 	settings_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/settings"
 	thresholds_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/thresholds"
+	precheckout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/pre_checkout"
+	successful_payment_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/successful_payment"
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
+type Services struct {
+	paymentService             payment_service.Service
+	notificationsToggleService notifications_toggle_service.Service
+	signalSettingsService      signal_settings_service.Service
+}
+
 // InitHandlerFactory инициализирует фабрику хэндлеров
 func InitHandlerFactory(
 	factory *handlers.HandlerFactory,
-	notificationsToggleService notifications_toggle_service.Service,
-	signalSettingsService signal_settings_service.Service, // Добавляем
 	cfg *config.Config,
+	services *Services,
 ) {
 	logger.Info("🔧 Инициализация создателей хэндлеров...")
 
 	// Регистрируем создателей КОМАНД
-	// Добавляю регистрацию команды /commands
 	factory.RegisterHandlerCreator("commands", func() handlers.Handler {
 		return commands_command.NewHandler()
 	})
@@ -175,42 +182,59 @@ func InitHandlerFactory(
 
 	// Регистрируем универсальный обработчик для параметризованных callback-ов
 	factory.RegisterHandlerCreator("with_params", func() handlers.Handler {
-		return with_params_handler.NewHandler(signalSettingsService)
+		return with_params_handler.NewHandler(services.signalSettingsService)
 	})
 
 	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (с сервисами)
 	factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
-		return signal_toggle_growth_handler.NewHandler(signalSettingsService)
+		return signal_toggle_growth_handler.NewHandler(services.signalSettingsService)
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalToggleFall, func() handlers.Handler {
-		return signal_toggle_fall_handler.NewHandler(signalSettingsService)
+		return signal_toggle_fall_handler.NewHandler(services.signalSettingsService)
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalSetGrowthThreshold, func() handlers.Handler {
-		return signal_set_growth_threshold_handler.NewHandler(signalSettingsService)
+		return signal_set_growth_threshold_handler.NewHandler(services.signalSettingsService)
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
-		return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
+		return signal_set_fall_threshold_handler.NewHandler(services.signalSettingsService)
 	})
 
+	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
 		return payment_plan_handler.NewHandler()
 	})
+
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
 		return payment_confirm_handler.NewHandler(cfg)
 	})
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
 	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
-		return notifications_toggle_handler.NewHandler(notificationsToggleService)
+		return notifications_toggle_handler.NewHandler(services.notificationsToggleService)
 	})
 
 	// Обработчик для выбора периода (использует общий префикс)
 	factory.RegisterHandlerCreator("period_select", func() handlers.Handler {
-		return period_select_handler.NewHandler(signalSettingsService)
+		return period_select_handler.NewHandler(services.signalSettingsService)
 	})
+
+	// РЕГИСТРАЦИЯ ПЛАТЕЖНЫХ СОБЫТИЙ TELEGRAM API
+	if services.paymentService != nil {
+		factory.RegisterHandlerCreator("pre_checkout_query", func() handlers.Handler {
+			return precheckout_handler.NewHandler(services.paymentService)
+		})
+
+		factory.RegisterHandlerCreator("successful_payment", func() handlers.Handler {
+			return successful_payment_handler.NewHandler(services.paymentService)
+		})
+
+		logger.Info("✅ Платежные обработчики событий зарегистрированы")
+	} else {
+		logger.Warn("⚠️ PaymentService не предоставлен, платежные события не будут обрабатываться")
+	}
 
 	logger.Info("✅ Инициализация создателей хэндлеров завершена")
 }

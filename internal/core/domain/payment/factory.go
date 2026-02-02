@@ -3,20 +3,19 @@ package payment
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
-	event_bus "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 )
 
 // StarsServiceFactory фабрика для создания StarsService
 type StarsServiceFactory struct {
-	config      *Config
-	userManager UserManager
-	eventBus    *event_bus.EventBus
-	logger      *logger.Logger
-	starsClient *http_client.StarsClient
-	botUsername string
-	initialized bool
+	config         *Config
+	userManager    UserManager
+	eventPublisher EventPublisher
+	logger         *logger.Logger
+	starsClient    *http_client.StarsClient
+	botUsername    string
+	initialized    bool
 }
 
 // Config конфигурация для StarsService
@@ -28,10 +27,10 @@ type Config struct {
 
 // Dependencies зависимости для фабрики StarsService
 type Dependencies struct {
-	Config      *Config
-	UserManager UserManager
-	EventBus    *event_bus.EventBus
-	Logger      *logger.Logger
+	Config         *Config
+	UserManager    UserManager
+	EventPublisher EventPublisher
+	Logger         *logger.Logger
 }
 
 // NewStarsServiceFactory создает новую фабрику StarsService
@@ -44,8 +43,8 @@ func NewStarsServiceFactory(deps Dependencies) (*StarsServiceFactory, error) {
 		return nil, fmt.Errorf("UserManager обязателен")
 	}
 
-	if deps.EventBus == nil {
-		return nil, fmt.Errorf("EventBus обязателен")
+	if deps.EventPublisher == nil {
+		return nil, fmt.Errorf("EventPublisher обязателен")
 	}
 
 	// Проверяем обязательные поля конфигурации
@@ -62,11 +61,11 @@ func NewStarsServiceFactory(deps Dependencies) (*StarsServiceFactory, error) {
 	}
 
 	factory := &StarsServiceFactory{
-		config:      deps.Config,
-		userManager: deps.UserManager,
-		eventBus:    deps.EventBus,
-		logger:      deps.Logger,
-		botUsername: deps.Config.TelegramBotUsername,
+		config:         deps.Config,
+		userManager:    deps.UserManager,
+		eventPublisher: deps.EventPublisher,
+		logger:         deps.Logger,
+		botUsername:    deps.Config.TelegramBotUsername,
 	}
 
 	// Создаем StarsClient
@@ -92,7 +91,7 @@ func (f *StarsServiceFactory) CreateStarsService() (*StarsService, error) {
 
 	service := NewStarsService(
 		f.userManager,
-		f.eventBus,
+		f.eventPublisher,
 		f.logger,
 		f.starsClient,
 		f.botUsername,
@@ -145,8 +144,8 @@ func (f *StarsServiceFactory) Validate() error {
 		return fmt.Errorf("UserManager не установлен")
 	}
 
-	if f.eventBus == nil {
-		return fmt.Errorf("EventBus не установлен")
+	if f.eventPublisher == nil {
+		return fmt.Errorf("EventPublisher не установлен")
 	}
 
 	return nil
@@ -155,12 +154,12 @@ func (f *StarsServiceFactory) Validate() error {
 // GetDependenciesInfo возвращает информацию о зависимостях
 func (f *StarsServiceFactory) GetDependenciesInfo() map[string]interface{} {
 	return map[string]interface{}{
-		"initialized":        f.initialized,
-		"stars_client_ready": f.starsClient != nil,
-		"user_manager_ready": f.userManager != nil,
-		"event_bus_ready":    f.eventBus != nil,
-		"bot_username":       f.botUsername,
-		"has_provider_token": f.config != nil && f.config.TelegramStarsProviderToken != "",
+		"initialized":           f.initialized,
+		"stars_client_ready":    f.starsClient != nil,
+		"user_manager_ready":    f.userManager != nil,
+		"event_publisher_ready": f.eventPublisher != nil,
+		"bot_username":          f.botUsername,
+		"has_provider_token":    f.config != nil && f.config.TelegramStarsProviderToken != "",
 	}
 }
 
@@ -169,9 +168,9 @@ func (f *StarsServiceFactory) SetUserManager(userManager UserManager) {
 	f.userManager = userManager
 }
 
-// SetEventBus устанавливает EventBus
-func (f *StarsServiceFactory) SetEventBus(eventBus *event_bus.EventBus) {
-	f.eventBus = eventBus
+// SetEventPublisher устанавливает EventPublisher
+func (f *StarsServiceFactory) SetEventPublisher(eventPublisher EventPublisher) {
+	f.eventPublisher = eventPublisher
 }
 
 // SetLogger устанавливает Logger
