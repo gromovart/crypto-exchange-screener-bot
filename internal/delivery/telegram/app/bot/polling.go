@@ -1,4 +1,3 @@
-// internal/delivery/telegram/app/bot/polling.go
 package bot
 
 import (
@@ -7,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -112,6 +111,18 @@ func (pc *PollingClient) fetchUpdates() {
 				} `json:"message"`
 				Data string `json:"data"`
 			} `json:"callback_query"`
+			PreCheckoutQuery *struct {
+				ID   string `json:"id"`
+				From *struct {
+					ID        int64  `json:"id"`
+					Username  string `json:"username"`
+					FirstName string `json:"first_name"`
+					LastName  string `json:"last_name"`
+				} `json:"from"`
+				Currency       string `json:"currency"`
+				TotalAmount    int    `json:"total_amount"`
+				InvoicePayload string `json:"invoice_payload"`
+			} `json:"pre_checkout_query"`
 		} `json:"result"`
 	}
 
@@ -162,37 +173,34 @@ func (pc *PollingClient) processUpdate(update struct {
 		} `json:"message"`
 		Data string `json:"data"`
 	} `json:"callback_query"`
+	PreCheckoutQuery *struct {
+		ID   string `json:"id"`
+		From *struct {
+			ID        int64  `json:"id"`
+			Username  string `json:"username"`
+			FirstName string `json:"first_name"`
+			LastName  string `json:"last_name"`
+		} `json:"from"`
+		Currency       string `json:"currency"`
+		TotalAmount    int    `json:"total_amount"`
+		InvoicePayload string `json:"invoice_payload"`
+	} `json:"pre_checkout_query"`
 }) {
-	// Преобразуем в формат middlewares.TelegramUpdate
-	middlewareUpdate := &middlewares.TelegramUpdate{
+	// Создаем обновление в формате telegram.TelegramUpdate
+	middlewareUpdate := &telegram.TelegramUpdate{
 		UpdateID: update.UpdateID,
 	}
 
+	// Обработка Message
 	if update.Message != nil {
-		middlewareUpdate.Message = &struct {
-			MessageID int `json:"message_id"`
-			From      *struct {
-				ID        int64  `json:"id"`
-				Username  string `json:"username"`
-				FirstName string `json:"first_name"`
-				LastName  string `json:"last_name"`
-			} `json:"from"`
-			Chat *struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-			Text string `json:"text"`
-		}{
-			MessageID: update.Message.MessageID,
+		msg := &telegram.Message{
+			MessageID: int64(update.Message.MessageID),
 			Text:      update.Message.Text,
 		}
 
+		// Преобразуем From
 		if update.Message.From != nil {
-			middlewareUpdate.Message.From = &struct {
-				ID        int64  `json:"id"`
-				Username  string `json:"username"`
-				FirstName string `json:"first_name"`
-				LastName  string `json:"last_name"`
-			}{
+			msg.From = telegram.User{
 				ID:        update.Message.From.ID,
 				Username:  update.Message.From.Username,
 				FirstName: update.Message.From.FirstName,
@@ -200,38 +208,26 @@ func (pc *PollingClient) processUpdate(update struct {
 			}
 		}
 
+		// Преобразуем Chat
 		if update.Message.Chat != nil {
-			middlewareUpdate.Message.Chat = &struct {
-				ID int64 `json:"id"`
-			}{
+			msg.Chat = telegram.Chat{
 				ID: update.Message.Chat.ID,
 			}
 		}
+
+		middlewareUpdate.Message = msg
 	}
 
+	// Обработка CallbackQuery
 	if update.CallbackQuery != nil {
-		middlewareUpdate.CallbackQuery = &struct {
-			ID   string `json:"id"`
-			From *struct {
-				ID        int64  `json:"id"`
-				Username  string `json:"username"`
-				FirstName string `json:"first_name"`
-				LastName  string `json:"last_name"`
-			} `json:"from"`
-			Message *struct {
-				MessageID int `json:"message_id"`
-				Chat      *struct {
-					ID int64 `json:"id"`
-				} `json:"chat"`
-			} `json:"message"`
-			Data string `json:"data"`
-		}{
+		callback := &telegram.CallbackQueryStruct{
 			ID:   update.CallbackQuery.ID,
 			Data: update.CallbackQuery.Data,
 		}
 
+		// Преобразуем From
 		if update.CallbackQuery.From != nil {
-			middlewareUpdate.CallbackQuery.From = &struct {
+			callback.From = &struct {
 				ID        int64  `json:"id"`
 				Username  string `json:"username"`
 				FirstName string `json:"first_name"`
@@ -243,6 +239,55 @@ func (pc *PollingClient) processUpdate(update struct {
 				LastName:  update.CallbackQuery.From.LastName,
 			}
 		}
+
+		// Преобразуем Message
+		if update.CallbackQuery.Message != nil {
+			callback.Message = &struct {
+				MessageID int `json:"message_id"`
+				Chat      *struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			}{
+				MessageID: update.CallbackQuery.Message.MessageID,
+			}
+
+			if update.CallbackQuery.Message.Chat != nil {
+				callback.Message.Chat = &struct {
+					ID int64 `json:"id"`
+				}{
+					ID: update.CallbackQuery.Message.Chat.ID,
+				}
+			}
+		}
+
+		middlewareUpdate.CallbackQuery = callback
+	}
+
+	// Обработка PreCheckoutQuery
+	if update.PreCheckoutQuery != nil {
+		preCheckout := &telegram.PreCheckoutQuery{
+			ID:             update.PreCheckoutQuery.ID,
+			Currency:       update.PreCheckoutQuery.Currency,
+			TotalAmount:    update.PreCheckoutQuery.TotalAmount,
+			InvoicePayload: update.PreCheckoutQuery.InvoicePayload,
+		}
+
+		// Преобразуем From
+		if update.PreCheckoutQuery.From != nil {
+			preCheckout.From = &struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			}{
+				ID:        update.PreCheckoutQuery.From.ID,
+				Username:  update.PreCheckoutQuery.From.Username,
+				FirstName: update.PreCheckoutQuery.From.FirstName,
+				LastName:  update.PreCheckoutQuery.From.LastName,
+			}
+		}
+
+		middlewareUpdate.PreCheckoutQuery = preCheckout
 	}
 
 	// Обрабатываем обновление через бота

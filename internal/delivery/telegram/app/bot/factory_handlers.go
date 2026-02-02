@@ -43,6 +43,7 @@ import (
 	precheckout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/pre_checkout"
 	successful_payment_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/successful_payment"
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
+	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
@@ -54,6 +55,7 @@ type Services struct {
 	paymentService             payment_service.Service
 	notificationsToggleService notifications_toggle_service.Service
 	signalSettingsService      signal_settings_service.Service
+	starsClient                *telegram_http.StarsClient
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -208,7 +210,10 @@ func InitHandlerFactory(
 	})
 
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
-		return payment_confirm_handler.NewHandler(cfg)
+		return payment_confirm_handler.NewHandler(payment_confirm_handler.Dependencies{
+			Config:      cfg,
+			StarsClient: services.starsClient,
+		})
 	})
 
 	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ

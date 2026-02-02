@@ -25,39 +25,76 @@ func NewStarsClient(baseURL, providerToken string) *StarsClient {
 func (c *StarsClient) CreateInvoiceLink(invoice telegram.Invoice) (string, error) {
 	endpoint := "createInvoiceLink"
 
-	if c.providerToken == "" {
-		return "", fmt.Errorf("токен платежного провайдера не указан")
+	// ВАЖНО: Для цифровых товаров provider_token может быть пустой строкой
+	// Согласно документации: "You can pass an empty string as the provider_token parameter"
+	if c.providerToken != "" {
+		invoice.ProviderToken = c.providerToken
+	} else {
+		// Для цифровых товаров оставляем пустую строку
+		invoice.ProviderToken = ""
+		logger.Debug("Создание инвойса для цифровых товаров (provider_token: '')")
 	}
-
-	// Устанавливаем провайдера
-	invoice.ProviderToken = c.providerToken
 
 	// Если не указана валюта, используем Stars (XTR)
 	if invoice.Currency == "" {
 		invoice.Currency = "XTR"
 	}
 
+	// Проверяем обязательные поля
+	if invoice.Title == "" || invoice.Description == "" || invoice.Payload == "" {
+		return "", fmt.Errorf("обязательные поля инвойса не заполнены: title, description, payload")
+	}
+
+	// Проверяем цены
+	if len(invoice.Prices) == 0 {
+		return "", fmt.Errorf("инвойс должен содержать хотя бы одну цену")
+	}
+
 	params := map[string]interface{}{
-		"title":                         invoice.Title,
-		"description":                   invoice.Description,
-		"payload":                       invoice.Payload,
-		"provider_token":                invoice.ProviderToken,
-		"currency":                      invoice.Currency,
-		"prices":                        invoice.Prices,
-		"max_tip_amount":                invoice.MaxTipAmount,
-		"suggested_tip_amounts":         invoice.SuggestedTipAmounts,
-		"start_parameter":               invoice.StartParameter,
-		"photo_url":                     invoice.PhotoURL,
-		"photo_size":                    invoice.PhotoSize,
-		"photo_width":                   invoice.PhotoWidth,
-		"photo_height":                  invoice.PhotoHeight,
-		"need_name":                     invoice.NeedName,
-		"need_phone_number":             invoice.NeedPhoneNumber,
-		"need_email":                    invoice.NeedEmail,
-		"need_shipping_address":         invoice.NeedShippingAddress,
-		"send_phone_number_to_provider": invoice.SendPhoneNumberToProvider,
-		"send_email_to_provider":        invoice.SendEmailToProvider,
-		"is_flexible":                   invoice.IsFlexible,
+		"title":          invoice.Title,
+		"description":    invoice.Description,
+		"payload":        invoice.Payload,
+		"provider_token": invoice.ProviderToken, // Может быть пустой строкой
+		"currency":       invoice.Currency,
+		"prices":         invoice.Prices,
+	}
+
+	// Добавляем опциональные поля только если они не нулевые
+	if invoice.MaxTipAmount > 0 {
+		params["max_tip_amount"] = invoice.MaxTipAmount
+	}
+	if len(invoice.SuggestedTipAmounts) > 0 {
+		params["suggested_tip_amounts"] = invoice.SuggestedTipAmounts
+	}
+	if invoice.StartParameter != "" {
+		params["start_parameter"] = invoice.StartParameter
+	}
+	if invoice.PhotoURL != "" {
+		params["photo_url"] = invoice.PhotoURL
+		params["photo_size"] = invoice.PhotoSize
+		params["photo_width"] = invoice.PhotoWidth
+		params["photo_height"] = invoice.PhotoHeight
+	}
+	if invoice.NeedName {
+		params["need_name"] = invoice.NeedName
+	}
+	if invoice.NeedPhoneNumber {
+		params["need_phone_number"] = invoice.NeedPhoneNumber
+	}
+	if invoice.NeedEmail {
+		params["need_email"] = invoice.NeedEmail
+	}
+	if invoice.NeedShippingAddress {
+		params["need_shipping_address"] = invoice.NeedShippingAddress
+	}
+	if invoice.SendPhoneNumberToProvider {
+		params["send_phone_number_to_provider"] = invoice.SendPhoneNumberToProvider
+	}
+	if invoice.SendEmailToProvider {
+		params["send_email_to_provider"] = invoice.SendEmailToProvider
+	}
+	if invoice.IsFlexible {
+		params["is_flexible"] = invoice.IsFlexible
 	}
 
 	var response telegram.CreateInvoiceResponse
@@ -69,12 +106,12 @@ func (c *StarsClient) CreateInvoiceLink(invoice telegram.Invoice) (string, error
 		return "", fmt.Errorf("ошибка Telegram API: %s", response.Description)
 	}
 
-	if response.Result == nil {
+	if response.Result == "" {
 		return "", fmt.Errorf("результат создания инвойса пуст")
 	}
 
-	logger.Info("Создан инвойс Stars: %s", response.Result.InvoiceLink)
-	return response.Result.InvoiceLink, nil
+	logger.Info("Создан инвойс Stars: %s", response.Result)
+	return response.Result, nil
 }
 
 // AnswerPreCheckoutQuery отвечает на pre-checkout запрос
@@ -110,15 +147,18 @@ func (c *StarsClient) AnswerPreCheckoutQuery(preCheckoutQueryID string, ok bool,
 // CreateSubscriptionInvoice создает инвойс для подписки
 func (c *StarsClient) CreateSubscriptionInvoice(title, description, payload string, starsAmount int) (string, error) {
 	invoice := telegram.Invoice{
-		Title:           title,
-		Description:     description,
-		Payload:         payload,
-		Currency:        "XTR",
-		StartParameter:  payload,
-		NeedName:        false,
-		NeedPhoneNumber: false,
-		NeedEmail:       false,
-		IsFlexible:      false,
+		Title:                     title,
+		Description:               description,
+		Payload:                   payload,
+		Currency:                  "XTR",
+		StartParameter:            payload,
+		NeedName:                  false,
+		NeedPhoneNumber:           false,
+		NeedEmail:                 false,
+		NeedShippingAddress:       false,
+		SendPhoneNumberToProvider: false,
+		SendEmailToProvider:       false,
+		IsFlexible:                false,
 	}
 
 	// Добавляем цену

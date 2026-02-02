@@ -59,6 +59,11 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	telegramClient := telegram_http.NewTelegramClient(baseURL)
 	pollingClient := telegram_http.NewPollingClient(baseURL)
 
+	// Создаем StarsClient для работы с платежами Telegram Stars
+	// Для цифровых товаров provider_token может быть пустой строкой ""
+	starsClient := telegram_http.NewStarsClient(baseURL, "")
+	logger.Info("✅ StarsClient создан для работы с Telegram Stars API")
+
 	// Получаем UserService из ServiceFactory
 	var userService *users.Service
 	if deps.ServiceFactory != nil {
@@ -93,6 +98,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		signalSettingsService:      signalSettingsService,
 		notificationsToggleService: notificationsToggleService,
 		paymentService:             paymentService,
+		starsClient:                starsClient, // Добавляем StarsClient
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -197,16 +203,14 @@ func (b *TelegramBot) startWebhook() error {
 
 // stopWebhook останавливает webhook режим
 func (b *TelegramBot) stopWebhook() error {
-	if b.webhookServer == nil {
-		return nil
+	if b.webhookServer != nil {
+		return b.webhookServer.Stop()
 	}
-
-	logger.Info("🛑 Остановка webhook режима...")
-	return b.webhookServer.Stop()
+	return nil
 }
 
 // HandleUpdate обрабатывает обновление от Telegram (новая система)
-func (b *TelegramBot) HandleUpdate(update *middlewares.TelegramUpdate) error {
+func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -219,7 +223,11 @@ func (b *TelegramBot) HandleUpdate(update *middlewares.TelegramUpdate) error {
 
 	// Определяем команду/callback для обработки
 	var command string
-	if update.Message != nil && update.Message.Text != "" {
+	// ВАЖНО: Сначала проверяем Data, так как authMiddleware заполняет ее для специальных событий
+	// (pre_checkout_query, successful_payment)
+	if handlerParams.Data != "" {
+		command = handlerParams.Data
+	} else if update.Message != nil && update.Message.Text != "" {
 		command = update.Message.Text
 	} else if update.CallbackQuery != nil {
 		command = update.CallbackQuery.Data

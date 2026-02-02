@@ -4,10 +4,12 @@ package payment_confirm
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -15,18 +17,20 @@ import (
 // paymentConfirmHandler обработчик подтверждения платежа
 type paymentConfirmHandler struct {
 	*base.BaseHandler
-	config *config.Config // Конфигурация приложения
+	config      *config.Config
+	starsClient *telegram_http.StarsClient
 }
 
 // NewHandler создает новый обработчик подтверждения платежа
-func NewHandler(cfg *config.Config) handlers.Handler {
+func NewHandler(deps Dependencies) handlers.Handler {
 	return &paymentConfirmHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "payment_confirm_handler",
 			Command: constants.PaymentConstants.CallbackPaymentConfirm,
 			Type:    handlers.TypeCallback,
 		},
-		config: cfg,
+		config:      deps.Config,
+		starsClient: deps.StarsClient,
 	}
 }
 
@@ -44,8 +48,21 @@ func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers
 		return handlers.HandlerResult{}, fmt.Errorf("план не найден: %s", planID)
 	}
 
-	// Создаем инвойс и ссылку для оплаты
-	invoiceLink := h.createInvoiceLink(params.User.ID, plan)
+	// Создаем инвойс через Telegram Stars API
+	invoiceLink, err := h.createTelegramInvoice(params.User.ID, plan)
+	if err != nil {
+		logger.Error("Ошибка создания инвойса: %v", err)
+		return handlers.HandlerResult{
+			Message: "❌ *Ошибка создания платежной формы*\n\nПожалуйста, попробуйте позже или обратитесь в поддержку.",
+			Keyboard: map[string]interface{}{
+				"inline_keyboard": [][]map[string]string{
+					{
+						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+					},
+				},
+			},
+		}, nil
+	}
 
 	// Сообщение с инструкцией по оплате
 	message := h.createPaymentMessage(plan, invoiceLink)
@@ -61,6 +78,22 @@ func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers
 			"stars_amount": h.calculateStars(plan.PriceCents),
 		},
 	}, nil
+}
+
+func (h *paymentConfirmHandler) createTelegramInvoice(userID int, plan *SubscriptionPlan) (string, error) {
+	// Создаем уникальный payload для инвойса
+	// Формат: sub_{plan_id}_{user_id}_{timestamp}
+	payload := fmt.Sprintf("sub_%s_%d_%d", plan.ID, userID, time.Now().Unix())
+
+	title := fmt.Sprintf("Подписка: %s", plan.Name)
+	description := fmt.Sprintf("Доступ к функциям тарифа %s", plan.Name)
+	starsAmount := h.calculateStars(plan.PriceCents)
+
+	logger.Info("Создание инвойса через Telegram API: план=%s, пользователь=%d, сумма=%d Stars",
+		plan.ID, userID, starsAmount)
+
+	// Используем StarsClient для создания инвойса
+	return h.starsClient.CreateSubscriptionInvoice(title, description, payload, starsAmount)
 }
 
 // extractPlanID извлекает ID плана из callback_data

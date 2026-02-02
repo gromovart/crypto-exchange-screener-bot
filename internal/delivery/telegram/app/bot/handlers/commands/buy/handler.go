@@ -1,13 +1,25 @@
 // internal/delivery/telegram/app/bot/handlers/commands/buy/handler.go
+// Добавляем проверку на дублирование
+
 package buy
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
+)
+
+// Кэш для предотвращения дублирования (простейшая реализация)
+var (
+	lastBuyCommand     = make(map[int]time.Time)
+	lastBuyCommandLock sync.RWMutex
+	duplicateThreshold = 2 * time.Second // Защита от дублирования в течение 2 секунд
 )
 
 // buyCommandHandler реализация обработчика команды /buy
@@ -28,6 +40,17 @@ func NewHandler() handlers.Handler {
 
 // Execute выполняет обработку команды /buy
 func (h *buyCommandHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+	// Проверка на дублирование команды
+	if h.isDuplicateCommand(params.User.ID) {
+		logger.Debug("Пропускаем дублирующую команду /buy от пользователя %d", params.User.ID)
+		return handlers.HandlerResult{
+			Message: "⏳ *Команда уже обрабатывается...*\n\nПожалуйста, подождите несколько секунд.",
+		}, nil
+	}
+
+	// Помечаем команду как обработанную
+	h.markCommandProcessed(params.User.ID)
+
 	// Проверяем авторизацию пользователя
 	if params.User == nil || params.User.ID == 0 {
 		return h.createUnauthorizedMessage()
@@ -50,8 +73,29 @@ func (h *buyCommandHandler) Execute(params handlers.HandlerParams) (handlers.Han
 			"user_id":          params.User.ID,
 			"plans_count":      len(plans),
 			"has_subscription": currentSubscription != nil,
+			"timestamp":        time.Now(),
 		},
 	}, nil
+}
+
+// isDuplicateCommand проверяет дублирование команды
+func (h *buyCommandHandler) isDuplicateCommand(userID int) bool {
+	lastBuyCommandLock.RLock()
+	lastTime, exists := lastBuyCommand[userID]
+	lastBuyCommandLock.RUnlock()
+
+	if !exists {
+		return false
+	}
+
+	return time.Since(lastTime) < duplicateThreshold
+}
+
+// markCommandProcessed помечает команду как обработанную
+func (h *buyCommandHandler) markCommandProcessed(userID int) {
+	lastBuyCommandLock.Lock()
+	lastBuyCommand[userID] = time.Now()
+	lastBuyCommandLock.Unlock()
 }
 
 // createUnauthorizedMessage создает сообщение для неавторизованных пользователей
@@ -77,7 +121,7 @@ func (h *buyCommandHandler) createUnauthorizedMessage() (handlers.HandlerResult,
 	}, nil
 }
 
-// getAvailablePlans возвращает доступные планы (заглушка)
+// getAvailablePlans возвращает доступные планы
 func (h *buyCommandHandler) getAvailablePlans() []*SubscriptionPlan {
 	return []*SubscriptionPlan{
 		{
@@ -104,7 +148,7 @@ func (h *buyCommandHandler) getAvailablePlans() []*SubscriptionPlan {
 	}
 }
 
-// getUserSubscription возвращает текущую подписку пользователя (заглушка)
+// getUserSubscription возвращает текущую подписку пользователя
 func (h *buyCommandHandler) getUserSubscription(userID int) *UserSubscription {
 	// TODO: Получить из базы данных
 	return nil
@@ -187,7 +231,7 @@ func (h *buyCommandHandler) calculateStars(usdCents int) int {
 	return baseStars + commission
 }
 
-// Вспомогательные типы (временные)
+// Вспомогательные типы
 type SubscriptionPlan struct {
 	ID          string
 	Name        string

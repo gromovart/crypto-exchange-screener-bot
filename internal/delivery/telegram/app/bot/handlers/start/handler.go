@@ -57,8 +57,29 @@ func (h *startHandlerImpl) handleStartWithPayload(user *models.User, payload str
 	logger.Info("Обработка /start с payload: %s для пользователя %d", payload, user.ID)
 
 	// Проверяем формат платежного payload: pay_{user_id}_{plan_id}
+	// Более строгая проверка для предотвращения ложных успешных сообщений
 	if strings.HasPrefix(payload, "pay_") {
-		return h.handlePaymentStart(user, payload)
+		// ВСЕГДА обрабатываем как платежный payload, даже если формат не идеален
+		result, err := h.handlePaymentStart(user, payload)
+		if err != nil {
+			logger.Warn("Ошибка обработки платежного payload %s: %v", payload, err)
+			// В случае ошибки показываем сообщение об ошибке, НЕ стандартное приветствие
+			message := h.formatWelcomeMessage(user)
+			message += "\n\n⚠️ *Ошибка обработки платежной ссылки*\n"
+			message += "Пожалуйста, используйте команду /buy для выбора плана оплаты."
+
+			return handlers.HandlerResult{
+				Message:  message,
+				Keyboard: h.createWelcomeKeyboard(),
+				Metadata: map[string]interface{}{
+					"user_id":   user.ID,
+					"payload":   payload,
+					"error":     err.Error(),
+					"timestamp": time.Now(),
+				},
+			}, nil
+		}
+		return result, nil
 	}
 
 	// Другие типы payload можно добавить здесь
@@ -66,7 +87,8 @@ func (h *startHandlerImpl) handleStartWithPayload(user *models.User, payload str
 
 	// Если payload не распознан, показываем стандартное приветствие с уведомлением
 	message := h.formatWelcomeMessage(user)
-	message += "\n\n⚠️ *Неизвестный параметр:* `" + payload + "`"
+	message += "\n\n⚠️ *Неизвестный параметр:* `" + payload + "`\n"
+	message += "Используйте команду /help для получения списка доступных команд."
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -81,16 +103,26 @@ func (h *startHandlerImpl) handleStartWithPayload(user *models.User, payload str
 
 // handlePaymentStart обрабатывает платежный payload
 func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string) (handlers.HandlerResult, error) {
+	logger.Info("Обработка платежного payload: %s для пользователя %d", payload, user.ID)
+
 	// Извлекаем параметры: pay_{user_id}_{plan_id}
 	parts := strings.Split(payload, "_")
 	if len(parts) != 3 {
-		// Неверный формат - возвращаем стандартное приветствие без сообщения об оплате
+		// Неверный формат - возвращаем сообщение об ошибке
 		logger.Warn("Неверный формат платежного payload: %s", payload)
-		message := h.formatWelcomeMessage(user)
-		message += "\n\n⚠️ *Неверный формат платежной ссылки*"
 		return handlers.HandlerResult{
-			Message:  message,
-			Keyboard: h.createWelcomeKeyboard(),
+			Message: "⚠️ *Неверный формат платежной ссылки*\n\n" +
+				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
+			Keyboard: map[string]interface{}{
+				"inline_keyboard": [][]map[string]string{
+					{
+						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
+					},
+					{
+						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+					},
+				},
+			},
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -106,11 +138,19 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 	userID, err := h.parseUserID(userIDStr)
 	if err != nil {
 		logger.Warn("Неверный user_id в payload: %s", userIDStr)
-		message := h.formatWelcomeMessage(user)
-		message += "\n\n⚠️ *Ошибка в платежной ссылке*"
 		return handlers.HandlerResult{
-			Message:  message,
-			Keyboard: h.createWelcomeKeyboard(),
+			Message: "⚠️ *Ошибка в платежной ссылке*\n\n" +
+				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
+			Keyboard: map[string]interface{}{
+				"inline_keyboard": [][]map[string]string{
+					{
+						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
+					},
+					{
+						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+					},
+				},
+			},
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -121,11 +161,19 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 
 	if userID != user.ID {
 		logger.Warn("UserID в payload (%d) не совпадает с текущим пользователем (%d)", userID, user.ID)
-		message := h.formatWelcomeMessage(user)
-		message += "\n\n⚠️ *Ссылка предназначена для другого пользователя*"
 		return handlers.HandlerResult{
-			Message:  message,
-			Keyboard: h.createWelcomeKeyboard(),
+			Message: "⚠️ *Ссылка предназначена для другого пользователя*\n\n" +
+				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
+			Keyboard: map[string]interface{}{
+				"inline_keyboard": [][]map[string]string{
+					{
+						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
+					},
+					{
+						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+					},
+				},
+			},
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -136,7 +184,7 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 
 	logger.Info("Начало процесса оплаты: пользователь=%d, план=%s", user.ID, planID)
 
-	// Показываем ТОЛЬКО сообщение о начале оплаты, НЕ стандартное приветствие
+	// Показываем ТОЛЬКО сообщение о начале оплаты
 	message := "💳 *Начинаем процесс оплаты*\n\n"
 	message += fmt.Sprintf("План: *%s*\n", h.getPlanName(planID))
 	message += "Для продолжения оплаты используйте команду /buy\n\n"

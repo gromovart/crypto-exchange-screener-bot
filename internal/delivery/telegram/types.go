@@ -6,6 +6,75 @@ import (
 	"time"
 )
 
+// Chat - чат Telegram
+type Chat struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title,omitempty"`
+	Username  string `json:"username,omitempty"`
+	FirstName string `json:"first_name,omitempty"`
+	LastName  string `json:"last_name,omitempty"`
+}
+
+// Message - сообщение от пользователя
+type Message struct {
+	MessageID         int64              `json:"message_id"`
+	From              User               `json:"from"`
+	Chat              Chat               `json:"chat"`
+	Text              string             `json:"text"`
+	Date              int64              `json:"date"`
+	SuccessfulPayment *SuccessfulPayment `json:"successful_payment,omitempty"`
+}
+
+// CallbackQueryStruct структура callback запроса
+type CallbackQueryStruct struct {
+	ID   string `json:"id"`
+	From *struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+	} `json:"from"`
+	Message *struct {
+		MessageID int `json:"message_id"`
+		Chat      *struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+	} `json:"message"`
+	Data string `json:"data"`
+}
+
+// CallbackQuery - callback от inline кнопки
+type CallbackQuery struct {
+	ID           string   `json:"id"`
+	From         User     `json:"from"`
+	Message      *Message `json:"message"`
+	ChatInstance string   `json:"chat_instance"`
+	Data         string   `json:"data"`
+}
+
+// PreCheckoutQuery предварительный запрос на проверку
+type PreCheckoutQuery struct {
+	ID   string `json:"id"`
+	From *struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+	} `json:"from"`
+	Currency         string `json:"currency"`
+	TotalAmount      int    `json:"total_amount"`
+	InvoicePayload   string `json:"invoice_payload"`
+	ShippingOptionID string `json:"shipping_option_id,omitempty"`
+}
+
+type TelegramUpdate struct {
+	UpdateID         int                  `json:"update_id"`
+	Message          *Message             `json:"message,omitempty"`
+	CallbackQuery    *CallbackQueryStruct `json:"callback_query,omitempty"`
+	PreCheckoutQuery *PreCheckoutQuery    `json:"pre_checkout_query,omitempty"` // Используем telegram тип
+}
+
 // RateLimiter - ограничитель частоты запросов
 type RateLimiter struct {
 	mu       sync.Mutex
@@ -136,26 +205,15 @@ type Invoice struct {
 
 // CreateInvoiceResponse ответ на создание инвойса
 type CreateInvoiceResponse struct {
-	OK          bool           `json:"ok"`
-	Result      *InvoiceResult `json:"result,omitempty"`
-	Description string         `json:"description,omitempty"`
-	ErrorCode   int            `json:"error_code,omitempty"`
+	OK          bool   `json:"ok"`
+	Result      string `json:"result,omitempty"`
+	Description string `json:"description,omitempty"`
+	ErrorCode   int    `json:"error_code,omitempty"`
 }
 
 // InvoiceResult результат создания инвойса
 type InvoiceResult struct {
 	InvoiceLink string `json:"invoice_link"` // Ссылка на инвойс
-}
-
-// PreCheckoutQuery предварительный запрос на проверку
-type PreCheckoutQuery struct {
-	ID               string     `json:"id"`
-	From             User       `json:"from"`
-	Currency         string     `json:"currency"`
-	TotalAmount      int        `json:"total_amount"`
-	InvoicePayload   string     `json:"invoice_payload"`
-	ShippingOptionID string     `json:"shipping_option_id,omitempty"`
-	OrderInfo        *OrderInfo `json:"order_info,omitempty"`
 }
 
 // OrderInfo информация о заказе

@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/middlewares/auth.go
 package middlewares
 
 import (
@@ -5,43 +6,10 @@ import (
 	"strconv"
 
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
-
-// TelegramUpdate - обновление от Telegram (упрощенная версия)
-type TelegramUpdate struct {
-	UpdateID int `json:"update_id"`
-	Message  *struct {
-		MessageID int `json:"message_id"`
-		From      *struct {
-			ID        int64  `json:"id"`
-			Username  string `json:"username"`
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
-		} `json:"from"`
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
-	} `json:"message"`
-	CallbackQuery *struct {
-		ID   string `json:"id"`
-		From *struct {
-			ID        int64  `json:"id"`
-			Username  string `json:"username"`
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
-		} `json:"from"`
-		Message *struct {
-			MessageID int `json:"message_id"`
-			Chat      *struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-		} `json:"message"`
-		Data string `json:"data"`
-	} `json:"callback_query"`
-}
 
 // Handler интерфейс хэндлера (совместимый с handlers.Handler)
 type Handler interface {
@@ -73,11 +41,10 @@ func NewAuthMiddleware(userService *users.Service) *AuthMiddleware {
 }
 
 // ProcessUpdate обрабатывает обновление и создает HandlerParams
-func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, error) {
+func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (HandlerParams, error) {
 	// ЗАЩИТА ОТ NIL: проверяем userService
 	if m.userService == nil {
 		logger.Warn("❌ ProcessUpdate: userService is nil! Cannot process update")
-		// Возвращаем "технические работы" или базовый обработчик
 		return HandlerParams{}, fmt.Errorf("сервис пользователей временно недоступен")
 	}
 
@@ -90,15 +57,32 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 	updateID = strconv.Itoa(update.UpdateID)
 
 	// Извлекаем данные из обновления
-	if update.Message != nil && update.Message.From != nil {
+	if update.Message != nil && update.Message.From.ID > 0 {
 		userID = update.Message.From.ID
 		username = update.Message.From.Username
 		firstName = update.Message.From.FirstName
 		lastName = update.Message.From.LastName
 		chatID = update.Message.Chat.ID
 		text = update.Message.Text
-		logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
-	} else if update.CallbackQuery != nil && update.CallbackQuery.From != nil {
+
+		// Проверяем successful_payment
+		if update.Message.SuccessfulPayment != nil {
+			// Форматируем данные для обработчика successful_payment
+			// Формат: successful_payment:{payload}:{currency}:{amount}:{telegram_charge_id}:{provider_charge_id}
+			data = fmt.Sprintf("successful_payment:%s:%s:%d:%s:%s",
+				update.Message.SuccessfulPayment.InvoicePayload,
+				update.Message.SuccessfulPayment.Currency,
+				update.Message.SuccessfulPayment.TotalAmount,
+				update.Message.SuccessfulPayment.TelegramPaymentChargeID,
+				update.Message.SuccessfulPayment.ProviderPaymentChargeID)
+
+			logger.Info("🔍 ProcessUpdate: SuccessfulPayment from user %d, amount: %d %s, payload: %s",
+				userID, update.Message.SuccessfulPayment.TotalAmount,
+				update.Message.SuccessfulPayment.Currency, update.Message.SuccessfulPayment.InvoicePayload)
+		} else {
+			logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
+		}
+	} else if update.CallbackQuery != nil && update.CallbackQuery.From.ID > 0 {
 		userID = update.CallbackQuery.From.ID
 		username = update.CallbackQuery.From.Username
 		firstName = update.CallbackQuery.From.FirstName
@@ -106,7 +90,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 		data = update.CallbackQuery.Data
 
 		// Для callback пытаемся получить chatID из Message
-		if update.CallbackQuery.Message != nil && update.CallbackQuery.Message.Chat != nil {
+		if update.CallbackQuery.Message != nil {
 			chatID = update.CallbackQuery.Message.Chat.ID
 			logger.Info("🔍 ProcessUpdate: Callback from user %d, chat %d (from Message), data: %s", userID, chatID, data)
 		} else {
@@ -114,6 +98,25 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 			chatID = userID
 			logger.Warn("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
 		}
+	} else if update.PreCheckoutQuery != nil && update.PreCheckoutQuery.From.ID > 0 {
+		// Обработка pre_checkout_query
+		userID = update.PreCheckoutQuery.From.ID
+		username = update.PreCheckoutQuery.From.Username
+		firstName = update.PreCheckoutQuery.From.FirstName
+		lastName = update.PreCheckoutQuery.From.LastName
+		chatID = userID // Для pre_checkout_query используем userID как chatID
+
+		// Формируем данные для передачи в обработчик
+		// Формат: pre_checkout_query:{query_id}:{payload}:{amount}:{currency}
+		data = fmt.Sprintf("pre_checkout_query:%s:%s:%d:%s",
+			update.PreCheckoutQuery.ID,
+			update.PreCheckoutQuery.InvoicePayload,
+			update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency)
+
+		logger.Info("🔍 ProcessUpdate: PreCheckoutQuery from user %d, amount: %d %s, payload: %s",
+			userID, update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency, update.PreCheckoutQuery.InvoicePayload)
 	} else {
 		logger.Warn("❌ ProcessUpdate: Не удалось получить информацию о пользователе")
 		return HandlerParams{}, fmt.Errorf("не удалось получить информацию о пользователе")
