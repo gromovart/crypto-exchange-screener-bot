@@ -57,10 +57,10 @@ type CounterData struct {
 	VolumeDelta        float64
 	VolumeDeltaPercent float64
 	RSI                float64
-	RSIStatus          string // ⭐ НОВОЕ: статус RSI из расчета
+	RSIStatus          string
 	MACDSignal         float64
-	MACDStatus         string // ⭐ НОВОЕ: статус MACD
-	MACDDescription    string // ⭐ НОВОЕ: полное описание MACD
+	MACDStatus         string
+	MACDDescription    string
 	DeltaSource        string
 	Confidence         float64
 	Timestamp          time.Time
@@ -85,9 +85,6 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	var builder strings.Builder
 
 	// 1. ЗАГОЛОВОК
-
-	// 🔴 ПАДЕНИЕ -60.00% 🚨
-	// 💰 $0.07388
 	builder.WriteString(p.SignalFormatter.FormatSignalHeader(
 		data.Direction,
 		data.ChangePercent,
@@ -95,11 +92,9 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	))
 
 	// 2. СИМВОЛ
-	// 📛 DOLOUSDT
 	builder.WriteString(fmt.Sprintf("📛 %s\n\n", data.Symbol))
 
 	// 3. БИРЖА
-	// 🏷️ BYBIT • 1ч
 	timeframe := p.HeaderFormatter.ExtractTimeframe(data.Period)
 	intensityEmoji := p.HeaderFormatter.GetIntensityEmoji(data.ChangePercent)
 	builder.WriteString(fmt.Sprintf("🏷️  %s • %s\n",
@@ -109,14 +104,10 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	}
 
 	// 4. ВРЕМЯ
-	// 🕐 22:07:06
 	builder.WriteString(fmt.Sprintf("🕐 %s\n\n",
 		data.Timestamp.Format("15:04:05")))
 
 	// 5. РЫНОЧНЫЕ МЕТРИКИ
-	// 📈 OI: $90.0M (🟢+7.0%)
-	// 📊 Объем 24ч: $915M
-	// 📈 Дельта: 🟠4.9K (🔴-33.4% ⚡) [API]
 	builder.WriteString("📈 OI: ")
 	builder.WriteString(p.MetricsFormatter.FormatOIWithChange(
 		data.OpenInterest, data.OIChange24h))
@@ -133,19 +124,14 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	}
 	builder.WriteString("\n\n")
 
-	// 6. ТЕХНИЧЕСКИЙ АНАЛИЗ (если есть данные)
-	// 📊 Тех. анализ:
-	// RSI: 50.0 ⚪ (нейтральный)
+	// 6. ТЕХНИЧЕСКИЙ АНАЛИЗ
 	if data.RSI > 0 || data.MACDSignal != 0 {
 		builder.WriteString("📊 Тех. анализ:\n")
 
-		// ⭐ ИСПОЛЬЗУЕМ РЕАЛЬНЫЕ ДАННЫЕ С СТАТУСАМИ
 		if data.RSI > 0 {
 			if data.RSIStatus != "" {
-				// Используем реальный статус из CounterAnalyzer
 				builder.WriteString(p.TechnicalFormatter.FormatRSIWithStatus(data.RSI, data.RSIStatus))
 			} else {
-				// Fallback: статический расчет (для обратной совместимости)
 				builder.WriteString(p.TechnicalFormatter.FormatRSI(data.RSI))
 			}
 			builder.WriteString("\n")
@@ -153,13 +139,10 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 
 		if data.MACDSignal != 0 {
 			if data.MACDDescription != "" {
-				// Используем реальное описание из CounterAnalyzer
 				builder.WriteString(p.TechnicalFormatter.FormatMACDWithDescription(data.MACDDescription))
 			} else if data.MACDStatus != "" {
-				// Используем статус из CounterAnalyzer
 				builder.WriteString(fmt.Sprintf("MACD: %s", data.MACDStatus))
 			} else {
-				// Fallback: статический расчет (для обратной совместимости)
 				builder.WriteString(p.TechnicalFormatter.FormatMACD(data.MACDSignal))
 			}
 			builder.WriteString("\n")
@@ -167,44 +150,9 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n")
 	}
 
-	// 7. ПРОГРЕСС ПОДТВЕРЖДЕНИЙ (новый раздел)
-	// 📡 Подтверждений: 3/6 🟢🟢🟢▫️▫️▫️ (50%)
-	// 🕐 Следующий анализ: 10:10
-	// ⏰ Следующий сигнал: 10:40 (через 20м)
-	// ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД с готовыми данными групп
-	// builder.WriteString(p.ProgressFormatter.FormatConfirmationProgressWithGroups(
-	// 	data.Confirmations,
-	// 	data.RequiredConfirmations,
-	// 	data.FilledSlots, // готовые данные заполненных групп
-	// 	data.TotalSlots,  // готовые данные всех групп
-	// 	data.Period,
-	// 	data.NextAnalysis,
-	// 	data.NextSignal,
-	// ))
-	// builder.WriteString("\n\n")
-
-	// 8. РЕКОМЕНДАЦИИ (если есть данные)
-	// 🎯 РЕКОМЕНДАЦИЯ:
-	// 📌 Направление: 🔴🔽 СИЛЬНЫЕ МЕДВЕЖЬИ СИГНАЛЫ
-	//
-	// 📊 Анализ сигналов:
-	// 1.  ⚠️ RSI в зоне перепроданности (28.5) - осторожность с SHORT
-	// 2.  📉 MACD: сильный медвежий тренд
-	// 3.  📉 умеренная дельта продаж ($20762) - заметное давление продавцов
-	// 4.  ✅ Объемы подтверждают ценовое движение
-	//
-	// 🟢 ОТКРИТЬ ЛОНГ: умеренные бычьи сигналы
-	//
-	// 📊 УРОВНИ:
-	// Стоп-лосс: $0.8560 (2.0%)
-	// Тейк-профит: $0.8912 (4.0%)
-	// Риск/Прибыль: 1:2.0
-	//
-	// 📈 РАЗМЕР ПОЗИЦИИ:
-	// Рекомендуемый размер: 1-2% капитала
-	//
-	// 🎯 ЗАКЛЮЧЕНИЕ: умеренное движение с умеренной дельтой объемов
-	recommendationText := p.Recommendation.GetEnhancedTradingRecommendation(
+	// ⭐ ИЗМЕНЕНО: Убрана старая рекомендация, добавлена только торговая рекомендация с уровнями
+	// Получаем только торговую рекомендацию с уровнями (без анализа сигналов)
+	tradingRecommendation := p.Recommendation.GetTradingRecommendationOnly(
 		data.Direction,
 		data.RSI,
 		data.MACDSignal,
@@ -212,17 +160,16 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		data.VolumeDeltaPercent,
 		data.LongLiqVolume,
 		data.ShortLiqVolume,
-		data.CurrentPrice,  // НОВЫЙ ПАРАМЕТР
-		data.ChangePercent, // НОВЫЙ ПАРАМЕТР
+		data.CurrentPrice,
+		data.ChangePercent,
 	)
-	if recommendationText != "" {
-		builder.WriteString(recommendationText)
+
+	if tradingRecommendation != "" {
+		builder.WriteString(tradingRecommendation)
 		builder.WriteString("\n\n")
 	}
 
-	// 9. ФАНДИНГ (если есть данные)
-	// 🎯 Фандинг: 🔴 -3.3459%
-	// ⏰ Через: 59м
+	// 9. ФАНДИНГ
 	if data.FundingRate != 0 && !data.NextFundingTime.IsZero() {
 		builder.WriteString(p.FundingFormatter.FormatFundingBlock(
 			data.FundingRate,
@@ -231,7 +178,7 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n\n")
 	}
 
-	// 10. ЛИКВИДАЦИИ (если есть данные)
+	// 10. ЛИКВИДАЦИИ
 	if data.LiquidationVolume > 0 {
 		builder.WriteString(p.LiquidationFormatter.FormatLiquidationBlock(
 			data.Period,
