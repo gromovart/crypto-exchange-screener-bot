@@ -6,6 +6,7 @@ import (
 	"time"
 
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	"crypto-exchange-screener-bot/pkg/period"
 )
 
 // CandleCalculator - калькулятор для свечей
@@ -21,9 +22,9 @@ func NewCandleCalculator(priceStorage storage.PriceStorageInterface) *CandleCalc
 }
 
 // BuildCandleFromHistory строит свечу из истории цен
-func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*storage.Candle, error) {
-	// Определяем период
-	duration := periodToDuration(period)
+func (cc *CandleCalculator) BuildCandleFromHistory(symbol, periodStr string) (*storage.Candle, error) {
+	// Определяем период через универсальную функцию
+	duration := period.PeriodToDuration(periodStr)
 	endTime := time.Now()
 	startTime := endTime.Add(-duration)
 
@@ -37,7 +38,7 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*stor
 		// Если нет данных, возвращаем пустую свечу
 		return &storage.Candle{
 			Symbol:       symbol,
-			Period:       period,
+			Period:       periodStr,
 			StartTime:    startTime,
 			EndTime:      endTime,
 			IsClosedFlag: true,
@@ -46,11 +47,11 @@ func (cc *CandleCalculator) BuildCandleFromHistory(symbol, period string) (*stor
 	}
 
 	// Строим свечу
-	return cc.buildCandleFromPriceData(symbol, period, prices), nil
+	return cc.buildCandleFromPriceData(symbol, periodStr, prices), nil
 }
 
 // buildCandleFromPriceData строит свечу из массива PriceDataInterface
-func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
+func (cc *CandleCalculator) buildCandleFromPriceData(symbol, periodStr string,
 	prices []storage.PriceDataInterface) *storage.Candle {
 
 	// Сортируем цены по времени
@@ -60,7 +61,7 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 	if len(sortedPrices) == 0 {
 		return &storage.Candle{
 			Symbol:       symbol,
-			Period:       period,
+			Period:       periodStr,
 			IsClosedFlag: true,
 			IsRealFlag:   false,
 		}
@@ -99,13 +100,13 @@ func (cc *CandleCalculator) buildCandleFromPriceData(symbol, period string,
 	}
 
 	// Проверяем, покрывает ли данные весь период
-	duration := periodToDuration(period)
+	duration := period.PeriodToDuration(periodStr)
 	minDuration := duration * 8 / 10 // 80% от периода
 	coversFullPeriod := endTime.Sub(startTime) >= minDuration
 
 	return &storage.Candle{
 		Symbol:       symbol,
-		Period:       period,
+		Period:       periodStr,
 		Open:         open,
 		High:         high,
 		Low:          low,
@@ -233,28 +234,6 @@ func (cc *CandleCalculator) AnalyzeCandleTrend(candle *storage.Candle) string {
 		return "bearish"
 	} else {
 		return "neutral"
-	}
-}
-
-// Helper functions
-
-// periodToDuration конвертирует период в длительность
-func periodToDuration(period string) time.Duration {
-	switch period {
-	case "5m":
-		return 5 * time.Minute
-	case "15m":
-		return 15 * time.Minute
-	case "30m":
-		return 30 * time.Minute
-	case "1h":
-		return 1 * time.Hour
-	case "4h":
-		return 4 * time.Hour
-	case "1d":
-		return 24 * time.Hour
-	default:
-		return 15 * time.Minute
 	}
 }
 

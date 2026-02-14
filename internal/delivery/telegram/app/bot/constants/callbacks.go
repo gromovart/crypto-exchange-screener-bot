@@ -38,6 +38,7 @@ const (
 
 	// ============== PERIODS MENU ==============
 	// Базовый (для всех)
+	CallbackPeriod1m  = "period_1m"  // ⏱️ 1 минута
 	CallbackPeriod5m  = "period_5m"  // ⏱️ 5 минут
 	CallbackPeriod15m = "period_15m" // ⏱️ 15 минут
 	CallbackPeriod30m = "period_30m" // ⏱️ 30 минут

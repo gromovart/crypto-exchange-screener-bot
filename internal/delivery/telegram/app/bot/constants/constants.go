@@ -191,6 +191,7 @@ var NotificationButtonTexts = struct {
 
 // PeriodButtonTexts содержит тексты для кнопок периодов
 var PeriodButtonTexts = struct {
+	Period1m     string
 	Period5m     string
 	Period15m    string
 	Period30m    string
@@ -201,6 +202,7 @@ var PeriodButtonTexts = struct {
 	ManageRemove string
 	ManageReset  string
 }{
+	Period1m:     "⏱️ 1 минута",
 	Period5m:     "⏱️ 5 минут",
 	Period15m:    "⏱️ 15 минут",
 	Period30m:    "⏱️ 30 минут",

@@ -39,6 +39,8 @@ func (f *HeaderFormatter) ExtractTimeframe(period string) string {
 
 	// ТОЛЬКО реальные форматы из CounterAnalyzer
 	switch period {
+	case "1m":
+		return "1мин"
 	case "5m":
 		return "5мин"
 	case "15m":

@@ -180,7 +180,8 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 	a.config = config
 
 	var signals []analysis.Signal
-	supportedPeriods := []string{"5m", "15m", "30m", "1h", "4h", "1d"}
+	// ✅ ДОБАВЛЯЕМ ПЕРИОД 1m
+	supportedPeriods := []string{"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
 
 	// Локальный счетчик для этого вызова
 	localSentCount := 0

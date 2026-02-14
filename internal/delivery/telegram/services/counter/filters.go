@@ -4,6 +4,7 @@ package counter
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 	"math"
 )
@@ -242,7 +243,7 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 
 	// Проверяем предпочтительные периоды
 	if len(user.PreferredPeriods) > 0 {
-		periodInt, err := ConvertPeriodToInt(data.Period)
+		periodInt, err := period.StringToMinutes(data.Period)
 		if err != nil {
 			logger.Debug("⚠️ User %d (%s) пропущен: неверный формат периода '%s'",
 				user.ID, user.Username, data.Period)

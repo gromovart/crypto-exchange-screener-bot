@@ -438,7 +438,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ДВИЖОК АНАЛИЗА
 	// ======================
 	cfg.AnalysisEngine.UpdateInterval = getEnvInt("ANALYSIS_UPDATE_INTERVAL", 30)
-	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "5,15,30"))
+	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "1,5,15,30"))
 	cfg.AnalysisEngine.MaxSymbolsPerRun = getEnvInt("ANALYSIS_MAX_SYMBOLS_PER_RUN", 50)
 	cfg.AnalysisEngine.SignalThreshold = getEnvFloat("ANALYSIS_SIGNAL_THRESHOLD", 2.0)
 	cfg.AnalysisEngine.RetentionPeriod = getEnvInt("ANALYSIS_RETENTION_PERIOD", 24)
@@ -924,6 +924,7 @@ func parsePatterns(value string) []string {
 
 func isValidPeriod(period string) bool {
 	validPeriods := map[string]bool{
+		"1m":  true,
 		"5m":  true,
 		"15m": true,
 		"30m": true,

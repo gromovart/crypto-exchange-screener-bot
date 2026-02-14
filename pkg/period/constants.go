@@ -1,9 +1,9 @@
+// pkg/period/constants.go
 package period
-
-import "time"
 
 // Поддерживаемые периоды в минутах
 const (
+	Minutes1    = 1 // 1 минута
 	Minutes5    = 5
 	Minutes15   = 15
 	Minutes30   = 30
@@ -14,6 +14,7 @@ const (
 
 // Поддерживаемые строковые представления
 const (
+	Period1m  = "1m"
 	Period5m  = "5m"
 	Period15m = "15m"
 	Period30m = "30m"
@@ -24,6 +25,7 @@ const (
 
 // Все поддерживаемые периоды
 var AllPeriods = []string{
+	Period1m,
 	Period5m,
 	Period15m,
 	Period30m,
@@ -34,6 +36,7 @@ var AllPeriods = []string{
 
 // Все поддерживаемые периоды в минутах
 var AllMinutes = []int{
+	Minutes1,
 	Minutes5,
 	Minutes15,
 	Minutes30,
@@ -42,9 +45,6 @@ var AllMinutes = []int{
 	Minutes1440,
 }
 
-// Дефолтные значения
-const (
-	DefaultPeriod   = Period15m
-	DefaultMinutes  = Minutes15
-	DefaultDuration = 15 * time.Minute
-)
+// AllPeriodsMinutes алиас для AllMinutes (для обратной совместимости)
+var AllPeriodsMinutes = AllMinutes
+
