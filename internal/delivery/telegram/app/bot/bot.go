@@ -374,6 +374,7 @@ func (b *TelegramBot) SetMyCommands() error {
 	commands := []telegram.BotCommand{
 		{Command: "/start", Description: constants.CommandDescriptions.Start},
 		{Command: "/help", Description: constants.CommandDescriptions.Help},
+		{Command: "/buy", Description: constants.CommandDescriptions.Buy},
 		{Command: "/profile", Description: constants.CommandDescriptions.Profile},
 		{Command: "/settings", Description: constants.CommandDescriptions.Settings},
 		{Command: "/notifications", Description: constants.CommandDescriptions.Notifications},

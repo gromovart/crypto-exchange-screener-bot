@@ -307,6 +307,7 @@ var CommandButtonTexts = struct {
 var CommandDescriptions = struct {
 	Start         string
 	Help          string
+	Buy           string
 	Profile       string
 	Settings      string
 	Notifications string
@@ -317,6 +318,7 @@ var CommandDescriptions = struct {
 }{
 	Start:         "Запустить бота",
 	Help:          "Помощь и инструкции",
+	Buy:           "Купить подписку",
 	Profile:       "Мой профиль",
 	Settings:      "Настройки",
 	Notifications: "Управление уведомлениями",
