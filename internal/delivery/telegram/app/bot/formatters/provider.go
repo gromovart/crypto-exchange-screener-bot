@@ -85,6 +85,8 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	var builder strings.Builder
 
 	// 1. ЗАГОЛОВОК
+	// 🔴 ПАДЕНИЕ -60.00% 🚨
+	// 💰 $0.07388
 	builder.WriteString(p.SignalFormatter.FormatSignalHeader(
 		data.Direction,
 		data.ChangePercent,
@@ -92,9 +94,11 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	))
 
 	// 2. СИМВОЛ
+	// 📛 DOLOUSDT
 	builder.WriteString(fmt.Sprintf("📛 %s\n\n", data.Symbol))
 
 	// 3. БИРЖА
+	// 🏷️ BYBIT • 1ч
 	timeframe := p.HeaderFormatter.ExtractTimeframe(data.Period)
 	intensityEmoji := p.HeaderFormatter.GetIntensityEmoji(data.ChangePercent)
 	builder.WriteString(fmt.Sprintf("🏷️  %s • %s\n",
@@ -104,10 +108,14 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	}
 
 	// 4. ВРЕМЯ
+	// 🕐 22:07:06
 	builder.WriteString(fmt.Sprintf("🕐 %s\n\n",
 		data.Timestamp.Format("15:04:05")))
 
 	// 5. РЫНОЧНЫЕ МЕТРИКИ
+	// 📈 OI: $90.0M (🟢+7.0%)
+	// 📊 Объем 24ч: $915M
+	// 📈 Дельта: 🟠4.9K (🔴-33.4% ⚡) [API]
 	builder.WriteString("📈 OI: ")
 	builder.WriteString(p.MetricsFormatter.FormatOIWithChange(
 		data.OpenInterest, data.OIChange24h))
@@ -124,14 +132,19 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	}
 	builder.WriteString("\n\n")
 
-	// 6. ТЕХНИЧЕСКИЙ АНАЛИЗ
+	// 6. ТЕХНИЧЕСКИЙ АНАЛИЗ (если есть данные)
+	// 📊 Тех. анализ:
+	// RSI: 50.0 ⚪ (нейтральный)
 	if data.RSI > 0 || data.MACDSignal != 0 {
 		builder.WriteString("📊 Тех. анализ:\n")
 
+		// ⭐ ИСПОЛЬЗУЕМ РЕАЛЬНЫЕ ДАННЫЕ С СТАТУСАМИ
 		if data.RSI > 0 {
 			if data.RSIStatus != "" {
+				// Используем реальный статус из CounterAnalyzer
 				builder.WriteString(p.TechnicalFormatter.FormatRSIWithStatus(data.RSI, data.RSIStatus))
 			} else {
+				// Fallback: статический расчет (для обратной совместимости)
 				builder.WriteString(p.TechnicalFormatter.FormatRSI(data.RSI))
 			}
 			builder.WriteString("\n")
@@ -139,10 +152,13 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 
 		if data.MACDSignal != 0 {
 			if data.MACDDescription != "" {
+				// Используем реальное описание из CounterAnalyzer
 				builder.WriteString(p.TechnicalFormatter.FormatMACDWithDescription(data.MACDDescription))
 			} else if data.MACDStatus != "" {
+				// Используем статус из CounterAnalyzer
 				builder.WriteString(fmt.Sprintf("MACD: %s", data.MACDStatus))
 			} else {
+				// Fallback: статический расчет (для обратной совместимости)
 				builder.WriteString(p.TechnicalFormatter.FormatMACD(data.MACDSignal))
 			}
 			builder.WriteString("\n")
@@ -150,8 +166,7 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n")
 	}
 
-	// ⭐ ИЗМЕНЕНО: Убрана старая рекомендация, добавлена только торговая рекомендация с уровнями
-	// Получаем только торговую рекомендацию с уровнями (без анализа сигналов)
+	// ⭐ ИЗМЕНЕНО: Только торговая рекомендация с уровнями (без дублирования анализа)
 	tradingRecommendation := p.Recommendation.GetTradingRecommendationOnly(
 		data.Direction,
 		data.RSI,
@@ -169,7 +184,9 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n\n")
 	}
 
-	// 9. ФАНДИНГ
+	// 9. ФАНДИНГ (если есть данные)
+	// 🎯 Фандинг: 🔴 -3.3459%
+	// ⏰ Через: 59м
 	if data.FundingRate != 0 && !data.NextFundingTime.IsZero() {
 		builder.WriteString(p.FundingFormatter.FormatFundingBlock(
 			data.FundingRate,
@@ -178,7 +195,9 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n\n")
 	}
 
-	// 10. ЛИКВИДАЦИИ
+	// 10. ЛИКВИДАЦИИ (если есть данные)
+	// 💥 Ликвидации за 5м: $12.5M
+	// LONG: $7.8M, SHORT: $4.7M
 	if data.LiquidationVolume > 0 {
 		builder.WriteString(p.LiquidationFormatter.FormatLiquidationBlock(
 			data.Period,

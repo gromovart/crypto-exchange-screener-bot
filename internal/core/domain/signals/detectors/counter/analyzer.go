@@ -44,7 +44,7 @@ type CounterAnalyzer struct {
 	// Агрегированная статистика
 	aggregatedStats AggregatedStats
 
-	// ✅ СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle С РАЗДЕЛЕНИЕМ НА ЗАКРЫТЫЕ/АКТИВНЫЕ
+	// СЧЕТЧИКИ ДЛЯ ОТЛАДКИ AnalyzeCandle С РАЗДЕЛЕНИЕМ НА ЗАКРЫТЫЕ/АКТИВНЫЕ
 	candleStatsMu sync.RWMutex
 	candleStats   CandleAnalyzeStats
 }
@@ -107,13 +107,13 @@ func NewCounterAnalyzer(
 	config common.AnalyzerConfig,
 	deps Dependencies,
 ) *CounterAnalyzer {
-	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ VolumeCalculator если не передан
+	// Проверяем и создаем VolumeCalculator если не передан
 	if deps.VolumeCalculator == nil && deps.MarketFetcher != nil && deps.Storage != nil {
 		logger.Warn("🔧 [CounterAnalyzer] Создаем VolumeDeltaCalculator")
 		deps.VolumeCalculator = calculator.NewVolumeDeltaCalculator(deps.MarketFetcher, deps.Storage)
 	}
 
-	// ✅ ПРОВЕРЯЕМ И СОЗДАЕМ TechnicalCalculator если не передан
+	// Проверяем и создаем TechnicalCalculator если не передан
 	if deps.TechnicalCalculator == nil {
 		logger.Warn("🔧 [CounterAnalyzer] Создаем TechnicalCalculator")
 		deps.TechnicalCalculator = calculator.NewTechnicalCalculator()
@@ -180,7 +180,7 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 	a.config = config
 
 	var signals []analysis.Signal
-	// ✅ ДОБАВЛЯЕМ ПЕРИОД 1m
+	// Добавляем период 1m
 	supportedPeriods := []string{"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
 
 	// Локальный счетчик для этого вызова
@@ -226,7 +226,7 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		}
 	}
 
-	// ✅ СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА
+	// СБОР АГРЕГИРОВАННОЙ СТАТИСТИКИ ДЛЯ ИНТЕРВАЛА
 	a.analyzeCallMu.Lock()
 	a.aggregatedStats = AggregatedStats{
 		TotalSymbols:       symbolsProcessed,
@@ -248,7 +248,7 @@ func (a *CounterAnalyzer) Analyze(data []storage.PriceDataInterface, config comm
 		a.sentStatsMu.Unlock()
 	}
 
-	// ✅ ТОЛЬКО АГРЕГИРОВАННОЕ ЛОГИРОВАНИЕ РАЗ В 5 СЕКУНД
+	// ТОЛЬКО АГРЕГИРОВАННОЕ ЛОГИРОВАНИЕ РАЗ В 5 СЕКУНД
 	a.logAggregatedStatsIfNeeded(5 * time.Second)
 
 	return signals, nil
@@ -281,7 +281,7 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 		avgTimePerCall = a.analyzeTotalTime / time.Duration(a.analyzeCallsCount)
 	}
 
-	// ✅ ОСНОВНАЯ АГРЕГИРОВАННАЯ СТАТИСТИКА
+	// ОСНОВНАЯ АГРЕГИРОВАННАЯ СТАТИСТИКА
 	logger.Warn("📊 [CounterAnalyzer] Статистика за последние %v:", interval)
 	logger.Warn("   📞 Вызовов Analyze: %d", a.analyzeCallsCount)
 	logger.Warn("   📍 Обработано символов: %d", a.analyzeTotalPoints)
@@ -289,12 +289,12 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 	logger.Warn("   📈 Среднее символов/вызов: %.1f", avgPointsPerCall)
 	logger.Warn("   ⚡ Скорость: %.1f символов/сек", float64(a.analyzeTotalPoints)/interval.Seconds())
 
-	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ И АКТИВНЫМ СВЕЧАМ
+	// СТАТИСТИКА ПО ЗАКРЫТЫМ И АКТИВНЫМ СВЕЧАМ
 	a.candleStatsMu.Lock()
 	candleStats := a.candleStats
 	a.candleStatsMu.Unlock()
 
-	// ✅ СТАТИСТИКА ПО ЗАКРЫТЫМ СВЕЧАМ
+	// СТАТИСТИКА ПО ЗАКРЫТЫМ СВЕЧАМ
 	if candleStats.ClosedCandleStats.Attempts > 0 {
 		closedAttempts := candleStats.ClosedCandleStats.Attempts
 		closedSuccessRate := float64(candleStats.ClosedCandleStats.Success) / float64(closedAttempts) * 100
@@ -312,7 +312,7 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 			candleStats.ClosedCandleStats.FallSignals)
 	}
 
-	// ✅ СТАТИСТИКА ПО АКТИВНЫМ СВЕЧАМ
+	// СТАТИСТИКА ПО АКТИВНЫМ СВЕЧАМ
 	if candleStats.ActiveCandleStats.Attempts > 0 {
 		activeAttempts := candleStats.ActiveCandleStats.Attempts
 		activeSuccessRate := float64(candleStats.ActiveCandleStats.Success) / float64(activeAttempts) * 100
@@ -329,7 +329,7 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 			candleStats.ActiveCandleStats.FallSignals)
 	}
 
-	// ✅ ИНТЕРВАЛЬНАЯ СТАТИСТИКА СИГНАЛОВ
+	// ИНТЕРВАЛЬНАЯ СТАТИСТИКА СИГНАЛОВ
 	if candleStats.IntervalStats.TotalSignals > 0 {
 		intervalDuration := now.Sub(candleStats.IntervalStats.StartTime)
 		logger.Warn("   📈 СИГНАЛЫ за интервал (%v):", intervalDuration.Round(time.Second))
@@ -347,7 +347,7 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 	a.analyzeTotalTime = 0
 	a.aggregatedStats = AggregatedStats{}
 
-	// ✅ СБРАСЫВАЕМ СТАТИСТИКУ СВЕЧЕЙ (сохраняем только интервальную)
+	// СБРАСЫВАЕМ СТАТИСТИКУ СВЕЧЕЙ (сохраняем только интервальную)
 	a.candleStatsMu.Lock()
 	// Сохраняем интервальную статистику, сбрасываем остальное
 	a.candleStats = CandleAnalyzeStats{
@@ -371,7 +371,7 @@ func (a *CounterAnalyzer) logAggregatedStatsIfNeeded(interval time.Duration) {
 func (a *CounterAnalyzer) Stop() error {
 	logger.Warn("🛑 [CounterAnalyzer] Остановка анализатора")
 
-	// ✅ Останавливаем VolumeDeltaCalculator если есть
+	// Останавливаем VolumeDeltaCalculator если есть
 	if a.deps.VolumeCalculator != nil {
 		logger.Warn("🛑 [CounterAnalyzer] Остановка VolumeDeltaCalculator")
 		a.deps.VolumeCalculator.Stop()
