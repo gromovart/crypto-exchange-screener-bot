@@ -3,6 +3,7 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -35,32 +36,55 @@ func NewPaymentRepository(db *sqlx.DB) PaymentRepository {
 
 // Create создает новый платеж
 func (r *paymentRepositoryImpl) Create(ctx context.Context, payment *models.Payment) error {
+	// Сериализуем Metadata в JSON если есть
+	var metadataJSON []byte
+	if payment.Metadata != nil {
+		var err error
+		metadataJSON, err = json.Marshal(payment.Metadata)
+		if err != nil {
+			return fmt.Errorf("ошибка сериализации metadata: %w", err)
+		}
+	} else {
+		metadataJSON = []byte("{}")
+	}
+
 	query := `
 	INSERT INTO payments (
 		user_id, subscription_id, invoice_id,
 		external_id, amount, currency, stars_amount, fiat_amount,
 		payment_type, status, provider,
 		description, payload, metadata,
-		expires_at
+		paid_at, expires_at
 	) VALUES (
-		:user_id, :subscription_id, :invoice_id,
-		:external_id, :amount, :currency, :stars_amount, :fiat_amount,
-		:payment_type, :status, :provider,
-		:description, :payload, :metadata,
-		:expires_at
+		$1, $2, $3,
+		$4, $5, $6, $7, $8,
+		$9, $10, $11,
+		$12, $13, $14,
+		$15, $16
 	) RETURNING id, created_at, updated_at
 	`
 
-	rows, err := sqlx.NamedQueryContext(ctx, r.db, query, payment)
+	err := r.db.QueryRowContext(ctx, query,
+		payment.UserID,
+		payment.SubscriptionID,
+		payment.InvoiceID,
+		payment.ExternalID,
+		payment.Amount,
+		payment.Currency,
+		payment.StarsAmount,
+		payment.FiatAmount,
+		payment.PaymentType,
+		payment.Status,
+		payment.Provider,
+		payment.Description,
+		payment.Payload,
+		metadataJSON,
+		payment.PaidAt,
+		payment.ExpiresAt,
+	).Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt)
+
 	if err != nil {
 		return fmt.Errorf("ошибка создания платежа: %w", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		if err := rows.Scan(&payment.ID, &payment.CreatedAt, &payment.UpdatedAt); err != nil {
-			return fmt.Errorf("ошибка сканирования результата: %w", err)
-		}
 	}
 
 	return nil

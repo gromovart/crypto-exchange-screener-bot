@@ -3,6 +3,8 @@ package payment
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
+	invoice_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/invoice"
+	payment_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/payment"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 )
@@ -101,6 +103,110 @@ func (f *StarsServiceFactory) CreateStarsService() (*StarsService, error) {
 
 	return service, nil
 }
+
+// ==================== НОВАЯ ФАБРИКА ДЛЯ PAYMENTSERVICE ====================
+
+// PaymentServiceFactory фабрика для создания PaymentService
+type PaymentServiceFactory struct {
+	starsService *StarsService
+	paymentRepo  payment_repo.PaymentRepository
+	invoiceRepo  invoice_repo.InvoiceRepository
+	logger       *logger.Logger
+	initialized  bool
+}
+
+// PaymentServiceDependencies зависимости для фабрики PaymentService
+type PaymentServiceDependencies struct {
+	StarsService *StarsService
+	PaymentRepo  payment_repo.PaymentRepository
+	InvoiceRepo  invoice_repo.InvoiceRepository
+	Logger       *logger.Logger
+}
+
+// NewPaymentServiceFactory создает новую фабрику PaymentService
+func NewPaymentServiceFactory(deps PaymentServiceDependencies) (*PaymentServiceFactory, error) {
+	if deps.StarsService == nil {
+		return nil, fmt.Errorf("StarsService обязателен")
+	}
+
+	if deps.PaymentRepo == nil {
+		return nil, fmt.Errorf("PaymentRepo обязателен")
+	}
+
+	if deps.InvoiceRepo == nil {
+		return nil, fmt.Errorf("InvoiceRepo обязателен")
+	}
+
+	if deps.Logger == nil {
+		return nil, fmt.Errorf("Logger обязателен")
+	}
+
+	factory := &PaymentServiceFactory{
+		starsService: deps.StarsService,
+		paymentRepo:  deps.PaymentRepo,
+		invoiceRepo:  deps.InvoiceRepo,
+		logger:       deps.Logger,
+		initialized:  true,
+	}
+
+	deps.Logger.Info("✅ Фабрика PaymentService создана")
+	return factory, nil
+}
+
+// CreatePaymentService создает новый PaymentService
+func (f *PaymentServiceFactory) CreatePaymentService() (*PaymentService, error) {
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика не инициализирована")
+	}
+
+	service := NewPaymentService(
+		f.starsService,
+		f.paymentRepo,
+		f.invoiceRepo, // ⭐ Передаем invoiceRepo
+		f.logger,
+	)
+
+	f.logger.Info("✅ PaymentService создан")
+	return service, nil
+}
+
+// IsReady проверяет готовность фабрики
+func (f *PaymentServiceFactory) IsReady() bool {
+	return f.initialized && f.starsService != nil && f.paymentRepo != nil && f.invoiceRepo != nil
+}
+
+// Validate проверяет валидность фабрики
+func (f *PaymentServiceFactory) Validate() error {
+	if !f.initialized {
+		return fmt.Errorf("фабрика не инициализирована")
+	}
+
+	if f.starsService == nil {
+		return fmt.Errorf("StarsService не установлен")
+	}
+
+	if f.paymentRepo == nil {
+		return fmt.Errorf("PaymentRepo не установлен")
+	}
+
+	if f.invoiceRepo == nil {
+		return fmt.Errorf("InvoiceRepo не установлен")
+	}
+
+	return nil
+}
+
+// GetDependenciesInfo возвращает информацию о зависимостях
+func (f *PaymentServiceFactory) GetDependenciesInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"initialized":   f.initialized,
+		"stars_service": f.starsService != nil,
+		"payment_repo":  f.paymentRepo != nil,
+		"invoice_repo":  f.invoiceRepo != nil,
+	}
+}
+
+// ==================== СТАРЫЕ МЕТОДЫ (ОСТАВЛЯЕМ) ====================
 
 // UpdateConfig обновляет конфигурацию
 func (f *StarsServiceFactory) UpdateConfig(config *Config) error {

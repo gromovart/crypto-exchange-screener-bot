@@ -862,7 +862,7 @@ func (f *InfrastructureFactory) GetPlanRepository() (plan.PlanRepository, error)
 		return nil, fmt.Errorf("RepositoryFactory не создана")
 	}
 
-	// Создаем PlanRepository если его нет
+	// ⭐ Создаем PlanRepository если его нет
 	if !f.repositoryFactory.HasRepository("PlanRepository") {
 		logger.Info("🔄 Создание PlanRepository...")
 		if _, err := f.repositoryFactory.CreatePlanRepository(); err != nil {
@@ -938,8 +938,8 @@ func (f *InfrastructureFactory) GetSubscriptionRepository() (subscription.Subscr
 
 // GetPaymentRepository получает репозиторий платежей
 func (f *InfrastructureFactory) GetPaymentRepository() (payment.PaymentRepository, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock() // ⚠️ Lock вместо RLock для записи
+	defer f.mu.Unlock()
 
 	if !f.initialized {
 		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
@@ -947,6 +947,16 @@ func (f *InfrastructureFactory) GetPaymentRepository() (payment.PaymentRepositor
 
 	if f.repositoryFactory == nil {
 		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	// ⭐ Создаем PaymentRepository если его нет
+	if !f.repositoryFactory.HasRepository("PaymentRepository") {
+		logger.Info("🔄 Создание PaymentRepository...")
+		if _, err := f.repositoryFactory.CreatePaymentRepository(); err != nil {
+			logger.Error("❌ Не удалось создать PaymentRepository: %v", err)
+			return nil, fmt.Errorf("не удалось создать PaymentRepository: %w", err)
+		}
+		logger.Info("✅ PaymentRepository создан")
 	}
 
 	repo, err := f.repositoryFactory.GetRepository("PaymentRepository")
@@ -964,8 +974,8 @@ func (f *InfrastructureFactory) GetPaymentRepository() (payment.PaymentRepositor
 
 // GetInvoiceRepository получает репозиторий инвойсов
 func (f *InfrastructureFactory) GetInvoiceRepository() (invoice.InvoiceRepository, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	if !f.initialized {
 		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
@@ -973,6 +983,16 @@ func (f *InfrastructureFactory) GetInvoiceRepository() (invoice.InvoiceRepositor
 
 	if f.repositoryFactory == nil {
 		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	// Создаем InvoiceRepository если его нет
+	if !f.repositoryFactory.HasRepository("InvoiceRepository") {
+		logger.Info("🔄 Создание InvoiceRepository...")
+		if _, err := f.repositoryFactory.CreateInvoiceRepository(); err != nil {
+			logger.Error("❌ Не удалось создать InvoiceRepository: %v", err)
+			return nil, fmt.Errorf("не удалось создать InvoiceRepository: %w", err)
+		}
+		logger.Info("✅ InvoiceRepository создан")
 	}
 
 	repo, err := f.repositoryFactory.GetRepository("InvoiceRepository")

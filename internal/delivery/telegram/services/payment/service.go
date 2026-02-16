@@ -4,6 +4,7 @@ package payment
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -12,16 +13,14 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
-	payment_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/payment"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // serviceImpl реализация Service
 type serviceImpl struct {
-	paymentService      *payment.StarsService
+	paymentService      *payment.PaymentService
 	subscriptionService *subscription.Service
 	userService         *users.Service
-	paymentRepo         payment_repo.PaymentRepository // Сохраняем репозиторий
 }
 
 // NewService создает новый сервис обработки платежей
@@ -30,7 +29,6 @@ func NewService(deps Dependencies) Service {
 		paymentService:      deps.PaymentService,
 		subscriptionService: deps.SubscriptionService,
 		userService:         deps.UserService,
-		paymentRepo:         deps.PaymentRepository,
 	}
 }
 
@@ -132,84 +130,111 @@ func (s *serviceImpl) handleSuccessfulPayment(params PaymentParams) (PaymentResu
 		return PaymentResult{}, fmt.Errorf("несоответствие user_id в платеже")
 	}
 
-	// ⭐ 1. СНАЧАЛА СОЗДАЕМ ЗАПИСЬ О ПЛАТЕЖЕ В БД
-	var paymentID *int64
-	if s.paymentRepo != nil {
-		logger.Warn("💰 [DEBUG] Сохраняем платеж в БД: telegramPaymentID=%s, userID=%d, starsAmount=%d",
-			telegramPaymentID, userID, totalAmount)
-
-		now := time.Now()
-		payment := &models.Payment{
-			UserID:      int64(userID),
-			ExternalID:  telegramPaymentID,
-			StarsAmount: totalAmount,
-			FiatAmount:  totalAmount * 100,
-			Currency:    models.CurrencyUSD,
-			Status:      models.PaymentStatusCompleted,
-			PaymentType: models.PaymentTypeStars,
-			CreatedAt:   now,
-			PaidAt:      &now,
-			Description: fmt.Sprintf("Подписка %s", planID),
-			Payload:     invoicePayload,
-		}
-
-		if err := s.paymentRepo.Create(context.Background(), payment); err != nil {
-			logger.Error("❌ [DEBUG] Не удалось сохранить платеж в БД: %v", err)
-			return PaymentResult{}, fmt.Errorf("ошибка сохранения платежа: %w", err)
-		}
-
-		paymentID = &payment.ID
-		logger.Warn("✅ [DEBUG] Платеж сохранен в БД: ID=%d, ExternalID=%s", payment.ID, telegramPaymentID)
-	} else {
-		logger.Warn("⚠️ [DEBUG] PaymentRepository не доступен, платеж не сохранен в БД")
-	}
-
-	// ⭐ 2. ОБРАБАТЫВАЕМ ПЛАТЕЖ ЧЕРЕЗ СЕРВИС ЯДРА
+	// ⭐ 1. Обрабатываем платеж через сервис ядра (он сохранит в БД)
+	ctx := context.Background()
 	paymentRequest := payment.ProcessPaymentRequest{
 		Payload:           invoicePayload,
 		TelegramPaymentID: telegramPaymentID,
 		StarsAmount:       totalAmount,
 	}
 
-	_, err = s.paymentService.ProcessPayment(paymentRequest)
+	result, err := s.paymentService.ProcessPayment(ctx, paymentRequest)
 	if err != nil {
+		logger.Error("❌ Ошибка обработки платежа в PaymentService: %v", err)
 		return PaymentResult{}, fmt.Errorf("ошибка обработки платежа: %w", err)
 	}
 
-	// ⭐ 3. АКТИВИРУЕМ ПОДПИСКУ С ID ПЛАТЕЖА ИЗ БД
+	// ⭐ 2. Получаем ID платежа из результата
+	var paymentID *int64
+	if result.InvoiceID != "" {
+		if id, err := strconv.ParseInt(result.InvoiceID, 10, 64); err == nil {
+			paymentID = &id
+			logger.Info("✅ Получен ID платежа из БД: %d", id)
+		}
+	}
+
+	// ⭐ 3. Активируем подписку
 	activationParams := PaymentParams{
 		Action: "activate_subscription",
 		UserID: params.UserID,
 		Data: map[string]interface{}{
 			"plan_id":    planID,
-			"payment_id": paymentID, // Передаем ID из БД, а не внешний ID
+			"payment_id": paymentID,
 		},
 	}
 
 	activationResult, err := s.activateSubscription(activationParams)
 	if err != nil {
-		// Если подписка не создалась, но платеж сохранен - нужно вернуть ошибку
+		logger.Error("❌ Ошибка активации подписки: %v", err)
+
+		// Проверяем на уже существующую подписку
+		if strings.Contains(err.Error(), "у пользователя уже есть активная подписка") {
+			// Возвращаем успех, но с предупреждением
+			return PaymentResult{
+				Success:        true,
+				Message:        "Платеж успешно обработан. У вас уже есть активная подписка.",
+				PaymentID:      telegramPaymentID,
+				StarsAmount:    totalAmount,
+				SubscriptionID: "",
+				Metadata: map[string]interface{}{
+					"payment_id":    telegramPaymentID,
+					"db_payment_id": paymentID,
+					"plan_id":       planID,
+					"stars_amount":  totalAmount,
+					"processed_at":  time.Now(),
+					"warning":       "existing_subscription",
+				},
+			}, nil
+		}
+
 		return PaymentResult{}, fmt.Errorf("ошибка активации подписки: %w", err)
 	}
 
-	// Отправляем подтверждение пользователю
-	err = s.sendConfirmation(params.UserID, params.ChatID, planID, totalAmount)
-	if err != nil {
-		logger.Warn("Не удалось отправить подтверждение: %v", err)
+	// ⭐ 4. Обновляем платеж с subscription_id
+	if paymentID != nil && activationResult.SubscriptionID != "" {
+		subID, err := strconv.ParseInt(activationResult.SubscriptionID, 10, 64)
+		if err != nil {
+			// Если не удалось распарсить, пытаемся извлечь число из строки
+			logger.Error("❌ Ошибка парсинга subscription_id '%s': %v",
+				activationResult.SubscriptionID, err)
+
+			// Пробуем извлечь число из строки (например, если пришло "sub_123")
+			re := regexp.MustCompile(`\d+`)
+			numbers := re.FindAllString(activationResult.SubscriptionID, -1)
+			if len(numbers) > 0 {
+				if id, err := strconv.ParseInt(numbers[0], 10, 64); err == nil {
+					subID = id
+					logger.Info("✅ Извлечен subscription_id из строки: %d", subID)
+				} else {
+					logger.Error("❌ Не удалось извлечь число из '%s'", activationResult.SubscriptionID)
+					return PaymentResult{}, fmt.Errorf("неверный формат subscription_id: %s", activationResult.SubscriptionID)
+				}
+			} else {
+				return PaymentResult{}, fmt.Errorf("неверный формат subscription_id: %s", activationResult.SubscriptionID)
+			}
+		}
+
+		// Обновляем платеж
+		updateCtx := context.Background()
+		if err := s.paymentService.UpdatePaymentWithSubscription(updateCtx, *paymentID, subID); err != nil {
+			logger.Error("⚠️ Не удалось обновить платеж с subscription_id: %v", err)
+		} else {
+			logger.Info("✅ Платеж %d обновлен: subscription_id=%d", *paymentID, subID)
+		}
 	}
 
-	logger.Info("Платеж успешно обработан: %s, подписка: %s", telegramPaymentID, planID)
+	logger.Info("✅ Платеж успешно обработан: %s, подписка: %s", telegramPaymentID, planID)
 
 	return PaymentResult{
 		Success:        true,
-		Message:        "Платеж успешно обработан. Подписка активирована.",
+		Message:        "✅ *Платеж успешно обработан!*\n\nПодписка активирована.",
 		PaymentID:      telegramPaymentID,
 		SubscriptionID: activationResult.SubscriptionID,
 		StarsAmount:    totalAmount,
 		ActivatedUntil: activationResult.ActivatedUntil,
 		Metadata: map[string]interface{}{
 			"payment_id":      telegramPaymentID,
-			"db_payment_id":   paymentID, // Добавляем ID из БД
+			"db_payment_id":   paymentID,
 			"plan_id":         planID,
 			"stars_amount":    totalAmount,
 			"processed_at":    time.Now(),
@@ -254,7 +279,6 @@ func (s *serviceImpl) activateSubscription(params PaymentParams) (PaymentResult,
 	if subscription.CurrentPeriodEnd != nil {
 		activatedUntil = *subscription.CurrentPeriodEnd
 	} else {
-		// Дефолт: 30 дней если не указано
 		activatedUntil = time.Now().Add(30 * 24 * time.Hour)
 	}
 
@@ -283,7 +307,7 @@ func (s *serviceImpl) createInvoice(params PaymentParams) (PaymentResult, error)
 		return PaymentResult{}, fmt.Errorf("ошибка получения плана: %w", err)
 	}
 
-	// Создаем адаптер плана для payment service
+	// Создаем адаптер плана
 	planAdapter := &subscriptionPlanAdapter{plan: plan}
 
 	// Создаем инвойс через сервис ядра
@@ -293,7 +317,8 @@ func (s *serviceImpl) createInvoice(params PaymentParams) (PaymentResult, error)
 		SubscriptionPlan: planAdapter,
 	}
 
-	invoice, err := s.paymentService.CreateInvoice(invoiceRequest)
+	ctx := context.Background()
+	invoice, err := s.paymentService.CreateInvoice(ctx, invoiceRequest)
 	if err != nil {
 		return PaymentResult{}, fmt.Errorf("ошибка создания инвойса: %w", err)
 	}
@@ -314,26 +339,19 @@ func (s *serviceImpl) createInvoice(params PaymentParams) (PaymentResult, error)
 	}, nil
 }
 
-// checkDuplicatePayment проверяет дубликаты платежей
+// Вспомогательные методы
 func (s *serviceImpl) checkDuplicatePayment(paymentID string) (bool, error) {
-	// TODO: реализовать проверку дубликатов в БД
-	// временная заглушка
 	return false, nil
 }
 
-// validatePayment валидирует платеж
 func (s *serviceImpl) validatePayment(payload string, amount int, userID int) (bool, error) {
-	// TODO: расширенная валидация через сервис ядра
-	// временная базовая проверка
 	if payload == "" || amount <= 0 {
 		return false, nil
 	}
 	return true, nil
 }
 
-// parseInvoicePayload парсит payload инвойса
 func (s *serviceImpl) parseInvoicePayload(payload string) (planID, userID string, err error) {
-	// Формат: sub_{plan_id}_{user_id}_{nonce}
 	parts := strings.Split(payload, "_")
 	if len(parts) < 4 || parts[0] != "sub" {
 		return "", "", fmt.Errorf("неверный формат payload")
@@ -341,21 +359,12 @@ func (s *serviceImpl) parseInvoicePayload(payload string) (planID, userID string
 	return parts[1], parts[2], nil
 }
 
-// sendConfirmation отправляет подтверждение пользователю
-func (s *serviceImpl) sendConfirmation(userID int, chatID int64, planID string, starsAmount int) error {
-	// TODO: реализовать отправку через message_sender
-	logger.Info("Подтверждение отправлено: пользователь %d, план %s, сумма %d Stars",
-		userID, planID, starsAmount)
-	return nil
-}
-
-// subscriptionPlanAdapter адаптер для models.Plan к payment.SubscriptionPlan
+// subscriptionPlanAdapter адаптер для models.Plan
 type subscriptionPlanAdapter struct {
 	plan *models.Plan
 }
 
 func (a *subscriptionPlanAdapter) GetID() string {
-	// План ID может быть string (code) для подписок
 	return a.plan.Code
 }
 
@@ -364,20 +373,17 @@ func (a *subscriptionPlanAdapter) GetName() string {
 }
 
 func (a *subscriptionPlanAdapter) GetPriceCents() int {
-	// Используем StarsPriceMonthly для Telegram Stars
-	// Конвертируем Stars в USD центы (1 Star = $0.01 = 1 цент)
 	if a.plan.StarsPriceMonthly > 0 {
 		return a.plan.StarsPriceMonthly
 	}
-	// Дефолтное значение если не указано
 	switch a.plan.Code {
 	case "basic":
-		return 299 // $2.99
+		return 299
 	case "pro":
-		return 999 // $9.99
+		return 999
 	case "enterprise":
-		return 2499 // $24.99
+		return 2499
 	default:
-		return 100 // $1.00
+		return 100
 	}
 }

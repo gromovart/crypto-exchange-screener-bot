@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -58,9 +59,9 @@ type Payment struct {
 	Provider    string        `db:"provider" json:"provider"`         // Платежный провайдер
 
 	// Детали платежа
-	Description string `db:"description" json:"description,omitempty"` // Описание платежа
-	Payload     string `db:"payload" json:"payload,omitempty"`         // Payload из инвойса
-	Metadata    string `db:"metadata" json:"metadata,omitempty"`       // Дополнительные данные (JSON)
+	Description string          `db:"description" json:"description,omitempty"` // Описание платежа
+	Payload     string          `db:"payload" json:"payload,omitempty"`         // Payload из инвойса
+	Metadata    json.RawMessage `db:"metadata" json:"metadata"`                 // Дополнительные данные (JSON)
 
 	// Временные метки
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`           // Дата создания

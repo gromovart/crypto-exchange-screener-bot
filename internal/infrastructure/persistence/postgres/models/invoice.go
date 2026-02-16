@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -38,10 +39,10 @@ type Invoice struct {
 	Title       string `db:"title" json:"title"`                       // Название инвойса
 	Description string `db:"description" json:"description,omitempty"` // Описание
 
-	// Сумма и валюта (совместимость со StarsInvoice)
+	// Сумма и валюта
 	AmountUSD   float64 `db:"amount_usd" json:"amount_usd"`     // Сумма в USD
 	StarsAmount int     `db:"stars_amount" json:"stars_amount"` // Количество Stars
-	FiatAmount  int     `db:"fiat_amount" json:"fiat_amount"`   // Сумма в центах (для совместимости)
+	FiatAmount  int     `db:"fiat_amount" json:"fiat_amount"`   // Сумма в центах
 	Currency    string  `db:"currency" json:"currency"`         // Валюта (USD, EUR, RUB)
 
 	// Статус и провайдер
@@ -49,9 +50,9 @@ type Invoice struct {
 	Provider InvoiceProvider `db:"provider" json:"provider"` // Провайдер платежа
 
 	// Ссылки и данные
-	InvoiceURL string `db:"invoice_url" json:"invoice_url"`     // Ссылка на оплату
-	Payload    string `db:"payload" json:"payload,omitempty"`   // Данные для deep link
-	Metadata   string `db:"metadata" json:"metadata,omitempty"` // Дополнительные данные
+	InvoiceURL string          `db:"invoice_url" json:"invoice_url"`     // Ссылка на оплату
+	Payload    string          `db:"payload" json:"payload,omitempty"`   // Данные для deep link
+	Metadata   json.RawMessage `db:"metadata" json:"metadata,omitempty"` // ⭐ Изменено с string на json.RawMessage
 
 	// Временные метки
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`     // Дата создания

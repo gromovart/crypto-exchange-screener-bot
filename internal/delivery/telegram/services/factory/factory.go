@@ -20,7 +20,7 @@ import (
 type ServiceFactory struct {
 	userService         *users.Service
 	subscriptionService *subscription.Service
-	paymentCoreService  *payment.StarsService // Добавляем сервис платежей из core
+	paymentCoreService  *payment.PaymentService // ⭐ Изменено с StarsService на PaymentService
 	messageSender       message_sender.MessageSender
 	buttonBuilder       *buttons.ButtonBuilder
 	formatterProvider   *formatters.FormatterProvider
@@ -30,7 +30,7 @@ type ServiceFactory struct {
 type ServiceDependencies struct {
 	UserService         *users.Service
 	SubscriptionService *subscription.Service
-	PaymentCoreService  *payment.StarsService // Добавляем
+	PaymentCoreService  *payment.PaymentService // ⭐ Изменено
 	MessageSender       message_sender.MessageSender
 	ButtonBuilder       *buttons.ButtonBuilder
 	FormatterProvider   *formatters.FormatterProvider
@@ -84,7 +84,7 @@ func (f *ServiceFactory) CreatePaymentService() payment_service.Service {
 
 	// Создаем зависимости для payment service
 	deps := payment_service.Dependencies{
-		PaymentService:      f.paymentCoreService,
+		PaymentService:      f.paymentCoreService, // ⭐ Передаем PaymentService
 		SubscriptionService: f.subscriptionService,
 		UserService:         f.userService,
 	}

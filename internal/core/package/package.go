@@ -189,7 +189,7 @@ func (f *CoreServiceFactory) CreateUserService() (*users.Service, error) {
 }
 
 // CreatePaymentService создает PaymentCoreService (StarsService)
-func (f *CoreServiceFactory) CreatePaymentService() (*payment.StarsService, error) {
+func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -202,12 +202,13 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.StarsService, erro
 		return nil, fmt.Errorf("TelegramBotToken не настроен в PaymentsConfig")
 	}
 
-	// Получаем EventBus из инфраструктуры
+	// Получаем InfrastructureFactory
 	infraFactory := f.GetInfrastructureFactory()
 	if infraFactory == nil {
 		return nil, fmt.Errorf("InfrastructureFactory не доступна")
 	}
 
+	// Получаем EventBus
 	eventBus, err := infraFactory.GetEventBus()
 	if err != nil {
 		logger.Warn("⚠️ EventBus недоступен: %v", err)
@@ -221,18 +222,48 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.StarsService, erro
 
 	// Создаем StarsClient
 	baseURL := "https://api.telegram.org/bot" + f.config.PaymentsConfig.TelegramBotToken + "/"
-	starsClient := http_client.NewStarsClient(baseURL, "")
+	starsClient := http_client.NewStarsClient(baseURL, f.config.PaymentsConfig.TelegramStarsProviderToken)
 
 	// Создаем StarsService
-	paymentService := payment.NewStarsService(
-		userService,        // UserManager
-		eventBus,           // EventPublisher
-		logger.GetLogger(), // *logger.Logger
-		starsClient,        // *http_client.StarsClient
-		f.config.PaymentsConfig.TelegramBotUsername, // botUsername
+	starsService := payment.NewStarsService(
+		userService,
+		eventBus,
+		logger.GetLogger(),
+		starsClient,
+		f.config.PaymentsConfig.TelegramBotUsername,
 	)
 
-	logger.Info("✅ PaymentCoreService создан")
+	// ⭐ Получаем PaymentRepository
+	paymentRepo, err := infraFactory.GetPaymentRepository()
+	if err != nil {
+		logger.Error("❌ PaymentRepository недоступен: %v", err)
+		return nil, fmt.Errorf("PaymentRepository не доступен: %w", err)
+	}
+
+	// ⭐ Получаем InvoiceRepository
+	invoiceRepo, err := infraFactory.GetInvoiceRepository()
+	if err != nil {
+		logger.Error("❌ InvoiceRepository недоступен: %v", err)
+		return nil, fmt.Errorf("InvoiceRepository не доступен: %w", err)
+	}
+
+	// Создаем PaymentService через фабрику
+	paymentServiceFactory, err := payment.NewPaymentServiceFactory(payment.PaymentServiceDependencies{
+		StarsService: starsService,
+		PaymentRepo:  paymentRepo,
+		InvoiceRepo:  invoiceRepo, // ⭐ Передаем InvoiceRepository
+		Logger:       logger.GetLogger(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать фабрику PaymentService: %w", err)
+	}
+
+	paymentService, err := paymentServiceFactory.CreatePaymentService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать PaymentService: %w", err)
+	}
+
+	logger.Info("✅ PaymentService создан")
 	return paymentService, nil
 }
 

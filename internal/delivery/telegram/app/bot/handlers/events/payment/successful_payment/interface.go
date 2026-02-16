@@ -13,7 +13,7 @@ type PaymentPlanHandler interface {
 }
 
 // NewHandler создает новый обработчик successful_payment
-func NewHandler(paymentService payment.Service) PaymentPlanHandler {
+func NewHandler(paymentService payment.Service) handlers.Handler {
 	return &successfulPaymentHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "successful_payment_handler",
