@@ -111,14 +111,11 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 
 	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT
 	if strings.HasPrefix(command, "successful_payment") {
-		logger.Debug("✅ Обнаружен successful_payment: %s", command)
+		logger.Debug("💰 Обнаружен successful_payment: %s", command)
 		if handler, exists := r.handlers["successful_payment"]; exists {
-			params.Data = command
-			logger.Debug("✅ Перенаправление successful_payment в %s", handler.GetName())
+			// ⚠️ ВАЖНО: params.Data уже содержит полную строку с параметрами
+			logger.Debug("💰 Вызов хэндлера successful_payment с data='%s'", params.Data)
 			return r.executeHandler(handler, command, params)
-		} else {
-			logger.Error("❌ Хэндлер successful_payment не найден в роутере")
-			r.debugRegisteredHandlers()
 		}
 	}
 

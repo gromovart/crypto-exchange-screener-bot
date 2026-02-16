@@ -9,6 +9,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // successfulPaymentHandler реализация обработчика successful_payment
@@ -84,11 +85,15 @@ func (h *successfulPaymentHandler) parseSuccessfulPaymentData(data string) succe
 	// Формат: successful_payment:{payment_id}:{payload}:{amount}:{currency}:{user_id}:{provider_charge_id}
 	parts := strings.Split(data, ":")
 	if len(parts) < 7 || parts[0] != "successful_payment" {
+		logger.Error("❌ Неверный формат successful_payment: %s, частей: %d", data, len(parts))
 		return successfulPaymentData{}
 	}
 
 	amount, _ := strconv.Atoi(parts[3])
 	userID, _ := strconv.ParseInt(parts[5], 10, 64)
+
+	logger.Warn("✅ Успешно распарсено successful_payment: paymentID=%s, payload=%s, amount=%d, currency=%s, userID=%d, providerChargeID=%s",
+		parts[1], parts[2], amount, parts[4], userID, parts[6])
 
 	return successfulPaymentData{
 		PaymentID:        parts[1],

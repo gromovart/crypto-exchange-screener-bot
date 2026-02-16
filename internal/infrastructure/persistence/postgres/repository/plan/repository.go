@@ -265,11 +265,17 @@ func (r *planRepositoryImpl) GetPlanLimits(ctx context.Context, code string) (*m
 		return nil, err
 	}
 
+	// Конвертируем Features из json.RawMessage в map
+	features, err := plan.GetFeatures()
+	if err != nil {
+		features = make(map[string]interface{})
+	}
+
 	limits := &models.PlanLimits{
 		MaxSymbols:       plan.MaxSymbols,
 		MaxSignalsPerDay: plan.MaxSignalsPerDay,
-		MaxAPIRequests:   1000, // Пример значения, можно брать из features
-		Features:         plan.Features,
+		MaxAPIRequests:   plan.GetMaxAPIRequests(),
+		Features:         features,
 	}
 
 	return limits, nil

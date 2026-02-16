@@ -249,6 +249,7 @@ func (p *TelegramDeliveryPackage) getSubscriptionService() (*subscription.Servic
 	// Создаем SubscriptionService через фабрику
 	subscriptionService, err := p.coreFactory.CreateSubscriptionService()
 	if err != nil {
+		logger.Error("❌ Не удалось создать SubscriptionService: %v", err)
 		return nil, fmt.Errorf("не удалось создать SubscriptionService: %w", err)
 	}
 

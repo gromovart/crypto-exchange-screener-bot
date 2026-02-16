@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -13,29 +14,70 @@ const (
 	PlanEnterprise = "enterprise"
 )
 
-// План подписки
-type Plan struct {
-	ID                int                    `db:"id" json:"id"`
-	Name              string                 `db:"name" json:"name"`
-	Code              string                 `db:"code" json:"code"`
-	Description       string                 `db:"description" json:"description"`
-	PriceMonthly      float64                `db:"price_monthly" json:"price_monthly"`
-	PriceYearly       float64                `db:"price_yearly" json:"price_yearly"`
-	StarsPriceMonthly int                    `db:"stars_price_monthly" json:"stars_price_monthly"` // Цена в Stars (месяц)
-	StarsPriceYearly  int                    `db:"stars_price_yearly" json:"stars_price_yearly"`   // Цена в Stars (год)
-	MaxSymbols        int                    `db:"max_symbols" json:"max_symbols"`                 // -1 = неограниченно
-	MaxSignalsPerDay  int                    `db:"max_signals_per_day" json:"max_signals_per_day"` // -1 = неограниченно
-	Features          map[string]interface{} `db:"features" json:"features"`
-	IsActive          bool                   `db:"is_active" json:"is_active"`
-	CreatedAt         time.Time              `db:"created_at" json:"created_at"`
+// PlanLimits лимиты по тарифам
+type PlanLimits struct {
+	MaxSymbols       int                    `json:"max_symbols"`
+	MaxSignalsPerDay int                    `json:"max_signals_per_day"`
+	MaxAPIRequests   int                    `json:"max_api_requests"`
+	Features         map[string]interface{} `json:"features"`
 }
 
-// Лимиты по тарифам
-type PlanLimits struct {
-	MaxSymbols       int
-	MaxSignalsPerDay int
-	MaxAPIRequests   int
-	Features         map[string]interface{}
+// План подписки
+type Plan struct {
+	ID                int             `db:"id" json:"id"`
+	Name              string          `db:"name" json:"name"`
+	Code              string          `db:"code" json:"code"`
+	Description       string          `db:"description" json:"description"`
+	PriceMonthly      float64         `db:"price_monthly" json:"price_monthly"`
+	PriceYearly       float64         `db:"price_yearly" json:"price_yearly"`
+	StarsPriceMonthly int             `db:"stars_price_monthly" json:"stars_price_monthly"` // Цена в Stars (месяц)
+	StarsPriceYearly  int             `db:"stars_price_yearly" json:"stars_price_yearly"`   // Цена в Stars (год)
+	MaxSymbols        int             `db:"max_symbols" json:"max_symbols"`                 // -1 = неограниченно
+	MaxSignalsPerDay  int             `db:"max_signals_per_day" json:"max_signals_per_day"` // -1 = неограниченно
+	Features          json.RawMessage `db:"features" json:"features"`
+	IsActive          bool            `db:"is_active" json:"is_active"`
+	CreatedAt         time.Time       `db:"created_at" json:"created_at"`
+}
+
+// GetFeatures возвращает features как map
+func (p *Plan) GetFeatures() (map[string]interface{}, error) {
+	if p.Features == nil {
+		return make(map[string]interface{}), nil
+	}
+
+	var features map[string]interface{}
+	err := json.Unmarshal(p.Features, &features)
+	return features, err
+}
+
+// GetMaxAPIRequests возвращает количество API запросов для плана
+func (p *Plan) GetMaxAPIRequests() int {
+	features, err := p.GetFeatures()
+	if err != nil {
+		return p.getDefaultAPIRequests()
+	}
+
+	if apiRequests, ok := features["max_api_requests"].(float64); ok {
+		return int(apiRequests)
+	}
+
+	return p.getDefaultAPIRequests()
+}
+
+// getDefaultAPIRequests возвращает значения по умолчанию
+func (p *Plan) getDefaultAPIRequests() int {
+	switch p.Code {
+	case PlanFree:
+		return 100
+	case PlanBasic:
+		return 1000
+	case PlanPro:
+		return 5000
+	case PlanEnterprise:
+		return -1 // неограниченно
+	default:
+		return 100
+	}
 }
 
 // GetStarsPrice возвращает цену в Stars в зависимости от периода
@@ -52,28 +94,4 @@ func (p *Plan) GetUSDPrice(isYearly bool) float64 {
 		return p.PriceYearly
 	}
 	return p.PriceMonthly
-}
-
-// GetMaxAPIRequests возвращает количество API запросов для плана
-func (p *Plan) GetMaxAPIRequests() int {
-	// Извлекаем из features или используем значения по умолчанию
-	if p.Features != nil {
-		if apiRequests, ok := p.Features["max_api_requests"].(float64); ok {
-			return int(apiRequests)
-		}
-	}
-
-	// Значения по умолчанию по планам
-	switch p.Code {
-	case PlanFree:
-		return 100
-	case PlanBasic:
-		return 1000
-	case PlanPro:
-		return 5000
-	case PlanEnterprise:
-		return -1 // неограниченно
-	default:
-		return 100
-	}
 }

@@ -1,3 +1,4 @@
+// internal/delivery/telegram/app/bot/polling.go
 package bot
 
 import (
@@ -93,7 +94,14 @@ func (pc *PollingClient) fetchUpdates() {
 				Chat *struct {
 					ID int64 `json:"id"`
 				} `json:"chat"`
-				Text string `json:"text"`
+				Text              string `json:"text"`
+				SuccessfulPayment *struct {
+					Currency                string `json:"currency"`
+					TotalAmount             int    `json:"total_amount"`
+					InvoicePayload          string `json:"invoice_payload"`
+					TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+					ProviderPaymentChargeID string `json:"provider_payment_charge_id"`
+				} `json:"successful_payment"`
 			} `json:"message"`
 			CallbackQuery *struct {
 				ID   string `json:"id"`
@@ -155,7 +163,14 @@ func (pc *PollingClient) processUpdate(update struct {
 		Chat *struct {
 			ID int64 `json:"id"`
 		} `json:"chat"`
-		Text string `json:"text"`
+		Text              string `json:"text"`
+		SuccessfulPayment *struct {
+			Currency                string `json:"currency"`
+			TotalAmount             int    `json:"total_amount"`
+			InvoicePayload          string `json:"invoice_payload"`
+			TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+			ProviderPaymentChargeID string `json:"provider_payment_charge_id"`
+		} `json:"successful_payment"`
 	} `json:"message"`
 	CallbackQuery *struct {
 		ID   string `json:"id"`
@@ -186,6 +201,22 @@ func (pc *PollingClient) processUpdate(update struct {
 		InvoicePayload string `json:"invoice_payload"`
 	} `json:"pre_checkout_query"`
 }) {
+	// ⭐ ЛОГ ДЛЯ ОТЛАДКИ
+	logger.Warn("📩 [POLLING] Получено обновление ID=%d", update.UpdateID)
+	logger.Warn("   • Message: %v", update.Message != nil)
+	logger.Warn("   • Callback: %v", update.CallbackQuery != nil)
+	logger.Warn("   • PreCheckout: %v", update.PreCheckoutQuery != nil)
+
+	// Если есть successful_payment, логируем детали
+	if update.Message != nil && update.Message.SuccessfulPayment != nil {
+		logger.Warn("💰💰💰 [POLLING] SUCCESSFUL PAYMENT DETECTED!")
+		logger.Warn("   • From ID: %d", update.Message.From.ID)
+		logger.Warn("   • Amount: %d %s", update.Message.SuccessfulPayment.TotalAmount, update.Message.SuccessfulPayment.Currency)
+		logger.Warn("   • Payload: %s", update.Message.SuccessfulPayment.InvoicePayload)
+		logger.Warn("   • TelegramChargeID: %s", update.Message.SuccessfulPayment.TelegramPaymentChargeID)
+		logger.Warn("   • ProviderChargeID: %s", update.Message.SuccessfulPayment.ProviderPaymentChargeID)
+	}
+
 	// Создаем обновление в формате telegram.TelegramUpdate
 	middlewareUpdate := &telegram.TelegramUpdate{
 		UpdateID: update.UpdateID,
@@ -212,6 +243,17 @@ func (pc *PollingClient) processUpdate(update struct {
 		if update.Message.Chat != nil {
 			msg.Chat = telegram.Chat{
 				ID: update.Message.Chat.ID,
+			}
+		}
+
+		// ⭐ Добавляем SuccessfulPayment если есть
+		if update.Message.SuccessfulPayment != nil {
+			msg.SuccessfulPayment = &telegram.SuccessfulPayment{
+				Currency:                update.Message.SuccessfulPayment.Currency,
+				TotalAmount:             update.Message.SuccessfulPayment.TotalAmount,
+				InvoicePayload:          update.Message.SuccessfulPayment.InvoicePayload,
+				TelegramPaymentChargeID: update.Message.SuccessfulPayment.TelegramPaymentChargeID,
+				ProviderPaymentChargeID: update.Message.SuccessfulPayment.ProviderPaymentChargeID,
 			}
 		}
 

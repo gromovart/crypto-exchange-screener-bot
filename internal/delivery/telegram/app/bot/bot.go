@@ -253,11 +253,12 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 
 	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT (ЭВЕНТ)
 	if update.Message != nil && update.Message.SuccessfulPayment != nil {
-		logger.Info("💰 Получен SuccessfulPayment эвент: пользователь=%d, сумма=%d %s, payload=%s",
-			update.Message.From.ID,
-			update.Message.SuccessfulPayment.TotalAmount,
-			update.Message.SuccessfulPayment.Currency,
-			update.Message.SuccessfulPayment.InvoicePayload)
+		logger.Warn("💰💰💰 [SUCCESSFUL PAYMENT] ПОЛУЧЕН В BOT!")
+		logger.Warn("   • From: %d", update.Message.From.ID)
+		logger.Warn("   • Amount: %d %s", update.Message.SuccessfulPayment.TotalAmount, update.Message.SuccessfulPayment.Currency)
+		logger.Warn("   • Payload: %s", update.Message.SuccessfulPayment.InvoicePayload)
+		logger.Warn("   • TelegramChargeID: %s", update.Message.SuccessfulPayment.TelegramPaymentChargeID)
+		logger.Warn("   • ProviderChargeID: %s", update.Message.SuccessfulPayment.ProviderPaymentChargeID)
 
 		// Обрабатываем через auth middleware
 		handlerParams, err := b.authMiddleware.ProcessUpdate(update)
@@ -268,6 +269,7 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 		}
 
 		// Вызываем обработчик successful_payment
+		logger.Warn("🔄 Вызов роутера для successful_payment")
 		result, err := b.router.Handle("successful_payment", convertToRouterParams(handlerParams))
 		if err != nil {
 			logger.Error("❌ Ошибка обработки successful_payment: %v", err)
@@ -276,6 +278,7 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 		}
 
 		// Отправляем сообщение пользователю
+		logger.Warn("✅ Отправка подтверждения пользователю")
 		return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
 	}
 

@@ -12,6 +12,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	payment_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/payment"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -20,6 +21,7 @@ type serviceImpl struct {
 	paymentService      *payment.StarsService
 	subscriptionService *subscription.Service
 	userService         *users.Service
+	paymentRepo         payment_repo.PaymentRepository // Сохраняем репозиторий
 }
 
 // NewService создает новый сервис обработки платежей
@@ -28,6 +30,7 @@ func NewService(deps Dependencies) Service {
 		paymentService:      deps.PaymentService,
 		subscriptionService: deps.SubscriptionService,
 		userService:         deps.UserService,
+		paymentRepo:         deps.PaymentRepository,
 	}
 }
 
@@ -129,31 +132,63 @@ func (s *serviceImpl) handleSuccessfulPayment(params PaymentParams) (PaymentResu
 		return PaymentResult{}, fmt.Errorf("несоответствие user_id в платеже")
 	}
 
-	// Обрабатываем платеж через сервис ядра
+	// ⭐ 1. СНАЧАЛА СОЗДАЕМ ЗАПИСЬ О ПЛАТЕЖЕ В БД
+	var paymentID *int64
+	if s.paymentRepo != nil {
+		logger.Warn("💰 [DEBUG] Сохраняем платеж в БД: telegramPaymentID=%s, userID=%d, starsAmount=%d",
+			telegramPaymentID, userID, totalAmount)
+
+		now := time.Now()
+		payment := &models.Payment{
+			UserID:      int64(userID),
+			ExternalID:  telegramPaymentID,
+			StarsAmount: totalAmount,
+			FiatAmount:  totalAmount * 100,
+			Currency:    models.CurrencyUSD,
+			Status:      models.PaymentStatusCompleted,
+			PaymentType: models.PaymentTypeStars,
+			CreatedAt:   now,
+			PaidAt:      &now,
+			Description: fmt.Sprintf("Подписка %s", planID),
+			Payload:     invoicePayload,
+		}
+
+		if err := s.paymentRepo.Create(context.Background(), payment); err != nil {
+			logger.Error("❌ [DEBUG] Не удалось сохранить платеж в БД: %v", err)
+			return PaymentResult{}, fmt.Errorf("ошибка сохранения платежа: %w", err)
+		}
+
+		paymentID = &payment.ID
+		logger.Warn("✅ [DEBUG] Платеж сохранен в БД: ID=%d, ExternalID=%s", payment.ID, telegramPaymentID)
+	} else {
+		logger.Warn("⚠️ [DEBUG] PaymentRepository не доступен, платеж не сохранен в БД")
+	}
+
+	// ⭐ 2. ОБРАБАТЫВАЕМ ПЛАТЕЖ ЧЕРЕЗ СЕРВИС ЯДРА
 	paymentRequest := payment.ProcessPaymentRequest{
 		Payload:           invoicePayload,
 		TelegramPaymentID: telegramPaymentID,
 		StarsAmount:       totalAmount,
 	}
 
-	// Вызываем ProcessPayment (результат используется в логах ниже)
 	_, err = s.paymentService.ProcessPayment(paymentRequest)
 	if err != nil {
 		return PaymentResult{}, fmt.Errorf("ошибка обработки платежа: %w", err)
 	}
 
-	// Активируем подписку
+	// ⭐ 3. АКТИВИРУЕМ ПОДПИСКУ С ID ПЛАТЕЖА ИЗ БД
 	activationParams := PaymentParams{
 		Action: "activate_subscription",
 		UserID: params.UserID,
 		Data: map[string]interface{}{
 			"plan_id":    planID,
-			"payment_id": telegramPaymentID,
+			"payment_id": paymentID, // Передаем ID из БД, а не внешний ID
 		},
 	}
 
 	activationResult, err := s.activateSubscription(activationParams)
 	if err != nil {
+		// Если подписка не создалась, но платеж сохранен - нужно вернуть ошибку
 		return PaymentResult{}, fmt.Errorf("ошибка активации подписки: %w", err)
 	}
 
@@ -174,6 +209,7 @@ func (s *serviceImpl) handleSuccessfulPayment(params PaymentParams) (PaymentResu
 		ActivatedUntil: activationResult.ActivatedUntil,
 		Metadata: map[string]interface{}{
 			"payment_id":      telegramPaymentID,
+			"db_payment_id":   paymentID, // Добавляем ID из БД
 			"plan_id":         planID,
 			"stars_amount":    totalAmount,
 			"processed_at":    time.Now(),
@@ -186,17 +222,23 @@ func (s *serviceImpl) handleSuccessfulPayment(params PaymentParams) (PaymentResu
 // activateSubscription активирует подписку пользователя
 func (s *serviceImpl) activateSubscription(params PaymentParams) (PaymentResult, error) {
 	planID, _ := params.Data["plan_id"].(string)
-	paymentID, _ := params.Data["payment_id"].(string)
+	paymentIDObj, _ := params.Data["payment_id"].(interface{})
 
 	logger.Info("Активация подписки %s для пользователя %d", planID, params.UserID)
 
-	// Конвертируем paymentID в *int64 если нужно
+	// Преобразуем paymentID в *int64
 	var paymentIDPtr *int64
-	if paymentID != "" {
-		// Для примера используем хэш как число
-		if len(paymentID) >= 8 {
-			id, _ := strconv.ParseInt(paymentID[len(paymentID)-8:], 16, 64)
+	if paymentIDObj != nil {
+		switch v := paymentIDObj.(type) {
+		case int64:
+			paymentIDPtr = &v
+		case int:
+			id := int64(v)
 			paymentIDPtr = &id
+		case *int64:
+			paymentIDPtr = v
+		default:
+			logger.Warn("⚠️ Неизвестный тип payment_id: %T", v)
 		}
 	}
 
@@ -222,7 +264,7 @@ func (s *serviceImpl) activateSubscription(params PaymentParams) (PaymentResult,
 		ActivatedUntil: activatedUntil,
 		Metadata: map[string]interface{}{
 			"plan_id":         planID,
-			"payment_id":      paymentID,
+			"payment_id":      paymentIDPtr,
 			"activated_at":    time.Now(),
 			"subscription_id": subscription.ID,
 		},

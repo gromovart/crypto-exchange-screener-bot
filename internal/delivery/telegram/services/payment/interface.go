@@ -5,6 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	payment_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/payment"
 	"time"
 )
 
@@ -37,9 +38,10 @@ type PaymentResult struct {
 
 // Dependencies зависимости для сервиса платежей
 type Dependencies struct {
-	PaymentService      *payment.StarsService // Сервис платежей ядра
-	SubscriptionService *subscription.Service // Сервис подписок ядра
-	UserService         *users.Service        // Сервис пользователей ядра
+	PaymentService      *payment.StarsService
+	SubscriptionService *subscription.Service
+	UserService         *users.Service
+	PaymentRepository   payment_repo.PaymentRepository // ⭐ Добавляем репозиторий платежей
 }
 
 // NewServiceWithDependencies фабрика с зависимостями (обновленная без factory.go)

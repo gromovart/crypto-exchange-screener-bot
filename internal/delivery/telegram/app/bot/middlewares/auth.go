@@ -67,18 +67,19 @@ func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (Handler
 
 		// Проверяем successful_payment
 		if update.Message.SuccessfulPayment != nil {
-			// Форматируем данные для обработчика successful_payment
-			// Формат: successful_payment:{payload}:{currency}:{amount}:{telegram_charge_id}:{provider_charge_id}
-			data = fmt.Sprintf("successful_payment:%s:%s:%d:%s:%s",
-				update.Message.SuccessfulPayment.InvoicePayload,
-				update.Message.SuccessfulPayment.Currency,
-				update.Message.SuccessfulPayment.TotalAmount,
+			// ⭐ ИСПРАВЛЕНО: правильный формат для successful_payment
+			// Формат: successful_payment:{payment_id}:{payload}:{amount}:{currency}:{user_id}:{charge_id}
+			data = fmt.Sprintf("successful_payment:%s:%s:%d:%s:%d:%s",
 				update.Message.SuccessfulPayment.TelegramPaymentChargeID,
+				update.Message.SuccessfulPayment.InvoicePayload,
+				update.Message.SuccessfulPayment.TotalAmount,
+				update.Message.SuccessfulPayment.Currency,
+				userID,
 				update.Message.SuccessfulPayment.ProviderPaymentChargeID)
 
-			logger.Info("🔍 ProcessUpdate: SuccessfulPayment from user %d, amount: %d %s, payload: %s",
+			logger.Info("🔍 ProcessUpdate: SuccessfulPayment from user %d, amount: %d %s, payload: %s, data: %s",
 				userID, update.Message.SuccessfulPayment.TotalAmount,
-				update.Message.SuccessfulPayment.Currency, update.Message.SuccessfulPayment.InvoicePayload)
+				update.Message.SuccessfulPayment.Currency, update.Message.SuccessfulPayment.InvoicePayload, data)
 		} else {
 			logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
 		}
@@ -99,7 +100,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (Handler
 			logger.Warn("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
 		}
 	} else if update.PreCheckoutQuery != nil && update.PreCheckoutQuery.From.ID > 0 {
-		// ⭐ ИСПРАВЛЕНО: Обработка pre_checkout_query с добавлением user_id
+		// Обработка pre_checkout_query
 		userID = update.PreCheckoutQuery.From.ID
 		username = update.PreCheckoutQuery.From.Username
 		firstName = update.PreCheckoutQuery.From.FirstName

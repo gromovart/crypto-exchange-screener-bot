@@ -38,47 +38,38 @@ func NewSubscriptionRepository(db *sqlx.DB) SubscriptionRepository {
 
 // Create создает новую подписку
 func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *models.UserSubscription) error {
-	query := `
-	INSERT INTO user_subscriptions (
-		user_id, plan_id, payment_id,
-		stripe_subscription_id, status,
-		current_period_start, current_period_end,
-		cancel_at_period_end, metadata
-	) VALUES (
-		:user_id, :plan_id, :payment_id,
-		:stripe_subscription_id, :status,
-		:current_period_start, :current_period_end,
-		:cancel_at_period_end, :metadata
-	) RETURNING id, created_at, updated_at
-	`
-
-	// Преобразуем metadata в JSON
+	// Сериализуем Metadata в JSON
 	metadataJSON, err := json.Marshal(subscription.Metadata)
 	if err != nil {
 		return fmt.Errorf("ошибка сериализации metadata: %w", err)
 	}
-	subscription.Metadata = nil // очищаем для sqlx
 
-	rows, err := sqlx.NamedQueryContext(ctx, r.db, query, map[string]interface{}{
-		"user_id":                subscription.UserID,
-		"plan_id":                subscription.PlanID,
-		"payment_id":             subscription.PaymentID,
-		"stripe_subscription_id": subscription.StripeSubscriptionID,
-		"status":                 subscription.Status,
-		"current_period_start":   subscription.CurrentPeriodStart,
-		"current_period_end":     subscription.CurrentPeriodEnd,
-		"cancel_at_period_end":   subscription.CancelAtPeriodEnd,
-		"metadata":               metadataJSON,
-	})
+	query := `
+	INSERT INTO user_subscriptions (
+		user_id, plan_id, payment_id,
+		plan_name, plan_code, status,
+		current_period_start, current_period_end,
+		cancel_at_period_end, metadata
+	) VALUES (
+		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+	) RETURNING id, created_at, updated_at
+	`
+
+	err = r.db.QueryRowContext(ctx, query,
+		subscription.UserID,
+		subscription.PlanID,
+		subscription.PaymentID,
+		subscription.PlanName,
+		subscription.PlanCode,
+		subscription.Status,
+		subscription.CurrentPeriodStart,
+		subscription.CurrentPeriodEnd,
+		subscription.CancelAtPeriodEnd,
+		metadataJSON,
+	).Scan(&subscription.ID, &subscription.CreatedAt, &subscription.UpdatedAt)
+
 	if err != nil {
 		return fmt.Errorf("ошибка создания подписки: %w", err)
-	}
-	defer rows.Close()
-
-	if rows.Next() {
-		if err := rows.Scan(&subscription.ID, &subscription.CreatedAt, &subscription.UpdatedAt); err != nil {
-			return fmt.Errorf("ошибка сканирования результата: %w", err)
-		}
 	}
 
 	return nil
@@ -202,9 +193,12 @@ func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int
 func (r *subscriptionRepositoryImpl) GetActiveByUserID(ctx context.Context, userID int) (*models.UserSubscription, error) {
 	query := `
 	SELECT
-		us.*,
-		sp.name as plan_name,
-		sp.code as plan_code
+		us.id, us.user_id, us.plan_id, us.payment_id,
+		us.stripe_subscription_id, us.status,
+		us.current_period_start, us.current_period_end,
+		us.cancel_at_period_end, us.metadata,
+		us.created_at, us.updated_at,
+		sp.name as plan_name, sp.code as plan_code
 	FROM user_subscriptions us
 	LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
 	WHERE us.user_id = $1
@@ -218,7 +212,7 @@ func (r *subscriptionRepositoryImpl) GetActiveByUserID(ctx context.Context, user
 	var metadataJSON []byte
 	var planName, planCode sql.NullString
 
-	if err := r.db.QueryRowContext(ctx, query, userID).Scan(
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&subscription.ID,
 		&subscription.UserID,
 		&subscription.PlanID,
@@ -233,7 +227,9 @@ func (r *subscriptionRepositoryImpl) GetActiveByUserID(ctx context.Context, user
 		&subscription.UpdatedAt,
 		&planName,
 		&planCode,
-	); err != nil {
+	)
+
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
