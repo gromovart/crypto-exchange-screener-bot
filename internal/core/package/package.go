@@ -2,8 +2,10 @@
 package core_factory
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	infrastructure_factory "crypto-exchange-screener-bot/internal/infrastructure/package"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -25,6 +27,7 @@ type CoreServiceFactory struct {
 type Config struct {
 	UserConfig         users.Config
 	SubscriptionConfig subscription.Config
+	PaymentsConfig     payment.Config // Добавляем по аналогии с другими сервисами
 }
 
 // CoreServiceDependencies зависимости для фабрики ядра
@@ -65,6 +68,11 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 				TrialPeriodDays: 7,
 				GracePeriodDays: 3,
 				AutoRenew:       true,
+			},
+			PaymentsConfig: payment.Config{ // Пустая конфигурация по умолчанию
+				TelegramBotToken:           "",
+				TelegramStarsProviderToken: "",
+				TelegramBotUsername:        "",
 			},
 		}
 	}
@@ -178,6 +186,54 @@ func (f *CoreServiceFactory) CreateUserService() (*users.Service, error) {
 	f.userFactory.SetRedisService(redisService)
 
 	return f.userFactory.CreateUserService()
+}
+
+// CreatePaymentService создает PaymentCoreService (StarsService)
+func (f *CoreServiceFactory) CreatePaymentService() (*payment.StarsService, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика ядра не инициализирована")
+	}
+
+	// Проверяем наличие конфигурации платежей
+	if f.config.PaymentsConfig.TelegramBotToken == "" {
+		return nil, fmt.Errorf("TelegramBotToken не настроен в PaymentsConfig")
+	}
+
+	// Получаем EventBus из инфраструктуры
+	infraFactory := f.GetInfrastructureFactory()
+	if infraFactory == nil {
+		return nil, fmt.Errorf("InfrastructureFactory не доступна")
+	}
+
+	eventBus, err := infraFactory.GetEventBus()
+	if err != nil {
+		logger.Warn("⚠️ EventBus недоступен: %v", err)
+	}
+
+	// Получаем UserService
+	userService, err := f.userFactory.CreateUserService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать UserService: %w", err)
+	}
+
+	// Создаем StarsClient
+	baseURL := "https://api.telegram.org/bot" + f.config.PaymentsConfig.TelegramBotToken + "/"
+	starsClient := http_client.NewStarsClient(baseURL, "")
+
+	// Создаем StarsService
+	paymentService := payment.NewStarsService(
+		userService,        // UserManager
+		eventBus,           // EventPublisher
+		logger.GetLogger(), // *logger.Logger
+		starsClient,        // *http_client.StarsClient
+		f.config.PaymentsConfig.TelegramBotUsername, // botUsername
+	)
+
+	logger.Info("✅ PaymentCoreService создан")
+	return paymentService, nil
 }
 
 // CreateSubscriptionService создает SubscriptionService

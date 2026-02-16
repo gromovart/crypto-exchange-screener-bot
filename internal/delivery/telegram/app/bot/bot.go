@@ -33,6 +33,7 @@ type TelegramBot struct {
 	// HTTP клиенты
 	telegramClient *telegram_http.TelegramClient
 	pollingClient  *telegram_http.PollingClient
+	starsClient    *telegram_http.StarsClient
 
 	// MessageSender для отправки сообщений
 	messageSender message_sender.MessageSender
@@ -98,7 +99,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		signalSettingsService:      signalSettingsService,
 		notificationsToggleService: notificationsToggleService,
 		paymentService:             paymentService,
-		starsClient:                starsClient, // Добавляем StarsClient
+		starsClient:                starsClient,
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -111,6 +112,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		config:         config,
 		telegramClient: telegramClient,
 		pollingClient:  pollingClient,
+		starsClient:    starsClient,
 		messageSender:  ms,
 		router:         router,
 		authMiddleware: authMiddleware,
@@ -209,39 +211,94 @@ func (b *TelegramBot) stopWebhook() error {
 	return nil
 }
 
-// HandleUpdate обрабатывает обновление от Telegram (новая система)
+// HandleUpdate обрабатывает обновление от Telegram
 func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Обрабатываем обновление через auth middleware
+	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ PRE-CHECKOUT QUERY (ЭВЕНТ)
+	if update.PreCheckoutQuery != nil {
+		logger.Info("💰 Получен PreCheckoutQuery эвент: ID=%s, пользователь=%d, сумма=%d %s, payload=%s",
+			update.PreCheckoutQuery.ID,
+			update.PreCheckoutQuery.From.ID,
+			update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency,
+			update.PreCheckoutQuery.InvoicePayload)
+
+		// Обрабатываем через auth middleware
+		handlerParams, err := b.authMiddleware.ProcessUpdate(update)
+		if err != nil {
+			logger.Error("❌ Ошибка аутентификации pre_checkout_query: %v", err)
+			return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, false, "Ошибка авторизации")
+		}
+
+		// Вызываем обработчик pre_checkout_query
+		result, err := b.router.Handle("pre_checkout_query", convertToRouterParams(handlerParams))
+		if err != nil {
+			logger.Error("❌ Ошибка обработки pre_checkout_query: %v", err)
+			return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, false, "Внутренняя ошибка сервера")
+		}
+
+		// Отправляем ответ через StarsClient
+		if result.Metadata != nil {
+			if params, ok := result.Metadata["telegram_params"].(map[string]interface{}); ok {
+				queryID, _ := params["pre_checkout_query_id"].(string)
+				ok, _ := params["ok"].(bool)
+				errorMessage, _ := params["error_message"].(string)
+				return b.starsClient.AnswerPreCheckoutQuery(queryID, ok, errorMessage)
+			}
+		}
+		return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, true, "")
+	}
+
+	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT (ЭВЕНТ)
+	if update.Message != nil && update.Message.SuccessfulPayment != nil {
+		logger.Info("💰 Получен SuccessfulPayment эвент: пользователь=%d, сумма=%d %s, payload=%s",
+			update.Message.From.ID,
+			update.Message.SuccessfulPayment.TotalAmount,
+			update.Message.SuccessfulPayment.Currency,
+			update.Message.SuccessfulPayment.InvoicePayload)
+
+		// Обрабатываем через auth middleware
+		handlerParams, err := b.authMiddleware.ProcessUpdate(update)
+		if err != nil {
+			logger.Error("❌ Ошибка аутентификации successful_payment: %v", err)
+			return b.messageSender.SendTextMessage(handlerParams.ChatID,
+				"❌ Ошибка авторизации. Пожалуйста, попробуйте позже.", nil)
+		}
+
+		// Вызываем обработчик successful_payment
+		result, err := b.router.Handle("successful_payment", convertToRouterParams(handlerParams))
+		if err != nil {
+			logger.Error("❌ Ошибка обработки successful_payment: %v", err)
+			return b.messageSender.SendTextMessage(handlerParams.ChatID,
+				"❌ Ошибка обработки платежа. Пожалуйста, обратитесь в поддержку.", nil)
+		}
+
+		// Отправляем сообщение пользователю
+		return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
+	}
+
+	// Обычная обработка сообщений и callback-ов
 	handlerParams, err := b.authMiddleware.ProcessUpdate(update)
 	if err != nil {
-		// Если ошибка авторизации, отправляем сообщение об ошибке
 		return b.sendAuthError(handlerParams.ChatID, err.Error())
 	}
 
-	// Определяем команду/callback для обработки
 	var command string
-	// ВАЖНО: Сначала проверяем Data, так как authMiddleware заполняет ее для специальных событий
-	// (pre_checkout_query, successful_payment)
-	if handlerParams.Data != "" {
-		command = handlerParams.Data
-	} else if update.Message != nil && update.Message.Text != "" {
+	if update.Message != nil && update.Message.Text != "" {
 		command = update.Message.Text
 	} else if update.CallbackQuery != nil {
 		command = update.CallbackQuery.Data
 	} else {
-		return nil // Игнорируем другие типы обновлений
+		return nil
 	}
 
-	// Обрабатываем команду через роутер
 	result, err := b.router.Handle(command, convertToRouterParams(handlerParams))
 	if err != nil {
 		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+err.Error(), nil)
 	}
 
-	// Отправляем результат пользователю
 	return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
 }
 

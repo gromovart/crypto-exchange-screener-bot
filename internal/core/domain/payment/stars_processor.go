@@ -127,7 +127,17 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		invoiceData.InvoiceID,
 	)
 
-	if err := s.eventPublisher.PublishPaymentEvent(types.EventPaymentComplete, eventData.ToMap()); err != nil {
+	event := types.Event{
+		Type:      types.EventPaymentComplete,
+		Source:    "payment_service",
+		Data:      eventData.ToMap(),
+		Timestamp: time.Now(),
+		Metadata: types.Metadata{
+			Tags: []string{"payment"},
+		},
+	}
+
+	if err := s.eventPublisher.Publish(event); err != nil {
 		s.logger.Error("Не удалось опубликовать событие платежа", "error", err)
 	}
 

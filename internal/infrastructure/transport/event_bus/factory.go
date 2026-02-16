@@ -1,3 +1,4 @@
+// internal/infrastructure/transport/event_bus/factory.go
 package events
 
 import (

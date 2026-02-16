@@ -1,19 +1,17 @@
-// internal/core/payment/stars_types.go
+// internal/core/domain/payment/stars_types.go
 package payment
 
-import "time"
+import (
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"time"
+)
 
 // StarsCommissionRate комиссия Telegram Stars (5%)
 const StarsCommissionRate = 0.05
 
 // UserManager интерфейс менеджера пользователей
 type UserManager interface {
-	GetUserByStringID(userID string) (User, error)
-}
-
-// User интерфейс пользователя
-type User interface {
-	GetID() string
+	GetUserByID(userID int) (*models.User, error) // ⬅️ ИЗМЕНЕНО: int вместо string
 }
 
 // SubscriptionPlan интерфейс плана подписки

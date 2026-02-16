@@ -5,6 +5,7 @@ import (
 	"crypto-exchange-screener-bot/internal/types"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -129,7 +130,17 @@ func (s *StarsService) publishPaymentSuccessEvent(
 		invoiceID,
 	)
 
-	return s.eventPublisher.PublishPaymentEvent(types.EventPaymentComplete, eventData.ToMap())
+	event := types.Event{
+		Type:      types.EventPaymentComplete,
+		Source:    "payment_service",
+		Data:      eventData.ToMap(),
+		Timestamp: time.Now(),
+		Metadata: types.Metadata{
+			Tags: []string{"payment"},
+		},
+	}
+
+	return s.eventPublisher.Publish(event)
 }
 
 // validateWebhook проверяет валидность webhook от Telegram

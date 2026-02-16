@@ -84,13 +84,43 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 		callback = callback[1:]
 	}
 	r.handlers[callback] = handler
-	logger.Debug("Зарегистрирован callback: %s → %s", callback, handler.GetName())
+	logger.Warn("Зарегистрирован callback: %s → %s", callback, handler.GetName())
+}
+
+// RegisterEvent регистрирует эвент
+func (r *routerImpl) RegisterEvent(eventName string, handler Handler) {
+	r.handlers[eventName] = handler
+	logger.Info("✅ Зарегистрирован эвент: %s → %s", eventName, handler.GetName())
 }
 
 // Handle обрабатывает команду/callback
 func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult, error) {
 	// ОТЛАДКА: выводим полученную команду
 	logger.Debug("🚀 Router.Handle вызван с command='%s'", command)
+
+	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ PRE-CHECKOUT QUERY
+	if strings.HasPrefix(command, "pre_checkout_query") {
+		logger.Debug("💰 Обнаружен pre_checkout_query: %s", command)
+		if handler, exists := r.handlers["pre_checkout_query"]; exists {
+			// ⚠️ ВАЖНО: params.Data уже содержит полную строку с параметрами
+			// Не нужно ничего менять, просто вызываем хэндлер
+			logger.Debug("💰 Вызов хэндлера pre_checkout_query с data='%s'", params.Data)
+			return r.executeHandler(handler, command, params)
+		}
+	}
+
+	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT
+	if strings.HasPrefix(command, "successful_payment") {
+		logger.Debug("✅ Обнаружен successful_payment: %s", command)
+		if handler, exists := r.handlers["successful_payment"]; exists {
+			params.Data = command
+			logger.Debug("✅ Перенаправление successful_payment в %s", handler.GetName())
+			return r.executeHandler(handler, command, params)
+		} else {
+			logger.Error("❌ Хэндлер successful_payment не найден в роутере")
+			r.debugRegisteredHandlers()
+		}
+	}
 
 	// Если команда начинается с / и содержит пробел (параметры)
 	if strings.HasPrefix(command, "/") && strings.Contains(command, " ") {
@@ -254,4 +284,3 @@ func (r *routerImpl) GetCommands() []string {
 }
 
 var _ Router = (*routerImpl)(nil)
-	

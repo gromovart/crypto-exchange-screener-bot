@@ -120,6 +120,13 @@ type UpdateProfileRequest struct {
 	DisplayMode string `json:"display_mode"`
 }
 
+// ==================== МЕТОД ДЛЯ ИНТЕРФЕЙСА PAYMENT.USER ====================
+
+// GetID возвращает ID пользователя (для интерфейса payment.User)
+func (u *User) GetID() int {
+	return u.ID
+}
+
 // ==================== МЕТОДЫ ПОЛЬЗОВАТЕЛЯ ====================
 
 // CanReceiveNotifications проверяет, может ли пользователь получать уведомления

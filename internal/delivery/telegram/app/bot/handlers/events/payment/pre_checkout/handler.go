@@ -9,6 +9,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // preCheckoutHandler реализация обработчика pre_checkout_query
@@ -78,13 +79,22 @@ type preCheckoutData struct {
 // parsePreCheckoutData парсит данные pre_checkout_query из строки
 func (h *preCheckoutHandler) parsePreCheckoutData(data string) preCheckoutData {
 	// Формат: pre_checkout_query:{query_id}:{payload}:{amount}:{currency}:{user_id}
+	logger.Warn("📦 Парсинг pre_checkout данных: '%s'", data)
+
 	parts := strings.Split(data, ":")
+	logger.Warn("📊 Разделено на %d частей: %v", len(parts), parts)
+
 	if len(parts) < 6 || parts[0] != "pre_checkout_query" {
+		logger.Error("❌ Неверный формат: ожидается 6 частей, получено %d, первый элемент: '%s'",
+			len(parts), parts[0])
 		return preCheckoutData{}
 	}
 
 	amount, _ := strconv.Atoi(parts[3])
 	userID, _ := strconv.ParseInt(parts[5], 10, 64)
+
+	logger.Warn("✅ Успешно распарсено: queryID=%s, payload=%s, amount=%d, currency=%s, userID=%d",
+		parts[1], parts[2], amount, parts[4], userID)
 
 	return preCheckoutData{
 		QueryID:     parts[1],

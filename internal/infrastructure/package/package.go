@@ -1065,3 +1065,19 @@ func (f *InfrastructureFactory) GetAPIKeyRepository() (api_key.APIKeyRepository,
 
 	return apiKeyRepo, nil
 }
+
+// GetEventBus возвращает EventBus
+func (f *InfrastructureFactory) GetEventBus() (*events.EventBus, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.eventBus == nil {
+		return nil, fmt.Errorf("EventBus не создан")
+	}
+
+	return f.eventBus, nil
+}

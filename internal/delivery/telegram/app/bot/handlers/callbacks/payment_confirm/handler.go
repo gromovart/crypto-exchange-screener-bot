@@ -3,7 +3,6 @@ package payment_confirm
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
@@ -23,6 +22,20 @@ type paymentConfirmHandler struct {
 
 // NewHandler создает новый обработчик подтверждения платежа
 func NewHandler(deps Dependencies) handlers.Handler {
+	// Получаем токен бота из конфига
+	botToken := deps.Config.Telegram.BotToken
+	if botToken == "" {
+		logger.Error("❌ TELEGRAM_BOT_TOKEN не настроен в конфигурации")
+		return nil
+	}
+
+	// Создаем базовый URL с токеном бота
+	baseURL := fmt.Sprintf("https://api.telegram.org/bot%s/", botToken)
+
+	// ВАЖНО: Создаем StarsClient с пустым providerToken,
+	// но сохраняем его в структуре Dependencies как требуется
+	starsClient := telegram_http.NewStarsClient(baseURL, "")
+
 	return &paymentConfirmHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "payment_confirm_handler",
@@ -30,7 +43,7 @@ func NewHandler(deps Dependencies) handlers.Handler {
 			Type:    handlers.TypeCallback,
 		},
 		config:      deps.Config,
-		starsClient: deps.StarsClient,
+		starsClient: starsClient, // Используем созданный клиент
 	}
 }
 
@@ -51,7 +64,7 @@ func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers
 	// Создаем инвойс через Telegram Stars API
 	invoiceLink, err := h.createTelegramInvoice(params.User.ID, plan)
 	if err != nil {
-		logger.Error("Ошибка создания инвойса: %v", err)
+		logger.Error("❌ Ошибка создания инвойса: %v", err)
 		return handlers.HandlerResult{
 			Message: "❌ *Ошибка создания платежной формы*\n\nПожалуйста, попробуйте позже или обратитесь в поддержку.",
 			Keyboard: map[string]interface{}{
@@ -80,20 +93,30 @@ func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers
 	}, nil
 }
 
+// createTelegramInvoice создает инвойс через Telegram API
 func (h *paymentConfirmHandler) createTelegramInvoice(userID int, plan *SubscriptionPlan) (string, error) {
 	// Создаем уникальный payload для инвойса
 	// Формат: sub_{plan_id}_{user_id}_{timestamp}
-	payload := fmt.Sprintf("sub_%s_%d_%d", plan.ID, userID, time.Now().Unix())
+	timestamp := time.Now().Unix()
+	payload := fmt.Sprintf("sub_%s_%d_%d", plan.ID, userID, timestamp)
 
 	title := fmt.Sprintf("Подписка: %s", plan.Name)
 	description := fmt.Sprintf("Доступ к функциям тарифа %s", plan.Name)
 	starsAmount := h.calculateStars(plan.PriceCents)
 
-	logger.Info("Создание инвойса через Telegram API: план=%s, пользователь=%d, сумма=%d Stars",
-		plan.ID, userID, starsAmount)
+	logger.Info("💰 Создание инвойса Stars: план=%s, пользователь=%d, сумма=%d Stars, payload=%s",
+		plan.ID, userID, starsAmount, payload)
 
 	// Используем StarsClient для создания инвойса
-	return h.starsClient.CreateSubscriptionInvoice(title, description, payload, starsAmount)
+	// provider_token будет пустым внутри клиента (мы передали "" при создании)
+	invoiceLink, err := h.starsClient.CreateSubscriptionInvoice(title, description, payload, starsAmount)
+	if err != nil {
+		logger.Error("❌ Ошибка создания инвойса: %v", err)
+		return "", err
+	}
+
+	logger.Info("✅ Инвойс создан успешно: %s", invoiceLink)
+	return invoiceLink, nil
 }
 
 // extractPlanID извлекает ID плана из callback_data
@@ -111,55 +134,20 @@ func (h *paymentConfirmHandler) getPlanByID(planID string) *SubscriptionPlan {
 		"basic": {
 			ID:         "basic",
 			Name:       "📱 Basic",
-			PriceCents: 299,
+			PriceCents: 299, // $2.99 = 3 Stars
 		},
 		"pro": {
 			ID:         "pro",
 			Name:       "🚀 Pro",
-			PriceCents: 999,
+			PriceCents: 999, // $9.99 = 10 Stars
 		},
 		"enterprise": {
 			ID:         "enterprise",
 			Name:       "🏢 Enterprise",
-			PriceCents: 2499,
+			PriceCents: 2499, // $24.99 = 25 Stars
 		},
 	}
 	return plans[planID]
-}
-
-// createInvoiceLink создает ссылку для оплаты
-func (h *paymentConfirmHandler) createInvoiceLink(userID int, plan *SubscriptionPlan) string {
-	// Получаем username бота из конфигурации
-	botUsername := ""
-
-	// Пробуем разные возможные поля из конфигурации
-	if h.config.Telegram.BotUsername != "" {
-		botUsername = h.config.Telegram.BotUsername
-	} else if h.config.TelegramStars.BotUsername != "" {
-		botUsername = h.config.TelegramStars.BotUsername
-	} else if h.config.TelegramStars.BotUsername != "" {
-		botUsername = h.config.TelegramStars.BotUsername
-	}
-
-	if botUsername == "" {
-		// Если username не указан в конфиге, логируем предупреждение
-		logger.Warn("BotUsername не найден в конфигурации, используется универсальная ссылка")
-		invoiceLink := fmt.Sprintf("https://t.me/?start=pay_%d_%s", userID, plan.ID)
-		logger.Info("Универсальная платежная ссылка: %s", invoiceLink)
-		return invoiceLink
-	}
-
-	// Убираем @ если есть в начале
-	botUsername = strings.TrimPrefix(botUsername, "@")
-
-	// Правильный формат deep link для Telegram бота
-	// Формат: https://t.me/{bot_username}?start={payload}
-	invoiceLink := fmt.Sprintf("https://t.me/%s?start=pay_%d_%s",
-		botUsername, userID, plan.ID)
-
-	logger.Info("Создана платежная ссылка: %s (бот: %s, пользователь: %d, план: %s)",
-		invoiceLink, botUsername, userID, plan.ID)
-	return invoiceLink
 }
 
 // createPaymentMessage создает сообщение с инструкцией по оплате
@@ -207,20 +195,20 @@ func (h *paymentConfirmHandler) createPaymentKeyboard(planID, invoiceLink string
 	}
 }
 
-// calculateStars рассчитывает количество Stars с учетом комиссии
+// calculateStars рассчитывает количество Stars с учетом комиссии Telegram
+// Согласно документации, комиссия уже включена в цену Stars для пользователя
 func (h *paymentConfirmHandler) calculateStars(usdCents int) int {
+	// 1 Star = $0.01 = 1 цент
 	baseStars := usdCents / 100
 	if baseStars < 1 {
 		baseStars = 1
 	}
-	commission := baseStars / 20 // 5%
-	if commission < 1 {
-		commission = 1
-	}
-	return baseStars + commission
+
+	// Комиссия Telegram уже учтена в стоимости Stars для пользователя
+	return baseStars
 }
 
-// Вспомогательный тип
+// SubscriptionPlan вспомогательный тип для планов подписки
 type SubscriptionPlan struct {
 	ID         string
 	Name       string

@@ -259,10 +259,29 @@ func (p *TelegramDeliveryPackage) getSubscriptionService() (*subscription.Servic
 
 // getPaymentCoreService получает PaymentCoreService (StarsService) из CoreFactory
 func (p *TelegramDeliveryPackage) getPaymentCoreService() (*payment.StarsService, error) {
-	// TODO: Реализовать создание payment.StarsService через CoreFactory
-	// Пока возвращаем nil, так как нужно настроить создание в core factory
-	logger.Info("ℹ️ PaymentCoreService пока не реализован в CoreFactory")
-	return nil, fmt.Errorf("PaymentCoreService не реализован")
+	logger.Warn("🔍 [TRACE] getPaymentCoreService: начало")
+
+	if p.coreFactory == nil {
+		logger.Error("❌ [TRACE] getPaymentCoreService: coreFactory == nil")
+		return nil, fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	logger.Warn("🔍 [TRACE] getPaymentCoreService: coreFactory готов, вызываем CreatePaymentService()")
+
+	// ⭐ ВЫЗЫВАЕМ CreatePaymentService из фабрики ядра
+	paymentService, err := p.coreFactory.CreatePaymentService()
+	if err != nil {
+		logger.Error("❌ [TRACE] getPaymentCoreService: CreatePaymentService вернул ошибку: %v", err)
+		return nil, fmt.Errorf("не удалось создать PaymentCoreService: %w", err)
+	}
+
+	if paymentService == nil {
+		logger.Error("❌ [TRACE] getPaymentCoreService: paymentService == nil")
+		return nil, fmt.Errorf("CreatePaymentService вернул nil")
+	}
+
+	logger.Info("✅ [TRACE] getPaymentCoreService: PaymentCoreService успешно создан")
+	return paymentService, nil
 }
 
 // createServices создает все сервисы Telegram

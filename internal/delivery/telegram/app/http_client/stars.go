@@ -17,7 +17,7 @@ type StarsClient struct {
 func NewStarsClient(baseURL, providerToken string) *StarsClient {
 	return &StarsClient{
 		TelegramClient: NewTelegramClient(baseURL),
-		providerToken:  providerToken,
+		providerToken:  "",
 	}
 }
 

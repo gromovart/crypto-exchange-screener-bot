@@ -4,6 +4,7 @@ package layers
 import (
 	"crypto-exchange-screener-bot/internal/core/domain/candle"
 	"crypto-exchange-screener-bot/internal/core/domain/fetchers"
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	engine "crypto-exchange-screener-bot/internal/core/domain/signals/engine"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
@@ -92,10 +93,15 @@ func (cl *CoreLayer) Initialize() error {
 			MaxSessionsPerUser:        5,
 		},
 		SubscriptionConfig: subscription.Config{
-			DefaultPlan:      "free",
-			TrialPeriodDays:  1,
-			GracePeriodDays:  3,
-			AutoRenew:        true,
+			DefaultPlan:     "free",
+			TrialPeriodDays: 1,
+			GracePeriodDays: 3,
+			AutoRenew:       true,
+		},
+		PaymentsConfig: payment.Config{
+			TelegramBotToken:           cl.config.Telegram.BotToken,
+			TelegramStarsProviderToken: "",
+			TelegramBotUsername:        cl.config.Telegram.BotUsername,
 		},
 	}
 

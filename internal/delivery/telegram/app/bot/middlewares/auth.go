@@ -99,7 +99,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (Handler
 			logger.Warn("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
 		}
 	} else if update.PreCheckoutQuery != nil && update.PreCheckoutQuery.From.ID > 0 {
-		// Обработка pre_checkout_query
+		// ⭐ ИСПРАВЛЕНО: Обработка pre_checkout_query с добавлением user_id
 		userID = update.PreCheckoutQuery.From.ID
 		username = update.PreCheckoutQuery.From.Username
 		firstName = update.PreCheckoutQuery.From.FirstName
@@ -107,16 +107,17 @@ func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (Handler
 		chatID = userID // Для pre_checkout_query используем userID как chatID
 
 		// Формируем данные для передачи в обработчик
-		// Формат: pre_checkout_query:{query_id}:{payload}:{amount}:{currency}
-		data = fmt.Sprintf("pre_checkout_query:%s:%s:%d:%s",
+		// Формат: pre_checkout_query:{query_id}:{payload}:{amount}:{currency}:{user_id}
+		data = fmt.Sprintf("pre_checkout_query:%s:%s:%d:%s:%d",
 			update.PreCheckoutQuery.ID,
 			update.PreCheckoutQuery.InvoicePayload,
 			update.PreCheckoutQuery.TotalAmount,
-			update.PreCheckoutQuery.Currency)
+			update.PreCheckoutQuery.Currency,
+			userID)
 
-		logger.Info("🔍 ProcessUpdate: PreCheckoutQuery from user %d, amount: %d %s, payload: %s",
+		logger.Info("🔍 ProcessUpdate: PreCheckoutQuery from user %d, amount: %d %s, payload: %s, data: %s",
 			userID, update.PreCheckoutQuery.TotalAmount,
-			update.PreCheckoutQuery.Currency, update.PreCheckoutQuery.InvoicePayload)
+			update.PreCheckoutQuery.Currency, update.PreCheckoutQuery.InvoicePayload, data)
 	} else {
 		logger.Warn("❌ ProcessUpdate: Не удалось получить информацию о пользователе")
 		return HandlerParams{}, fmt.Errorf("не удалось получить информацию о пользователе")

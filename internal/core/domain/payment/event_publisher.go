@@ -8,8 +8,7 @@ import (
 
 // EventPublisher интерфейс для публикации событий платежей
 type EventPublisher interface {
-	// PublishPaymentEvent публикует событие платежа
-	PublishPaymentEvent(eventType types.EventType, data map[string]interface{}) error
+	Publish(event types.Event) error // ⬅️ Используем стандартный метод
 }
 
 // PaymentEventData данные события платежа

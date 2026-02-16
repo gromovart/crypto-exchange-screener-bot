@@ -228,10 +228,12 @@ func InitHandlerFactory(
 
 	// РЕГИСТРАЦИЯ ПЛАТЕЖНЫХ СОБЫТИЙ TELEGRAM API
 	if services.paymentService != nil {
+		// ⭐ РЕГИСТРИРУЕМ ОБРАБОТЧИК PRE-CHECKOUT QUERY
 		factory.RegisterHandlerCreator("pre_checkout_query", func() handlers.Handler {
 			return precheckout_handler.NewHandler(services.paymentService)
 		})
 
+		// ⭐ РЕГИСТРИРУЕМ ОБРАБОТЧИК SUCCESSFUL PAYMENT
 		factory.RegisterHandlerCreator("successful_payment", func() handlers.Handler {
 			return successful_payment_handler.NewHandler(services.paymentService)
 		})
