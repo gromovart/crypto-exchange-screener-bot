@@ -69,8 +69,16 @@ func (h *notificationsMenuHandler) createNotificationsMessage(user *models.User)
 
 // createNotificationsKeyboard создает клавиатуру для меню уведомлений
 func (h *notificationsMenuHandler) createNotificationsKeyboard(user *models.User) interface{} {
-	// Используем методы через h.BaseHandler
-	toggleAllText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.ToggleAll, user.NotificationsEnabled)
+	// ⭐ ИСПРАВЛЕНО: объявляем переменную и заменяем ✅/❌ на нужный эмодзи
+	var toggleAllText string
+	toggleAllBase := " Включить/Выключить"
+	if user.NotificationsEnabled {
+		toggleAllText = "✅" + toggleAllBase
+	} else {
+		toggleAllText = "❌" + toggleAllBase
+	}
+
+	// Для остальных кнопок используем GetToggleText как обычно
 	growthText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.GrowthOnly, user.NotifyGrowth)
 	fallText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.FallOnly, user.NotifyFall)
 

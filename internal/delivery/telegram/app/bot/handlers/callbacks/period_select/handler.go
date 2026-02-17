@@ -9,6 +9,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	signal_settings_svc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"crypto-exchange-screener-bot/pkg/period"
 )
 
@@ -70,25 +71,32 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 	periods, _ := result.NewValue.([]int)
 	periodsStr := formatPeriodsToString(periods)
 
-	// Создаем сообщение с результатом
-	var emoji string
+	// Убираем эмодзи из result.Message
+	cleanMessage := strings.TrimPrefix(result.Message, "✅ ")
+	cleanMessage = strings.TrimPrefix(cleanMessage, "❌ ")
+
+	// Определяем эмодзи для заголовка
+	emoji := "✅"
 	if actionResult, ok := result.Metadata["action"].(string); ok {
-		if actionResult == "added" {
-			emoji = "✅"
-		} else {
+		if actionResult == "removed" {
 			emoji = "❌"
 		}
-	} else {
-		emoji = "✅"
 	}
 
+	// Формируем сообщение
 	message := fmt.Sprintf(
 		"%s *Период обновлен*\n\n%s\n\n"+
 			"Текущие периоды анализа: %s",
 		emoji,
-		result.Message,
+		cleanMessage,
 		periodsStr,
 	)
+
+	// ⭐ Экранируем все Markdown-символы в сообщении
+	message = escapeMarkdown(message)
+
+	// Логируем финальное сообщение для отладки
+	logger.Info("📨 FINAL MESSAGE: %s", message)
 
 	// Создаем клавиатуру
 	keyboard := map[string]interface{}{
@@ -103,6 +111,17 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 		Message:  message,
 		Keyboard: keyboard,
 	}, nil
+}
+
+// Вспомогательная функция для экранирования Markdown-символов
+func escapeMarkdown(text string) string {
+	// Экранируем символы, которые имеют специальное значение в Markdown
+	text = strings.ReplaceAll(text, "_", "\\_")
+	text = strings.ReplaceAll(text, "*", "\\*")
+	text = strings.ReplaceAll(text, "`", "\\`")
+	text = strings.ReplaceAll(text, "[", "\\[")
+	text = strings.ReplaceAll(text, "]", "\\]")
+	return text
 }
 
 // showPeriodsMenu показывает меню управления периодами
