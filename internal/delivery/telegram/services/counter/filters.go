@@ -2,6 +2,7 @@
 package counter
 
 import (
+	"context"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"crypto-exchange-screener-bot/pkg/period"
@@ -62,6 +63,12 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 		return false
 	}
 
+	// ⭐ ПРОВЕРКА ПОДПИСКИ
+	if !s.hasActiveSubscription(user.ID) {
+		logger.Debug("🔍 Пропуск user=%d: нет активной подписки", user.ID)
+		return false
+	}
+
 	// Проверка типа сигнала
 	signalType, valid := s.determineSignalType(data)
 	if !valid {
@@ -87,6 +94,23 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	logger.Debug("✅ shouldSendToUser ПРОШЕЛ: user=%d (%s) для %s signal (%.2f%%)",
 		user.ID, user.Username, signalType, changePercentForCheck)
 	return true
+}
+
+// hasActiveSubscription проверяет наличие активной подписки
+func (s *serviceImpl) hasActiveSubscription(userID int) bool {
+	if s.subscriptionService == nil {
+		logger.Warn("⚠️ subscriptionService не инициализирован в counter service")
+		return true // Если сервис не инициализирован, пропускаем (для обратной совместимости)
+	}
+
+	ctx := context.Background()
+	sub, err := s.subscriptionService.GetActiveSubscription(ctx, userID)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка проверки подписки для user %d: %v", userID, err)
+		return false
+	}
+
+	return sub != nil
 }
 
 // checkBasicConditions проверяет базовые условия пользователя
@@ -251,8 +275,17 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 		}
 
 		if !s.isPeriodPreferred(periodInt, user.PreferredPeriods) {
-			logger.Debug("❌ User %d (%s) пропущен: период %s (%d) не в предпочтительных периодах %v",
-				user.ID, user.Username, data.Period, periodInt, user.PreferredPeriods)
+			// ⭐ Убираем DEBUG логирование для этого случая
+			return false
+		}
+	} else {
+		// Если у пользователя нет предпочтительных периодов - используем дефолтный 15 минут
+		defaultPeriod := 15
+		periodInt, err := period.StringToMinutes(data.Period)
+		if err != nil {
+			return false
+		}
+		if periodInt != defaultPeriod {
 			return false
 		}
 	}

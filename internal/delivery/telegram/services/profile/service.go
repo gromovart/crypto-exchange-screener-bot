@@ -2,6 +2,7 @@
 package profile
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // Service интерфейс профиля
@@ -69,28 +71,34 @@ func (s *serviceImpl) Exec(params interface{}) (interface{}, error) {
 
 // getProfile получает профиль пользователя
 func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
-	// 1. Получаем данные пользователя из ядра
-	user, err := s.userService.GetUserByID(int(userID))
+	// Получаем пользователя
+	user, err := s.userService.GetUserByTelegramID(userID)
 	if err != nil {
-		return ProfileResult{Success: false},
-			fmt.Errorf("ошибка получения пользователя: %w", err)
+		return ProfileResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка получения пользователя: %v", err),
+		}, nil
 	}
 
-	// 2. Получаем подписку пользователя (если есть)
-	var userSubscription *models.UserSubscription
-	userSubscription, err = s.subscriptionService.GetUserSubscription(int(userID))
+	if user == nil {
+		return ProfileResult{
+			Success: false,
+			Message: "Пользователь не найден",
+		}, nil
+	}
+
+	// Получаем подписку пользователя
+	ctx := context.Background()
+	userSubscription, err := s.subscriptionService.GetLatestSubscription(ctx, user.ID)
 	if err != nil {
-		// Может быть у пользователя нет подписки
 		userSubscription = nil
 	}
-
-	// 3. Получаем информацию о плане подписки
+	// Получаем информацию о плане подписки
 	var planName, planCode string
 	var expiresAt time.Time
 	isActive := false
 
 	if userSubscription != nil {
-		// Проверяем статус подписки
 		isActive = s.isSubscriptionActive(userSubscription)
 
 		// Получаем информацию о плане
@@ -99,10 +107,17 @@ func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
 			planCode = plan.Code
 		}
 
-		// Получаем дату окончания
+		// ⭐ Получаем дату окончания из current_period_end
 		if userSubscription.CurrentPeriodEnd != nil {
 			expiresAt = *userSubscription.CurrentPeriodEnd
+			logger.Info("📅 getProfile: expiresAt = %v для пользователя %d", expiresAt, user.ID)
+		} else {
+			logger.Info("📅 getProfile: CurrentPeriodEnd = nil для пользователя %d", user.ID)
 		}
+	} else {
+		logger.Info("📅 getProfile: userSubscription = nil для пользователя %d", user.ID)
+		planName = "Free"
+		planCode = "free"
 	}
 
 	// 4. Форматируем сообщение для Telegram
@@ -139,7 +154,7 @@ func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
 				"plan_code":        planCode,
 				"is_active":        isActive,
 				"status":           safeStatus(userSubscription),
-				"expires_at":       expiresAt,
+				"expires_at":       expiresAt, // ⭐ Здесь должна быть дата
 				"plan_id":          safePlanID(userSubscription),
 			},
 		},
@@ -148,18 +163,29 @@ func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
 
 // getProfileStats получает статистику профиля
 func (s *serviceImpl) getProfileStats(userID int64) (ProfileResult, error) {
-	// 1. Получаем статистику пользователя из ядра
-	stats, err := s.userService.GetUserStats(int(userID))
+	// 1. Получаем пользователя для получения внутреннего ID
+	user, err := s.userService.GetUserByTelegramID(userID)
 	if err != nil {
-		return ProfileResult{Success: false},
-			fmt.Errorf("ошибка получения статистики: %w", err)
+		return ProfileResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка получения пользователя: %v", err),
+		}, nil
 	}
 
-	// 2. Получаем пользователя для дополнительной информации
-	user, err := s.userService.GetUserByID(int(userID))
+	if user == nil {
+		return ProfileResult{
+			Success: false,
+			Message: "Пользователь не найден",
+		}, nil
+	}
+
+	// 2. Получаем статистику пользователя из ядра
+	stats, err := s.userService.GetUserStats(user.ID) // ⭐ Используем внутренний ID
 	if err != nil {
-		return ProfileResult{Success: false},
-			fmt.Errorf("ошибка получения пользователя: %w", err)
+		return ProfileResult{
+			Success: false,
+			Message: fmt.Sprintf("Ошибка получения статистики: %v", err),
+		}, nil
 	}
 
 	// 3. Форматируем статистику для Telegram
@@ -179,6 +205,11 @@ func (s *serviceImpl) formatProfileMessage(
 	isActive bool,
 	expiresAt time.Time,
 ) string {
+	// Защита от nil
+	if user == nil {
+		return "Ошибка: данные пользователя не найдены"
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("👤 *Ваш профиль*\n\n")
@@ -264,6 +295,11 @@ func (s *serviceImpl) formatProfileMessage(
 
 // formatStatsMessage форматирует сообщение статистики для Telegram
 func (s *serviceImpl) formatStatsMessage(user *models.User, stats map[string]interface{}) string {
+	// Защита от nil
+	if user == nil {
+		return "Ошибка: данные пользователя не найдены"
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("📊 *Статистика профиля*\n\n")

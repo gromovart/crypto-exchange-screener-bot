@@ -3,26 +3,29 @@ package profile_main
 
 import (
 	"fmt"
+	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
-	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 )
 
 // profileMainHandler реализация обработчика профиля
 type profileMainHandler struct {
-	*base.BaseHandler // Изменено на указатель
+	*base.BaseHandler
+	profileService profile.Service
 }
 
 // NewHandler создает новый обработчик профиля
-func NewHandler() handlers.Handler {
+func NewHandler(profileService profile.Service) handlers.Handler {
 	return &profileMainHandler{
-		BaseHandler: &base.BaseHandler{ // Изменено на указатель
+		BaseHandler: &base.BaseHandler{
 			Name:    "profile_main_handler",
 			Command: constants.CallbackProfileMain,
 			Type:    handlers.TypeCallback,
 		},
+		profileService: profileService,
 	}
 }
 
@@ -32,7 +35,34 @@ func (h *profileMainHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
 	}
 
-	message := h.formatProfileMessage(params.User)
+	// Создаем параметры для сервиса профиля
+	profileParams := profile.ProfileParams{
+		UserID: params.User.TelegramID,
+		Action: "get",
+	}
+
+	// Вызываем сервис
+	result, err := h.profileService.Exec(profileParams)
+	if err != nil {
+		return handlers.HandlerResult{}, fmt.Errorf("ошибка получения профиля: %w", err)
+	}
+
+	// Приводим результат к нужному типу
+	profileResult, ok := result.(profile.ProfileResult)
+	if !ok {
+		return handlers.HandlerResult{}, fmt.Errorf("неверный тип результата от сервиса профиля")
+	}
+
+	// ⭐ Если сервис вернул ошибку, показываем сообщение пользователю
+	if !profileResult.Success {
+		return handlers.HandlerResult{
+			Message:  fmt.Sprintf("❌ %s", profileResult.Message),
+			Keyboard: h.createProfileKeyboard(),
+		}, nil
+	}
+
+	// Извлекаем данные для форматирования
+	message := h.formatProfileMessage(profileResult.Data)
 	keyboard := h.createProfileKeyboard()
 
 	return handlers.HandlerResult{
@@ -44,24 +74,90 @@ func (h *profileMainHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 	}, nil
 }
 
-// formatProfileMessage форматирует сообщение профиля
-func (h *profileMainHandler) formatProfileMessage(user *models.User) string {
-	firstName := user.FirstName
-	if firstName == "" {
-		firstName = "Гость"
+// formatProfileMessage форматирует сообщение профиля из данных сервиса
+func (h *profileMainHandler) formatProfileMessage(data interface{}) string {
+	// Приводим данные к map
+	dataMap, ok := data.(map[string]interface{})
+	if !ok {
+		return "Ошибка форматирования данных профиля"
 	}
 
-	username := user.Username
-	if username == "" {
-		username = "не указан"
+	// Извлекаем данные пользователя
+	userData, ok := dataMap["user"].(map[string]interface{})
+	if !ok {
+		return "Ошибка получения данных пользователя"
+	}
+
+	// Извлекаем данные подписки
+	subData, ok := dataMap["subscription"].(map[string]interface{})
+	if !ok {
+		subData = make(map[string]interface{})
+	}
+
+	// Получаем значения с безопасным приведением типов
+	id := getInt64(userData, "id")
+	telegramID := getInt64(userData, "telegram_id")
+	username := getString(userData, "username")
+	firstName := getString(userData, "first_name")
+	role := getString(userData, "role")
+
+	planName := getString(subData, "plan_name")
+	if planName == "" {
+		planName = "Free"
+	}
+
+	subscriptionActive := getBool(subData, "is_active")
+	signalsToday := getInt(userData, "signals_today")
+	maxSignals := getInt(userData, "max_signals_per_day")
+	growthMin := getFloat64(userData, "min_growth_threshold")
+	fallMin := getFloat64(userData, "min_fall_threshold")
+
+	// Получаем даты
+	createdAt := getTime(userData, "created_at")
+	lastLoginAt := getTime(userData, "last_login_at")
+	expiresAt := getTime(subData, "expires_at")
+
+	// Форматируем имя
+	displayName := firstName
+	if displayName == "" {
+		displayName = "Гость"
+	}
+
+	// Форматируем username
+	displayUsername := username
+	if displayUsername == "" {
+		displayUsername = "не указан"
 	} else {
-		username = "@" + username
+		displayUsername = "@" + displayUsername
 	}
 
 	// Форматируем дату последнего входа
 	lastLoginDisplay := "еще не входил"
-	if !user.LastLoginAt.IsZero() {
-		lastLoginDisplay = user.LastLoginAt.Format("02.01.2006 15:04")
+	if !lastLoginAt.IsZero() {
+		lastLoginDisplay = lastLoginAt.Format("02.01.2006 15:04")
+	}
+
+	// Определяем статус подписки
+	subscriptionStatus := "❌ Неактивна"
+	if subscriptionActive {
+		subscriptionStatus = "✅ Активна"
+	}
+
+	// Форматируем дату окончания подписки - показываем всегда, если есть
+	expiresAtDisplay := "—"
+	if !expiresAt.IsZero() {
+		expiresAtDisplay = expiresAt.Format("02.01.2006 15:04")
+
+		// Добавляем индикатор, если подписка истекла
+		if !subscriptionActive && expiresAt.Before(time.Now()) {
+			expiresAtDisplay = expiresAtDisplay + " (истекла)"
+		}
+	}
+
+	// Добавляем эмодзи для тарифа
+	planEmoji := "🆓"
+	if planName != "Free" && planName != "free" {
+		planEmoji = "💎"
 	}
 
 	return fmt.Sprintf(
@@ -70,31 +166,48 @@ func (h *profileMainHandler) formatProfileMessage(user *models.User) string {
 			"📱 Telegram ID: %d\n"+
 			"👤 Имя: %s\n"+
 			"📧 Username: %s\n"+
-			"⭐ Роль: %s\n"+
-			"💰 Тариф: %s\n"+
-			"✅ Статус: %s\n"+
+			"⭐ Роль: %s\n\n"+
+			"💰 *Подписка*\n"+
+			"   %s %s\n"+
+			"   Статус: %s\n"+
+			"   Действует до: %s\n\n"+
+			"📊 *Статистика*\n"+
+			"   📈 Сигналов сегодня: %d/%d\n"+
+			"   🎯 Мин. рост: %.2f%%\n"+
+			"   📉 Мин. падение: %.2f%%\n\n"+
 			"📅 Регистрация: %s\n"+
-			"🔐 Последний вход: %s\n\n"+
-			"%s\n"+
-			"📈 Сигналов сегодня: %d/%d\n"+
-			"🎯 Мин. рост: %.2f%%\n"+
-			"📉 Мин. падение: %.2f%%\n",
-		constants.MenuButtonTexts.Profile,
-		user.ID,
-		user.TelegramID,
-		firstName,
-		username,
-		h.GetRoleDisplay(user.Role),
-		h.GetSubscriptionTierDisplayName(user.SubscriptionTier),
-		h.GetStatusDisplay(user.IsActive),
-		user.CreatedAt.Format("02.01.2006"),
+			"🔐 Последний вход: %s",
+		constants.AuthButtonTexts.Profile,
+		id,
+		telegramID,
+		displayName,
+		displayUsername,
+		h.getRoleDisplay(role),
+		planEmoji,
+		planName,
+		subscriptionStatus,
+		expiresAtDisplay,
+		signalsToday,
+		maxSignals,
+		growthMin,
+		fallMin,
+		createdAt.Format("02.01.2006"),
 		lastLoginDisplay,
-		constants.AuthButtonTexts.Stats, // Используем AuthButtonTexts.Stats для "Статистика"
-		user.SignalsToday,
-		user.MaxSignalsPerDay,
-		user.MinGrowthThreshold,
-		user.MinFallThreshold,
 	)
+}
+
+// getRoleDisplay возвращает отображаемое имя роли
+func (h *profileMainHandler) getRoleDisplay(role string) string {
+	switch role {
+	case "admin":
+		return "👑 Администратор"
+	case "moderator":
+		return "🛡️ Модератор"
+	case "premium":
+		return "💎 Премиум"
+	default:
+		return "👤 Пользователь"
+	}
 }
 
 // createProfileKeyboard создает клавиатуру для профиля
@@ -113,26 +226,78 @@ func (h *profileMainHandler) createProfileKeyboard() interface{} {
 	}
 }
 
-// GetSubscriptionTierDisplayName возвращает отображаемое имя тарифа
-func (h *profileMainHandler) GetSubscriptionTierDisplayName(tier string) string {
-	switch tier {
-	case "enterprise":
-		return "🏢 Доступ на 12 месяцев"
-	case "pro":
-		return "🚀 Доступ на 3 месяца"
-	case "basic":
-		return "📱 Доступ на 1 месяц"
-	case "free":
-		return "🆓 Free"
-	default:
-		return tier
+// Вспомогательные функции для безопасного извлечения данных из map
+
+func getString(m map[string]interface{}, key string) string {
+	if val, ok := m[key]; ok && val != nil {
+		if s, ok := val.(string); ok {
+			return s
+		}
 	}
+	return ""
 }
 
-// GetStatusDisplay возвращает отображение статуса
-func (h *profileMainHandler) GetStatusDisplay(isActive bool) string {
-	if isActive {
-		return "✅ Активен"
+func getInt64(m map[string]interface{}, key string) int64 {
+	if val, ok := m[key]; ok && val != nil {
+		switch v := val.(type) {
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case float64:
+			return int64(v)
+		}
 	}
-	return "❌ Деактивирован"
+	return 0
+}
+
+func getInt(m map[string]interface{}, key string) int {
+	if val, ok := m[key]; ok && val != nil {
+		switch v := val.(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+	}
+	return 0
+}
+
+func getFloat64(m map[string]interface{}, key string) float64 {
+	if val, ok := m[key]; ok && val != nil {
+		switch v := val.(type) {
+		case float64:
+			return v
+		case int:
+			return float64(v)
+		case int64:
+			return float64(v)
+		}
+	}
+	return 0
+}
+
+func getBool(m map[string]interface{}, key string) bool {
+	if val, ok := m[key]; ok && val != nil {
+		if b, ok := val.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+func getTime(m map[string]interface{}, key string) time.Time {
+	if val, ok := m[key]; ok && val != nil {
+		switch v := val.(type) {
+		case time.Time:
+			return v
+		case string:
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }

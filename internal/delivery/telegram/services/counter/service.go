@@ -2,6 +2,7 @@
 package counter
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
@@ -16,26 +17,29 @@ import (
 )
 
 type serviceImpl struct {
-	userService       *users.Service
-	formatter         *formatters.FormatterProvider
-	messageSender     message_sender.MessageSender
-	buttonBuilder     *buttons.ButtonBuilder
-	notificationGuard *SymbolNotificationGuard
-	guardMu           sync.RWMutex
+	userService         *users.Service
+	subscriptionService *subscription.Service
+	formatter           *formatters.FormatterProvider
+	messageSender       message_sender.MessageSender
+	buttonBuilder       *buttons.ButtonBuilder
+	notificationGuard   *SymbolNotificationGuard
+	guardMu             sync.RWMutex
 }
 
 func NewService(
 	userService *users.Service,
+	subscriptionService *subscription.Service,
 	formatter *formatters.FormatterProvider,
 	messageSender message_sender.MessageSender,
 	buttonBuilder *buttons.ButtonBuilder,
 ) Service {
 	return &serviceImpl{
-		userService:       userService,
-		formatter:         formatter,
-		messageSender:     messageSender,
-		buttonBuilder:     buttonBuilder,
-		notificationGuard: NewSymbolNotificationGuard(),
+		userService:         userService,
+		subscriptionService: subscriptionService,
+		formatter:           formatter,
+		messageSender:       messageSender,
+		buttonBuilder:       buttonBuilder,
+		notificationGuard:   NewSymbolNotificationGuard(),
 	}
 }
 

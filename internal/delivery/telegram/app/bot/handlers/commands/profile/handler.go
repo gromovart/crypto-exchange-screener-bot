@@ -64,6 +64,12 @@ func (h *profileCommandHandler) formatProfileMessage(user *models.User) string {
 		lastLoginDisplay = user.LastLoginAt.Format("02.01.2006 15:04")
 	}
 
+	// Определяем статус пользователя (не подписки)
+	userStatus := "✅ Активен"
+	if !user.IsActive {
+		userStatus = "❌ Заблокирован"
+	}
+
 	return fmt.Sprintf(
 		"%s\n\n"+
 			"🆔 ID: %d\n"+
@@ -72,7 +78,7 @@ func (h *profileCommandHandler) formatProfileMessage(user *models.User) string {
 			"📧 Username: %s\n"+
 			"⭐ Роль: %s\n"+
 			"💰 Тариф: %s\n"+
-			"✅ Статус: %s\n"+
+			"👤 Статус пользователя: %s\n"+ // ⭐ Изменено: явно указано "Статус пользователя"
 			"📅 Регистрация: %s\n"+
 			"🔐 Последний вход: %s\n\n"+
 			"%s\n"+
@@ -86,7 +92,7 @@ func (h *profileCommandHandler) formatProfileMessage(user *models.User) string {
 		username,
 		h.GetRoleDisplay(user.Role),
 		h.GetSubscriptionTierDisplayName(user.SubscriptionTier),
-		h.GetStatusDisplay(user.IsActive),
+		userStatus, // ⭐ Статус пользователя (активен/заблокирован)
 		user.CreatedAt.Format("02.01.2006"),
 		lastLoginDisplay,
 		constants.AuthButtonTexts.Stats,

@@ -136,9 +136,12 @@ func (r *subscriptionRepositoryImpl) GetByID(ctx context.Context, id int) (*mode
 func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int) (*models.UserSubscription, error) {
 	query := `
 	SELECT
-		us.*,
-		sp.name as plan_name,
-		sp.code as plan_code
+		us.id, us.user_id, us.plan_id, us.payment_id,
+		us.stripe_subscription_id, us.status,
+		us.current_period_start, us.current_period_end,
+		us.cancel_at_period_end, us.metadata,
+		us.created_at, us.updated_at,
+		sp.name as plan_name, sp.code as plan_code
 	FROM user_subscriptions us
 	LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
 	WHERE us.user_id = $1
@@ -150,7 +153,7 @@ func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int
 	var metadataJSON []byte
 	var planName, planCode sql.NullString
 
-	if err := r.db.QueryRowContext(ctx, query, userID).Scan(
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(
 		&subscription.ID,
 		&subscription.UserID,
 		&subscription.PlanID,
@@ -159,13 +162,15 @@ func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int
 		&subscription.Status,
 		&subscription.CurrentPeriodStart,
 		&subscription.CurrentPeriodEnd,
-		&subscription.CancelAtPeriodEnd,
+		&subscription.CancelAtPeriodEnd, // ⭐ bool, не *time.Time
 		&metadataJSON,
 		&subscription.CreatedAt,
 		&subscription.UpdatedAt,
 		&planName,
 		&planCode,
-	); err != nil {
+	)
+
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

@@ -414,11 +414,15 @@ func (s *Service) CheckUserLimit(ctx context.Context, userID int, limitType stri
 // ProcessExpiredSubscriptions обрабатывает истекшие подписки
 func (s *Service) ProcessExpiredSubscriptions(ctx context.Context) error {
 	// Получаем истекшие подписки
+	logger.Info("🔍 [PROCESS] Начинаем обработку истекших подписок")
+
+	// Получаем истекшие подписки
 	expiredSubs, err := s.subRepo.GetExpiredSubscriptions(ctx)
 	if err != nil {
 		return fmt.Errorf("ошибка получения истекших подписок: %w", err)
 	}
 
+	logger.Info("📊 [PROCESS] Найдено истекших подписок: %d", len(expiredSubs))
 	for _, sub := range expiredSubs {
 		// Для free плана - просто удаляем
 		if sub.PlanCode == models.PlanFree {
@@ -495,8 +499,11 @@ func (s *Service) startSubscriptionChecker() {
 
 	for range ticker.C {
 		ctx := context.Background()
+		currentTime := time.Now()
+		logger.Info("⏰ [CHECKER] Запуск проверки истекших подписок в %s", currentTime.Format("15:04:05"))
+
 		if err := s.ProcessExpiredSubscriptions(ctx); err != nil {
-			logger.Error("Ошибка обработки истекших подписок: %v", err)
+			logger.Error("❌ [CHECKER] Ошибка обработки истекших подписок: %v", err)
 		}
 	}
 }
@@ -539,4 +546,26 @@ func (s *Service) GetPlanByID(ctx context.Context, planID int) (*models.Plan, er
 	s.mu.Unlock()
 
 	return plan, nil
+}
+
+// GetLatestSubscription возвращает последнюю подписку пользователя (любого статуса)
+func (s *Service) GetLatestSubscription(ctx context.Context, userID int) (*models.UserSubscription, error) {
+	logger.Info("🔍 GetLatestSubscription: ищем подписку для user %d", userID)
+
+	// Получаем из репозитория последнюю подписку
+	subscription, err := s.subRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		logger.Error("❌ GetLatestSubscription: ошибка получения подписки для user %d: %v", userID, err)
+		return nil, err
+	}
+
+	if subscription == nil {
+		logger.Info("📅 GetLatestSubscription: подписка не найдена для user %d", userID)
+		return nil, nil
+	}
+
+	logger.Info("✅ GetLatestSubscription: найдена подписка для user %d, статус: %s, план: %s",
+		userID, subscription.Status, subscription.PlanCode)
+
+	return subscription, nil
 }

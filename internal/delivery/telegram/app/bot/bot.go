@@ -2,6 +2,7 @@
 package bot
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
@@ -13,6 +14,7 @@ import (
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
+	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -39,8 +41,9 @@ type TelegramBot struct {
 	messageSender message_sender.MessageSender
 
 	// Роутер для обработки команд
-	router         router.Router
-	authMiddleware *middlewares.AuthMiddleware
+	router                 router.Router
+	authMiddleware         *middlewares.AuthMiddleware
+	subscriptionMiddleware *middlewares.SubscriptionMiddleware
 
 	// Режимы работы
 	pollingHandler *PollingClient
@@ -68,20 +71,43 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	// Получаем UserService из ServiceFactory
 	var userService *users.Service
 	if deps.ServiceFactory != nil {
-		// GetUserService должен возвращать *users.Service
 		userService = deps.ServiceFactory.GetUserService()
 	} else {
 		logger.Error("❌ ServiceFactory не предоставлена в зависимостях")
 		userService = nil
 	}
 
+	// Получаем SubscriptionService из ServiceFactory
+	var subscriptionService *subscription.Service
+	if deps.ServiceFactory != nil {
+		subscriptionService = deps.ServiceFactory.GetSubscriptionService()
+	} else {
+		logger.Warn("⚠️ ServiceFactory не предоставлена, SubscriptionService будет nil")
+	}
+
 	// Создаем middleware аутентификации
-	authMiddleware := middlewares.NewAuthMiddleware(userService)
+	authMiddleware := middlewares.NewAuthMiddleware(
+		userService,
+		subscriptionService,
+		deps.ServiceFactory.GetSubscriptionRepository(),
+	)
+
+	// Создаем middleware подписки
+	subscriptionMiddleware := middlewares.NewSubscriptionMiddleware(subscriptionService)
 
 	// Создаем фабрику хэндлеров и роутер
 	handlerFactory := handlers.NewHandlerFactory()
 
-	// Создаем сервисы для хэндлеров
+	// Создаем сервисы
+	var profileSvc profile_service.Service
+	if deps.ServiceFactory != nil {
+		profileSvc = deps.ServiceFactory.CreateProfileService()
+		logger.Info("✅ ProfileService создан через фабрику")
+	} else {
+		logger.Error("❌ ServiceFactory не предоставлена, ProfileService не может быть создан")
+		profileSvc = nil
+	}
+
 	notificationsToggleService := notifications_toggle.NewService(userService)
 	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
 
@@ -99,24 +125,26 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		signalSettingsService:      signalSettingsService,
 		notificationsToggleService: notificationsToggleService,
 		paymentService:             paymentService,
+		profileService:             profileSvc,
 		starsClient:                starsClient,
 	}
 
 	// Инициализируем фабрику с сервисами
-	InitHandlerFactory(handlerFactory, config, services)
+	InitHandlerFactory(handlerFactory, config, services, subscriptionMiddleware)
 
 	// Регистрируем все хэндлеры
 	router := handlerFactory.RegisterAllHandlers()
 
 	bot := &TelegramBot{
-		config:         config,
-		telegramClient: telegramClient,
-		pollingClient:  pollingClient,
-		starsClient:    starsClient,
-		messageSender:  ms,
-		router:         router,
-		authMiddleware: authMiddleware,
-		startupTime:    time.Now(),
+		config:                 config,
+		telegramClient:         telegramClient,
+		pollingClient:          pollingClient,
+		starsClient:            starsClient,
+		messageSender:          ms,
+		router:                 router,
+		authMiddleware:         authMiddleware,
+		subscriptionMiddleware: subscriptionMiddleware,
+		startupTime:            time.Now(),
 	}
 
 	// Определяем текущий режим работы
@@ -216,7 +244,7 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ PRE-CHECKOUT QUERY (ЭВЕНТ)
+	// СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ PRE-CHECKOUT QUERY (ЭВЕНТ)
 	if update.PreCheckoutQuery != nil {
 		logger.Info("💰 Получен PreCheckoutQuery эвент: ID=%s, пользователь=%d, сумма=%d %s, payload=%s",
 			update.PreCheckoutQuery.ID,
@@ -251,7 +279,7 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 		return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, true, "")
 	}
 
-	// ⭐ СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT (ЭВЕНТ)
+	// СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT (ЭВЕНТ)
 	if update.Message != nil && update.Message.SuccessfulPayment != nil {
 		logger.Warn("💰💰💰 [SUCCESSFUL PAYMENT] ПОЛУЧЕН В BOT!")
 		logger.Warn("   • From: %d", update.Message.From.ID)
@@ -390,7 +418,7 @@ func (b *TelegramBot) StopPolling() error {
 // Вспомогательные методы
 
 // convertToRouterParams конвертирует HandlerParams в router.HandlerParams
-func convertToRouterParams(params middlewares.HandlerParams) router.HandlerParams {
+func convertToRouterParams(params handlers.HandlerParams) router.HandlerParams {
 	return router.HandlerParams{
 		User:     params.User,
 		ChatID:   params.ChatID,
@@ -424,6 +452,11 @@ func (b *TelegramBot) GetRouter() router.Router {
 // GetAuthMiddleware возвращает middleware аутентификации
 func (b *TelegramBot) GetAuthMiddleware() *middlewares.AuthMiddleware {
 	return b.authMiddleware
+}
+
+// GetSubscriptionMiddleware возвращает middleware подписки
+func (b *TelegramBot) GetSubscriptionMiddleware() *middlewares.SubscriptionMiddleware {
+	return b.subscriptionMiddleware
 }
 
 // SetMyCommands устанавливает меню команд в Telegram

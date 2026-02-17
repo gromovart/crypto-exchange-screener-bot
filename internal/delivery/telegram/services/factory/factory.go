@@ -60,6 +60,7 @@ func (f *ServiceFactory) CreateProfileService() profile.Service {
 func (f *ServiceFactory) CreateCounterService() counter.Service {
 	return counter.NewService(
 		f.userService,
+		f.subscriptionService,
 		f.formatterProvider,
 		f.messageSender,
 		f.buttonBuilder,
