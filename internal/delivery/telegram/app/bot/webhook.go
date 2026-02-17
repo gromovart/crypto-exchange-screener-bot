@@ -11,6 +11,8 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // WebhookServer - сервер для обработки webhook запросов от Telegram
@@ -112,15 +114,192 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	var update telegram.TelegramUpdate
-	if err := json.Unmarshal(body, &update); err != nil {
+	// ⭐ Парсим обновление с детальной структурой как в polling.go
+	var updateData struct {
+		UpdateID int `json:"update_id"`
+		Message  *struct {
+			MessageID int `json:"message_id"`
+			From      *struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			} `json:"from"`
+			Chat *struct {
+				ID int64 `json:"id"`
+			} `json:"chat"`
+			Text              string `json:"text"`
+			SuccessfulPayment *struct {
+				Currency                string `json:"currency"`
+				TotalAmount             int    `json:"total_amount"`
+				InvoicePayload          string `json:"invoice_payload"`
+				TelegramPaymentChargeID string `json:"telegram_payment_charge_id"`
+				ProviderPaymentChargeID string `json:"provider_payment_charge_id"`
+			} `json:"successful_payment"`
+		} `json:"message"`
+		CallbackQuery *struct {
+			ID   string `json:"id"`
+			From *struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			} `json:"from"`
+			Message *struct {
+				MessageID int `json:"message_id"`
+				Chat      *struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			} `json:"message"`
+			Data string `json:"data"`
+		} `json:"callback_query"`
+		PreCheckoutQuery *struct {
+			ID   string `json:"id"`
+			From *struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			} `json:"from"`
+			Currency       string `json:"currency"`
+			TotalAmount    int    `json:"total_amount"`
+			InvoicePayload string `json:"invoice_payload"`
+		} `json:"pre_checkout_query"`
+	}
+
+	if err := json.Unmarshal(body, &updateData); err != nil {
 		log.Printf("❌ Failed to parse webhook update: %v", err)
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return
 	}
 
-	// Обработка обновления через новую систему
-	if err := ws.bot.HandleUpdate(&update); err != nil {
+	// ⭐ ЛОГ ДЛЯ ОТЛАДКИ как в polling.go
+	logger.Warn("📩 [WEBHOOK] Получено обновление ID=%d", updateData.UpdateID)
+	logger.Warn("   • Message: %v", updateData.Message != nil)
+	logger.Warn("   • Callback: %v", updateData.CallbackQuery != nil)
+	logger.Warn("   • PreCheckout: %v", updateData.PreCheckoutQuery != nil)
+
+	// Если есть successful_payment, логируем детали
+	if updateData.Message != nil && updateData.Message.SuccessfulPayment != nil {
+		logger.Warn("💰💰💰 [WEBHOOK] SUCCESSFUL PAYMENT DETECTED!")
+		logger.Warn("   • From ID: %d", updateData.Message.From.ID)
+		logger.Warn("   • Amount: %d %s", updateData.Message.SuccessfulPayment.TotalAmount, updateData.Message.SuccessfulPayment.Currency)
+		logger.Warn("   • Payload: %s", updateData.Message.SuccessfulPayment.InvoicePayload)
+		logger.Warn("   • TelegramChargeID: %s", updateData.Message.SuccessfulPayment.TelegramPaymentChargeID)
+		logger.Warn("   • ProviderChargeID: %s", updateData.Message.SuccessfulPayment.ProviderPaymentChargeID)
+	}
+
+	// ⭐ Конвертируем в telegram.TelegramUpdate как в polling.go
+	middlewareUpdate := &telegram.TelegramUpdate{
+		UpdateID: updateData.UpdateID,
+	}
+
+	// Обработка Message
+	if updateData.Message != nil {
+		msg := &telegram.Message{
+			MessageID: int64(updateData.Message.MessageID),
+			Text:      updateData.Message.Text,
+		}
+
+		if updateData.Message.From != nil {
+			msg.From = telegram.User{
+				ID:        updateData.Message.From.ID,
+				Username:  updateData.Message.From.Username,
+				FirstName: updateData.Message.From.FirstName,
+				LastName:  updateData.Message.From.LastName,
+			}
+		}
+
+		if updateData.Message.Chat != nil {
+			msg.Chat = telegram.Chat{
+				ID: updateData.Message.Chat.ID,
+			}
+		}
+
+		if updateData.Message.SuccessfulPayment != nil {
+			msg.SuccessfulPayment = &telegram.SuccessfulPayment{
+				Currency:                updateData.Message.SuccessfulPayment.Currency,
+				TotalAmount:             updateData.Message.SuccessfulPayment.TotalAmount,
+				InvoicePayload:          updateData.Message.SuccessfulPayment.InvoicePayload,
+				TelegramPaymentChargeID: updateData.Message.SuccessfulPayment.TelegramPaymentChargeID,
+				ProviderPaymentChargeID: updateData.Message.SuccessfulPayment.ProviderPaymentChargeID,
+			}
+		}
+
+		middlewareUpdate.Message = msg
+	}
+
+	// Обработка CallbackQuery
+	if updateData.CallbackQuery != nil {
+		callback := &telegram.CallbackQueryStruct{
+			ID:   updateData.CallbackQuery.ID,
+			Data: updateData.CallbackQuery.Data,
+		}
+
+		if updateData.CallbackQuery.From != nil {
+			callback.From = &struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			}{
+				ID:        updateData.CallbackQuery.From.ID,
+				Username:  updateData.CallbackQuery.From.Username,
+				FirstName: updateData.CallbackQuery.From.FirstName,
+				LastName:  updateData.CallbackQuery.From.LastName,
+			}
+		}
+
+		if updateData.CallbackQuery.Message != nil {
+			callback.Message = &struct {
+				MessageID int `json:"message_id"`
+				Chat      *struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			}{
+				MessageID: updateData.CallbackQuery.Message.MessageID,
+			}
+
+			if updateData.CallbackQuery.Message.Chat != nil {
+				callback.Message.Chat = &struct {
+					ID int64 `json:"id"`
+				}{
+					ID: updateData.CallbackQuery.Message.Chat.ID,
+				}
+			}
+		}
+
+		middlewareUpdate.CallbackQuery = callback
+	}
+
+	// Обработка PreCheckoutQuery
+	if updateData.PreCheckoutQuery != nil {
+		preCheckout := &telegram.PreCheckoutQuery{
+			ID:             updateData.PreCheckoutQuery.ID,
+			Currency:       updateData.PreCheckoutQuery.Currency,
+			TotalAmount:    updateData.PreCheckoutQuery.TotalAmount,
+			InvoicePayload: updateData.PreCheckoutQuery.InvoicePayload,
+		}
+
+		if updateData.PreCheckoutQuery.From != nil {
+			preCheckout.From = &struct {
+				ID        int64  `json:"id"`
+				Username  string `json:"username"`
+				FirstName string `json:"first_name"`
+				LastName  string `json:"last_name"`
+			}{
+				ID:        updateData.PreCheckoutQuery.From.ID,
+				Username:  updateData.PreCheckoutQuery.From.Username,
+				FirstName: updateData.PreCheckoutQuery.From.FirstName,
+				LastName:  updateData.PreCheckoutQuery.From.LastName,
+			}
+		}
+
+		middlewareUpdate.PreCheckoutQuery = preCheckout
+	}
+
+	// Обработка обновления через бота
+	if err := ws.bot.HandleUpdate(middlewareUpdate); err != nil {
 		log.Printf("❌ Failed to handle update: %v", err)
 	}
 
