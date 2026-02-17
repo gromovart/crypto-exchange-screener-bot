@@ -276,6 +276,8 @@ config-init:
 	@echo "  - TG_CHAT_ID=your_telegram_chat_id_here"
 	@echo "  - TELEGRAM_ENABLED=true/false"
 	@echo "  - LOG_LEVEL=debug/info/warn/error"
+	@echo "  - LOG_FILE=logs/app.log    # Основной лог-файл"
+	@echo "  - LOG_ERROR_FILE=logs/error.log # Файл для ошибок"
 
 ## config-edit: Редактировать конфигурацию текущего окружения
 config-edit:
@@ -349,6 +351,23 @@ check-config:
 		echo "✅ LOG_LEVEL: $$LOG"; \
 	else \
 		echo "⚠️  LOG_LEVEL не указан"; \
+	fi
+
+	@# Проверка настроек логов
+	@echo ""
+	@echo "📋 НАСТРОЙКИ ЛОГИРОВАНИЯ:"
+	@if grep -q "LOG_FILE=" "$(ENV_FILE)"; then \
+		LOG_FILE=$$(grep "LOG_FILE=" "$(ENV_FILE)" | cut -d= -f2); \
+		echo "✅ LOG_FILE: $$LOG_FILE"; \
+	else \
+		echo "⚠️  LOG_FILE не указан (будет использован logs/app.log)"; \
+	fi
+
+	@if grep -q "LOG_ERROR_FILE=" "$(ENV_FILE)"; then \
+		ERR_FILE=$$(grep "LOG_ERROR_FILE=" "$(ENV_FILE)" | cut -d= -f2); \
+		echo "✅ LOG_ERROR_FILE: $$ERR_FILE"; \
+	else \
+		echo "⚠️  LOG_ERROR_FILE не указан (будет использован logs/error.log)"; \
 	fi
 
 	@echo ""

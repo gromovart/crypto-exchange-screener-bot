@@ -114,7 +114,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	// ⭐ Парсим обновление с детальной структурой как в polling.go
+	// ⭐ ТОЧНО КАК В POLLING.GO - парсим обновление
 	var updateData struct {
 		UpdateID int `json:"update_id"`
 		Message  *struct {
@@ -173,7 +173,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ⭐ ЛОГ ДЛЯ ОТЛАДКИ как в polling.go
+	// ⭐ ЛОГИРУЕМ КАК В POLLING.GO
 	logger.Warn("📩 [WEBHOOK] Получено обновление ID=%d", updateData.UpdateID)
 	logger.Warn("   • Message: %v", updateData.Message != nil)
 	logger.Warn("   • Callback: %v", updateData.CallbackQuery != nil)
@@ -189,7 +189,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		logger.Warn("   • ProviderChargeID: %s", updateData.Message.SuccessfulPayment.ProviderPaymentChargeID)
 	}
 
-	// ⭐ Конвертируем в telegram.TelegramUpdate как в polling.go
+	// ⭐ КОНВЕРТИРУЕМ В TELEGRAM.TELEGRAMUPDATE КАК В POLLING.GO
 	middlewareUpdate := &telegram.TelegramUpdate{
 		UpdateID: updateData.UpdateID,
 	}
@@ -234,10 +234,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		callback := &telegram.CallbackQueryStruct{
 			ID:   updateData.CallbackQuery.ID,
 			Data: updateData.CallbackQuery.Data,
-		}
-
-		if updateData.CallbackQuery.From != nil {
-			callback.From = &struct {
+			From: &struct {
 				ID        int64  `json:"id"`
 				Username  string `json:"username"`
 				FirstName string `json:"first_name"`
@@ -247,7 +244,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				Username:  updateData.CallbackQuery.From.Username,
 				FirstName: updateData.CallbackQuery.From.FirstName,
 				LastName:  updateData.CallbackQuery.From.LastName,
-			}
+			},
 		}
 
 		if updateData.CallbackQuery.Message != nil {
@@ -279,10 +276,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			Currency:       updateData.PreCheckoutQuery.Currency,
 			TotalAmount:    updateData.PreCheckoutQuery.TotalAmount,
 			InvoicePayload: updateData.PreCheckoutQuery.InvoicePayload,
-		}
-
-		if updateData.PreCheckoutQuery.From != nil {
-			preCheckout.From = &struct {
+			From: &struct {
 				ID        int64  `json:"id"`
 				Username  string `json:"username"`
 				FirstName string `json:"first_name"`
@@ -292,7 +286,7 @@ func (ws *WebhookServer) handleWebhook(w http.ResponseWriter, r *http.Request) {
 				Username:  updateData.PreCheckoutQuery.From.Username,
 				FirstName: updateData.PreCheckoutQuery.From.FirstName,
 				LastName:  updateData.PreCheckoutQuery.From.LastName,
-			}
+			},
 		}
 
 		middlewareUpdate.PreCheckoutQuery = preCheckout

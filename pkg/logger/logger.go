@@ -21,27 +21,44 @@ const (
 )
 
 type Logger struct {
-	logFile   *os.File
-	console   io.Writer
-	logLevel  string // Уровень логирования
-	debugMode bool
+	appLogFile   *os.File // для всех логов
+	errorLogFile *os.File // только для ошибок
+	console      io.Writer
+	logLevel     string
+	debugMode    bool
 }
 
 func NewLogger(logPath string, logLevel string, debug bool) (*Logger, error) {
-	os.MkdirAll("logs", 0755)
-
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, err
+	// Всегда создаем директорию logs
+	if err := os.MkdirAll("logs", 0755); err != nil {
+		return nil, fmt.Errorf("не удалось создать директорию logs: %w", err)
 	}
 
-	multiWriter := io.MultiWriter(os.Stdout, file)
+	// Игнорируем переданный logPath, используем только стандартные имена
+	appLogPath := "logs/app.log"
+	errorLogPath := "logs/error.log"
+
+	// Основной лог-файл (app.log)
+	appFile, err := os.OpenFile(appLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось открыть app.log: %w", err)
+	}
+
+	// Файл для ошибок (error.log)
+	errorFile, err := os.OpenFile(errorLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		appFile.Close()
+		return nil, fmt.Errorf("не удалось открыть error.log: %w", err)
+	}
+
+	multiWriter := io.MultiWriter(os.Stdout, appFile)
 
 	return &Logger{
-		logFile:   file,
-		console:   multiWriter,
-		logLevel:  strings.ToUpper(logLevel),
-		debugMode: debug,
+		appLogFile:   appFile,
+		errorLogFile: errorFile,
+		console:      multiWriter,
+		logLevel:     strings.ToUpper(logLevel),
+		debugMode:    debug,
 	}, nil
 }
 
@@ -59,10 +76,15 @@ func (l *Logger) shouldLog(level string) bool {
 	msgPriority, ok2 := levelPriority[level]
 
 	if !ok1 || !ok2 {
-		return true // Если неизвестный уровень, логируем всё
+		return true
 	}
 
 	return msgPriority >= currentPriority
+}
+
+// isErrorLevel проверяет, является ли уровень ошибкой
+func isErrorLevel(level string) bool {
+	return level == LevelError || level == LevelFatal
 }
 
 func (l *Logger) log(level string, format string, v ...interface{}) {
@@ -92,7 +114,17 @@ func (l *Logger) log(level string, format string, v ...interface{}) {
 		reset = "\033[0m"
 	}
 
-	log.Printf("%s[%s] %s %s%s", color, level, timestamp, msg, reset)
+	// Формируем строку лога
+	logLine := fmt.Sprintf("%s[%s] %s %s%s\n", color, level, timestamp, msg, reset)
+
+	// Пишем в консоль и app.log
+	fmt.Fprint(l.console, logLine)
+
+	// Если это ошибка - пишем также в error.log
+	if isErrorLevel(level) && l.errorLogFile != nil {
+		errorLine := fmt.Sprintf("[%s] %s %s\n", level, timestamp, msg)
+		fmt.Fprint(l.errorLogFile, errorLine)
+	}
 }
 
 // Методы для разных уровней
@@ -142,7 +174,10 @@ func (l *Logger) Signal(symbol, direction string, change, confidence float64, pe
 }
 
 func (l *Logger) Close() {
-	if l.logFile != nil {
-		l.logFile.Close()
+	if l.appLogFile != nil {
+		l.appLogFile.Close()
+	}
+	if l.errorLogFile != nil {
+		l.errorLogFile.Close()
 	}
 }

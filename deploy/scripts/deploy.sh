@@ -1779,6 +1779,56 @@ EOF
     log_info "Проверка завершена"
 }
 
+# Настройка прав доступа к таблицам PostgreSQL
+setup_postgresql_permissions() {
+    log_step "Настройка прав доступа к таблицам PostgreSQL..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+#!/bin/bash
+set -e
+
+DB_NAME="${DB_NAME}"
+DB_USER="${DB_USER}"
+
+echo "🔐 Настройка прав для пользователя \${DB_USER} на базу \${DB_NAME}..."
+
+# Даем права на схему public
+sudo -u postgres psql -d \${DB_NAME} << SQL
+-- Права на схему
+GRANT ALL ON SCHEMA public TO \${DB_USER};
+ALTER SCHEMA public OWNER TO \${DB_USER};
+
+-- Права на все существующие таблицы
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \${DB_USER};
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \${DB_USER};
+
+-- Права на будущие таблицы
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \${DB_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \${DB_USER};
+
+-- Делаем пользователя владельцем всех таблиц
+DO \$\$
+DECLARE
+    t text;
+BEGIN
+    FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+    LOOP
+        EXECUTE format('ALTER TABLE public.%I OWNER TO \${DB_USER};', t);
+    END LOOP;
+END\$\$;
+SQL
+
+echo "✅ Права PostgreSQL настроены"
+
+# Проверка прав
+echo "🔍 Проверка прав доступа..."
+sudo -u postgres psql -d \${DB_NAME} -c "\du \${DB_USER}"
+echo "✅ Права проверены"
+EOF
+
+    log_info "Права PostgreSQL настроены"
+}
+
 # Основная функция
 main() {
     log_step "Начало развертывания Crypto Exchange Screener Bot с Webhook"
@@ -1799,6 +1849,7 @@ main() {
     check_ssh_connection
     install_dependencies
     setup_postgresql
+    setup_postgresql_permissions
     setup_redis
     setup_ssl_certificates  # ОБНОВЛЕННАЯ ФУНКЦИЯ
     setup_firewall
