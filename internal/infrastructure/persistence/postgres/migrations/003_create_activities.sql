@@ -751,8 +751,17 @@ CREATE POLICY admin_activities_admin_only ON admin_activities
           AND users.role = 'admin'
     ));
 
--- Создаем роль для чтения логов
-CREATE ROLE activity_monitor;
+-- ⭐ ИСПРАВЛЕНО: Создаем роль для чтения логов (только если не существует)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'activity_monitor') THEN
+        CREATE ROLE activity_monitor;
+        RAISE NOTICE '✅ Роль activity_monitor создана';
+    ELSE
+        RAISE NOTICE 'ℹ️ Роль activity_monitor уже существует';
+    END IF;
+END $$;
+
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO activity_monitor;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO activity_monitor;
 

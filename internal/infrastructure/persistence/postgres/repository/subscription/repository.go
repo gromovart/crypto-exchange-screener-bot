@@ -36,6 +36,7 @@ func NewSubscriptionRepository(db *sqlx.DB) SubscriptionRepository {
 	return &subscriptionRepositoryImpl{db: db}
 }
 
+// ✅ ИСПРАВЛЕНО: убраны поля plan_name и plan_code
 // Create создает новую подписку
 func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *models.UserSubscription) error {
 	// Сериализуем Metadata в JSON
@@ -47,11 +48,11 @@ func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *m
 	query := `
 	INSERT INTO user_subscriptions (
 		user_id, plan_id, payment_id,
-		plan_name, plan_code, status,
+		status,
 		current_period_start, current_period_end,
 		cancel_at_period_end, metadata
 	) VALUES (
-		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+		$1, $2, $3, $4, $5, $6, $7, $8
 	) RETURNING id, created_at, updated_at
 	`
 
@@ -59,8 +60,6 @@ func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *m
 		subscription.UserID,
 		subscription.PlanID,
 		subscription.PaymentID,
-		subscription.PlanName,
-		subscription.PlanCode,
 		subscription.Status,
 		subscription.CurrentPeriodStart,
 		subscription.CurrentPeriodEnd,
@@ -75,6 +74,7 @@ func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *m
 	return nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetByID получает подписку по ID
 func (r *subscriptionRepositoryImpl) GetByID(ctx context.Context, id int) (*models.UserSubscription, error) {
 	query := `
@@ -131,6 +131,7 @@ func (r *subscriptionRepositoryImpl) GetByID(ctx context.Context, id int) (*mode
 	return &subscription, nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetByUserID получает последнюю подписку пользователя
 func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int) (*models.UserSubscription, error) {
 	query := `
@@ -189,6 +190,7 @@ func (r *subscriptionRepositoryImpl) GetByUserID(ctx context.Context, userID int
 	return &subscription, nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetActiveByUserID получает активную подписку пользователя
 func (r *subscriptionRepositoryImpl) GetActiveByUserID(ctx context.Context, userID int) (*models.UserSubscription, error) {
 	query := `
@@ -254,6 +256,7 @@ func (r *subscriptionRepositoryImpl) GetActiveByUserID(ctx context.Context, user
 	return &subscription, nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // Update обновляет подписку
 func (r *subscriptionRepositoryImpl) Update(ctx context.Context, subscription *models.UserSubscription) error {
 	query := `
@@ -301,6 +304,7 @@ func (r *subscriptionRepositoryImpl) Update(ctx context.Context, subscription *m
 	return nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // UpdateStatus обновляет статус подписки
 func (r *subscriptionRepositoryImpl) UpdateStatus(ctx context.Context, id int, status string) error {
 	query := `
@@ -322,6 +326,7 @@ func (r *subscriptionRepositoryImpl) UpdateStatus(ctx context.Context, id int, s
 	return nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // Cancel отменяет подписку
 func (r *subscriptionRepositoryImpl) Cancel(ctx context.Context, id int, cancelAtPeriodEnd bool) error {
 	query := `
@@ -343,6 +348,7 @@ func (r *subscriptionRepositoryImpl) Cancel(ctx context.Context, id int, cancelA
 	return nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetExpiringSubscriptions получает подписки, срок которых истекает в течение N дней
 func (r *subscriptionRepositoryImpl) GetExpiringSubscriptions(ctx context.Context, daysBefore int) ([]*models.UserSubscription, error) {
 	query := `
@@ -396,6 +402,7 @@ func (r *subscriptionRepositoryImpl) GetExpiringSubscriptions(ctx context.Contex
 	return subscriptions, nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetExpiredSubscriptions получает истекшие подписки
 func (r *subscriptionRepositoryImpl) GetExpiredSubscriptions(ctx context.Context) ([]*models.UserSubscription, error) {
 	query := `
@@ -449,6 +456,7 @@ func (r *subscriptionRepositoryImpl) GetExpiredSubscriptions(ctx context.Context
 	return subscriptions, nil
 }
 
+// ✅ БЕЗ ИЗМЕНЕНИЙ
 // GetByPaymentID получает подписку по ID платежа
 func (r *subscriptionRepositoryImpl) GetByPaymentID(ctx context.Context, paymentID int64) (*models.UserSubscription, error) {
 	query := `

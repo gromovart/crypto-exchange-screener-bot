@@ -142,6 +142,10 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 	now := time.Now()
 	expiresAt := now.Add(30 * 24 * time.Hour)
 
+	// ⭐ Правильная конвертация Stars → USD (курс 36.23 Stars = 1 USD)
+	usdAmount := float64(request.StarsAmount) / 36.23
+	centsAmount := int(usdAmount * 100) // 500/36.23*100 = 1380 центов = $13.80
+
 	// ⭐ Создаем metadata из invoiceData
 	metadataMap := map[string]interface{}{
 		"invoice_data": map[string]interface{}{
@@ -155,6 +159,12 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 			"user_id":    result.UserID,
 			"plan_id":    result.PlanID,
 			"success":    result.Success,
+		},
+		"conversion": map[string]interface{}{
+			"rate":         36.23,
+			"stars_amount": request.StarsAmount,
+			"usd_amount":   usdAmount,
+			"cents":        centsAmount,
 		},
 		"processed_at": now,
 	}
@@ -172,9 +182,9 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		ExternalID:  request.TelegramPaymentID,
 		Title:       fmt.Sprintf("Подписка %s", result.PlanID),
 		Description: fmt.Sprintf("Оплата подписки %s через Telegram Stars", result.PlanID),
-		AmountUSD:   float64(request.StarsAmount) / 100,
-		StarsAmount: request.StarsAmount,
-		FiatAmount:  request.StarsAmount * 100,
+		AmountUSD:   usdAmount,           // ⭐ $13.80 для 500 Stars
+		StarsAmount: request.StarsAmount, // ⭐ 500 Stars
+		FiatAmount:  centsAmount,         // ⭐ 1380 центов
 		Currency:    "USD",
 		Status:      models.InvoiceStatusPaid,
 		Provider:    models.InvoiceProviderTelegram,
@@ -191,7 +201,8 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		s.logger.Error("❌ Не удалось создать инвойс: %v", err)
 		return nil, fmt.Errorf("ошибка создания инвойса: %w", err)
 	}
-	s.logger.Info("✅ Инвойс создан в БД: ID=%d, ExternalID=%s", invoice.ID, request.TelegramPaymentID)
+	s.logger.Info("✅ Инвойс создан в БД: ID=%d, ExternalID=%s, Stars=%d, USD=$%.2f",
+		invoice.ID, request.TelegramPaymentID, request.StarsAmount, usdAmount)
 
 	// ⭐ 2. Теперь создаем платеж с invoice_id
 	payment := &models.Payment{
@@ -199,10 +210,10 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		SubscriptionID: nil,
 		InvoiceID:      &invoice.ID, // Заполняем ID созданного инвойса
 		ExternalID:     request.TelegramPaymentID,
-		Amount:         float64(request.StarsAmount) / 100,
+		Amount:         usdAmount, // ⭐ $13.80
 		Currency:       models.CurrencyUSD,
-		StarsAmount:    request.StarsAmount,
-		FiatAmount:     request.StarsAmount * 100,
+		StarsAmount:    request.StarsAmount, // ⭐ 500
+		FiatAmount:     centsAmount,         // ⭐ 1380 центов
 		PaymentType:    models.PaymentTypeStars,
 		Status:         models.PaymentStatusCompleted,
 		Provider:       "telegram_stars",
@@ -215,14 +226,17 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		ExpiresAt:      &expiresAt,
 	}
 
+	s.logger.Info("💾 Конвертация: %d Stars = $%.2f (%d центов) по курсу 36.23",
+		request.StarsAmount, usdAmount, centsAmount)
+
 	if err := s.paymentRepo.Create(ctx, payment); err != nil {
 		s.logger.Error("❌ Не удалось сохранить платеж в БД: %v", err)
 		return nil, fmt.Errorf("ошибка сохранения платежа: %w", err)
 	}
 
 	result.InvoiceID = fmt.Sprintf("%d", payment.ID)
-	s.logger.Info("✅ Платеж сохранен в БД: ID=%d, ExternalID=%s, InvoiceID=%d",
-		payment.ID, request.TelegramPaymentID, invoice.ID)
+	s.logger.Info("✅ Платеж сохранен в БД: ID=%d, ExternalID=%s, InvoiceID=%d, Amount=$%.2f",
+		payment.ID, request.TelegramPaymentID, invoice.ID, usdAmount)
 
 	return result, nil
 }

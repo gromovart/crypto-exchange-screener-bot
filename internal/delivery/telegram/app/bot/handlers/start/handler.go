@@ -245,9 +245,9 @@ func (h *startHandlerImpl) parseUserID(userIDStr string) (int, error) {
 // getPlanName возвращает читаемое название плана по ID
 func (h *startHandlerImpl) getPlanName(planID string) string {
 	plans := map[string]string{
-		"basic":      "📱 Basic",
-		"pro":        "🚀 Pro",
-		"enterprise": "🏢 Enterprise",
+		"basic":      "📱 Доступ на 1 месяц",
+		"pro":        "🚀 Доступ на 3 месяца",
+		"enterprise": "🏢 Доступ на 12 месяцев",
 	}
 	if name, exists := plans[planID]; exists {
 		return name

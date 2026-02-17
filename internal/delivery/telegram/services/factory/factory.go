@@ -13,6 +13,7 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -124,4 +125,21 @@ func (f *ServiceFactory) Validate() bool {
 // GetUserService возвращает UserService (геттер для приватного поля)
 func (f *ServiceFactory) GetUserService() *users.Service {
 	return f.userService
+}
+
+// GetSubscriptionService возвращает SubscriptionService
+func (f *ServiceFactory) GetSubscriptionService() *subscription.Service {
+	return f.subscriptionService
+}
+
+// GetSubscriptionRepository возвращает SubscriptionRepository через сервис
+func (f *ServiceFactory) GetSubscriptionRepository() subscription_repo.SubscriptionRepository {
+	if f.subscriptionService == nil {
+		logger.Warn("⚠️ GetSubscriptionRepository: subscriptionService is nil")
+		return nil
+	}
+
+	// Получаем репозиторий через сервис
+	// Нужно добавить метод GetRepository() в subscription.Service
+	return f.subscriptionService.GetRepository()
 }

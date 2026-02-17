@@ -133,18 +133,18 @@ func (h *paymentConfirmHandler) getPlanByID(planID string) *SubscriptionPlan {
 	plans := map[string]*SubscriptionPlan{
 		"basic": {
 			ID:         "basic",
-			Name:       "📱 Basic",
-			PriceCents: 299, // $2.99 = 3 Stars
+			Name:       "📱 Доступ на 1 месяц",
+			PriceCents: 1500, // ⭐ $15.00 = 1500 центов
 		},
 		"pro": {
 			ID:         "pro",
-			Name:       "🚀 Pro",
-			PriceCents: 999, // $9.99 = 10 Stars
+			Name:       "🚀 Доступ на 3 месяца",
+			PriceCents: 3000, // ⭐ $30.00 = 3000 центов
 		},
 		"enterprise": {
 			ID:         "enterprise",
-			Name:       "🏢 Enterprise",
-			PriceCents: 2499, // $24.99 = 25 Stars
+			Name:       "🏢 Доступ на 12 месяцев",
+			PriceCents: 7500, // ⭐ $75.00 = 7500 центов
 		},
 	}
 	return plans[planID]
@@ -198,14 +198,7 @@ func (h *paymentConfirmHandler) createPaymentKeyboard(planID, invoiceLink string
 // calculateStars рассчитывает количество Stars с учетом комиссии Telegram
 // Согласно документации, комиссия уже включена в цену Stars для пользователя
 func (h *paymentConfirmHandler) calculateStars(usdCents int) int {
-	// 1 Star = $0.01 = 1 цент
-	baseStars := usdCents / 100
-	if baseStars < 1 {
-		baseStars = 1
-	}
-
-	// Комиссия Telegram уже учтена в стоимости Stars для пользователя
-	return baseStars
+	return usdCents / 3 // 1500/3 = 500, 3000/3 = 1000, 7500/3 = 2500
 }
 
 // SubscriptionPlan вспомогательный тип для планов подписки

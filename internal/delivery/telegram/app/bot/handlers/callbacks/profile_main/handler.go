@@ -117,11 +117,11 @@ func (h *profileMainHandler) createProfileKeyboard() interface{} {
 func (h *profileMainHandler) GetSubscriptionTierDisplayName(tier string) string {
 	switch tier {
 	case "enterprise":
-		return "🏢 Enterprise"
+		return "🏢 Доступ на 12 месяцев"
 	case "pro":
-		return "🚀 Pro"
+		return "🚀 Доступ на 3 месяца"
 	case "basic":
-		return "📱 Basic"
+		return "📱 Доступ на 1 месяц"
 	case "free":
 		return "🆓 Free"
 	default:

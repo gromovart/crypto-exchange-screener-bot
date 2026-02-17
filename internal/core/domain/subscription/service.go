@@ -173,8 +173,6 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 		UserID:             userID,
 		PlanID:             plan.ID,
 		PaymentID:          paymentID,
-		PlanName:           plan.Name,
-		PlanCode:           plan.Code,
 		Status:             models.StatusActive,
 		CurrentPeriodStart: &now,
 		CurrentPeriodEnd:   &periodEnd,
@@ -263,6 +261,9 @@ func (s *Service) UpgradeSubscription(ctx context.Context, userID int, newPlanCo
 	existing.Metadata["previous_plan"] = oldPlanCode
 	existing.Metadata["period_days"] = int(period.Hours() / 24)
 	existing.Metadata["auto_renew"] = s.config.AutoRenew && newPlanCode != models.PlanFree
+
+	existing.Metadata["new_plan_name"] = newPlan.Name // ⭐ Сохраняем в metadata
+	existing.Metadata["new_plan_code"] = newPlan.Code // ⭐ Сохраняем в metadata
 
 	// Обновляем в БД
 	if err := s.subRepo.Update(ctx, existing); err != nil {
@@ -504,4 +505,38 @@ func (s *Service) startSubscriptionChecker() {
 func (s *Service) GetUserSubscription(userID int) (*models.UserSubscription, error) {
 	ctx := context.Background()
 	return s.GetActiveSubscription(ctx, userID)
+}
+
+// GetRepository возвращает репозиторий подписок
+func (s *Service) GetRepository() subscription_repo.SubscriptionRepository {
+	return s.subRepo
+}
+
+// GetPlanByID возвращает план по ID
+func (s *Service) GetPlanByID(ctx context.Context, planID int) (*models.Plan, error) {
+	// Сначала ищем в кэше планов
+	s.mu.RLock()
+	for _, plan := range s.plans {
+		if plan.ID == planID {
+			s.mu.RUnlock()
+			return plan, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	// Если не нашли в памяти, ищем в БД
+	plan, err := s.planRepo.GetByID(ctx, planID)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения плана по ID %d: %w", planID, err)
+	}
+	if plan == nil {
+		return nil, fmt.Errorf("план не найден: %d", planID)
+	}
+
+	// Сохраняем в кэш
+	s.mu.Lock()
+	s.plans[plan.Code] = plan
+	s.mu.Unlock()
+
+	return plan, nil
 }

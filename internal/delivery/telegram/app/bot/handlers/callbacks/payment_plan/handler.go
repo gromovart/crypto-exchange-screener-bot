@@ -69,24 +69,36 @@ func (h *paymentPlanHandler) getPlanByID(planID string) *SubscriptionPlan {
 	plans := map[string]*SubscriptionPlan{
 		"basic": {
 			ID:          "basic",
-			Name:        "📱 Basic",
+			Name:        "📱 Доступ на 1 месяц",
 			Description: "Идеально для начала",
-			PriceCents:  299,
-			Features:    []string{"10 символов", "50 сигналов/день", "Базовые уведомления"},
+			PriceCents:  1500,
+			Features: []string{
+				"✅ Неограниченные сигналы",
+				"✅ Все виды уведомлений",
+			},
 		},
 		"pro": {
 			ID:          "pro",
-			Name:        "🚀 Pro",
+			Name:        "🚀 Доступ на 3 месяца",
 			Description: "Для активных трейдеров",
-			PriceCents:  999,
-			Features:    []string{"50 символов", "200 сигналов/день", "Расширенные уведомления", "Приоритетная поддержка"},
+			PriceCents:  3000,
+			Features: []string{
+				"✅ Неограниченные сигналы",
+				"✅ Все виды уведомлений",
+				"✅ Приоритетная поддержка",
+			},
 		},
 		"enterprise": {
 			ID:          "enterprise",
-			Name:        "🏢 Enterprise",
+			Name:        "🏢 Доступ на 12 месяцев",
 			Description: "Максимальные возможности",
-			PriceCents:  2499,
-			Features:    []string{"Неограниченные символы", "1000+ сигналов/день", "Кастомные настройки", "API доступ"},
+			PriceCents:  7500,
+			Features: []string{
+				"✅ Неограниченные сигналы",
+				"✅ Все виды уведомлений",
+				"✅ Кастомные настройки",
+				"✅ Приоритетная поддержка 24/7",
+			},
 		},
 	}
 
@@ -135,15 +147,7 @@ func (h *paymentPlanHandler) createConfirmationKeyboard(planID string) interface
 
 // calculateStars рассчитывает количество Stars с учетом комиссии
 func (h *paymentPlanHandler) calculateStars(usdCents int) int {
-	baseStars := usdCents / 100
-	if baseStars < 1 {
-		baseStars = 1
-	}
-	commission := baseStars / 20 // 5%
-	if commission < 1 {
-		commission = 1
-	}
-	return baseStars + commission
+	return usdCents / 3 // 1500/3 = 500, 3000/3 = 1000, 7500/3 = 2500
 }
 
 // Вспомогательный тип

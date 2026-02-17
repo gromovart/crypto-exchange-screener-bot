@@ -17,16 +17,16 @@ BEGIN
         SET
             stars_price_monthly = CASE
                 WHEN code = 'free' THEN 0
-                WHEN code = 'basic' THEN 299
-                WHEN code = 'pro' THEN 999
-                WHEN code = 'enterprise' THEN 2499
+                WHEN code = 'basic' THEN 500   -- ⭐ 500 Stars = $13.80
+                WHEN code = 'pro' THEN 1000    -- ⭐ 1000 Stars = $27.60
+                WHEN code = 'enterprise' THEN 2500  -- ⭐ 2500 Stars = $69.00
                 ELSE stars_price_monthly
             END,
             stars_price_yearly = CASE
                 WHEN code = 'free' THEN 0
-                WHEN code = 'basic' THEN 2999
-                WHEN code = 'pro' THEN 9999
-                WHEN code = 'enterprise' THEN 24999
+                WHEN code = 'basic' THEN 5000   -- ⭐ 5000 Stars = $138.00
+                WHEN code = 'pro' THEN 10000    -- ⭐ 10000 Stars = $276.00
+                WHEN code = 'enterprise' THEN 25000  -- ⭐ 25000 Stars = $690.00
                 ELSE stars_price_yearly
             END
         WHERE code IN ('free', 'basic', 'pro', 'enterprise');
@@ -199,7 +199,8 @@ END $$;
 CREATE OR REPLACE FUNCTION calculate_stars_from_usd(usd_amount DECIMAL(10,2))
 RETURNS INTEGER AS $$
 BEGIN
-    RETURN FLOOR(usd_amount * 100)::INTEGER;
+    -- 1 USD = 36 Stars (500 Stars / 13.88 = 36)
+    RETURN ROUND(usd_amount * 36)::INTEGER;
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
@@ -207,7 +208,8 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE OR REPLACE FUNCTION calculate_usd_from_stars(stars_amount INTEGER)
 RETURNS DECIMAL(10,2) AS $$
 BEGIN
-    RETURN (stars_amount::DECIMAL / 100);
+    -- 36 Stars = 1 USD
+    RETURN (stars_amount::DECIMAL / 36);
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
@@ -218,12 +220,14 @@ BEGIN
     -- Проверяем только если колонки существуют
     IF NEW.stars_price_monthly IS NOT NULL AND
        NEW.stars_price_monthly != calculate_stars_from_usd(NEW.price_monthly) THEN
-        RAISE EXCEPTION 'Цена в Stars не соответствует цене в USD для месячного плана';
+        RAISE EXCEPTION 'Цена в Stars не соответствует цене в USD для месячного плана (ожидается % Stars, получено %)',
+            calculate_stars_from_usd(NEW.price_monthly), NEW.stars_price_monthly;
     END IF;
 
     IF NEW.stars_price_yearly IS NOT NULL AND
        NEW.stars_price_yearly != calculate_stars_from_usd(NEW.price_yearly) THEN
-        RAISE EXCEPTION 'Цена в Stars не соответствует цене в USD для годового плана';
+        RAISE EXCEPTION 'Цена в Stars не соответствует цене в USD для годового плана (ожидается % Stars, получено %)',
+            calculate_stars_from_usd(NEW.price_yearly), NEW.stars_price_yearly;
     END IF;
 
     RETURN NEW;
@@ -364,8 +368,8 @@ BEGIN
 END $$;
 
 -- 15. Добавляем комментарии к функциям
-COMMENT ON FUNCTION calculate_stars_from_usd IS 'Конвертирует сумму в USD в количество Telegram Stars (1 USD = 100 Stars)';
-COMMENT ON FUNCTION calculate_usd_from_stars IS 'Конвертирует количество Telegram Stars в сумму в USD (100 Stars = 1 USD)';
+COMMENT ON FUNCTION calculate_stars_from_usd IS 'Конвертирует сумму в USD в количество Telegram Stars (1 USD = 36 Stars)';
+COMMENT ON FUNCTION calculate_usd_from_stars IS 'Конвертирует количество Telegram Stars в сумму в USD (36 Stars = 1 USD)';
 COMMENT ON FUNCTION validate_plan_prices IS 'Проверяет соответствие цен в USD и Telegram Stars для планов подписки';
 COMMENT ON FUNCTION get_user_active_plan IS 'Возвращает активный план подписки пользователя или NULL если нет активной подписки';
 COMMENT ON VIEW plan_pricing_view IS 'Представление для просмотра тарифных планов с расчетами стоимости и экономии';

@@ -104,9 +104,9 @@ func (i *Invoice) MarkAsCancelled() {
 // GetPlanName возвращает читаемое название плана
 func (i *Invoice) GetPlanName() string {
 	plans := map[string]string{
-		"basic":      "📱 Basic",
-		"pro":        "🚀 Pro",
-		"enterprise": "🏢 Enterprise",
+		"basic":      "📱 Доступ на 1 месяц",
+		"pro":        "🚀 Доступ на 3 месяца",
+		"enterprise": "🏢 Доступ на 12 месяцев",
 	}
 
 	if name, exists := plans[i.PlanID]; exists {
