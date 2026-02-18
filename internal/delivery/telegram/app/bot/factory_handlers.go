@@ -47,7 +47,7 @@ import (
 	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
-	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile" // ⭐ ДОБАВЛЕНО
+	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"

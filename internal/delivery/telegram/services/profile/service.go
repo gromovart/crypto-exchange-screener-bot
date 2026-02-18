@@ -141,8 +141,6 @@ func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
 				"notify_fall":           user.NotifyFall,
 				"min_growth_threshold":  user.MinGrowthThreshold,
 				"min_fall_threshold":    user.MinFallThreshold,
-				"quiet_hours_start":     user.QuietHoursStart,
-				"quiet_hours_end":       user.QuietHoursEnd,
 				"signals_today":         user.SignalsToday,
 				"max_signals_per_day":   user.MaxSignalsPerDay,
 				"created_at":            user.CreatedAt,
@@ -275,10 +273,6 @@ func (s *serviceImpl) formatProfileMessage(
 		sb.WriteString(fmt.Sprintf("Порог роста: %.1f%%\n", user.MinGrowthThreshold))
 		sb.WriteString(fmt.Sprintf("Порог падения: %.1f%%\n", user.MinFallThreshold))
 
-		if user.QuietHoursStart > 0 || user.QuietHoursEnd > 0 {
-			sb.WriteString(fmt.Sprintf("Тихие часы: %02d:00 - %02d:00\n",
-				user.QuietHoursStart, user.QuietHoursEnd))
-		}
 	} else {
 		sb.WriteString("Статус: ❌ Выключены\n")
 	}

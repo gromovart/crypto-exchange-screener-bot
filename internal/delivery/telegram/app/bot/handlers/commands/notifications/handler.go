@@ -56,14 +56,11 @@ func (h *notificationsCommandHandler) createNotificationsMessage(user *models.Us
 			"🔊 Общие уведомления: %s\n"+
 			"%s\n"+
 			"%s\n"+
-			"⏰ Тихие часы: %02d:00 - %02d:00\n\n"+
 			"Выберите настройку для изменения:",
 		constants.AuthButtonTexts.Notifications,
 		h.BaseHandler.GetBoolDisplay(user.NotificationsEnabled),
 		notifyGrowthText,
 		notifyFallText,
-		user.QuietHoursStart,
-		user.QuietHoursEnd,
 	)
 }
 

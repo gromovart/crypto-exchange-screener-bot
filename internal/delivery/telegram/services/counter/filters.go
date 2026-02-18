@@ -190,55 +190,21 @@ func (s *serviceImpl) checkUserThresholds(user *models.User, signalType string, 
 	return true
 }
 
-// logUserSkipReason логирует причину пропуска пользователя
+// logUserSkipReason логирует причину пропуска пользователя (только для отладки, но без спама)
 func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, changePercent float64, data RawCounterData) {
-	if !user.IsActive {
-		logger.Debug("🔍 Пропуск user=%d: не активен", user.ID)
-		return
-	}
+	// ⭐ Логируем только для важных случаев (большие изменения, но не достигшие порога)
+	absChange := math.Abs(changePercent)
 
-	if !user.CanReceiveNotifications() {
-		logger.Debug("🔍 Пропуск user=%d: уведомления отключены", user.ID)
-		return
+	// Логируем если изменение больше 0.5% но не достигло порога (это интересно)
+	if absChange > 0.5 {
+		if signalType == "growth" && changePercent < user.MinGrowthThreshold {
+			logger.Debug("🔍 Пропуск user=%d: рост %.2f%% < порога %.2f%%",
+				user.ID, changePercent, user.MinGrowthThreshold)
+		} else if signalType == "fall" && absChange < user.MinFallThreshold {
+			logger.Debug("🔍 Пропуск user=%d: падение |%.2f|%% < порога %.2f%%",
+				user.ID, absChange, user.MinFallThreshold)
+		}
 	}
-
-	if signalType == SignalTypeGrowth && !user.CanReceiveGrowthSignals() {
-		logger.Debug("🔍 Пропуск user=%d: рост отключен", user.ID)
-		return
-	}
-
-	if signalType == SignalTypeFall && !user.CanReceiveFallSignals() {
-		logger.Debug("🔍 Пропуск user=%d: падение отключено", user.ID)
-		return
-	}
-
-	// Проверка порогов
-	if signalType == SignalTypeGrowth && changePercent < user.MinGrowthThreshold {
-		logger.Debug("🔍 Пропуск user=%d: порог роста не достигнут (%.2f%% < %.1f%%)",
-			user.ID, changePercent, user.MinGrowthThreshold)
-		return
-	}
-
-	if signalType == SignalTypeFall && math.Abs(changePercent) < user.MinFallThreshold {
-		logger.Debug("🔍 Пропуск user=%d: порог падения не достигнут (%.2f%% < %.1f%%)",
-			user.ID, math.Abs(changePercent), user.MinFallThreshold)
-		return
-	}
-
-	if user.IsInQuietHours() {
-		logger.Debug("🔍 Пропуск user=%d: тихие часы (%d-%d)",
-			user.ID, user.QuietHoursStart, user.QuietHoursEnd)
-		return
-	}
-
-	if user.HasReachedDailyLimit() {
-		logger.Debug("🔍 Пропуск user=%d: дневной лимит достигнут (%d/%d)",
-			user.ID, user.SignalsToday, user.MaxSignalsPerDay)
-		return
-	}
-
-	logger.Debug("🔍 Пропуск user=%d: ShouldReceiveSignal вернул false (тип: %s, изменение: %.2f%%)",
-		user.ID, signalType, changePercent)
 }
 
 // applyUserFilters применяет фильтры пользователя к данным счетчика
@@ -275,7 +241,6 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 		}
 
 		if !s.isPeriodPreferred(periodInt, user.PreferredPeriods) {
-			// ⭐ Убираем DEBUG логирование для этого случая
 			return false
 		}
 	} else {

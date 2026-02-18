@@ -497,7 +497,7 @@ func (ce *CandleEngine) recordBuildResult(result BuildResult) {
 		if result.IsNew {
 			ce.closedCandles++
 			if ce.closedCandles%100 == 0 {
-				logger.Info("📊 CandleEngine: закрыто %d свечей", ce.closedCandles)
+				logger.Debug("📊 CandleEngine: закрыто %d свечей", ce.closedCandles)
 			}
 		}
 	}

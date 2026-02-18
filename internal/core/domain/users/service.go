@@ -23,10 +23,15 @@ import (
 
 // Config конфигурация сервиса
 type Config struct {
-	DefaultMinGrowthThreshold float64
-	DefaultMaxSignalsPerDay   int
-	SessionTTL                time.Duration
-	MaxSessionsPerUser        int
+	UserDefaults struct {
+		MinGrowthThreshold float64
+		MinFallThreshold   float64
+		Language           string
+		Timezone           string
+	}
+	DefaultMaxSignalsPerDay int
+	SessionTTL              time.Duration
+	MaxSessionsPerUser      int
 }
 
 // NotificationService интерфейс для уведомлений
@@ -52,7 +57,7 @@ func NewService(
 	db *sqlx.DB,
 	cache *redis.Cache,
 	notifier NotificationService,
-	config Config,
+	cfg Config, // ⭐ Передаем локальный Config
 ) (*Service, error) {
 
 	userRepo := users_repo.NewUserRepository(db, cache)
@@ -67,7 +72,22 @@ func NewService(
 		cachePrefix:  "users:",
 		cacheTTL:     30 * time.Minute,
 		notifier:     notifier,
-		config:       config,
+		config: Config{
+			UserDefaults: struct {
+				MinGrowthThreshold float64
+				MinFallThreshold   float64
+				Language           string
+				Timezone           string
+			}{
+				MinGrowthThreshold: cfg.UserDefaults.MinGrowthThreshold, // ⭐ используем параметр cfg
+				MinFallThreshold:   cfg.UserDefaults.MinFallThreshold,   // ⭐ используем параметр cfg
+				Language:           cfg.UserDefaults.Language,           // ⭐ используем параметр cfg
+				Timezone:           cfg.UserDefaults.Timezone,           // ⭐ используем параметр cfg
+			},
+			DefaultMaxSignalsPerDay: 50,
+			SessionTTL:              24 * time.Hour,
+			MaxSessionsPerUser:      5,
+		},
 	}
 
 	logger.Info("✅ User service initialized")
@@ -86,7 +106,7 @@ func (s *Service) CreateUser(telegramID int64, username, firstName, lastName str
 		return existing, nil
 	}
 
-	// Создаем нового пользователя
+	// Создаем нового пользователя с настройками по умолчанию из конфига
 	user := &models.User{
 		TelegramID:           telegramID,
 		Username:             username,
@@ -94,7 +114,10 @@ func (s *Service) CreateUser(telegramID int64, username, firstName, lastName str
 		LastName:             lastName,
 		IsActive:             true,
 		Role:                 models.RoleUser,
-		MinGrowthThreshold:   s.config.DefaultMinGrowthThreshold,
+		MinGrowthThreshold:   s.config.UserDefaults.MinGrowthThreshold, // ⭐ из конфига
+		MinFallThreshold:     s.config.UserDefaults.MinFallThreshold,   // ⭐ из конфига
+		Language:             s.config.UserDefaults.Language,           // ⭐ из конфига
+		Timezone:             s.config.UserDefaults.Timezone,           // ⭐ из конфига
 		MaxSignalsPerDay:     s.config.DefaultMaxSignalsPerDay,
 		NotificationsEnabled: true,
 		SubscriptionTier:     models.TierFree,
@@ -172,6 +195,8 @@ func (s *Service) GetUserByTelegramID(telegramID int64) (*models.User, error) {
 	cacheKey := s.cachePrefix + fmt.Sprintf("telegram:%d", telegramID)
 	var cachedUser models.User
 	if err := s.cache.Get(context.Background(), cacheKey, &cachedUser); err == nil {
+		// Проверяем и исправляем нулевые пороги
+		s.fixUserDefaults(&cachedUser)
 		return &cachedUser, nil
 	}
 
@@ -181,12 +206,54 @@ func (s *Service) GetUserByTelegramID(telegramID int64) (*models.User, error) {
 		return nil, err
 	}
 
-	// Кэшируем
+	// Проверяем и исправляем нулевые пороги
 	if user != nil {
+		s.fixUserDefaults(user)
 		s.cacheUser(user)
 	}
 
 	return user, nil
+}
+
+// fixUserDefaults исправляет нулевые значения на значения по умолчанию из конфига
+func (s *Service) fixUserDefaults(user *models.User) {
+	fixed := false
+
+	if user.MinGrowthThreshold == 0 {
+		user.MinGrowthThreshold = s.config.UserDefaults.MinGrowthThreshold
+		logger.Warn("⚠️ Исправлен нулевой порог роста для user %d на %.1f%%",
+			user.ID, s.config.UserDefaults.MinGrowthThreshold)
+		fixed = true
+	}
+
+	if user.MinFallThreshold == 0 {
+		user.MinFallThreshold = s.config.UserDefaults.MinFallThreshold
+		logger.Warn("⚠️ Исправлен нулевой порог падения для user %d на %.1f%%",
+			user.ID, s.config.UserDefaults.MinFallThreshold)
+		fixed = true
+	}
+
+	if user.Language == "" {
+		user.Language = s.config.UserDefaults.Language
+		logger.Warn("⚠️ Исправлен пустой язык для user %d на %s",
+			user.ID, s.config.UserDefaults.Language)
+		fixed = true
+	}
+
+	if user.Timezone == "" {
+		user.Timezone = s.config.UserDefaults.Timezone
+		logger.Warn("⚠️ Исправлен пустой часовой пояс для user %d на %s",
+			user.ID, s.config.UserDefaults.Timezone)
+		fixed = true
+	}
+
+	if fixed {
+		// Сохраняем исправления в БД
+		if err := s.repo.Update(user); err != nil {
+			logger.Error("❌ Не удалось сохранить исправленные настройки для user %d: %v",
+				user.ID, err)
+		}
+	}
 }
 
 // UpdateUser обновляет данные пользователя
@@ -506,8 +573,17 @@ func (s *Service) SearchUsers(query string, limit, offset int) ([]*models.User, 
 
 // GetAllUsers возвращает всех пользователей с пагинацией
 func (s *Service) GetAllUsers(limit, offset int) ([]*models.User, error) {
-	// Исправлено: вызываем GetAll
-	return s.repo.GetAll(limit, offset)
+	users, err := s.repo.GetAll(limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	// Применяем fixUserDefaults к каждому пользователю
+	for _, user := range users {
+		s.fixUserDefaults(user)
+	}
+
+	return users, nil
 }
 
 // GetTotalUsersCount возвращает общее количество пользователей

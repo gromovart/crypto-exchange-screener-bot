@@ -94,6 +94,14 @@ type AnalyzerConfigs struct {
 	CounterAnalyzer      AnalyzerConfig `mapstructure:"COUNTER_ANALYZER"`
 }
 
+// UserDefaultsConfig - настройки пользователей по умолчанию
+type UserDefaultsConfig struct {
+	MinGrowthThreshold float64 `mapstructure:"COUNTER_GROWTH_THRESHOLD"`
+	MinFallThreshold   float64 `mapstructure:"COUNTER_FALL_THRESHOLD"`
+	Language           string  `mapstructure:"DEFAULT_LANGUAGE"`
+	Timezone           string  `mapstructure:"DEFAULT_TIMEZONE"`
+}
+
 // ============================================
 // ОСНОВНАЯ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ (добавлено DatabaseConfig)
 // ============================================
@@ -294,6 +302,11 @@ type Config struct {
 	} `mapstructure:",squash"`
 
 	// ======================
+	// НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ ПО УМОЛЧАНИЮ
+	// ======================
+	UserDefaults UserDefaultsConfig `mapstructure:",squash"`
+
+	// ======================
 	// ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ
 	// ======================
 
@@ -343,6 +356,14 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Environment = getEnv("ENVIRONMENT", "dev")
 	cfg.Version = getEnv("VERSION", "1.0.0")
+
+	// ======================
+	// НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ ПО УМОЛЧАНИЮ
+	// ======================
+	cfg.UserDefaults.MinGrowthThreshold = getEnvFloat("COUNTER_GROWTH_THRESHOLD", 2.0)
+	cfg.UserDefaults.MinFallThreshold = getEnvFloat("COUNTER_FALL_THRESHOLD", 2.0)
+	cfg.UserDefaults.Language = getEnv("DEFAULT_LANGUAGE", "ru")
+	cfg.UserDefaults.Timezone = getEnv("DEFAULT_TIMEZONE", "Europe/Moscow")
 
 	// ======================
 	// БАЗА ДАННЫХ
@@ -791,6 +812,13 @@ func (c *Config) PrintSummary() {
 	log.Printf("   • Уровень логирования: %s", c.Logging.Level)
 	log.Printf("   • Telegram режим: %s", c.TelegramMode)
 	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
+
+	// Настройки пользователей по умолчанию
+	log.Printf("   • Настройки по умолчанию:")
+	log.Printf("     - Порог роста: %.1f%%", c.UserDefaults.MinGrowthThreshold)
+	log.Printf("     - Порог падения: %.1f%%", c.UserDefaults.MinFallThreshold)
+	log.Printf("     - Язык: %s", c.UserDefaults.Language)
+	log.Printf("     - Часовой пояс: %s", c.UserDefaults.Timezone)
 
 	// База данных
 	log.Printf("   • PostgreSQL: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)

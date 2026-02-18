@@ -58,10 +58,20 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 	if deps.Config == nil {
 		deps.Config = &Config{
 			UserConfig: users.Config{
-				DefaultMinGrowthThreshold: 2.0,
-				DefaultMaxSignalsPerDay:   50,
-				SessionTTL:                24 * time.Hour,
-				MaxSessionsPerUser:        5,
+				UserDefaults: struct { // ⭐ Добавить структуру UserDefaults
+					MinGrowthThreshold float64
+					MinFallThreshold   float64
+					Language           string
+					Timezone           string
+				}{
+					MinGrowthThreshold: 2.0,
+					MinFallThreshold:   2.0,
+					Language:           "ru",
+					Timezone:           "Europe/Moscow",
+				},
+				DefaultMaxSignalsPerDay: 50,
+				SessionTTL:              24 * time.Hour,
+				MaxSessionsPerUser:      5,
 			},
 			SubscriptionConfig: subscription.Config{
 				DefaultPlan:     "free",
@@ -69,7 +79,7 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 				GracePeriodDays: 3,
 				AutoRenew:       true,
 			},
-			PaymentsConfig: payment.Config{ // Пустая конфигурация по умолчанию
+			PaymentsConfig: payment.Config{
 				TelegramBotToken:           "",
 				TelegramStarsProviderToken: "",
 				TelegramBotUsername:        "",

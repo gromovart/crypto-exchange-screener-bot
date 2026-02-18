@@ -34,7 +34,6 @@ const (
 	// ============== THRESHOLDS MENU ==============
 	CallbackThresholdGrowth = "threshold_growth" // 📈 Мин. рост: X%
 	CallbackThresholdFall   = "threshold_fall"   // 📉 Мин. падение: X%
-	CallbackQuietHours      = "quiet_hours"      // 🕐 Тихие часы: XX-XX
 
 	// ============== PERIODS MENU ==============
 	// Базовый (для всех)
@@ -79,7 +78,6 @@ const (
 	CallbackSignalSetGrowthThreshold = "signal_set_growth_threshold" // 📈 Установить порог роста
 	CallbackSignalSetFallThreshold   = "signal_set_fall_threshold"   // 📉 Установить порог падения
 	CallbackSignalSetSensitivity     = "signal_set_sensitivity"      // 🎯 Настроить чувствительность
-	CallbackSignalSetQuietHours      = "signal_set_quiet_hours"      // ⏱️ Настроить тихие часы
 	CallbackSignalHistory            = "signal_history"              // 📊 История сигналов
 	CallbackSignalTest               = "signal_test"                 // ⚡ Тестовый сигнал
 

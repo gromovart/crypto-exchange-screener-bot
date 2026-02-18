@@ -216,13 +216,11 @@ var PeriodButtonTexts = struct {
 
 // ThresholdButtonTexts содержит тексты для кнопок порогов
 var ThresholdButtonTexts = struct {
-	Growth     string
-	Fall       string
-	QuietHours string
+	Growth string
+	Fall   string
 }{
-	Growth:     "📈 Мин. рост: X%",
-	Fall:       "📉 Мин. падение: X%",
-	QuietHours: "🕐 Тихие часы: XX-XX",
+	Growth: "📈 Мин. рост: X%",
+	Fall:   "📉 Мин. падение: X%",
 }
 
 // SymbolButtonTexts содержит тексты для кнопок символов
@@ -264,7 +262,6 @@ var SignalButtonTexts = struct {
 	GrowthThreshold string
 	FallThreshold   string
 	Sensitivity     string
-	QuietHours      string
 	History         string
 	TestSignal      string
 	ThresholdFormat string
@@ -274,7 +271,6 @@ var SignalButtonTexts = struct {
 	GrowthThreshold: "📈 Порог роста",
 	FallThreshold:   "📉 Порог падения",
 	Sensitivity:     "🎯 Чувствительность",
-	QuietHours:      "⏱️ Тихие часы",
 	History:         "📊 История сигналов",
 	TestSignal:      "⚡ Тестовый сигнал",
 	ThresholdFormat: "%s Порог: %.1f%%",

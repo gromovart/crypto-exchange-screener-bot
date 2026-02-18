@@ -87,10 +87,20 @@ func (cl *CoreLayer) Initialize() error {
 	// Создаем конфигурацию для фабрики ядра со значениями по умолчанию
 	coreConfig := &core_factory.Config{
 		UserConfig: users.Config{
-			DefaultMinGrowthThreshold: 2.0,
-			DefaultMaxSignalsPerDay:   50,
-			SessionTTL:                24 * time.Hour,
-			MaxSessionsPerUser:        5,
+			UserDefaults: struct {
+				MinGrowthThreshold float64
+				MinFallThreshold   float64
+				Language           string
+				Timezone           string
+			}{
+				MinGrowthThreshold: 2.0,
+				MinFallThreshold:   2.0,
+				Language:           "ru",
+				Timezone:           "Europe/Moscow",
+			},
+			DefaultMaxSignalsPerDay: 50,
+			SessionTTL:              24 * time.Hour,
+			MaxSessionsPerUser:      5,
 		},
 		SubscriptionConfig: subscription.Config{
 			DefaultPlan:     "free",
