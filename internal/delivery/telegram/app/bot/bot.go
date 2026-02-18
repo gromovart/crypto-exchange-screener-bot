@@ -468,6 +468,8 @@ func (b *TelegramBot) SetMyCommands() error {
 		{Command: "/start", Description: constants.CommandDescriptions.Start},
 		{Command: "/help", Description: constants.CommandDescriptions.Help},
 		{Command: "/buy", Description: constants.CommandDescriptions.Buy},
+		{Command: "/paysupport", Description: constants.CommandDescriptions.PaySupport},
+		{Command: "/terms", Description: constants.CommandDescriptions.Terms},
 		{Command: "/profile", Description: constants.CommandDescriptions.Profile},
 		{Command: "/settings", Description: constants.CommandDescriptions.Settings},
 		{Command: "/notifications", Description: constants.CommandDescriptions.Notifications},

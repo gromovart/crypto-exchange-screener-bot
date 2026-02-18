@@ -313,6 +313,8 @@ var CommandDescriptions = struct {
 	Thresholds    string
 	Commands      string
 	Stats         string
+	PaySupport    string
+	Terms         string
 }{
 	Start:         "Запустить бота",
 	Help:          "Помощь и инструкции",
@@ -324,6 +326,8 @@ var CommandDescriptions = struct {
 	Thresholds:    "Пороги сигналов",
 	Commands:      "Список всех команд",
 	Stats:         "Статистика системы",
+	PaySupport:    "Поддержка по платежам",
+	Terms:         "Условия использования",
 }
 
 // PaymentButtonTexts содержит тексты для кнопок платежей

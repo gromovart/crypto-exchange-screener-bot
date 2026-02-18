@@ -138,7 +138,10 @@ func (h *paymentPlanHandler) createConfirmationKeyboard(planID string) interface
 				{"text": constants.PaymentButtonTexts.PayNow, "callback_data": callbackConfirm},
 			},
 			{
+				{"text": "📜 Условия использования", "callback_data": "/terms"}, // ⭐ ДОБАВИТЬ
 				{"text": constants.PaymentButtonTexts.BackToPlans, "callback_data": constants.PaymentConstants.CommandBuy},
+			},
+			{
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
 			},
 		},

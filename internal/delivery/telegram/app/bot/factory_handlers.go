@@ -36,9 +36,11 @@ import (
 	commands_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/commands"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
+	paysupport_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/paysupport"
 	periods_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/periods"
 	profile_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/profile"
 	settings_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/settings"
+	terms_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/terms"
 	thresholds_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/thresholds"
 	precheckout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/pre_checkout"
 	successful_payment_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/successful_payment"
@@ -77,6 +79,9 @@ func InitHandlerFactory(
 
 	factory.RegisterHandlerCreator("help", func() handlers.Handler {
 		return help_command.NewHandler()
+	})
+	factory.RegisterHandlerCreator("terms", func() handlers.Handler {
+		return terms_command.NewHandler()
 	})
 
 	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
@@ -147,6 +152,10 @@ func InitHandlerFactory(
 
 	factory.RegisterHandlerCreator(constants.CallbackAuthLogout, func() handlers.Handler {
 		return auth_logout_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator("paysupport", func() handlers.Handler {
+		return paysupport_command.NewHandler()
 	})
 
 	// Callback-и, требующие подписки
