@@ -56,21 +56,20 @@ func (h *notificationsCommandHandler) createNotificationsMessage(user *models.Us
 			"🔊 Общие уведомления: %s\n"+
 			"%s\n"+
 			"%s\n"+
-			"⏰ Тихие часы: %02d:00 - %02d:00\n\n"+
 			"Выберите настройку для изменения:",
 		constants.AuthButtonTexts.Notifications,
 		h.BaseHandler.GetBoolDisplay(user.NotificationsEnabled),
 		notifyGrowthText,
 		notifyFallText,
-		user.QuietHoursStart,
-		user.QuietHoursEnd,
 	)
 }
 
 // createNotificationsKeyboard создает клавиатуру для команды /notifications
 func (h *notificationsCommandHandler) createNotificationsKeyboard(user *models.User) interface{} {
-	// Используем методы через h.BaseHandler
-	toggleAllText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.ToggleAll, user.NotificationsEnabled)
+	// ⭐ ИСПРАВЛЕНО: для ToggleAll не используем GetToggleText
+	toggleAllText := constants.NotificationButtonTexts.ToggleAll
+
+	// Для остальных кнопок используем GetToggleText как обычно
 	growthText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.GrowthOnly, user.NotifyGrowth)
 	fallText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.FallOnly, user.NotifyFall)
 

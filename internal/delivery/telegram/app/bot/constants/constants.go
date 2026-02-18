@@ -191,6 +191,7 @@ var NotificationButtonTexts = struct {
 
 // PeriodButtonTexts содержит тексты для кнопок периодов
 var PeriodButtonTexts = struct {
+	Period1m     string
 	Period5m     string
 	Period15m    string
 	Period30m    string
@@ -201,6 +202,7 @@ var PeriodButtonTexts = struct {
 	ManageRemove string
 	ManageReset  string
 }{
+	Period1m:     "⏱️ 1 минута",
 	Period5m:     "⏱️ 5 минут",
 	Period15m:    "⏱️ 15 минут",
 	Period30m:    "⏱️ 30 минут",
@@ -214,13 +216,11 @@ var PeriodButtonTexts = struct {
 
 // ThresholdButtonTexts содержит тексты для кнопок порогов
 var ThresholdButtonTexts = struct {
-	Growth     string
-	Fall       string
-	QuietHours string
+	Growth string
+	Fall   string
 }{
-	Growth:     "📈 Мин. рост: X%",
-	Fall:       "📉 Мин. падение: X%",
-	QuietHours: "🕐 Тихие часы: XX-XX",
+	Growth: "📈 Мин. рост: X%",
+	Fall:   "📉 Мин. падение: X%",
 }
 
 // SymbolButtonTexts содержит тексты для кнопок символов
@@ -262,7 +262,6 @@ var SignalButtonTexts = struct {
 	GrowthThreshold string
 	FallThreshold   string
 	Sensitivity     string
-	QuietHours      string
 	History         string
 	TestSignal      string
 	ThresholdFormat string
@@ -272,7 +271,6 @@ var SignalButtonTexts = struct {
 	GrowthThreshold: "📈 Порог роста",
 	FallThreshold:   "📉 Порог падения",
 	Sensitivity:     "🎯 Чувствительность",
-	QuietHours:      "⏱️ Тихие часы",
 	History:         "📊 История сигналов",
 	TestSignal:      "⚡ Тестовый сигнал",
 	ThresholdFormat: "%s Порог: %.1f%%",
@@ -307,6 +305,7 @@ var CommandButtonTexts = struct {
 var CommandDescriptions = struct {
 	Start         string
 	Help          string
+	Buy           string
 	Profile       string
 	Settings      string
 	Notifications string
@@ -317,6 +316,7 @@ var CommandDescriptions = struct {
 }{
 	Start:         "Запустить бота",
 	Help:          "Помощь и инструкции",
+	Buy:           "Купить подписку",
 	Profile:       "Мой профиль",
 	Settings:      "Настройки",
 	Notifications: "Управление уведомлениями",
@@ -324,4 +324,57 @@ var CommandDescriptions = struct {
 	Thresholds:    "Пороги сигналов",
 	Commands:      "Список всех команд",
 	Stats:         "Статистика системы",
+}
+
+// PaymentButtonTexts содержит тексты для кнопок платежей
+var PaymentButtonTexts = struct {
+	Buy         string
+	Plans       string
+	Confirm     string
+	Cancel      string
+	History     string
+	BackToPlans string
+	SelectPlan  string
+	PayNow      string
+	CheckStatus string
+}{
+	Buy:         "💎 Купить подписку",
+	Plans:       "📋 Тарифные планы",
+	Confirm:     "✅ Подтвердить оплату",
+	Cancel:      "❌ Отмена",
+	History:     "📊 История платежей",
+	BackToPlans: "← К планам",
+	SelectPlan:  "📋 Выбрать план",
+	PayNow:      "💳 Оплатить сейчас",
+	CheckStatus: "🔄 Проверить статус",
+}
+
+// PaymentConstants содержит callback'и и команды для платежей
+var PaymentConstants = struct {
+	CommandBuy             string
+	CallbackPaymentPlan    string
+	CallbackPaymentConfirm string
+	CallbackPaymentSuccess string
+	CallbackPaymentFailed  string
+	CallbackPaymentCancel  string
+	CallbackPaymentHistory string
+	CallbackPaymentCheck   string
+	CallbackPaymentSupport string
+}{
+	CommandBuy:             "buy",
+	CallbackPaymentPlan:    "payment_plan:",
+	CallbackPaymentConfirm: "payment_confirm:",
+	CallbackPaymentSuccess: "payment_success:",
+	CallbackPaymentFailed:  "payment_failed:",
+	CallbackPaymentCancel:  "payment_cancel",
+	CallbackPaymentHistory: "payment_history",
+	CallbackPaymentCheck:   "payment_check",
+	CallbackPaymentSupport: "payment_support",
+}
+
+// PaymentDescriptions содержит описания для платежных команд
+var PaymentDescriptions = struct {
+	Buy string
+}{
+	Buy: "Покупка подписки через Telegram Stars",
 }

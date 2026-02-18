@@ -907,43 +907,61 @@ func (f *BybitPriceFetcher) fetchLiquidations() error {
 		return nil
 	}
 
-	logger.Info("🔄 BybitFetcher: получение данных о ликвидациях...")
+	logger.Warn("🔄 [DEBUG LIQ] Запуск получения ликвидаций...") // ⭐
 
 	// Получаем символы с наибольшим объемом
-	topSymbols, err := f.storage.GetTopSymbolsByVolumeUSD(10) // Топ-10 символов
+	topSymbols, err := f.storage.GetTopSymbolsByVolumeUSD(10)
 	if err != nil {
-		logger.Warn("⚠️ Не удалось получить топ-символы: %v", err)
+		logger.Warn("⚠️ [DEBUG LIQ] Ошибка получения топ-символов: %v", err)
 		return err
 	}
 
+	logger.Warn("📊 [DEBUG LIQ] Получение ликвидаций для %d символов", len(topSymbols))
+
+	liqFound := 0
 	for _, symbolVolume := range topSymbols {
 		symbol := symbolVolume.GetSymbol()
 
-		summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute) // За последние 5 минут
+		summary, err := f.client.GetLiquidationsSummary(symbol, 5*time.Minute)
 		if err != nil {
-			logger.Debug("⚠️ Не удалось получить ликвидации для %s: %v", symbol, err)
+			logger.Warn("⚠️ [DEBUG LIQ] Ошибка API для %s: %v", symbol, err)
 			continue
 		}
 
-		metrics := &bybit.LiquidationMetrics{
-			Symbol:         symbol,
-			TotalVolumeUSD: summary["total_volume_usd"].(float64),
-			LongLiqVolume:  summary["long_liq_volume"].(float64),
-			ShortLiqVolume: summary["short_liq_volume"].(float64),
-			LongLiqCount:   summary["long_liq_count"].(int),
-			ShortLiqCount:  summary["short_liq_count"].(int),
-			UpdateTime:     time.Now(),
+		totalVolume, ok := summary["total_volume_usd"].(float64)
+		if !ok {
+			logger.Warn("⚠️ [DEBUG LIQ] Некорректный формат данных для %s", symbol)
+			continue
 		}
 
-		f.liqCacheMu.Lock()
-		f.liqCache[symbol] = metrics
-		f.liqCacheMu.Unlock()
+		if totalVolume > 0 {
+			liqFound++
+			longVolume := summary["long_liq_volume"].(float64)
+			shortVolume := summary["short_liq_volume"].(float64)
 
-		if metrics.TotalVolumeUSD > 0 {
-			logger.Debug("💥 Ликвидации %s: $%.0f (длинные: $%.0f, короткие: $%.0f)",
-				symbol, metrics.TotalVolumeUSD, metrics.LongLiqVolume, metrics.ShortLiqVolume)
+			logger.Warn("💥 [DEBUG LIQ] НАЙДЕНЫ ликвидации для %s: $%.0f (LONG: $%.0f, SHORT: $%.0f)",
+				symbol, totalVolume, longVolume, shortVolume)
+
+			metrics := &bybit.LiquidationMetrics{
+				Symbol:         symbol,
+				TotalVolumeUSD: totalVolume,
+				LongLiqVolume:  longVolume,
+				ShortLiqVolume: shortVolume,
+				LongLiqCount:   summary["long_liq_count"].(int),
+				ShortLiqCount:  summary["short_liq_count"].(int),
+				UpdateTime:     time.Now(),
+			}
+
+			f.liqCacheMu.Lock()
+			f.liqCache[symbol] = metrics
+			f.liqCacheMu.Unlock()
+		} else {
+			logger.Warn("📭 [DEBUG LIQ] Нет ликвидаций для %s", symbol)
 		}
 	}
+
+	logger.Warn("✅ [DEBUG LIQ] Завершено. Найдено ликвидаций для %d/%d символов",
+		liqFound, len(topSymbols))
 
 	f.lastLiqUpdate = time.Now()
 	return nil

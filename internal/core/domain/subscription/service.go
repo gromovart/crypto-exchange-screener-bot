@@ -3,17 +3,16 @@ package subscription
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	plan_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/plan"
 	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
 	"crypto-exchange-screener-bot/pkg/logger"
 
@@ -22,18 +21,10 @@ import (
 
 // Config конфигурация сервиса
 type Config struct {
-	StripeSecretKey  string
-	StripeWebhookKey string
-	DefaultPlan      string
-	TrialPeriodDays  int
-	GracePeriodDays  int
-	AutoRenew        bool
-}
-
-// NotificationService интерфейс для уведомлений
-type NotificationService interface {
-	SendSubscriptionNotification(userID int, message, notificationType string) error
-	SendTelegramNotification(chatID, message string) error
+	DefaultPlan     string
+	TrialPeriodDays int  // Для free плана
+	GracePeriodDays int  // Льготный период после истечения
+	AutoRenew       bool // Автопродление (для платных планов)
 }
 
 // AnalyticsService интерфейс для аналитики
@@ -43,51 +34,54 @@ type AnalyticsService interface {
 
 // Service сервис управления подписками
 type Service struct {
-	repo        subscription_repo.SubscriptionRepository
+	subRepo     subscription_repo.SubscriptionRepository
+	planRepo    plan_repo.PlanRepository
 	cache       *redis.Cache
 	cachePrefix string
 	cacheTTL    time.Duration
 	plans       map[string]*models.Plan
 	mu          sync.RWMutex
-	notifier    NotificationService
 	analytics   AnalyticsService
+	config      Config
 }
 
 // NewService создает новый сервис подписок
 func NewService(
 	db *sqlx.DB,
+	planRepo plan_repo.PlanRepository,
 	cache *redis.Cache,
-	notifier NotificationService,
 	analytics AnalyticsService,
 	config Config,
 ) (*Service, error) {
 
-	repo := subscription_repo.NewSubscriptionRepository(db, cache)
+	subRepo := subscription_repo.NewSubscriptionRepository(db)
 	service := &Service{
-		repo:        repo,
+		subRepo:     subRepo,
+		planRepo:    planRepo,
 		cache:       cache,
 		cachePrefix: "subscription:",
 		cacheTTL:    30 * time.Minute,
 		plans:       make(map[string]*models.Plan),
-		notifier:    notifier,
 		analytics:   analytics,
+		config:      config,
 	}
 
 	// Загружаем планы в память
 	if err := service.loadPlans(); err != nil {
-		return nil, fmt.Errorf("failed to load plans: %w", err)
+		return nil, fmt.Errorf("не удалось загрузить планы: %w", err)
 	}
 
 	// Запускаем планировщик проверки подписок
 	go service.startSubscriptionChecker()
 
-	logger.Info("✅ Subscription service initialized")
+	logger.Info("✅ Сервис подписок инициализирован")
 	return service, nil
 }
 
 // loadPlans загружает тарифные планы в память
 func (s *Service) loadPlans() error {
-	plans, err := s.repo.GetAllPlans()
+	ctx := context.Background()
+	plans, err := s.planRepo.GetAllActive(ctx)
 	if err != nil {
 		return err
 	}
@@ -97,7 +91,7 @@ func (s *Service) loadPlans() error {
 
 	for _, plan := range plans {
 		s.plans[plan.Code] = plan
-		logger.Info("📋 Loaded plan: %s (%s)", plan.Name, plan.Code)
+		logger.Info("📋 Загружен план: %s (%s)", plan.Name, plan.Code)
 	}
 
 	return nil
@@ -110,13 +104,14 @@ func (s *Service) GetPlan(code string) (*models.Plan, error) {
 	s.mu.RUnlock()
 
 	if !exists {
-		// Пробуем загрузить из БД
-		dbPlan, err := s.repo.GetPlanByCode(code)
+		// Пробуем загрузить из репозитория
+		ctx := context.Background()
+		dbPlan, err := s.planRepo.GetByCode(ctx, code)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("ошибка получения плана: %w", err)
 		}
 		if dbPlan == nil {
-			return nil, fmt.Errorf("plan not found: %s", code)
+			return nil, fmt.Errorf("план не найден: %s", code)
 		}
 
 		s.mu.Lock()
@@ -129,81 +124,72 @@ func (s *Service) GetPlan(code string) (*models.Plan, error) {
 	return plan, nil
 }
 
-// GetAllPlans возвращает все доступные планы
-func (s *Service) GetAllPlans() ([]*models.Plan, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var result []*models.Plan
-	for _, plan := range s.plans {
-		if plan.IsActive {
-			result = append(result, plan)
-		}
+// GetSubscriptionPeriod возвращает период подписки в зависимости от плана
+func (s *Service) GetSubscriptionPeriod(planCode string) (time.Duration, error) {
+	switch planCode {
+	case models.PlanFree:
+		return 24 * time.Hour, nil // 24 часа для бесплатного
+	case models.PlanBasic:
+		return 30 * 24 * time.Hour, nil // 1 месяц
+	case models.PlanPro:
+		return 90 * 24 * time.Hour, nil // 3 месяца
+	case models.PlanEnterprise:
+		return 365 * 24 * time.Hour, nil // 12 месяцев
+	default:
+		return 0, fmt.Errorf("неизвестный план: %s", planCode)
 	}
-
-	return result, nil
 }
 
-// SubscribeUser создает подписку для пользователя
-func (s *Service) SubscribeUser(userID int, planCode string, trial bool) (*models.UserSubscription, error) {
+// CreateSubscription создает подписку для пользователя
+func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error) {
 	// Проверяем существующую подписку
-	existing, err := s.repo.GetActiveSubscription(userID)
-	if err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("failed to check existing subscription: %w", err)
+	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		return nil, fmt.Errorf("ошибка проверки существующей подписки: %w", err)
 	}
 
-	// Если уже есть активная подписку
-	if existing != nil {
-		// Обновляем существующую подписку
-		return s.upgradeSubscription(userID, planCode, existing)
+	// Если уже есть активная подписка
+	if existing != nil && existing.IsActive() {
+		return nil, errors.New("у пользователя уже есть активная подписка")
 	}
 
 	// Получаем план
 	plan, err := s.GetPlan(planCode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get plan: %w", err)
+		return nil, fmt.Errorf("ошибка получения плана: %w", err)
+	}
+
+	// Получаем период подписки
+	period, err := s.GetSubscriptionPeriod(planCode)
+	if err != nil {
+		return nil, err
 	}
 
 	// Создаем подписку
 	now := time.Now()
-	periodEnd := now.AddDate(0, 1, 0) // 1 месяц по умолчанию
+	periodEnd := now.Add(period)
 
-	// Для пробного периода
-	if trial {
-		periodEnd = now.AddDate(0, 0, 7) // 7 дней пробного периода
-	}
-
-	stripeSubscriptionID := fmt.Sprintf("local_%d_%s", userID, planCode)
 	subscription := &models.UserSubscription{
-		UserID:               userID,
-		PlanID:               plan.ID,
-		PlanName:             plan.Name,
-		PlanCode:             plan.Code,
-		StripeSubscriptionID: &stripeSubscriptionID,
-		Status:               models.StatusActive,
-		CurrentPeriodStart:   &now,
-		CurrentPeriodEnd:     &periodEnd,
-		CancelAtPeriodEnd:    false,
+		UserID:             userID,
+		PlanID:             plan.ID,
+		PaymentID:          paymentID,
+		Status:             models.StatusActive,
+		CurrentPeriodStart: &now,
+		CurrentPeriodEnd:   &periodEnd,
+		CancelAtPeriodEnd:  false,
 		Metadata: map[string]interface{}{
-			"trial":          trial,
-			"trial_ends_at":  periodEnd.Format(time.RFC3339),
-			"auto_renew":     true,
-			"payment_method": "manual",
+			"trial":          isTrial,
+			"period_days":    int(period.Hours() / 24),
+			"auto_renew":     s.config.AutoRenew && !isTrial && planCode != models.PlanFree,
+			"payment_method": "stars",
+			"created_at":     now.Format(time.RFC3339),
 		},
 	}
 
 	// Сохраняем в БД
-	if err := s.repo.CreateSubscription(subscription); err != nil {
-		return nil, fmt.Errorf("failed to create subscription: %w", err)
+	if err := s.subRepo.Create(ctx, subscription); err != nil {
+		return nil, fmt.Errorf("ошибка создания подписки: %w", err)
 	}
-
-	// Обновляем тариф пользователя
-	if err := s.repo.UpdateUserSubscriptionTier(userID, planCode); err != nil {
-		return nil, fmt.Errorf("failed to update user tier: %w", err)
-	}
-
-	// Отправляем уведомление
-	s.sendSubscriptionNotification(userID, plan, trial)
 
 	// Трекаем событие
 	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
@@ -214,23 +200,41 @@ func (s *Service) SubscribeUser(userID int, planCode string, trial bool) (*model
 		Status:         models.StatusActive,
 		Timestamp:      now,
 		Metadata: map[string]interface{}{
-			"trial": trial,
+			"trial":       isTrial,
+			"period_days": int(period.Hours() / 24),
 		},
 	})
 
 	// Кэшируем
 	s.cacheSubscription(subscription)
 
-	log.Printf("✅ User %d subscribed to plan %s", userID, planCode)
+	logger.Info("✅ Создана подписка: пользователь %d, план %s, период %d дней",
+		userID, planCode, int(period.Hours()/24))
 
 	return subscription, nil
 }
 
-// upgradeSubscription обновляет подписку пользователя
-func (s *Service) upgradeSubscription(userID int, newPlanCode string, existing *models.UserSubscription) (*models.UserSubscription, error) {
+// UpgradeSubscription обновляет подписку пользователя на новый план
+func (s *Service) UpgradeSubscription(ctx context.Context, userID int, newPlanCode string, paymentID *int64) (*models.UserSubscription, error) {
+	// Получаем текущую подписку
+	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения текущей подписки: %w", err)
+	}
+	if existing == nil {
+		return nil, errors.New("активная подписка не найдена")
+	}
+
+	// Получаем новый план
 	newPlan, err := s.GetPlan(newPlanCode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get new plan: %w", err)
+		return nil, fmt.Errorf("ошибка получения нового плана: %w", err)
+	}
+
+	// Получаем период нового плана
+	period, err := s.GetSubscriptionPeriod(newPlanCode)
+	if err != nil {
+		return nil, err
 	}
 
 	// Логируем апгрейд
@@ -238,33 +242,33 @@ func (s *Service) upgradeSubscription(userID int, newPlanCode string, existing *
 
 	// Обновляем подписку
 	now := time.Now()
-	periodEnd := now.AddDate(0, 1, 0) // Новый период на 1 месяц
+	periodEnd := now.Add(period)
 
 	existing.PlanID = newPlan.ID
 	existing.PlanName = newPlan.Name
 	existing.PlanCode = newPlan.Code
+	existing.PaymentID = paymentID
 	existing.Status = models.StatusActive
 	existing.CurrentPeriodStart = &now
 	existing.CurrentPeriodEnd = &periodEnd
+	existing.CancelAtPeriodEnd = false
+
+	// Обновляем метаданные
+	if existing.Metadata == nil {
+		existing.Metadata = make(map[string]interface{})
+	}
+	existing.Metadata["upgraded_at"] = now.Format(time.RFC3339)
+	existing.Metadata["previous_plan"] = oldPlanCode
+	existing.Metadata["period_days"] = int(period.Hours() / 24)
+	existing.Metadata["auto_renew"] = s.config.AutoRenew && newPlanCode != models.PlanFree
+
+	existing.Metadata["new_plan_name"] = newPlan.Name // ⭐ Сохраняем в metadata
+	existing.Metadata["new_plan_code"] = newPlan.Code // ⭐ Сохраняем в metadata
 
 	// Обновляем в БД
-	err = s.repo.UpdateSubscriptionStatus(
-		fmt.Sprintf("%d", existing.ID),
-		"",
-		models.StatusActive,
-		periodEnd,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to update subscription: %w", err)
+	if err := s.subRepo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("ошибка обновления подписки: %w", err)
 	}
-
-	// Обновляем тариф пользователя
-	if err := s.repo.UpdateUserSubscriptionTier(userID, newPlanCode); err != nil {
-		return nil, fmt.Errorf("failed to update user tier: %w", err)
-	}
-
-	// Отправляем уведомление
-	s.sendUpgradeNotification(userID, oldPlanCode, newPlanCode)
 
 	// Трекаем событие
 	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
@@ -275,63 +279,51 @@ func (s *Service) upgradeSubscription(userID int, newPlanCode string, existing *
 		OldPlanCode:    oldPlanCode,
 		Status:         models.StatusActive,
 		Timestamp:      now,
+		Metadata: map[string]interface{}{
+			"period_days": int(period.Hours() / 24),
+		},
 	})
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(userID)
 
-	log.Printf("🔄 User %d upgraded from %s to %s", userID, oldPlanCode, newPlanCode)
+	logger.Info("🔄 Обновлена подписка: пользователь %d, с %s на %s, период %d дней",
+		userID, oldPlanCode, newPlanCode, int(period.Hours()/24))
 
 	return existing, nil
 }
 
 // CancelSubscription отменяет подписку
-func (s *Service) CancelSubscription(userID int, cancelAtPeriodEnd bool) error {
+func (s *Service) CancelSubscription(ctx context.Context, userID int, cancelAtPeriodEnd bool) error {
 	// Получаем активную подписку
-	sub, err := s.repo.GetActiveSubscription(userID)
+	sub, err := s.subRepo.GetActiveByUserID(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get active subscription: %w", err)
+		return fmt.Errorf("ошибка получения активной подписки: %w", err)
 	}
 	if sub == nil {
-		return errors.New("no active subscription found")
+		return errors.New("активная подписка не найдена")
 	}
 
 	// Отменяем подписку
-	if err := s.repo.CancelSubscription(userID, cancelAtPeriodEnd); err != nil {
-		return fmt.Errorf("failed to cancel subscription: %w", err)
+	if err := s.subRepo.Cancel(ctx, sub.ID, cancelAtPeriodEnd); err != nil {
+		return fmt.Errorf("ошибка отмены подписки: %w", err)
 	}
 
 	// Обновляем статус
 	newStatus := models.StatusCanceled
 	if cancelAtPeriodEnd {
 		newStatus = models.StatusActive // Остается активной до конца периода
-	}
-
-	// Проверяем, что CurrentPeriodEnd не nil
-	if sub.CurrentPeriodEnd == nil {
-		return errors.New("subscription has no end date")
-	}
-
-	// Обновляем в БД
-	err = s.repo.UpdateSubscriptionStatus(
-		fmt.Sprintf("%d", sub.ID),
-		"",
-		newStatus,
-		*sub.CurrentPeriodEnd,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update subscription status: %w", err)
-	}
-
-	// Если немедленная отмена, переводим на бесплатный тариф
-	if !cancelAtPeriodEnd {
-		if err := s.repo.UpdateUserSubscriptionTier(userID, models.PlanFree); err != nil {
-			return fmt.Errorf("failed to update user tier: %w", err)
+		// Обновляем только флаг cancel_at_period_end
+		sub.CancelAtPeriodEnd = true
+		if err := s.subRepo.Update(ctx, sub); err != nil {
+			return fmt.Errorf("ошибка обновления подписки: %w", err)
+		}
+	} else {
+		// Немедленная отмена - обновляем статус
+		if err := s.subRepo.UpdateStatus(ctx, sub.ID, newStatus); err != nil {
+			return fmt.Errorf("ошибка обновления статуса подписки: %w", err)
 		}
 	}
-
-	// Отправляем уведомление
-	s.sendCancellationNotification(userID, cancelAtPeriodEnd, *sub.CurrentPeriodEnd)
 
 	// Трекаем событие
 	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
@@ -349,22 +341,22 @@ func (s *Service) CancelSubscription(userID int, cancelAtPeriodEnd bool) error {
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(userID)
 
-	log.Printf("⏹️ User %d cancelled subscription (end of period: %v)", userID, cancelAtPeriodEnd)
+	logger.Info("⏹️ Отменена подписка: пользователь %d, отмена в конце периода: %v", userID, cancelAtPeriodEnd)
 
 	return nil
 }
 
-// GetUserSubscription возвращает подписку пользователя
-func (s *Service) GetUserSubscription(userID int) (*models.UserSubscription, error) {
+// GetActiveSubscription возвращает активную подписку пользователя
+func (s *Service) GetActiveSubscription(ctx context.Context, userID int) (*models.UserSubscription, error) {
 	// Пробуем получить из кэша
 	cacheKey := s.cachePrefix + fmt.Sprintf("user:%d", userID)
 	var subscription models.UserSubscription
-	if err := s.cache.Get(context.Background(), cacheKey, &subscription); err == nil {
+	if err := s.cache.Get(ctx, cacheKey, &subscription); err == nil {
 		return &subscription, nil
 	}
 
 	// Получаем из репозитория
-	subscriptionPtr, err := s.repo.GetActiveSubscription(userID)
+	subscriptionPtr, err := s.subRepo.GetActiveByUserID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -377,19 +369,12 @@ func (s *Service) GetUserSubscription(userID int) (*models.UserSubscription, err
 	return subscriptionPtr, nil
 }
 
-// GetUserLimits возвращает лимиты пользователя
-func (s *Service) GetUserLimits(userID int) (*models.PlanLimits, error) {
-	// Пробуем получить из кэша
-	cacheKey := s.cachePrefix + fmt.Sprintf("limits:%d", userID)
-	var limits models.PlanLimits
-	if err := s.cache.Get(context.Background(), cacheKey, &limits); err == nil {
-		return &limits, nil
-	}
-
-	// Получаем подписку
-	subscription, err := s.GetUserSubscription(userID)
+// CheckUserLimit проверяет лимит пользователя
+func (s *Service) CheckUserLimit(ctx context.Context, userID int, limitType string, currentUsage int) (bool, int, error) {
+	// Получаем активную подписку
+	subscription, err := s.GetActiveSubscription(ctx, userID)
 	if err != nil {
-		return nil, err
+		return false, 0, err
 	}
 
 	var planCode string
@@ -402,42 +387,19 @@ func (s *Service) GetUserLimits(userID int) (*models.PlanLimits, error) {
 	// Получаем лимиты плана
 	plan, err := s.GetPlan(planCode)
 	if err != nil {
-		return nil, err
-	}
-
-	limits = models.PlanLimits{
-		MaxSymbols:       plan.MaxSymbols,
-		MaxSignalsPerDay: plan.MaxSignalsPerDay,
-		Features:         plan.Features,
-	}
-
-	// Кэшируем
-	if data, err := json.Marshal(limits); err == nil {
-		s.cache.Set(context.Background(), cacheKey, string(data), s.cacheTTL)
-	}
-
-	return &limits, nil
-}
-
-// CheckUserLimit проверяет лимит пользователя
-func (s *Service) CheckUserLimit(userID int, limitType string, currentUsage int) (bool, int, error) {
-	limits, err := s.GetUserLimits(userID)
-	if err != nil {
 		return false, 0, err
 	}
 
 	var maxLimit int
 	switch strings.ToLower(limitType) {
 	case "symbols":
-		maxLimit = limits.MaxSymbols
+		maxLimit = plan.MaxSymbols
 	case "signals":
-		maxLimit = limits.MaxSignalsPerDay
+		maxLimit = plan.MaxSignalsPerDay
 	case "api_requests":
-		// Исправлено: MaxAPIRequests не существует в PlanLimits, используем фиксированное значение
-		// В будущем можно добавить это поле в модель
-		maxLimit = 1000 // Фиксированное значение для API запросов
+		maxLimit = plan.GetMaxAPIRequests()
 	default:
-		return false, 0, fmt.Errorf("unknown limit type: %s", limitType)
+		return false, 0, fmt.Errorf("неизвестный тип лимита: %s", limitType)
 	}
 
 	// Неограниченный доступ
@@ -446,125 +408,65 @@ func (s *Service) CheckUserLimit(userID int, limitType string, currentUsage int)
 	}
 
 	remaining := maxLimit - currentUsage
-	hasAccess := remaining > 0
-
-	return hasAccess, remaining, nil
+	return remaining > 0, remaining, nil
 }
 
-// IsSubscriptionActive проверяет активна ли подписка
-func (s *Service) IsSubscriptionActive(userID int) (bool, error) {
-	subscription, err := s.GetUserSubscription(userID)
+// ProcessExpiredSubscriptions обрабатывает истекшие подписки
+func (s *Service) ProcessExpiredSubscriptions(ctx context.Context) error {
+	// Получаем истекшие подписки
+	logger.Info("🔍 [PROCESS] Начинаем обработку истекших подписок")
+
+	// Получаем истекшие подписки
+	expiredSubs, err := s.subRepo.GetExpiredSubscriptions(ctx)
 	if err != nil {
-		return false, err
+		return fmt.Errorf("ошибка получения истекших подписок: %w", err)
 	}
 
-	return subscription != nil && subscription.Status == models.StatusActive, nil
-}
+	logger.Info("📊 [PROCESS] Найдено истекших подписок: %d", len(expiredSubs))
+	for _, sub := range expiredSubs {
+		// Для free плана - просто удаляем
+		if sub.PlanCode == models.PlanFree {
+			if err := s.subRepo.UpdateStatus(ctx, sub.ID, models.StatusExpired); err != nil {
+				logger.Error("Ошибка обновления статуса free подписки %d: %v", sub.ID, err)
+				continue
+			}
+		} else {
+			// Для платных планов - переводим на free с ограничениями
+			// Создаем free подписку на 24 часа
+			freeSub, err := s.CreateSubscription(ctx, sub.UserID, models.PlanFree, nil, false)
+			if err != nil {
+				logger.Error("Ошибка создания free подписки для пользователя %d: %v", sub.UserID, err)
+				continue
+			}
 
-// GetSubscriptionEndDate возвращает дату окончания подписки
-func (s *Service) GetSubscriptionEndDate(userID int) (*time.Time, error) {
-	subscription, err := s.GetUserSubscription(userID)
-	if err != nil {
-		return nil, err
+			// Помечаем старую подписку как истекшую
+			if err := s.subRepo.UpdateStatus(ctx, sub.ID, models.StatusExpired); err != nil {
+				logger.Error("Ошибка обновления статуса подписки %d: %v", sub.ID, err)
+			}
+
+			logger.Info("📉 Подписка %d истекла, пользователь %d переведен на free тариф на 24 часа",
+				sub.ID, sub.UserID)
+
+			// Трекаем событие
+			s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+				Type:           "subscription_expired",
+				UserID:         sub.UserID,
+				SubscriptionID: sub.ID,
+				PlanCode:       sub.PlanCode,
+				Status:         models.StatusExpired,
+				Timestamp:      time.Now(),
+				Metadata: map[string]interface{}{
+					"new_subscription_id": freeSub.ID,
+					"new_plan":            models.PlanFree,
+				},
+			})
+		}
+
+		// Инвалидируем кэш
+		s.invalidateSubscriptionCache(sub.UserID)
 	}
-
-	if subscription == nil || subscription.CurrentPeriodEnd == nil {
-		return nil, nil
-	}
-
-	return subscription.CurrentPeriodEnd, nil
-}
-
-// GetExpiringSubscriptions возвращает подписки, срок действия которых истекает
-func (s *Service) GetExpiringSubscriptions(daysBefore int) ([]*models.UserSubscription, error) {
-	// В реальной реализации нужно добавить метод в репозиторий
-	// query := `
-	// SELECT ... FROM user_subscriptions
-	// WHERE current_period_end BETWEEN NOW() AND NOW() + INTERVAL '$1 days'
-	// AND status = 'active'
-	// `
-
-	// Пока возвращаем пустой список
-	return []*models.UserSubscription{}, nil
-}
-
-// RenewSubscription продлевает подписку
-func (s *Service) RenewSubscription(userID int) error {
-	subscription, err := s.GetUserSubscription(userID)
-	if err != nil {
-		return err
-	}
-	if subscription == nil {
-		return errors.New("no active subscription found")
-	}
-
-	// Продлеваем на месяц
-	newEndDate := time.Now().AddDate(0, 1, 0)
-
-	// Обновляем в БД
-	err = s.repo.UpdateSubscriptionStatus(
-		fmt.Sprintf("%d", subscription.ID),
-		"",
-		models.StatusActive,
-		newEndDate,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to renew subscription: %w", err)
-	}
-
-	// Отправляем уведомление
-	s.sendRenewalNotification(userID, newEndDate)
-
-	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
-		Type:           "subscription_renewed",
-		UserID:         userID,
-		SubscriptionID: subscription.ID,
-		PlanCode:       subscription.PlanCode,
-		Status:         models.StatusActive,
-		Timestamp:      time.Now(),
-		Metadata: map[string]interface{}{
-			"new_end_date": newEndDate.Format(time.RFC3339),
-		},
-	})
-
-	// Инвалидируем кэш
-	s.invalidateSubscriptionCache(userID)
-
-	log.Printf("🔄 User %d subscription renewed until %s", userID, newEndDate.Format("2006-01-02"))
 
 	return nil
-}
-
-// GetRevenueReport возвращает отчет по доходам
-func (s *Service) GetRevenueReport(startDate, endDate time.Time) (*models.RevenueReport, error) {
-	// В реальной реализации нужно добавить метод в репозиторий
-	// Пока возвращаем заглушку
-	return &models.RevenueReport{
-		PeriodStart:      startDate,
-		PeriodEnd:        endDate,
-		TotalRevenue:     0,
-		NewSubscriptions: 0,
-		ARPU:             0,
-		MostPopularPlan:  models.PlanFree,
-		MonthlyBreakdown: []models.MonthlyBreakdown{},
-	}, nil
-}
-
-// GetSubscriptionStats возвращает статистику подписок
-func (s *Service) GetSubscriptionStats() (map[string]interface{}, error) {
-	stats := make(map[string]interface{})
-
-	// В реальной реализации нужно получить статистику из БД
-	// Пока возвращаем заглушку
-	stats["total_subscriptions"] = 0
-	stats["active_subscriptions"] = 0
-	stats["trial_subscriptions"] = 0
-	stats["monthly_revenue"] = 0.0
-	stats["churn_rate"] = 0.0
-	stats["plan_distribution"] = map[string]int{}
-
-	return stats, nil
 }
 
 // Вспомогательные методы
@@ -586,111 +488,9 @@ func (s *Service) invalidateSubscriptionCache(userID int) {
 	ctx := context.Background()
 	keys := []string{
 		s.cachePrefix + fmt.Sprintf("user:%d", userID),
-		s.cachePrefix + fmt.Sprintf("limits:%d", userID),
 	}
 
 	s.cache.DeleteMulti(ctx, keys...)
-}
-
-func (s *Service) sendSubscriptionNotification(userID int, plan *models.Plan, trial bool) {
-	var message string
-
-	// Фиксированные значения для API запросов по тарифам
-	var apiRequestsStr string
-	switch plan.Code {
-	case models.PlanFree:
-		apiRequestsStr = "100" // Бесплатный тариф
-	case models.PlanBasic:
-		apiRequestsStr = "1000" // Базовый тариф
-	case models.PlanPro:
-		apiRequestsStr = "5000" // Про тариф
-	default:
-		apiRequestsStr = "1000" // По умолчанию
-	}
-
-	if trial {
-		message = fmt.Sprintf(
-			"🎉 Вы успешно подписались на тариф %s!\n\n"+
-				"Пробный период: 7 дней\n"+
-				"Лимиты:\n"+
-				"• Символов: %d\n"+
-				"• Сигналов в день: %d\n"+
-				"• API запросов: %s\n\n"+
-				"После окончания пробного периода подписка будет продлена автоматически.",
-			plan.Name,
-			plan.MaxSymbols,
-			plan.MaxSignalsPerDay,
-			apiRequestsStr,
-		)
-	} else {
-		message = fmt.Sprintf(
-			"✅ Подписка активирована!\n\n"+
-				"Тариф: %s\n"+
-				"Лимиты:\n"+
-				"• Символов: %d\n"+
-				"• Сигналов в день: %d\n"+
-				"• API запросов: %s\n\n"+
-				"Следующее списание: через 30 дней",
-			plan.Name,
-			plan.MaxSymbols,
-			plan.MaxSignalsPerDay,
-			apiRequestsStr,
-		)
-	}
-
-	s.notifier.SendSubscriptionNotification(userID, message, "subscription_created")
-}
-
-func (s *Service) sendUpgradeNotification(userID int, oldPlan, newPlan string) {
-	message := fmt.Sprintf(
-		"🔄 Тариф изменен!\n\n"+
-			"Старый тариф: %s\n"+
-			"Новый тариф: %s\n\n"+
-			"Изменения вступят в силу немедленно.",
-		oldPlan, newPlan,
-	)
-
-	s.notifier.SendSubscriptionNotification(userID, message, "subscription_upgraded")
-}
-
-func (s *Service) sendCancellationNotification(userID int, atPeriodEnd bool, endDate time.Time) {
-	var message string
-	if atPeriodEnd {
-		message = fmt.Sprintf(
-			"⏹️ Подписка будет отменена\n\n"+
-				"Ваша подписка останется активной до %s.\n"+
-				"После этой даты она будет автоматически отменена.",
-			endDate.Format("02.01.2006"),
-		)
-	} else {
-		message = "⏹️ Подписка отменена\n\n" +
-			"Ваша подписка была немедленно отменена.\n" +
-			"Вы переведены на бесплатный тариф."
-	}
-
-	s.notifier.SendSubscriptionNotification(userID, message, "subscription_cancelled")
-}
-
-func (s *Service) sendRenewalNotification(userID int, newEndDate time.Time) {
-	message := fmt.Sprintf(
-		"🔄 Подписка продлена!\n\n"+
-			"Ваша подписка успешно продлена.\n"+
-			"Следующая дата окончания: %s",
-		newEndDate.Format("02.01.2006"),
-	)
-
-	s.notifier.SendSubscriptionNotification(userID, message, "subscription_renewed")
-}
-
-func (s *Service) sendExpirationNotification(userID int, daysLeft int) {
-	message := fmt.Sprintf(
-		"⚠️ Подписка скоро истекает\n\n"+
-			"До окончания вашей подписки осталось %d дней.\n"+
-			"Пожалуйста, продлите подписку, чтобы продолжить пользоваться всеми функциями.",
-		daysLeft,
-	)
-
-	s.notifier.SendSubscriptionNotification(userID, message, "subscription_expiring")
 }
 
 func (s *Service) startSubscriptionChecker() {
@@ -698,26 +498,74 @@ func (s *Service) startSubscriptionChecker() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		s.checkExpiringSubscriptions()
-		s.checkExpiredSubscriptions()
+		ctx := context.Background()
+		currentTime := time.Now()
+		logger.Info("⏰ [CHECKER] Запуск проверки истекших подписок в %s", currentTime.Format("15:04:05"))
+
+		if err := s.ProcessExpiredSubscriptions(ctx); err != nil {
+			logger.Error("❌ [CHECKER] Ошибка обработки истекших подписок: %v", err)
+		}
 	}
 }
 
-func (s *Service) checkExpiringSubscriptions() {
-	// Проверяем подписки, которые истекают через 3 дня
-	subscriptions, err := s.GetExpiringSubscriptions(3)
+// GetUserSubscription возвращает подписку пользователя (для обратной совместимости)
+func (s *Service) GetUserSubscription(userID int) (*models.UserSubscription, error) {
+	ctx := context.Background()
+	return s.GetActiveSubscription(ctx, userID)
+}
+
+// GetRepository возвращает репозиторий подписок
+func (s *Service) GetRepository() subscription_repo.SubscriptionRepository {
+	return s.subRepo
+}
+
+// GetPlanByID возвращает план по ID
+func (s *Service) GetPlanByID(ctx context.Context, planID int) (*models.Plan, error) {
+	// Сначала ищем в кэше планов
+	s.mu.RLock()
+	for _, plan := range s.plans {
+		if plan.ID == planID {
+			s.mu.RUnlock()
+			return plan, nil
+		}
+	}
+	s.mu.RUnlock()
+
+	// Если не нашли в памяти, ищем в БД
+	plan, err := s.planRepo.GetByID(ctx, planID)
 	if err != nil {
-		log.Printf("Error checking expiring subscriptions: %v", err)
-		return
+		return nil, fmt.Errorf("ошибка получения плана по ID %d: %w", planID, err)
+	}
+	if plan == nil {
+		return nil, fmt.Errorf("план не найден: %d", planID)
 	}
 
-	for _, sub := range subscriptions {
-		// Отправляем уведомление
-		s.sendExpirationNotification(sub.UserID, 3)
-	}
+	// Сохраняем в кэш
+	s.mu.Lock()
+	s.plans[plan.Code] = plan
+	s.mu.Unlock()
+
+	return plan, nil
 }
 
-func (s *Service) checkExpiredSubscriptions() {
-	// В реальной реализации нужно найти истекшие подписки
-	// и перевести пользователей на бесплатный тариф
+// GetLatestSubscription возвращает последнюю подписку пользователя (любого статуса)
+func (s *Service) GetLatestSubscription(ctx context.Context, userID int) (*models.UserSubscription, error) {
+	logger.Info("🔍 GetLatestSubscription: ищем подписку для user %d", userID)
+
+	// Получаем из репозитория последнюю подписку
+	subscription, err := s.subRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		logger.Error("❌ GetLatestSubscription: ошибка получения подписки для user %d: %v", userID, err)
+		return nil, err
+	}
+
+	if subscription == nil {
+		logger.Info("📅 GetLatestSubscription: подписка не найдена для user %d", userID)
+		return nil, nil
+	}
+
+	logger.Info("✅ GetLatestSubscription: найдена подписка для user %d, статус: %s, план: %s",
+		userID, subscription.Status, subscription.PlanCode)
+
+	return subscription, nil
 }

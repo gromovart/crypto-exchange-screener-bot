@@ -13,7 +13,7 @@ import (
 // UserServiceFactory фабрика для создания UserService
 type UserServiceFactory struct {
 	config       Config
-	database     *database.DatabaseService // ИЗМЕНЕНО
+	database     *database.DatabaseService
 	redisService *redis.RedisService
 	notifier     NotificationService
 	mu           sync.RWMutex
@@ -23,7 +23,7 @@ type UserServiceFactory struct {
 // UserServiceDependencies зависимости для фабрики UserService
 type UserServiceDependencies struct {
 	Config       Config
-	Database     *database.DatabaseService // ИЗМЕНЕНО
+	Database     *database.DatabaseService
 	RedisService *redis.RedisService
 	Notifier     NotificationService
 }
@@ -72,6 +72,7 @@ func (f *UserServiceFactory) CreateUserService() (*Service, error) {
 		return nil, fmt.Errorf("подключение к Redis не установлено")
 	}
 
+	// ⭐ Передаем локальный Config напрямую
 	service, err := NewService(db, redisCache, f.notifier, f.config)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать UserService: %w", err)
@@ -85,10 +86,20 @@ func (f *UserServiceFactory) CreateUserService() (*Service, error) {
 func (f *UserServiceFactory) CreateUserServiceWithDefaults() (*Service, error) {
 	f.mu.Lock()
 	f.config = Config{
-		DefaultMinGrowthThreshold: 2.0,
-		DefaultMaxSignalsPerDay:   50,
-		SessionTTL:                24 * time.Hour,
-		MaxSessionsPerUser:        5,
+		UserDefaults: struct {
+			MinGrowthThreshold float64
+			MinFallThreshold   float64
+			Language           string
+			Timezone           string
+		}{
+			MinGrowthThreshold: 2.0,
+			MinFallThreshold:   2.0,
+			Language:           "ru",
+			Timezone:           "Europe/Moscow",
+		},
+		DefaultMaxSignalsPerDay: 50,
+		SessionTTL:              24 * time.Hour,
+		MaxSessionsPerUser:      5,
 	}
 	f.mu.Unlock()
 
@@ -153,6 +164,17 @@ func (f *UserServiceFactory) GetDependenciesInfo() map[string]interface{} {
 		"config_available": f.config != (Config{}),
 	}
 
+	// Добавляем информацию о UserDefaults
+	if f.config != (Config{}) {
+		info["default_growth_threshold"] = f.config.UserDefaults.MinGrowthThreshold
+		info["default_fall_threshold"] = f.config.UserDefaults.MinFallThreshold
+		info["default_language"] = f.config.UserDefaults.Language
+		info["default_timezone"] = f.config.UserDefaults.Timezone
+		info["default_max_signals"] = f.config.DefaultMaxSignalsPerDay
+		info["session_ttl"] = f.config.SessionTTL.String()
+		info["max_sessions"] = f.config.MaxSessionsPerUser
+	}
+
 	if f.database != nil {
 		info["database_state"] = f.database.State()
 	}
@@ -172,7 +194,14 @@ func (f *UserServiceFactory) Reset() {
 	f.redisService = nil
 	f.notifier = nil
 	f.initialized = false
-	f.config = Config{}
+	f.config = Config{
+		UserDefaults: struct {
+			MinGrowthThreshold float64
+			MinFallThreshold   float64
+			Language           string
+			Timezone           string
+		}{},
+	}
 
 	logger.Info("🔄 Фабрика UserService сброшена")
 }
@@ -219,7 +248,6 @@ func (f *UserServiceFactory) IsReady() bool {
 		return false
 	}
 
-	// Не проверяем GetDB() != nil, так как подключение может быть ленивым
 	logger.Debug("✅ Фабрика UserService готова (сервисы созданы)")
 	return true
 }

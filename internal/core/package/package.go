@@ -2,8 +2,10 @@
 package core_factory
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	infrastructure_factory "crypto-exchange-screener-bot/internal/infrastructure/package"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -25,6 +27,7 @@ type CoreServiceFactory struct {
 type Config struct {
 	UserConfig         users.Config
 	SubscriptionConfig subscription.Config
+	PaymentsConfig     payment.Config // Добавляем по аналогии с другими сервисами
 }
 
 // CoreServiceDependencies зависимости для фабрики ядра
@@ -33,7 +36,6 @@ type CoreServiceDependencies struct {
 	InfrastructureFactory *infrastructure_factory.InfrastructureFactory
 	// Остальные зависимости остаются без изменений
 	UserNotifier users.NotificationService
-	SubNotifier  subscription.NotificationService
 	Analytics    subscription.AnalyticsService
 	Config       *Config
 }
@@ -56,18 +58,31 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 	if deps.Config == nil {
 		deps.Config = &Config{
 			UserConfig: users.Config{
-				DefaultMinGrowthThreshold: 2.0,
-				DefaultMaxSignalsPerDay:   50,
-				SessionTTL:                24 * time.Hour,
-				MaxSessionsPerUser:        5,
+				UserDefaults: struct { // ⭐ Добавить структуру UserDefaults
+					MinGrowthThreshold float64
+					MinFallThreshold   float64
+					Language           string
+					Timezone           string
+				}{
+					MinGrowthThreshold: 2.0,
+					MinFallThreshold:   2.0,
+					Language:           "ru",
+					Timezone:           "Europe/Moscow",
+				},
+				DefaultMaxSignalsPerDay: 50,
+				SessionTTL:              24 * time.Hour,
+				MaxSessionsPerUser:      5,
 			},
 			SubscriptionConfig: subscription.Config{
-				StripeSecretKey:  "",
-				StripeWebhookKey: "",
-				DefaultPlan:      "free",
-				TrialPeriodDays:  7,
-				GracePeriodDays:  3,
-				AutoRenew:        true,
+				DefaultPlan:     "free",
+				TrialPeriodDays: 7,
+				GracePeriodDays: 3,
+				AutoRenew:       true,
+			},
+			PaymentsConfig: payment.Config{
+				TelegramBotToken:           "",
+				TelegramStarsProviderToken: "",
+				TelegramBotUsername:        "",
 			},
 		}
 	}
@@ -85,6 +100,14 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		// Не падаем, если Redis не доступен - сервисы могут создаваться позже
 	}
 
+	planRepo, err := deps.InfrastructureFactory.GetPlanRepository()
+	if err != nil {
+		logger.Warn("⚠️ Не удалось получить PlanRepository: %v", err)
+	} else {
+		logger.Info("✅ PlanRepository получен через InfrastructureFactory")
+		// Используем planRepo для создания SubscriptionServiceFactory
+	}
+
 	// Создаем фабрику UserService
 	userFactory, err := users.NewUserServiceFactory(users.UserServiceDependencies{
 		Config:       deps.Config.UserConfig,
@@ -92,20 +115,21 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		RedisService: redisService,
 		Notifier:     deps.UserNotifier,
 	})
+
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику UserService: %w", err)
 	}
 
 	// Создаем фабрику SubscriptionService
 	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(
-		subscription.SubscriptionServiceDependencies{
-			Config:       deps.Config.SubscriptionConfig,
-			Database:     databaseService,
-			RedisService: redisService,
-			Notifier:     deps.SubNotifier,
-			Analytics:    deps.Analytics,
+		subscription.Dependencies{
+			Config:    deps.Config.SubscriptionConfig,
+			PlanRepo:  planRepo,
+			Cache:     redisService.GetCache(),
+			Analytics: deps.Analytics,
 		},
 	)
+
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику SubscriptionService: %w", err)
 	}
@@ -174,6 +198,85 @@ func (f *CoreServiceFactory) CreateUserService() (*users.Service, error) {
 	return f.userFactory.CreateUserService()
 }
 
+// CreatePaymentService создает PaymentCoreService (StarsService)
+func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика ядра не инициализирована")
+	}
+
+	// Проверяем наличие конфигурации платежей
+	if f.config.PaymentsConfig.TelegramBotToken == "" {
+		return nil, fmt.Errorf("TelegramBotToken не настроен в PaymentsConfig")
+	}
+
+	// Получаем InfrastructureFactory
+	infraFactory := f.GetInfrastructureFactory()
+	if infraFactory == nil {
+		return nil, fmt.Errorf("InfrastructureFactory не доступна")
+	}
+
+	// Получаем EventBus
+	eventBus, err := infraFactory.GetEventBus()
+	if err != nil {
+		logger.Warn("⚠️ EventBus недоступен: %v", err)
+	}
+
+	// Получаем UserService
+	userService, err := f.userFactory.CreateUserService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать UserService: %w", err)
+	}
+
+	// Создаем StarsClient
+	baseURL := "https://api.telegram.org/bot" + f.config.PaymentsConfig.TelegramBotToken + "/"
+	starsClient := http_client.NewStarsClient(baseURL, f.config.PaymentsConfig.TelegramStarsProviderToken)
+
+	// Создаем StarsService
+	starsService := payment.NewStarsService(
+		userService,
+		eventBus,
+		logger.GetLogger(),
+		starsClient,
+		f.config.PaymentsConfig.TelegramBotUsername,
+	)
+
+	// ⭐ Получаем PaymentRepository
+	paymentRepo, err := infraFactory.GetPaymentRepository()
+	if err != nil {
+		logger.Error("❌ PaymentRepository недоступен: %v", err)
+		return nil, fmt.Errorf("PaymentRepository не доступен: %w", err)
+	}
+
+	// ⭐ Получаем InvoiceRepository
+	invoiceRepo, err := infraFactory.GetInvoiceRepository()
+	if err != nil {
+		logger.Error("❌ InvoiceRepository недоступен: %v", err)
+		return nil, fmt.Errorf("InvoiceRepository не доступен: %w", err)
+	}
+
+	// Создаем PaymentService через фабрику
+	paymentServiceFactory, err := payment.NewPaymentServiceFactory(payment.PaymentServiceDependencies{
+		StarsService: starsService,
+		PaymentRepo:  paymentRepo,
+		InvoiceRepo:  invoiceRepo, // ⭐ Передаем InvoiceRepository
+		Logger:       logger.GetLogger(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать фабрику PaymentService: %w", err)
+	}
+
+	paymentService, err := paymentServiceFactory.CreatePaymentService()
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать PaymentService: %w", err)
+	}
+
+	logger.Info("✅ PaymentService создан")
+	return paymentService, nil
+}
+
 // CreateSubscriptionService создает SubscriptionService
 func (f *CoreServiceFactory) CreateSubscriptionService() (*subscription.Service, error) {
 	f.mu.RLock()
@@ -199,10 +302,10 @@ func (f *CoreServiceFactory) CreateSubscriptionService() (*subscription.Service,
 	}
 
 	// Обновляем зависимости фабрики SubscriptionService
-	f.subscriptionFactory.SetDatabase(databaseService)
+	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 	f.subscriptionFactory.SetRedisService(redisService)
 
-	return f.subscriptionFactory.CreateSubscriptionService()
+	return f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
 }
 
 // CreateAllServices создает все сервисы ядра
@@ -232,8 +335,8 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	// Обновляем зависимости фабрик
 	f.userFactory.SetDatabase(databaseService)
 	f.userFactory.SetRedisService(redisService)
-	f.subscriptionFactory.SetDatabase(databaseService)
-	f.subscriptionFactory.SetRedisService(redisService)
+	// f.subscriptionFactory.SetDatabase(databaseService.GetDB())
+	// f.subscriptionFactory.SetRedisService(redisService)
 
 	// Создаем UserService
 	userService, err := f.userFactory.CreateUserService()
@@ -244,15 +347,15 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	logger.Info("✅ UserService создан")
 
 	// Создаем SubscriptionService
-	subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService()
-	if err != nil {
-		// Не падаем, если SubscriptionService не создан
-		logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
-		services["SubscriptionService"] = nil
-	} else {
-		services["SubscriptionService"] = subscriptionService
-		logger.Info("✅ SubscriptionService создан")
-	}
+	// subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
+	// if err != nil {
+	// 	// Не падаем, если SubscriptionService не создан
+	// 	logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
+	// 	services["SubscriptionService"] = nil
+	// } else {
+	// 	services["SubscriptionService"] = subscriptionService
+	// 	logger.Info("✅ SubscriptionService создан")
+	// }
 
 	logger.Info("✅ Все сервисы ядра созданы")
 	return services, nil
@@ -476,7 +579,7 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 		// Получаем сервисы из новой инфраструктурной фабрики
 		databaseService, err := deps.InfrastructureFactory.CreateDatabaseService()
 		if err == nil && databaseService != nil {
-			f.subscriptionFactory.SetDatabase(databaseService)
+			f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 		}
 
 		redisService, err := deps.InfrastructureFactory.CreateRedisService()
@@ -484,9 +587,6 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 			f.subscriptionFactory.SetRedisService(redisService)
 		}
 
-		if deps.SubNotifier != nil {
-			f.subscriptionFactory.SetNotifier(deps.SubNotifier)
-		}
 		if deps.Analytics != nil {
 			f.subscriptionFactory.SetAnalytics(deps.Analytics)
 		}

@@ -1,3 +1,4 @@
+// pkg/period/period.go
 package period
 
 import (
@@ -12,6 +13,8 @@ func StringToMinutes(period string) (int, error) {
 	period = strings.ToLower(strings.TrimSpace(period))
 
 	switch period {
+	case "1m":
+		return Minutes1, nil
 	case "5m":
 		return Minutes5, nil
 	case "15m":
@@ -40,6 +43,8 @@ func StringToMinutes(period string) (int, error) {
 // MinutesToString конвертирует минуты в строковый период
 func MinutesToString(minutes int) string {
 	switch minutes {
+	case Minutes1:
+		return Period1m
 	case Minutes5:
 		return Period5m
 	case Minutes15:
@@ -58,13 +63,40 @@ func MinutesToString(minutes int) string {
 	}
 }
 
-// StringToDuration конвертирует строковый период в time.Duration
-func StringToDuration(period string) (time.Duration, error) {
-	minutes, err := StringToMinutes(period)
-	if err != nil {
-		return 0, err
+// ✅ НОВАЯ УНИВЕРСАЛЬНАЯ ФУНКЦИЯ
+// PeriodToDuration конвертирует строковый период в time.Duration (без ошибки)
+func PeriodToDuration(period string) time.Duration {
+	switch period {
+	case "1m":
+		return 1 * time.Minute
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "30m":
+		return 30 * time.Minute
+	case "1h":
+		return 1 * time.Hour
+	case "4h":
+		return 4 * time.Hour
+	case "1d":
+		return 24 * time.Hour
+	default:
+		// Пробуем распарсить как число минут
+		if minutes, err := StringToMinutes(period); err == nil {
+			return MinutesToDuration(minutes)
+		}
+		// Если не удалось распарсить, возвращаем дефолт
+		return 15 * time.Minute
 	}
-	return MinutesToDuration(minutes), nil
+}
+
+// StringToDuration конвертирует строковый период в time.Duration с проверкой ошибки
+func StringToDuration(period string) (time.Duration, error) {
+	if !IsValidPeriod(period) {
+		return 0, fmt.Errorf("неизвестный период: %s", period)
+	}
+	return PeriodToDuration(period), nil
 }
 
 // MinutesToDuration конвертирует минуты в time.Duration
@@ -91,12 +123,8 @@ func IsValidPeriod(period string) bool {
 
 // IsValidMinutes проверяет, являются ли минуты валидным периодом
 func IsValidMinutes(minutes int) bool {
-	for _, validMinutes := range AllMinutes {
-		if minutes == validMinutes {
-			return true
-		}
-	}
-	return false
+	// Проверяем, что минуты положительные и не превышают разумный предел
+	return minutes > 0 && minutes <= Minutes1440*30 // до 30 дней
 }
 
 // IsStandardPeriod проверяет, является ли период стандартным
@@ -111,7 +139,12 @@ func IsStandardPeriod(period string) bool {
 
 // IsStandardMinutes проверяет, являются ли минуты стандартным периодом
 func IsStandardMinutes(minutes int) bool {
-	return IsValidMinutes(minutes)
+	for _, stdMinutes := range AllPeriodsMinutes {
+		if minutes == stdMinutes {
+			return true
+		}
+	}
+	return false
 }
 
 // GetStandardPeriods возвращает все стандартные периоды
@@ -121,7 +154,7 @@ func GetStandardPeriods() []string {
 
 // GetStandardMinutes возвращает все стандартные периоды в минутах
 func GetStandardMinutes() []int {
-	return AllMinutes
+	return AllPeriodsMinutes
 }
 
 // ParseUserPeriods парсит периоды пользователя из разных форматов
@@ -133,6 +166,10 @@ func ParseUserPeriods(periods []interface{}) ([]int, error) {
 		case int:
 			if v > 0 {
 				result = append(result, v)
+			}
+		case int64:
+			if v > 0 {
+				result = append(result, int(v))
 			}
 		case string:
 			minutes, err := StringToMinutes(v)
@@ -165,6 +202,8 @@ func FormatPeriodsForDisplay(minutes []int) []string {
 // FormatPeriodForDisplay форматирует период для отображения
 func FormatPeriodForDisplay(minutes int) string {
 	switch minutes {
+	case Minutes1:
+		return "1 минута"
 	case Minutes5:
 		return "5 минут"
 	case Minutes15:
@@ -182,10 +221,22 @@ func FormatPeriodForDisplay(minutes int) string {
 			return fmt.Sprintf("%d минут", minutes)
 		} else if minutes < 1440 {
 			hours := minutes / 60
-			return fmt.Sprintf("%d часов", hours)
+			if hours == 1 {
+				return "1 час"
+			} else if hours >= 2 && hours <= 4 {
+				return fmt.Sprintf("%d часа", hours)
+			} else {
+				return fmt.Sprintf("%d часов", hours)
+			}
 		} else {
 			days := minutes / 1440
-			return fmt.Sprintf("%d дней", days)
+			if days == 1 {
+				return "1 день"
+			} else if days >= 2 && days <= 4 {
+				return fmt.Sprintf("%d дня", days)
+			} else {
+				return fmt.Sprintf("%d дней", days)
+			}
 		}
 	}
 }
@@ -193,7 +244,7 @@ func FormatPeriodForDisplay(minutes int) string {
 // GetMaxPeriod возвращает максимальный период из списка минут
 func GetMaxPeriod(minutes []int) int {
 	if len(minutes) == 0 {
-		return DefaultMinutes
+		return Minutes5 // По умолчанию 5 минут
 	}
 
 	max := minutes[0]
@@ -208,7 +259,7 @@ func GetMaxPeriod(minutes []int) int {
 // GetMinPeriod возвращает минимальный период из списка минут
 func GetMinPeriod(minutes []int) int {
 	if len(minutes) == 0 {
-		return DefaultMinutes
+		return Minutes5 // По умолчанию 5 минут
 	}
 
 	min := minutes[0]
@@ -231,14 +282,14 @@ func ClampPeriod(minutes int, minLimit, maxLimit int) int {
 	return minutes
 }
 
-// ClampPeriodStandard ограничивает период стандартными пределами (5м - 1день)
+// ClampPeriodStandard ограничивает период стандартными пределами (1м - 1день)
 func ClampPeriodStandard(minutes int) int {
-	return ClampPeriod(minutes, Minutes5, Minutes1440)
+	return ClampPeriod(minutes, Minutes1, Minutes1440)
 }
 
 // ConvertToStandardPeriod конвертирует произвольный период в ближайший стандартный
 func ConvertToStandardPeriod(minutes int) int {
-	standardPeriods := []int{Minutes5, Minutes15, Minutes30, Minutes60, Minutes240, Minutes1440}
+	standardPeriods := []int{Minutes1, Minutes5, Minutes15, Minutes30, Minutes60, Minutes240, Minutes1440}
 
 	for _, std := range standardPeriods {
 		if minutes <= std {
@@ -247,3 +298,12 @@ func ConvertToStandardPeriod(minutes int) int {
 	}
 	return Minutes1440
 }
+
+var DefaultDuration = MinutesToDuration(DefaultMinutes)
+
+// Дефолтные значения
+const (
+	DefaultPeriod    = Period15m
+	DefaultPeriodStr = Period15m
+	DefaultMinutes   = Minutes5
+)

@@ -7,6 +7,14 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	database "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/database"
 	postgres_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/factory"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/activity"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/api_key"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/invoice"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/payment"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/plan"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -132,6 +140,25 @@ func (f *InfrastructureFactory) Initialize() error {
 		} else {
 			logger.Info("✅ Redis StorageFactory инициализирована")
 		}
+	}
+
+	// 5. Создаем фабрику репозиториев
+	repositoryFactory, err := postgres_factory.NewRepositoryFactory(postgres_factory.RepositoryDependencies{
+		Cache:           f.redisCache,
+		DatabaseService: f.databaseService,
+		EncryptionKey:   "",
+	})
+
+	if err != nil {
+		logger.Warn("⚠️ Не удалось создать RepositoryFactory: %v", err)
+	} else {
+		f.repositoryFactory = repositoryFactory
+		if err := f.repositoryFactory.Initialize(); err != nil {
+			logger.Warn("⚠️ Не удалось инициализировать RepositoryFactory: %v", err)
+		} else {
+			logger.Info("✅ RepositoryFactory инициализирована ")
+		}
+
 	}
 
 	f.initialized = true
@@ -820,4 +847,257 @@ func (f *InfrastructureFactory) UpdateConfig(newConfig *config.Config) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.config = newConfig
+}
+
+// GetPlanRepository получает репозиторий планов
+func (f *InfrastructureFactory) GetPlanRepository() (plan.PlanRepository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	// ⭐ Создаем PlanRepository если его нет
+	if !f.repositoryFactory.HasRepository("PlanRepository") {
+		logger.Info("🔄 Создание PlanRepository...")
+		if _, err := f.repositoryFactory.CreatePlanRepository(); err != nil {
+			return nil, fmt.Errorf("не удалось создать PlanRepository: %w", err)
+		}
+		logger.Info("✅ PlanRepository создан")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("PlanRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	planRepo, ok := repo.(plan.PlanRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается PlanRepository")
+	}
+
+	return planRepo, nil
+}
+
+// GetUserRepository получает репозиторий пользователей
+func (f *InfrastructureFactory) GetUserRepository() (users.UserRepository, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("UserRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	userRepo, ok := repo.(users.UserRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается UserRepository")
+	}
+
+	return userRepo, nil
+}
+
+// GetSubscriptionRepository получает репозиторий подписок
+func (f *InfrastructureFactory) GetSubscriptionRepository() (subscription.SubscriptionRepository, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("SubscriptionRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	subRepo, ok := repo.(subscription.SubscriptionRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается SubscriptionRepository")
+	}
+
+	return subRepo, nil
+}
+
+// GetPaymentRepository получает репозиторий платежей
+func (f *InfrastructureFactory) GetPaymentRepository() (payment.PaymentRepository, error) {
+	f.mu.Lock() // ⚠️ Lock вместо RLock для записи
+	defer f.mu.Unlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	// ⭐ Создаем PaymentRepository если его нет
+	if !f.repositoryFactory.HasRepository("PaymentRepository") {
+		logger.Info("🔄 Создание PaymentRepository...")
+		if _, err := f.repositoryFactory.CreatePaymentRepository(); err != nil {
+			logger.Error("❌ Не удалось создать PaymentRepository: %v", err)
+			return nil, fmt.Errorf("не удалось создать PaymentRepository: %w", err)
+		}
+		logger.Info("✅ PaymentRepository создан")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("PaymentRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	paymentRepo, ok := repo.(payment.PaymentRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается PaymentRepository")
+	}
+
+	return paymentRepo, nil
+}
+
+// GetInvoiceRepository получает репозиторий инвойсов
+func (f *InfrastructureFactory) GetInvoiceRepository() (invoice.InvoiceRepository, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	// Создаем InvoiceRepository если его нет
+	if !f.repositoryFactory.HasRepository("InvoiceRepository") {
+		logger.Info("🔄 Создание InvoiceRepository...")
+		if _, err := f.repositoryFactory.CreateInvoiceRepository(); err != nil {
+			logger.Error("❌ Не удалось создать InvoiceRepository: %v", err)
+			return nil, fmt.Errorf("не удалось создать InvoiceRepository: %w", err)
+		}
+		logger.Info("✅ InvoiceRepository создан")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("InvoiceRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	invoiceRepo, ok := repo.(invoice.InvoiceRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается InvoiceRepository")
+	}
+
+	return invoiceRepo, nil
+}
+
+// GetSessionRepository получает репозиторий сессий
+func (f *InfrastructureFactory) GetSessionRepository() (session.SessionRepository, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("SessionRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	sessionRepo, ok := repo.(session.SessionRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается SessionRepository")
+	}
+
+	return sessionRepo, nil
+}
+
+// GetActivityRepository получает репозиторий активности
+func (f *InfrastructureFactory) GetActivityRepository() (activity.ActivityRepository, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("ActivityRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	activityRepo, ok := repo.(activity.ActivityRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается ActivityRepository")
+	}
+
+	return activityRepo, nil
+}
+
+// GetAPIKeyRepository получает репозиторий API ключей
+func (f *InfrastructureFactory) GetAPIKeyRepository() (api_key.APIKeyRepository, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.repositoryFactory == nil {
+		return nil, fmt.Errorf("RepositoryFactory не создана")
+	}
+
+	repo, err := f.repositoryFactory.GetRepository("APIKeyRepository")
+	if err != nil {
+		return nil, err
+	}
+
+	apiKeyRepo, ok := repo.(api_key.APIKeyRepository)
+	if !ok {
+		return nil, fmt.Errorf("неверный тип репозитория: ожидается APIKeyRepository")
+	}
+
+	return apiKeyRepo, nil
+}
+
+// GetEventBus возвращает EventBus
+func (f *InfrastructureFactory) GetEventBus() (*events.EventBus, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	if !f.initialized {
+		return nil, fmt.Errorf("фабрика инфраструктуры не инициализирована")
+	}
+
+	if f.eventBus == nil {
+		return nil, fmt.Errorf("EventBus не создан")
+	}
+
+	return f.eventBus, nil
 }

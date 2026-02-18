@@ -152,8 +152,6 @@ func (sm *SettingsManager) GetUserNotificationSettings(userID int) (*models.User
 		NotifyContinuous:     user.NotifyContinuous,
 		MinGrowthThreshold:   user.MinGrowthThreshold,
 		MinFallThreshold:     user.MinFallThreshold,
-		QuietHoursStart:      user.QuietHoursStart,
-		QuietHoursEnd:        user.QuietHoursEnd,
 		PreferredPeriods:     user.PreferredPeriods,
 	}, nil
 }

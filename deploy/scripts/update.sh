@@ -809,6 +809,19 @@ INSTALL_DIR="${INSTALL_DIR}"
 
 echo "🗄️  Проверка состояния базы данных..."
 
+# Читаем настройки БД из конфига
+if [ -f "\${INSTALL_DIR}/.env" ]; then
+    DB_NAME=\$(grep "^DB_NAME=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+    DB_USER=\$(grep "^DB_USER=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+    DB_PASSWORD=\$(grep "^DB_PASSWORD=" "\${INSTALL_DIR}/.env" | cut -d= -f2)
+
+    echo "📊 Настройки БД: \${DB_NAME} (пользователь: \${DB_USER})"
+else
+    echo "⚠️  Конфиг не найден, используем значения по умолчанию"
+    DB_NAME="cryptobot"
+    DB_USER="cryptobot"
+fi
+
 # Проверяем существование папки миграций
 if [ -d "\${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations" ]; then
     MIGRATION_COUNT=\$(ls "\${INSTALL_DIR}/internal/infrastructure/persistence/postgres/migrations/"*.sql 2>/dev/null | wc -l)
@@ -825,9 +838,20 @@ fi
 echo ""
 echo "ℹ️  Миграции будут автоматически применены при запуске приложения"
 echo "   (если DB_ENABLE_AUTO_MIGRATE=true в .env файле)"
+
+# Добавить проверку и восстановление прав
+echo ""
+echo "🔐 Проверка прав доступа к таблицам..."
+sudo -u postgres psql -d \${DB_NAME} << SQL
+    GRANT ALL ON SCHEMA public TO \${DB_USER};
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \${DB_USER};
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \${DB_USER};
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \${DB_USER};
+SQL
+echo "✅ Права PostgreSQL проверены и восстановлены"
 EOF
 
-    log_info "Миграции проверены"
+    log_info "Миграции и права PostgreSQL проверены"
 }
 
 # Запуск обновленного приложения

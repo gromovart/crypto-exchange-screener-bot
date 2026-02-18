@@ -1,84 +1,45 @@
+// internal/delivery/telegram/app/bot/middlewares/auth.go
 package middlewares
 
 import (
 	"fmt"
 	"strconv"
 
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
-// TelegramUpdate - обновление от Telegram (упрощенная версия)
-type TelegramUpdate struct {
-	UpdateID int `json:"update_id"`
-	Message  *struct {
-		MessageID int `json:"message_id"`
-		From      *struct {
-			ID        int64  `json:"id"`
-			Username  string `json:"username"`
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
-		} `json:"from"`
-		Chat *struct {
-			ID int64 `json:"id"`
-		} `json:"chat"`
-		Text string `json:"text"`
-	} `json:"message"`
-	CallbackQuery *struct {
-		ID   string `json:"id"`
-		From *struct {
-			ID        int64  `json:"id"`
-			Username  string `json:"username"`
-			FirstName string `json:"first_name"`
-			LastName  string `json:"last_name"`
-		} `json:"from"`
-		Message *struct {
-			MessageID int `json:"message_id"`
-			Chat      *struct {
-				ID int64 `json:"id"`
-			} `json:"chat"`
-		} `json:"message"`
-		Data string `json:"data"`
-	} `json:"callback_query"`
-}
-
-// Handler интерфейс хэндлера (совместимый с handlers.Handler)
-type Handler interface {
-	Execute(params interface{}) (interface{}, error)
-	GetName() string
-	GetCommand() string
-	GetType() string
-}
-
-// HandlerParams параметры для хэндлеров (совместимые)
-type HandlerParams struct {
-	User     *models.User
-	ChatID   int64
-	Text     string // текст сообщения
-	Data     string // для callback данных
-	UpdateID string // ID обновления
-}
-
 // AuthMiddleware - middleware для проверки авторизации
 type AuthMiddleware struct {
-	userService *users.Service
+	userService         *users.Service
+	subscriptionService *subscription.Service
+	subscriptionRepo    subscription_repo.SubscriptionRepository
 }
 
 // NewAuthMiddleware создает новый middleware аутентификации
-func NewAuthMiddleware(userService *users.Service) *AuthMiddleware {
+func NewAuthMiddleware(
+	userService *users.Service,
+	subscriptionService *subscription.Service,
+	subscriptionRepo subscription_repo.SubscriptionRepository,
+) *AuthMiddleware {
 	return &AuthMiddleware{
-		userService: userService,
+		userService:         userService,
+		subscriptionService: subscriptionService,
+		subscriptionRepo:    subscriptionRepo,
 	}
 }
 
-// ProcessUpdate обрабатывает обновление и создает HandlerParams
-func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, error) {
+// ProcessUpdate обрабатывает обновление и создает handlers.HandlerParams
+func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (handlers.HandlerParams, error) {
 	// ЗАЩИТА ОТ NIL: проверяем userService
 	if m.userService == nil {
 		logger.Warn("❌ ProcessUpdate: userService is nil! Cannot process update")
-		// Возвращаем "технические работы" или базовый обработчик
-		return HandlerParams{}, fmt.Errorf("сервис пользователей временно недоступен")
+		return handlers.HandlerParams{}, fmt.Errorf("сервис пользователей временно недоступен")
 	}
 
 	var userID int64
@@ -90,40 +51,71 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 	updateID = strconv.Itoa(update.UpdateID)
 
 	// Извлекаем данные из обновления
-	if update.Message != nil && update.Message.From != nil {
+	if update.Message != nil && update.Message.From.ID > 0 {
 		userID = update.Message.From.ID
 		username = update.Message.From.Username
 		firstName = update.Message.From.FirstName
 		lastName = update.Message.From.LastName
 		chatID = update.Message.Chat.ID
 		text = update.Message.Text
-		logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
-	} else if update.CallbackQuery != nil && update.CallbackQuery.From != nil {
+
+		// Проверяем successful_payment
+		if update.Message.SuccessfulPayment != nil {
+			data = fmt.Sprintf("successful_payment:%s:%s:%d:%s:%d:%s",
+				update.Message.SuccessfulPayment.TelegramPaymentChargeID,
+				update.Message.SuccessfulPayment.InvoicePayload,
+				update.Message.SuccessfulPayment.TotalAmount,
+				update.Message.SuccessfulPayment.Currency,
+				userID,
+				update.Message.SuccessfulPayment.ProviderPaymentChargeID)
+
+			logger.Info("🔍 ProcessUpdate: SuccessfulPayment from user %d, amount: %d %s, payload: %s, data: %s",
+				userID, update.Message.SuccessfulPayment.TotalAmount,
+				update.Message.SuccessfulPayment.Currency, update.Message.SuccessfulPayment.InvoicePayload, data)
+		} else {
+			logger.Info("🔍 ProcessUpdate: Message from user %d, chat %d, text: %s", userID, chatID, text)
+		}
+	} else if update.CallbackQuery != nil && update.CallbackQuery.From.ID > 0 {
 		userID = update.CallbackQuery.From.ID
 		username = update.CallbackQuery.From.Username
 		firstName = update.CallbackQuery.From.FirstName
 		lastName = update.CallbackQuery.From.LastName
 		data = update.CallbackQuery.Data
 
-		// Для callback пытаемся получить chatID из Message
-		if update.CallbackQuery.Message != nil && update.CallbackQuery.Message.Chat != nil {
+		if update.CallbackQuery.Message != nil {
 			chatID = update.CallbackQuery.Message.Chat.ID
 			logger.Info("🔍 ProcessUpdate: Callback from user %d, chat %d (from Message), data: %s", userID, chatID, data)
 		} else {
-			// Если нет Message, используем userID как chatID (для приватных чатов)
 			chatID = userID
 			logger.Warn("⚠️ ProcessUpdate: No Message in callback, using userID as chatID: %d, data: %s", chatID, data)
 		}
+	} else if update.PreCheckoutQuery != nil && update.PreCheckoutQuery.From.ID > 0 {
+		userID = update.PreCheckoutQuery.From.ID
+		username = update.PreCheckoutQuery.From.Username
+		firstName = update.PreCheckoutQuery.From.FirstName
+		lastName = update.PreCheckoutQuery.From.LastName
+		chatID = userID
+
+		data = fmt.Sprintf("pre_checkout_query:%s:%s:%d:%s:%d",
+			update.PreCheckoutQuery.ID,
+			update.PreCheckoutQuery.InvoicePayload,
+			update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency,
+			userID)
+
+		logger.Info("🔍 ProcessUpdate: PreCheckoutQuery from user %d, amount: %d %s, payload: %s, data: %s",
+			userID, update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency, update.PreCheckoutQuery.InvoicePayload, data)
 	} else {
 		logger.Warn("❌ ProcessUpdate: Не удалось получить информацию о пользователе")
-		return HandlerParams{}, fmt.Errorf("не удалось получить информацию о пользователе")
+		return handlers.HandlerParams{}, fmt.Errorf("не удалось получить информацию о пользователе")
 	}
 
 	// Получаем или создаем пользователя
 	user, err := m.userService.GetOrCreateUser(userID, username, firstName, lastName)
 	if err != nil {
 		logger.Error("❌ ProcessUpdate: Ошибка получения пользователя %d: %v", userID, err)
-		return HandlerParams{}, fmt.Errorf("ошибка получения пользователя: %w", err)
+		return handlers.HandlerParams{}, fmt.Errorf("ошибка получения пользователя: %w", err)
 	}
 
 	logger.Info("✅ ProcessUpdate: User found/created: ID=%d, TelegramID=%d, ChatID=%s",
@@ -132,8 +124,13 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 	// Проверяем активность пользователя
 	if !user.IsActive {
 		logger.Warn("❌ ProcessUpdate: User %d is not active", user.ID)
-		return HandlerParams{}, fmt.Errorf("аккаунт деактивирован")
+		return handlers.HandlerParams{}, fmt.Errorf("аккаунт деактивирован")
 	}
+
+	// ⭐ ПРОВЕРКА ПОДПИСКИ (опционально, можно раскомментировать)
+	// if err := m.ensureSubscription(user.ID); err != nil {
+	//     return handlers.HandlerParams{}, err
+	// }
 
 	// Добавляем ChatID если его нет
 	if user.ChatID == "" {
@@ -145,7 +142,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 		}
 	}
 
-	return HandlerParams{
+	return handlers.HandlerParams{
 		User:     user,
 		ChatID:   chatID,
 		Text:     text,
@@ -155,7 +152,7 @@ func (m *AuthMiddleware) ProcessUpdate(update *TelegramUpdate) (HandlerParams, e
 }
 
 // RequireAuth создает обертку для хэндлера с проверкой авторизации
-func (m *AuthMiddleware) RequireAuth(handler Handler) Handler {
+func (m *AuthMiddleware) RequireAuth(handler handlers.Handler) handlers.Handler {
 	return &authWrapper{
 		handler:      handler,
 		userService:  m.userService,
@@ -165,7 +162,7 @@ func (m *AuthMiddleware) RequireAuth(handler Handler) Handler {
 }
 
 // RequireRole создает обертку для хэндлера с проверкой роли
-func (m *AuthMiddleware) RequireRole(requiredRole string, handler Handler) Handler {
+func (m *AuthMiddleware) RequireRole(requiredRole string, handler handlers.Handler) handlers.Handler {
 	return &authWrapper{
 		handler:      handler,
 		userService:  m.userService,
@@ -175,12 +172,12 @@ func (m *AuthMiddleware) RequireRole(requiredRole string, handler Handler) Handl
 }
 
 // RequireAdmin создает обертку для хэндлера с проверкой администратора
-func (m *AuthMiddleware) RequireAdmin(handler Handler) Handler {
+func (m *AuthMiddleware) RequireAdmin(handler handlers.Handler) handlers.Handler {
 	return m.RequireRole(models.RoleAdmin, handler)
 }
 
 // RequirePremium создает обертку для хэндлера с проверкой премиум статуса
-func (m *AuthMiddleware) RequirePremium(handler Handler) Handler {
+func (m *AuthMiddleware) RequirePremium(handler handlers.Handler) handlers.Handler {
 	return &authWrapper{
 		handler:        handler,
 		userService:    m.userService,
@@ -191,7 +188,7 @@ func (m *AuthMiddleware) RequirePremium(handler Handler) Handler {
 
 // authWrapper обертка для хэндлера с проверкой авторизации
 type authWrapper struct {
-	handler        Handler
+	handler        handlers.Handler
 	userService    *users.Service
 	requireAuth    bool
 	requiredRole   string
@@ -199,29 +196,24 @@ type authWrapper struct {
 }
 
 // Execute выполняет проверку авторизации и вызывает оригинальный хэндлер
-func (w *authWrapper) Execute(params interface{}) (interface{}, error) {
-	handlerParams, ok := params.(HandlerParams)
-	if !ok {
-		return nil, fmt.Errorf("неверный тип параметров")
+func (w *authWrapper) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+	if w.requireAuth && params.User == nil {
+		return handlers.HandlerResult{}, fmt.Errorf("требуется авторизация")
 	}
 
-	if w.requireAuth && handlerParams.User == nil {
-		return nil, fmt.Errorf("требуется авторизация")
-	}
-
-	if w.requiredRole != "" && handlerParams.User != nil {
-		if !w.hasRequiredRole(handlerParams.User, w.requiredRole) {
-			return nil, fmt.Errorf("недостаточно прав. Требуется роль: %s", w.requiredRole)
+	if w.requiredRole != "" && params.User != nil {
+		if !w.hasRequiredRole(params.User, w.requiredRole) {
+			return handlers.HandlerResult{}, fmt.Errorf("недостаточно прав. Требуется роль: %s", w.requiredRole)
 		}
 	}
 
-	if w.requirePremium && handlerParams.User != nil {
-		if !w.isPremiumUser(handlerParams.User) {
-			return nil, fmt.Errorf("эта функция доступна только премиум пользователям")
+	if w.requirePremium && params.User != nil {
+		if !w.isPremiumUser(params.User) {
+			return handlers.HandlerResult{}, fmt.Errorf("эта функция доступна только премиум пользователям")
 		}
 	}
 
-	return w.handler.Execute(handlerParams)
+	return w.handler.Execute(params)
 }
 
 // GetName возвращает имя обернутого хэндлера
@@ -235,7 +227,7 @@ func (w *authWrapper) GetCommand() string {
 }
 
 // GetType возвращает тип обернутого хэндлера
-func (w *authWrapper) GetType() string {
+func (w *authWrapper) GetType() handlers.HandlerType {
 	return w.handler.GetType()
 }
 

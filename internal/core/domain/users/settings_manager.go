@@ -136,43 +136,6 @@ func (sm *SettingsManager) UpdateThreshold(userID int, thresholdType string, val
 		thresholdType, oldValue, value), nil
 }
 
-// SetQuietHours устанавливает тихие часы
-func (sm *SettingsManager) SetQuietHours(userID, startHour, endHour int) (string, error) {
-	// Валидация
-	if startHour < 0 || startHour > 23 || endHour < 0 || endHour > 23 {
-		return "", fmt.Errorf("часы должны быть от 0 до 23")
-	}
-
-	user, err := sm.userService.GetUserByID(userID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get user: %w", err)
-	}
-
-	if user == nil {
-		return "", fmt.Errorf("user not found")
-	}
-
-	oldStart := user.QuietHoursStart
-	oldEnd := user.QuietHoursEnd
-
-	user.QuietHoursStart = startHour
-	user.QuietHoursEnd = endHour
-
-	// Сохраняем изменения
-	if err := sm.userService.UpdateUser(user); err != nil {
-		return "", fmt.Errorf("failed to update user: %w", err)
-	}
-
-	// Инвалидируем кэш
-	sm.invalidateUserCache(userID)
-
-	log.Printf("User %d updated quiet hours: %d-%d → %d-%d",
-		userID, oldStart, oldEnd, startHour, endHour)
-
-	return fmt.Sprintf("✅ Тихие часы установлены: %02d:00 - %02d:00",
-		startHour, endHour), nil
-}
-
 // ResetToDefault сбрасывает настройки к значениям по умолчанию
 func (sm *SettingsManager) ResetToDefault(userID int) (string, error) {
 	user, err := sm.userService.GetUserByID(userID)
@@ -195,8 +158,6 @@ func (sm *SettingsManager) ResetToDefault(userID int) (string, error) {
 	user.NotifyGrowth = defaultUser.NotifyGrowth
 	user.NotifyFall = defaultUser.NotifyFall
 	user.NotifyContinuous = defaultUser.NotifyContinuous
-	user.QuietHoursStart = defaultUser.QuietHoursStart
-	user.QuietHoursEnd = defaultUser.QuietHoursEnd
 	user.PreferredPeriods = defaultUser.PreferredPeriods
 	user.MinVolumeFilter = defaultUser.MinVolumeFilter
 	user.ExcludePatterns = defaultUser.ExcludePatterns
@@ -236,12 +197,6 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 		fallStatus = "✅"
 	}
 
-	quietHours := "Не настроены"
-	if user.QuietHoursStart != 0 || user.QuietHoursEnd != 0 {
-		quietHours = fmt.Sprintf("%02d:00 - %02d:00",
-			user.QuietHoursStart, user.QuietHoursEnd)
-	}
-
 	// Форматируем периоды
 	periodsStr := "Не настроены"
 	if len(user.PreferredPeriods) > 0 {
@@ -261,8 +216,7 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 			"🔔 *Уведомления:*\n"+
 			"   Все: %s\n"+
 			"   Рост: %s\n"+
-			"   Падение: %s\n"+
-			"   Тихие часы: %s\n\n"+
+			"   Падение: %s\n\n"+
 			"📈 *Статистика:*\n"+
 			"   Сигналов сегодня: %d/%d\n"+
 			"   Подписка: %s",
@@ -273,7 +227,6 @@ func (sm *SettingsManager) formatSettingsForTelegram(user *models.User) string {
 		notificationsStatus,
 		growthStatus,
 		fallStatus,
-		quietHours,
 		user.SignalsToday,
 		user.MaxSignalsPerDay,
 		user.SubscriptionTier,

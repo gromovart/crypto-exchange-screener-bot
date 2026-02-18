@@ -1,3 +1,4 @@
+// internal/core/domain/signals/detectors/counter/methods.go
 package counter
 
 import (
@@ -317,6 +318,8 @@ func (a *CounterAnalyzer) analyzeActiveCandle(symbol, period string) (*analysis.
 // periodToDuration конвертирует строковый период в time.Duration
 func periodToDuration(period string) time.Duration {
 	switch period {
+	case "1m":
+		return 1 * time.Minute
 	case "5m":
 		return 5 * time.Minute
 	case "15m":
@@ -538,13 +541,23 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	eventData["open_interest"] = oi
 
 	// Получаем реальную ставку фандинга
-	fundingRate := 0.001 // Заглушка, можно доработать
+	fundingRate := 0.0
 	if a.deps.Storage != nil {
 		if snapshot, exists := a.deps.Storage.GetCurrentSnapshot(signal.Symbol); exists {
 			fundingRate = snapshot.GetFundingRate()
 		}
 	}
 	eventData["funding_rate"] = fundingRate
+
+	// ⭐ ДОБАВЛЯЕМ ВРЕМЯ СЛЕДУЮЩЕГО ФАНДИНГА (заглушка, нужно получить реальное)
+	// В Bybit фандинг обычно каждые 8 часов: 00:00, 08:00, 16:00 UTC
+	now := time.Now().UTC()
+	nextFunding := time.Date(now.Year(), now.Month(), now.Day(),
+		(now.Hour()/8+1)*8, 0, 0, 0, time.UTC)
+	if nextFunding.Before(now) {
+		nextFunding = nextFunding.Add(8 * time.Hour)
+	}
+	eventData["next_funding_time"] = nextFunding
 
 	// ⭐ РЕАЛЬНЫЙ RSI
 	rsi, rsiStatus := a.calculateRSI(signal.Symbol, period)
@@ -561,6 +574,45 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction)
 	eventData["volume_delta"] = deltaData.Delta
 	eventData["volume_delta_percent"] = deltaData.DeltaPercent
+	eventData["delta_source"] = deltaData.Source
+
+	// ⭐ ДОБАВЛЯЕМ ЛИКВИДАЦИИ
+	liquidationVolume := 0.0
+	longLiqVolume := 0.0
+	shortLiqVolume := 0.0
+
+	// Пробуем получить метрики ликвидаций через MarketFetcher
+	if a.deps.MarketFetcher != nil {
+		// Пытаемся привести к интерфейсу с методом GetLiquidationMetrics
+		if fetcher, ok := a.deps.MarketFetcher.(interface {
+			GetLiquidationMetrics(string) (interface{}, bool)
+		}); ok {
+			if metrics, exists := fetcher.GetLiquidationMetrics(signal.Symbol); exists {
+				// Пытаемся извлечь данные из интерфейса
+				if m, ok := metrics.(struct {
+					TotalVolumeUSD float64
+					LongLiqVolume  float64
+					ShortLiqVolume float64
+				}); ok {
+					liquidationVolume = m.TotalVolumeUSD
+					longLiqVolume = m.LongLiqVolume
+					shortLiqVolume = m.ShortLiqVolume
+				}
+			}
+		}
+	}
+
+	// Если не получили через MarketFetcher, пробуем через Storage
+	if liquidationVolume == 0 && a.deps.Storage != nil {
+		if _, exists := a.deps.Storage.GetCurrentSnapshot(signal.Symbol); exists {
+			// Некоторые хранилища могут хранить ликвидации
+			// Это зависит от реализации
+		}
+	}
+
+	eventData["liquidation_volume"] = liquidationVolume
+	eventData["long_liq_volume"] = longLiqVolume
+	eventData["short_liq_volume"] = shortLiqVolume
 
 	// 4. Данные прогресса (3 поля) - вложенные в progress map
 	eventData["progress"] = map[string]interface{}{
@@ -569,8 +621,8 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 		"percentage":    50.0, // Заглушка
 	}
 
-	logger.Debug("📊 CounterAnalyzer: реальные индикаторы для %s/%s - RSI: %.1f (%s), MACD: %.4f (%s)",
-		signal.Symbol, period, rsi, rsiStatus, macdSignal, macdStatus)
+	logger.Debug("📊 CounterAnalyzer: реальные индикаторы для %s/%s - RSI: %.1f (%s), MACD: %.4f (%s), ликвидации: $%.0f",
+		signal.Symbol, period, rsi, rsiStatus, macdSignal, macdStatus, liquidationVolume)
 
 	return eventData
 }

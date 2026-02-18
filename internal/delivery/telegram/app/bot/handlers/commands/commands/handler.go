@@ -48,6 +48,7 @@ func (h *commandsCommandHandler) createCommandsMessage() string {
 	}{
 		{"/start", constants.CommandDescriptions.Start},
 		{"/help", constants.CommandDescriptions.Help},
+		{"/buy", constants.CommandDescriptions.Buy},
 		{"/profile", constants.CommandDescriptions.Profile},
 		{"/settings", constants.CommandDescriptions.Settings},
 		{"/notifications", constants.CommandDescriptions.Notifications},

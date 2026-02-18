@@ -268,14 +268,3 @@ func (s *serviceImpl) updateSensitivity(params SignalSettingsParams) (SignalSett
 		UserID:       params.UserID,
 	}, nil
 }
-
-// updateQuietHours обновляет тихие часы (заглушка)
-func (s *serviceImpl) updateQuietHours(params SignalSettingsParams) (SignalSettingsResult, error) {
-	return SignalSettingsResult{
-		Success:      true,
-		Message:      "✅ Тихие часы обновлены",
-		UpdatedField: "quiet_hours",
-		NewValue:     params.Value,
-		UserID:       params.UserID,
-	}, nil
-}

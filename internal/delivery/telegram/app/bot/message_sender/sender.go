@@ -14,8 +14,10 @@ type MessageSender interface {
 	// Основные методы отправки
 	SendTextMessage(chatID int64, text string, keyboard interface{}) error
 	SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error
-	// НОВЫЙ МЕТОД: Отправка без rate limiting (для counter уведомлений)
+	// Отправка без rate limiting (для counter уведомлений)
 	SendCounterMessage(chatID int64, text string, keyboard interface{}) error
+	// Отправка сообщений меню (приоритетные, с защитой от блокировок)
+	SendMenuMessage(chatID int64, text string, keyboard interface{}) error
 
 	// Управление сообщениями
 	EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error
@@ -31,14 +33,15 @@ type MessageSender interface {
 
 // MessageSenderImpl реализация MessageSender
 type MessageSenderImpl struct {
-	config       *config.Config
-	httpClient   *http.Client
-	baseURL      string
-	rateLimiter  *RateLimiter
-	chatID       int64
-	testMode     bool
-	enabled      bool
-	messageCache *MessageCache
+	config          *config.Config
+	httpClient      *http.Client
+	baseURL         string
+	rateLimiter     *RateLimiter
+	menuRateLimiter *RateLimiter // Отдельный rate limiter для меню
+	chatID          int64
+	testMode        bool
+	enabled         bool
+	messageCache    *MessageCache
 }
 
 // NewMessageSender создает новый MessageSender
@@ -46,24 +49,30 @@ func NewMessageSender(cfg *config.Config) MessageSender {
 	chatID := ParseChatID(cfg.TelegramChatID)
 
 	return &MessageSenderImpl{
-		config:       cfg,
-		httpClient:   &http.Client{Timeout: 30 * time.Second},
-		baseURL:      fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
-		rateLimiter:  NewRateLimiter(2 * time.Second),
-		chatID:       chatID,
-		testMode:     cfg.MonitoringTestMode,
-		enabled:      cfg.Telegram.Enabled,
-		messageCache: NewMessageCache(10 * time.Minute),
+		config:          cfg,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		baseURL:         fmt.Sprintf("https://api.telegram.org/bot%s/", cfg.TelegramBotToken),
+		rateLimiter:     NewRateLimiter(2 * time.Second),        // Для уведомлений
+		menuRateLimiter: NewRateLimiter(200 * time.Millisecond), // Для меню (быстрее)
+		chatID:          chatID,
+		testMode:        cfg.MonitoringTestMode,
+		enabled:         cfg.Telegram.Enabled,
+		messageCache:    NewMessageCache(10 * time.Minute),
 	}
 }
 
 // SendCounterMessage отправляет counter уведомление без rate limiting
 func (ms *MessageSenderImpl) SendCounterMessage(chatID int64, text string, keyboard interface{}) error {
-	return ms.sendMessageWithoutRateLimit(chatID, text, keyboard)
+	return ms.sendMessageWithoutRateLimit(chatID, text, keyboard, "counter")
+}
+
+// SendMenuMessage отправляет сообщение меню (приоритетное, с отдельным rate limiter)
+func (ms *MessageSenderImpl) SendMenuMessage(chatID int64, text string, keyboard interface{}) error {
+	return ms.sendMenuMessage(chatID, text, keyboard)
 }
 
 // sendMessageWithoutRateLimit внутренний метод без rate limiting
-func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text string, keyboard interface{}) error {
+func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text string, keyboard interface{}, msgType string) error {
 	// Проверяем включен ли Telegram
 	if !ms.enabled {
 		log.Println("⚠️ Telegram отключен, пропуск отправки сообщения")
@@ -72,23 +81,22 @@ func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text stri
 
 	// Проверяем тестовый режим
 	if ms.testMode {
-		log.Printf("[TEST] Send counter to %d: %s", chatID, text[:min(50, len(text))])
+		log.Printf("[TEST] Send %s to %d: %s", msgType, chatID, text[:min(50, len(text))])
 		return nil
 	}
 
-	// НЕ проверяем rate limiting для counter сообщений!
-
-	// Проверяем дубликаты (можно оставить для защиты от спама)
+	// Проверяем дубликаты (защита от спама)
 	messageHash := ms.getMessageHash(chatID, text, keyboard)
 	if ms.messageCache.IsDuplicate(messageHash) {
-		log.Println("⚠️ Дубликат counter сообщения, пропуск")
+		log.Printf("⚠️ Дубликат %s сообщения, пропуск", msgType)
 		return nil
 	}
 
 	// Отправляем запрос
 	request := map[string]interface{}{
-		"chat_id": chatID,
-		"text":    text,
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
 	}
 
 	if keyboard != nil {
@@ -98,6 +106,56 @@ func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text stri
 	err := ms.sendTelegramRequest("sendMessage", request)
 	if err == nil {
 		ms.messageCache.Add(messageHash)
+	} else {
+		log.Printf("❌ Ошибка отправки %s сообщения: %v", msgType, err)
+	}
+
+	return err
+}
+
+// sendMenuMessage отправляет сообщение меню с отдельным rate limiter
+func (ms *MessageSenderImpl) sendMenuMessage(chatID int64, text string, keyboard interface{}) error {
+	// Проверяем включен ли Telegram
+	if !ms.enabled {
+		log.Println("⚠️ Telegram отключен, пропуск отправки сообщения")
+		return nil
+	}
+
+	// Проверяем тестовый режим
+	if ms.testMode {
+		log.Printf("[TEST] Send menu to %d: %s", chatID, text[:min(50, len(text))])
+		return nil
+	}
+
+	// Используем отдельный rate limiter для меню
+	if !ms.menuRateLimiter.CanSend() {
+		log.Println("⚠️ Menu rate limit, но отправляем (приоритетное сообщение)")
+		// Не блокируем меню, а просто логируем и отправляем
+	}
+
+	// Проверяем дубликаты (более мягко для меню)
+	messageHash := ms.getMessageHash(chatID, text, keyboard)
+	if ms.messageCache.IsDuplicate(messageHash) {
+		log.Println("⚠️ Дубликат menu сообщения, но обновляем (меню)")
+		// Для меню разрешаем обновление даже если был дубликат
+	}
+
+	// Отправляем запрос
+	request := map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
+	}
+
+	if keyboard != nil {
+		request["reply_markup"] = keyboard
+	}
+
+	err := ms.sendTelegramRequest("sendMessage", request)
+	if err == nil {
+		ms.messageCache.Add(messageHash)
+	} else {
+		log.Printf("❌ Ошибка отправки menu сообщения: %v", err)
 	}
 
 	return err
@@ -105,17 +163,17 @@ func (ms *MessageSenderImpl) sendMessageWithoutRateLimit(chatID int64, text stri
 
 // SendTextMessage отправляет текстовое сообщение
 func (ms *MessageSenderImpl) SendTextMessage(chatID int64, text string, keyboard interface{}) error {
-	return ms.sendMessage(chatID, text, keyboard, false, "")
+	return ms.sendMessage(chatID, text, keyboard, false, "Markdown")
 }
 
 // SendMessageWithKeyboard отправляет сообщение с клавиатурой
 func (ms *MessageSenderImpl) SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error {
-	return ms.sendMessage(chatID, text, keyboard, false, "")
+	return ms.sendMessage(chatID, text, keyboard, false, "Markdown")
 }
 
 // EditMessageText редактирует текст сообщения
 func (ms *MessageSenderImpl) EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error {
-	return ms.editMessage(chatID, messageID, text, keyboard, "")
+	return ms.editMessage(chatID, messageID, text, keyboard, "Markdown")
 }
 
 // DeleteMessage удаляет сообщение
@@ -183,15 +241,15 @@ func (ms *MessageSenderImpl) sendMessage(chatID int64, text string, keyboard int
 
 	// Проверяем rate limiting
 	if !ms.rateLimiter.CanSend() {
-		log.Println("⚠️ Rate limit, пропуск сообщения")
-		return nil
+		log.Println("⚠️ Rate limit, но отправляем (приоритетное сообщение)")
+		// Не блокируем, а просто логируем
 	}
 
 	// Проверяем дубликаты
 	messageHash := ms.getMessageHash(chatID, text, keyboard)
 	if ms.messageCache.IsDuplicate(messageHash) {
-		log.Println("⚠️ Дубликат сообщения, пропуск")
-		return nil
+		log.Println("⚠️ Дубликат сообщения, но отправляем (обновление)")
+		// Для важных сообщений разрешаем
 	}
 
 	// Определяем метод
@@ -220,6 +278,8 @@ func (ms *MessageSenderImpl) sendMessage(chatID int64, text string, keyboard int
 	err := ms.sendTelegramRequest(method, request)
 	if err == nil {
 		ms.messageCache.Add(messageHash)
+	} else {
+		log.Printf("❌ Ошибка отправки сообщения: %v", err)
 	}
 
 	return err

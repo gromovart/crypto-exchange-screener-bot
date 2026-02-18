@@ -2,8 +2,10 @@
 package counter
 
 import (
+	"context"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto-exchange-screener-bot/pkg/period"
 	"fmt"
 	"math"
 )
@@ -61,6 +63,12 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 		return false
 	}
 
+	// ⭐ ПРОВЕРКА ПОДПИСКИ
+	if !s.hasActiveSubscription(user.ID) {
+		logger.Debug("🔍 Пропуск user=%d: нет активной подписки", user.ID)
+		return false
+	}
+
 	// Проверка типа сигнала
 	signalType, valid := s.determineSignalType(data)
 	if !valid {
@@ -86,6 +94,23 @@ func (s *serviceImpl) shouldSendToUser(user *models.User, data RawCounterData) b
 	logger.Debug("✅ shouldSendToUser ПРОШЕЛ: user=%d (%s) для %s signal (%.2f%%)",
 		user.ID, user.Username, signalType, changePercentForCheck)
 	return true
+}
+
+// hasActiveSubscription проверяет наличие активной подписки
+func (s *serviceImpl) hasActiveSubscription(userID int) bool {
+	if s.subscriptionService == nil {
+		logger.Warn("⚠️ subscriptionService не инициализирован в counter service")
+		return true // Если сервис не инициализирован, пропускаем (для обратной совместимости)
+	}
+
+	ctx := context.Background()
+	sub, err := s.subscriptionService.GetActiveSubscription(ctx, userID)
+	if err != nil {
+		logger.Warn("⚠️ Ошибка проверки подписки для user %d: %v", userID, err)
+		return false
+	}
+
+	return sub != nil
 }
 
 // checkBasicConditions проверяет базовые условия пользователя
@@ -165,55 +190,21 @@ func (s *serviceImpl) checkUserThresholds(user *models.User, signalType string, 
 	return true
 }
 
-// logUserSkipReason логирует причину пропуска пользователя
+// logUserSkipReason логирует причину пропуска пользователя (только для отладки, но без спама)
 func (s *serviceImpl) logUserSkipReason(user *models.User, signalType string, changePercent float64, data RawCounterData) {
-	if !user.IsActive {
-		logger.Debug("🔍 Пропуск user=%d: не активен", user.ID)
-		return
-	}
+	// ⭐ Логируем только для важных случаев (большие изменения, но не достигшие порога)
+	absChange := math.Abs(changePercent)
 
-	if !user.CanReceiveNotifications() {
-		logger.Debug("🔍 Пропуск user=%d: уведомления отключены", user.ID)
-		return
+	// Логируем если изменение больше 0.5% но не достигло порога (это интересно)
+	if absChange > 0.5 {
+		if signalType == "growth" && changePercent < user.MinGrowthThreshold {
+			logger.Debug("🔍 Пропуск user=%d: рост %.2f%% < порога %.2f%%",
+				user.ID, changePercent, user.MinGrowthThreshold)
+		} else if signalType == "fall" && absChange < user.MinFallThreshold {
+			logger.Debug("🔍 Пропуск user=%d: падение |%.2f|%% < порога %.2f%%",
+				user.ID, absChange, user.MinFallThreshold)
+		}
 	}
-
-	if signalType == SignalTypeGrowth && !user.CanReceiveGrowthSignals() {
-		logger.Debug("🔍 Пропуск user=%d: рост отключен", user.ID)
-		return
-	}
-
-	if signalType == SignalTypeFall && !user.CanReceiveFallSignals() {
-		logger.Debug("🔍 Пропуск user=%d: падение отключено", user.ID)
-		return
-	}
-
-	// Проверка порогов
-	if signalType == SignalTypeGrowth && changePercent < user.MinGrowthThreshold {
-		logger.Debug("🔍 Пропуск user=%d: порог роста не достигнут (%.2f%% < %.1f%%)",
-			user.ID, changePercent, user.MinGrowthThreshold)
-		return
-	}
-
-	if signalType == SignalTypeFall && math.Abs(changePercent) < user.MinFallThreshold {
-		logger.Debug("🔍 Пропуск user=%d: порог падения не достигнут (%.2f%% < %.1f%%)",
-			user.ID, math.Abs(changePercent), user.MinFallThreshold)
-		return
-	}
-
-	if user.IsInQuietHours() {
-		logger.Debug("🔍 Пропуск user=%d: тихие часы (%d-%d)",
-			user.ID, user.QuietHoursStart, user.QuietHoursEnd)
-		return
-	}
-
-	if user.HasReachedDailyLimit() {
-		logger.Debug("🔍 Пропуск user=%d: дневной лимит достигнут (%d/%d)",
-			user.ID, user.SignalsToday, user.MaxSignalsPerDay)
-		return
-	}
-
-	logger.Debug("🔍 Пропуск user=%d: ShouldReceiveSignal вернул false (тип: %s, изменение: %.2f%%)",
-		user.ID, signalType, changePercent)
 }
 
 // applyUserFilters применяет фильтры пользователя к данным счетчика
@@ -242,7 +233,7 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 
 	// Проверяем предпочтительные периоды
 	if len(user.PreferredPeriods) > 0 {
-		periodInt, err := ConvertPeriodToInt(data.Period)
+		periodInt, err := period.StringToMinutes(data.Period)
 		if err != nil {
 			logger.Debug("⚠️ User %d (%s) пропущен: неверный формат периода '%s'",
 				user.ID, user.Username, data.Period)
@@ -250,8 +241,16 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 		}
 
 		if !s.isPeriodPreferred(periodInt, user.PreferredPeriods) {
-			logger.Debug("❌ User %d (%s) пропущен: период %s (%d) не в предпочтительных периодах %v",
-				user.ID, user.Username, data.Period, periodInt, user.PreferredPeriods)
+			return false
+		}
+	} else {
+		// Если у пользователя нет предпочтительных периодов - используем дефолтный 15 минут
+		defaultPeriod := 15
+		periodInt, err := period.StringToMinutes(data.Period)
+		if err != nil {
+			return false
+		}
+		if periodInt != defaultPeriod {
 			return false
 		}
 	}

@@ -160,3 +160,58 @@ func (w *CounterControllerWrapper) GetName() string {
 func (w *CounterControllerWrapper) GetSubscribedEvents() []types.EventType {
 	return w.controller.GetSubscribedEvents()
 }
+
+// ==================== НОВЫЕ ПОДПИСЧИКИ ДЛЯ ПЛАТЕЖЕЙ ====================
+
+// PaymentControllerSubscriber - подписчик для контроллера платежей
+type PaymentControllerSubscriber struct {
+	BaseSubscriber
+	paymentController types.EventSubscriber
+}
+
+// NewPaymentControllerSubscriber создает нового подписчика для контроллера платежей
+func NewPaymentControllerSubscriber(controller types.EventSubscriber) *PaymentControllerSubscriber {
+	return &PaymentControllerSubscriber{
+		BaseSubscriber: *NewBaseSubscriber(
+			"payment_controller",
+			[]types.EventType{
+				types.EventPaymentComplete,
+				types.EventPaymentCreated,
+				types.EventPaymentFailed,
+				types.EventPaymentRefunded,
+			},
+			func(event types.Event) error {
+				logger.Warn("💰 [PAYMENT SUBSCRIBER] Получено событие: %s", event.Type)
+				return controller.HandleEvent(event)
+			},
+		),
+		paymentController: controller,
+	}
+}
+
+// PaymentControllerWrapper - обертка для контроллера платежей как подписчика
+type PaymentControllerWrapper struct {
+	controller types.EventSubscriber
+}
+
+// NewPaymentControllerWrapper создает обертку для контроллера платежей
+func NewPaymentControllerWrapper(controller types.EventSubscriber) *PaymentControllerWrapper {
+	return &PaymentControllerWrapper{
+		controller: controller,
+	}
+}
+
+// HandleEvent обрабатывает событие
+func (w *PaymentControllerWrapper) HandleEvent(event types.Event) error {
+	return w.controller.HandleEvent(event)
+}
+
+// GetName возвращает имя подписчика
+func (w *PaymentControllerWrapper) GetName() string {
+	return w.controller.GetName()
+}
+
+// GetSubscribedEvents возвращает типы событий
+func (w *PaymentControllerWrapper) GetSubscribedEvents() []types.EventType {
+	return w.controller.GetSubscribedEvents()
+}

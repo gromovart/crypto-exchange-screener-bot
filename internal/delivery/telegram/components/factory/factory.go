@@ -95,12 +95,18 @@ func (s *stubMessageSender) SendTextMessage(chatID int64, text string, keyboard 
 	return nil
 }
 
-func (s *stubMessageSender) SendCounterMessage(chatID int64, text string, keyboard interface{}) error {
+func (s *stubMessageSender) SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error {
+	logger.Debug("[STUB] Отправка сообщения с клавиатурой в %d: %s", chatID, text[:min(50, len(text))])
 	return nil
 }
 
-func (s *stubMessageSender) SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error {
-	logger.Debug("[STUB] Отправка сообщения с клавиатурой в %d: %s", chatID, text[:min(50, len(text))])
+func (s *stubMessageSender) SendCounterMessage(chatID int64, text string, keyboard interface{}) error {
+	logger.Debug("[STUB] Отправка counter сообщения в %d: %s", chatID, text[:min(50, len(text))])
+	return nil
+}
+
+func (s *stubMessageSender) SendMenuMessage(chatID int64, text string, keyboard interface{}) error {
+	logger.Debug("[STUB] Отправка menu сообщения в %d: %s", chatID, text[:min(50, len(text))])
 	return nil
 }
 
@@ -133,4 +139,12 @@ func (s *stubMessageSender) SetTestMode(enabled bool) {
 
 func (s *stubMessageSender) IsTestMode() bool {
 	return false
+}
+
+// min возвращает минимум из двух чисел
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

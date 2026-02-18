@@ -32,8 +32,6 @@ func (s *serviceImpl) Exec(params SignalSettingsParams) (SignalSettingsResult, e
 		return s.updateFallThreshold(params)
 	case "set_sensitivity":
 		return s.updateSensitivity(params)
-	case "set_quiet_hours":
-		return s.updateQuietHours(params)
 	case "select_period":
 		return s.selectPeriod(params)
 	case "remove_period":

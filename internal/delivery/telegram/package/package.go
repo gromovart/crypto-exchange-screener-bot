@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
@@ -30,6 +31,7 @@ type TelegramDeliveryPackage struct {
 	// Созданные сервисы ядра (ленивое создание)
 	userService         *users.Service
 	subscriptionService *subscription.Service
+	paymentService      *payment.PaymentService // ⭐ Новый сервис платежей
 
 	// Подфабрики
 	componentFactory  *components_factory.ComponentFactory
@@ -175,16 +177,35 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	logger.Debug("🏭 Создание ServiceFactory...")
 
-	// ПОЛУЧАЕМ UserService из CoreFactory перед созданием ServiceFactory
+	// Получаем UserService из CoreFactory
 	userService, err := p.getUserService()
 	if err != nil {
 		return fmt.Errorf("не удалось получить UserService: %w", err)
 	}
 
+	// Получаем SubscriptionService
+	subscriptionService, err := p.getSubscriptionService()
+	if err != nil {
+		logger.Warn("⚠️ SubscriptionService не доступен: %v", err)
+	}
+
+	// ⭐ Получаем PaymentService (новый сервис ядра)
+	paymentSvc, err := p.getPaymentService()
+	if err != nil {
+		logger.Warn("⚠️ PaymentService не доступен: %v", err)
+		paymentSvc = nil
+	}
+
+	// ⭐ Проверяем что все зависимости есть
+	if paymentSvc == nil {
+		logger.Error("❌ PaymentService не создан, будет использоваться заглушка")
+	}
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
-			UserService:         userService, // ✅ Теперь не nil
-			SubscriptionService: nil,         // Может быть nil
+			UserService:         userService,
+			SubscriptionService: subscriptionService,
+			PaymentCoreService:  paymentSvc, // ⭐ Передаем PaymentService
 			MessageSender:       p.components.MessageSender,
 			ButtonBuilder:       p.components.ButtonBuilder,
 			FormatterProvider:   p.components.FormatterProvider,
@@ -220,6 +241,56 @@ func (p *TelegramDeliveryPackage) getUserService() (*users.Service, error) {
 	return p.userService, nil
 }
 
+// getSubscriptionService получает SubscriptionService из CoreFactory
+func (p *TelegramDeliveryPackage) getSubscriptionService() (*subscription.Service, error) {
+	if p.subscriptionService != nil {
+		return p.subscriptionService, nil
+	}
+
+	if p.coreFactory == nil {
+		return nil, fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	// Создаем SubscriptionService через фабрику
+	subscriptionService, err := p.coreFactory.CreateSubscriptionService()
+	if err != nil {
+		logger.Error("❌ Не удалось создать SubscriptionService: %v", err)
+		return nil, fmt.Errorf("не удалось создать SubscriptionService: %w", err)
+	}
+
+	p.subscriptionService = subscriptionService
+	logger.Info("✅ SubscriptionService создан и сохранен в пакете")
+	return p.subscriptionService, nil
+}
+
+// ⭐ НОВЫЙ МЕТОД: getPaymentService получает PaymentService из CoreFactory
+func (p *TelegramDeliveryPackage) getPaymentService() (*payment.PaymentService, error) {
+	if p.paymentService != nil {
+		return p.paymentService, nil
+	}
+
+	if p.coreFactory == nil {
+		return nil, fmt.Errorf("CoreServiceFactory не установлена")
+	}
+
+	// Создаем PaymentService через фабрику
+	logger.Warn("🔍 Создание PaymentService через CoreFactory...")
+	paymentSvc, err := p.coreFactory.CreatePaymentService()
+	if err != nil {
+		logger.Error("❌ Не удалось создать PaymentService: %v", err)
+		return nil, fmt.Errorf("не удалось создать PaymentService: %w", err)
+	}
+
+	if paymentSvc == nil {
+		logger.Error("❌ CreatePaymentService вернул nil")
+		return nil, fmt.Errorf("CreatePaymentService вернул nil")
+	}
+
+	p.paymentService = paymentSvc
+	logger.Info("✅ PaymentService создан и сохранен в пакете")
+	return p.paymentService, nil
+}
+
 // createServices создает все сервисы Telegram
 func (p *TelegramDeliveryPackage) createServices() error {
 	logger.Debug("🔧 Создание сервисов Telegram...")
@@ -229,10 +300,13 @@ func (p *TelegramDeliveryPackage) createServices() error {
 	p.services["NotificationToggleService"] = p.serviceFactory.CreateNotificationToggleService()
 	p.services["SignalSettingsService"] = p.serviceFactory.CreateSignalSettingsService()
 
+	// Создаем PaymentService
+	p.services["PaymentService"] = p.serviceFactory.CreatePaymentService()
+
 	// Проверяем что сервисы созданы
 	for name, service := range p.services {
 		if service == nil {
-			return fmt.Errorf("сервис %s не создан", name)
+			logger.Warn("⚠️ Сервис %s не создан", name)
 		}
 	}
 
@@ -292,15 +366,14 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 		return nil
 	}
 
-	// ПОЛУЧАЕМ UserService
-	userService, err := p.getUserService()
-	if err != nil {
-		return fmt.Errorf("UserService не создан для бота: %w", err)
+	// Проверяем что ServiceFactory создана
+	if p.serviceFactory == nil {
+		return fmt.Errorf("ServiceFactory не создана")
 	}
 
-	// Зависимости для бота
+	// Создаем зависимости для бота
 	deps := &bot.Dependencies{
-		UserService: userService,
+		ServiceFactory: p.serviceFactory,
 	}
 
 	// Создаем бота
@@ -308,10 +381,12 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 
 	// Создаем транспорт на основе конфигурации
 	transportFactory := transport.NewTransportFactory(p.config, p.bot)
-	p.transport, err = transportFactory.CreateTransport()
+	transport, err := transportFactory.CreateTransport()
 	if err != nil {
 		return fmt.Errorf("ошибка создания транспорта: %w", err)
 	}
+
+	p.transport = transport
 
 	logger.Info("✅ Telegram бот создан (режим: %s)", p.config.TelegramMode)
 	logger.Info("✅ Транспорт создан: %s", p.transport.Name())
@@ -357,16 +432,12 @@ func (p *TelegramDeliveryPackage) Start() error {
 	logger.Info("🚀 Запуск Telegram бота (режим: %s, транспорт: %s)...",
 		p.config.TelegramMode, p.transport.Name())
 
-	// 🔴 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
 	// В вебхук-режиме нужно убедиться что контроллеры подписаны на EventBus
-	// Polling режим сохраняет состояние в одном процессе, а вебхук может его терять
 	if p.config.IsWebhookMode() {
 		logger.Info("🔗 Вебхук-режим: проверка подписки контроллеров на EventBus...")
 
 		if p.eventBus == nil {
 			logger.Error("❌ EventBus не установлен в вебхук-режиме - уведомления о сигналах не будут работать!")
-			// Не возвращаем ошибку, чтобы бот продолжал работать с командами
-			// Но логируем критическое предупреждение
 		} else {
 			// Переподписываем контроллеры на EventBus
 			subscribedCount := p.subscribeControllersToEventBus()
@@ -389,13 +460,13 @@ func (p *TelegramDeliveryPackage) Start() error {
 	p.isRunning = true
 	logger.Info("✅ Telegram бот запущен через %s", p.transport.Name())
 
-	// 🔴 ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА: Логируем информацию о контроллерах
+	// Логируем информацию о контроллерах
 	p.logControllerInfo()
 
 	return nil
 }
 
-// 🔴 НОВЫЙ МЕТОД: logControllerInfo логирует информацию о контроллерах
+// logControllerInfo логирует информацию о контроллерах
 func (p *TelegramDeliveryPackage) logControllerInfo() {
 	if len(p.controllers) == 0 {
 		logger.Warn("⚠️ TelegramDeliveryPackage: контроллеры не созданы")
@@ -460,6 +531,7 @@ func (p *TelegramDeliveryPackage) GetHealthStatus() map[string]interface{} {
 		"core_factory_ready":   p.coreFactory != nil && p.coreFactory.IsReady(),
 		"user_service":         p.userService != nil,
 		"subscription_service": p.subscriptionService != nil,
+		"payment_service":      p.services["PaymentService"] != nil,
 		"telegram_mode":        p.config.TelegramMode,
 	}
 
@@ -555,6 +627,7 @@ func (p *TelegramDeliveryPackage) UpdateCoreFactory(newFactory *core_factory.Cor
 	// Сбрасываем созданные сервисы ядра, чтобы пересоздать с новой фабрикой
 	p.userService = nil
 	p.subscriptionService = nil
+	p.paymentService = nil
 
 	logger.Info("✅ Фабрика ядра обновлена")
 	return nil
@@ -599,6 +672,9 @@ func (p *TelegramDeliveryPackage) Reset() {
 	p.transport = nil
 	p.isRunning = false
 	p.initialized = false
+	p.userService = nil
+	p.subscriptionService = nil
+	p.paymentService = nil
 
 	logger.Info("🔄 TelegramDeliveryPackage сброшен")
 }

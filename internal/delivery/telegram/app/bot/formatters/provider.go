@@ -57,10 +57,10 @@ type CounterData struct {
 	VolumeDelta        float64
 	VolumeDeltaPercent float64
 	RSI                float64
-	RSIStatus          string // ⭐ НОВОЕ: статус RSI из расчета
+	RSIStatus          string
 	MACDSignal         float64
-	MACDStatus         string // ⭐ НОВОЕ: статус MACD
-	MACDDescription    string // ⭐ НОВОЕ: полное описание MACD
+	MACDStatus         string
+	MACDDescription    string
 	DeltaSource        string
 	Confidence         float64
 	Timestamp          time.Time
@@ -85,7 +85,6 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	var builder strings.Builder
 
 	// 1. ЗАГОЛОВОК
-
 	// 🔴 ПАДЕНИЕ -60.00% 🚨
 	// 💰 $0.07388
 	builder.WriteString(p.SignalFormatter.FormatSignalHeader(
@@ -167,44 +166,8 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		builder.WriteString("\n")
 	}
 
-	// 7. ПРОГРЕСС ПОДТВЕРЖДЕНИЙ (новый раздел)
-	// 📡 Подтверждений: 3/6 🟢🟢🟢▫️▫️▫️ (50%)
-	// 🕐 Следующий анализ: 10:10
-	// ⏰ Следующий сигнал: 10:40 (через 20м)
-	// ИСПОЛЬЗУЕМ НОВЫЙ МЕТОД с готовыми данными групп
-	// builder.WriteString(p.ProgressFormatter.FormatConfirmationProgressWithGroups(
-	// 	data.Confirmations,
-	// 	data.RequiredConfirmations,
-	// 	data.FilledSlots, // готовые данные заполненных групп
-	// 	data.TotalSlots,  // готовые данные всех групп
-	// 	data.Period,
-	// 	data.NextAnalysis,
-	// 	data.NextSignal,
-	// ))
-	// builder.WriteString("\n\n")
-
-	// 8. РЕКОМЕНДАЦИИ (если есть данные)
-	// 🎯 РЕКОМЕНДАЦИЯ:
-	// 📌 Направление: 🔴🔽 СИЛЬНЫЕ МЕДВЕЖЬИ СИГНАЛЫ
-	//
-	// 📊 Анализ сигналов:
-	// 1.  ⚠️ RSI в зоне перепроданности (28.5) - осторожность с SHORT
-	// 2.  📉 MACD: сильный медвежий тренд
-	// 3.  📉 умеренная дельта продаж ($20762) - заметное давление продавцов
-	// 4.  ✅ Объемы подтверждают ценовое движение
-	//
-	// 🟢 ОТКРИТЬ ЛОНГ: умеренные бычьи сигналы
-	//
-	// 📊 УРОВНИ:
-	// Стоп-лосс: $0.8560 (2.0%)
-	// Тейк-профит: $0.8912 (4.0%)
-	// Риск/Прибыль: 1:2.0
-	//
-	// 📈 РАЗМЕР ПОЗИЦИИ:
-	// Рекомендуемый размер: 1-2% капитала
-	//
-	// 🎯 ЗАКЛЮЧЕНИЕ: умеренное движение с умеренной дельтой объемов
-	recommendationText := p.Recommendation.GetEnhancedTradingRecommendation(
+	// ⭐ ИЗМЕНЕНО: Только торговая рекомендация с уровнями (без дублирования анализа)
+	tradingRecommendation := p.Recommendation.GetTradingRecommendationOnly(
 		data.Direction,
 		data.RSI,
 		data.MACDSignal,
@@ -212,11 +175,12 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 		data.VolumeDeltaPercent,
 		data.LongLiqVolume,
 		data.ShortLiqVolume,
-		data.CurrentPrice,  // НОВЫЙ ПАРАМЕТР
-		data.ChangePercent, // НОВЫЙ ПАРАМЕТР
+		data.CurrentPrice,
+		data.ChangePercent,
 	)
-	if recommendationText != "" {
-		builder.WriteString(recommendationText)
+
+	if tradingRecommendation != "" {
+		builder.WriteString(tradingRecommendation)
 		builder.WriteString("\n\n")
 	}
 
@@ -232,6 +196,8 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 	}
 
 	// 10. ЛИКВИДАЦИИ (если есть данные)
+	// 💥 Ликвидации за 5м: $12.5M
+	// LONG: $7.8M, SHORT: $4.7M
 	if data.LiquidationVolume > 0 {
 		builder.WriteString(p.LiquidationFormatter.FormatLiquidationBlock(
 			data.Period,

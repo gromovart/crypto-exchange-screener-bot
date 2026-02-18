@@ -102,17 +102,6 @@ func (h *signalsMenuHandler) createSignalsKeyboard(user *models.User) interface{
 				"callback_data": constants.CallbackSignalSetFallThreshold},
 		},
 
-		//TODO: рааскомментировать и реализовать эти функции позже
-		// Дополнительные настройки
-		// {
-		// 	{"text": constants.SignalButtonTexts.Sensitivity, "callback_data": constants.CallbackSignalSetSensitivity},
-		// 	{"text": constants.SignalButtonTexts.QuietHours, "callback_data": constants.CallbackSignalSetQuietHours},
-		// },
-		// Действия
-		// {
-		// 	{"text": constants.SignalButtonTexts.History, "callback_data": constants.CallbackSignalHistory},
-		// 	{"text": constants.SignalButtonTexts.TestSignal, "callback_data": constants.CallbackSignalTest},
-		// },
 		// Навигация
 		{
 			{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},

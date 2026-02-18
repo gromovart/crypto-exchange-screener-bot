@@ -57,7 +57,6 @@ func (r *UserRepositoryImpl) GetAllActive() ([]*models.User, error) {
         id, telegram_id, username, first_name, last_name, chat_id,
         email, phone,
         notifications_enabled, notify_growth, notify_fall, notify_continuous,
-        quiet_hours_start, quiet_hours_end,
         min_growth_threshold, min_fall_threshold,
         preferred_periods, min_volume_filter, exclude_patterns,
         language, timezone, display_mode,
@@ -100,7 +99,6 @@ func (r *UserRepositoryImpl) GetAll(limit, offset int) ([]*models.User, error) {
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -236,7 +234,6 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,  -- ЭТИ ПОЛЯ ЕСТЬ!
 			language, timezone, display_mode,
@@ -262,7 +259,6 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		user.TelegramID, user.Username, user.FirstName, user.LastName, user.ChatID,
 		user.Email, user.Phone,
 		user.NotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
-		user.QuietHoursStart, user.QuietHoursEnd,
 		user.MinGrowthThreshold, user.MinFallThreshold,
 		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns), // ДОБАВЛЯЕМ!
 		user.Language, user.Timezone, user.DisplayMode,
@@ -290,7 +286,6 @@ func (r *UserRepositoryImpl) FindByID(id int) (*models.User, error) {
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -312,7 +307,6 @@ func (r *UserRepositoryImpl) FindByTelegramID(telegramID int64) (*models.User, e
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -334,7 +328,6 @@ func (r *UserRepositoryImpl) FindByChatID(chatID string) (*models.User, error) {
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -356,7 +349,6 @@ func (r *UserRepositoryImpl) FindByEmail(email string) (*models.User, error) {
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -393,33 +385,30 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 			notify_growth = $9,
 			notify_fall = $10,
 			notify_continuous = $11,
-			quiet_hours_start = $12,
-			quiet_hours_end = $13,
-			min_growth_threshold = $14,
-			min_fall_threshold = $15,
-			preferred_periods = $16,
-			min_volume_filter = $17,
-			exclude_patterns = $18,
-			language = $19,
-			timezone = $20,
-			display_mode = $21,
-			role = $22,
-			is_active = $23,
-			is_verified = $24,
-			subscription_tier = $25,
-			signals_today = $26,
-			max_signals_per_day = $27,
-			last_login_at = $28,
-			last_signal_at = $29,
-			updated_at = $30
-		WHERE id = $31
+			min_growth_threshold = $12,
+			min_fall_threshold = $13,
+			preferred_periods = $14,
+			min_volume_filter = $15,
+			exclude_patterns = $16,
+			language = $17,
+			timezone = $18,
+			display_mode = $19,
+			role = $20,
+			is_active = $21,
+			is_verified = $22,
+			subscription_tier = $23,
+			signals_today = $24,
+			max_signals_per_day = $25,
+			last_login_at = $26,
+			last_signal_at = $27,
+			updated_at = $28
+		WHERE id = $29
 	`
 
 	result, err := tx.Exec(query,
 		user.TelegramID, user.Username, user.FirstName, user.LastName, user.ChatID,
 		user.Email, user.Phone,
 		user.NotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
-		user.QuietHoursStart, user.QuietHoursEnd,
 		user.MinGrowthThreshold, user.MinFallThreshold,
 		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns),
 		user.Language, user.Timezone, user.DisplayMode,
@@ -553,7 +542,6 @@ func (r *UserRepositoryImpl) SearchUsers(query string, limit, offset int) ([]*mo
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
-			quiet_hours_start, quiet_hours_end,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -611,7 +599,6 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
 		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
-		&user.QuietHoursStart, &user.QuietHoursEnd,
 		&user.MinGrowthThreshold, &user.MinFallThreshold,
 		pq.Array(&preferredPeriods), &user.MinVolumeFilter, pq.Array(&excludePatterns),
 		&user.Language, &user.Timezone, &user.DisplayMode,
@@ -661,8 +648,7 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
 		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
-		&user.QuietHoursStart, &user.QuietHoursEnd,
-		&user.MinGrowthThreshold, &user.MinFallThreshold,
+		&user.MinGrowthThreshold, &user.MinFallThreshold, // ⭐ ДОЛЖНО БЫТЬ 13-14 позиции
 		pq.Array(&preferredPeriods), &user.MinVolumeFilter, pq.Array(&excludePatterns),
 		&user.Language, &user.Timezone, &user.DisplayMode,
 		&user.Role, &user.IsActive, &user.IsVerified, &user.SubscriptionTier,
@@ -738,21 +724,23 @@ func getNullTime(t time.Time) sql.NullTime {
 // GetByTelegramID получает пользователя по Telegram ID
 func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int64) (*models.User, error) {
 	var user models.User
+	var lastActivityAt sql.NullTime // ⭐ ДОБАВИТЬ
+
 	query := `SELECT id, telegram_id, username, first_name, last_name, chat_id,
-		created_at, updated_at, min_growth_threshold, min_fall_threshold,
-		notifications_enabled, notify_growth, notify_fall, notify_continuous,
-		quiet_hours_start, quiet_hours_end, preferred_periods, min_volume_filter,
-		exclude_patterns, language, timezone, display_mode, subscription_tier,
-		signals_today, max_signals_per_day, is_active, last_activity_at
-		FROM users WHERE telegram_id = $1`
+        created_at, updated_at, min_growth_threshold, min_fall_threshold,
+        notifications_enabled, notify_growth, notify_fall, notify_continuous,
+        preferred_periods, min_volume_filter,
+        exclude_patterns, language, timezone, display_mode, subscription_tier,
+        signals_today, max_signals_per_day, is_active, last_activity_at
+        FROM users WHERE telegram_id = $1`
 
 	err := r.db.QueryRowContext(ctx, query, telegramID).Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.LastName, &user.ChatID,
 		&user.CreatedAt, &user.UpdatedAt, &user.MinGrowthThreshold, &user.MinFallThreshold,
 		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
-		&user.QuietHoursStart, &user.QuietHoursEnd, pq.Array(&user.PreferredPeriods), &user.MinVolumeFilter,
-		&user.ExcludePatterns, &user.Language, &user.Timezone, &user.DisplayMode, &user.SubscriptionTier,
-		&user.SignalsToday, &user.MaxSignalsPerDay, &user.IsActive, &user.LastLoginAt,
+		pq.Array(&user.PreferredPeriods), &user.MinVolumeFilter,
+		pq.Array(&user.ExcludePatterns), &user.Language, &user.Timezone, &user.DisplayMode, &user.SubscriptionTier,
+		&user.SignalsToday, &user.MaxSignalsPerDay, &user.IsActive, &lastActivityAt, // ⭐ ДОБАВИТЬ
 	)
 
 	if err == sql.ErrNoRows {
@@ -760,6 +748,10 @@ func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by telegram ID: %w", err)
+	}
+
+	if lastActivityAt.Valid {
+		user.LastLoginAt = lastActivityAt.Time
 	}
 
 	return &user, nil

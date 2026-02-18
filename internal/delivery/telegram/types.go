@@ -6,6 +6,75 @@ import (
 	"time"
 )
 
+// Chat - чат Telegram
+type Chat struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	Title     string `json:"title,omitempty"`
+	Username  string `json:"username,omitempty"`
+	FirstName string `json:"first_name,omitempty"`
+	LastName  string `json:"last_name,omitempty"`
+}
+
+// Message - сообщение от пользователя
+type Message struct {
+	MessageID         int64              `json:"message_id"`
+	From              User               `json:"from"`
+	Chat              Chat               `json:"chat"`
+	Text              string             `json:"text"`
+	Date              int64              `json:"date"`
+	SuccessfulPayment *SuccessfulPayment `json:"successful_payment,omitempty"`
+}
+
+// CallbackQueryStruct структура callback запроса
+type CallbackQueryStruct struct {
+	ID   string `json:"id"`
+	From *struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+	} `json:"from"`
+	Message *struct {
+		MessageID int `json:"message_id"`
+		Chat      *struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+	} `json:"message"`
+	Data string `json:"data"`
+}
+
+// CallbackQuery - callback от inline кнопки
+type CallbackQuery struct {
+	ID           string   `json:"id"`
+	From         User     `json:"from"`
+	Message      *Message `json:"message"`
+	ChatInstance string   `json:"chat_instance"`
+	Data         string   `json:"data"`
+}
+
+// PreCheckoutQuery предварительный запрос на проверку
+type PreCheckoutQuery struct {
+	ID   string `json:"id"`
+	From *struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+	} `json:"from"`
+	Currency         string `json:"currency"`
+	TotalAmount      int    `json:"total_amount"`
+	InvoicePayload   string `json:"invoice_payload"`
+	ShippingOptionID string `json:"shipping_option_id,omitempty"`
+}
+
+type TelegramUpdate struct {
+	UpdateID         int                  `json:"update_id"`
+	Message          *Message             `json:"message,omitempty"`
+	CallbackQuery    *CallbackQueryStruct `json:"callback_query,omitempty"`
+	PreCheckoutQuery *PreCheckoutQuery    `json:"pre_checkout_query,omitempty"` // Используем telegram тип
+}
+
 // RateLimiter - ограничитель частоты запросов
 type RateLimiter struct {
 	mu       sync.Mutex
@@ -102,4 +171,91 @@ type SetMyCommandsResponse struct {
 	OK          bool   `json:"ok"`
 	Description string `json:"description,omitempty"`
 	ErrorCode   int    `json:"error_code,omitempty"`
+}
+
+// LabeledPrice представляет цену с меткой для Telegram Stars
+type LabeledPrice struct {
+	Label  string `json:"label"`  // Метка цены (например, "Подписка")
+	Amount int    `json:"amount"` // Сумма в минимальных единицах валюты
+}
+
+// Invoice представляет инвойс для Telegram Stars
+type Invoice struct {
+	Title                     string         `json:"title"`                                   // Название товара (1-32 символа)
+	Description               string         `json:"description"`                             // Описание товара (1-255 символов)
+	Payload                   string         `json:"payload"`                                 // Уникальный payload (1-128 байт)
+	ProviderToken             string         `json:"provider_token"`                          // Токен платежного провайдера
+	Currency                  string         `json:"currency"`                                // Валюта (XTR для Stars)
+	Prices                    []LabeledPrice `json:"prices"`                                  // Цены
+	MaxTipAmount              int            `json:"max_tip_amount,omitempty"`                // Максимальная сумма чаевых
+	SuggestedTipAmounts       []int          `json:"suggested_tip_amounts,omitempty"`         // Предлагаемые чаевые
+	StartParameter            string         `json:"start_parameter,omitempty"`               // Параметр для /start
+	PhotoURL                  string         `json:"photo_url,omitempty"`                     // URL фото товара
+	PhotoSize                 int            `json:"photo_size,omitempty"`                    // Размер фото
+	PhotoWidth                int            `json:"photo_width,omitempty"`                   // Ширина фото
+	PhotoHeight               int            `json:"photo_height,omitempty"`                  // Высота фото
+	NeedName                  bool           `json:"need_name,omitempty"`                     // Требовать имя
+	NeedPhoneNumber           bool           `json:"need_phone_number,omitempty"`             // Требовать телефон
+	NeedEmail                 bool           `json:"need_email,omitempty"`                    // Требовать email
+	NeedShippingAddress       bool           `json:"need_shipping_address,omitempty"`         // Требовать адрес
+	SendPhoneNumberToProvider bool           `json:"send_phone_number_to_provider,omitempty"` // Отправлять телефон провайдеру
+	SendEmailToProvider       bool           `json:"send_email_to_provider,omitempty"`        // Отправлять email провайдеру
+	IsFlexible                bool           `json:"is_flexible,omitempty"`                   // Гибкая цена
+}
+
+// CreateInvoiceResponse ответ на создание инвойса
+type CreateInvoiceResponse struct {
+	OK          bool   `json:"ok"`
+	Result      string `json:"result,omitempty"`
+	Description string `json:"description,omitempty"`
+	ErrorCode   int    `json:"error_code,omitempty"`
+}
+
+// InvoiceResult результат создания инвойса
+type InvoiceResult struct {
+	InvoiceLink string `json:"invoice_link"` // Ссылка на инвойс
+}
+
+// OrderInfo информация о заказе
+type OrderInfo struct {
+	Name            string           `json:"name,omitempty"`
+	PhoneNumber     string           `json:"phone_number,omitempty"`
+	Email           string           `json:"email,omitempty"`
+	ShippingAddress *ShippingAddress `json:"shipping_address,omitempty"`
+}
+
+// ShippingAddress адрес доставки
+type ShippingAddress struct {
+	CountryCode string `json:"country_code"`
+	State       string `json:"state,omitempty"`
+	City        string `json:"city"`
+	StreetLine1 string `json:"street_line1"`
+	StreetLine2 string `json:"street_line2,omitempty"`
+	PostCode    string `json:"post_code"`
+}
+
+// SuccessfulPayment успешный платеж
+type SuccessfulPayment struct {
+	Currency                string     `json:"currency"`
+	TotalAmount             int        `json:"total_amount"`
+	InvoicePayload          string     `json:"invoice_payload"`
+	ShippingOptionID        string     `json:"shipping_option_id,omitempty"`
+	OrderInfo               *OrderInfo `json:"order_info,omitempty"`
+	TelegramPaymentChargeID string     `json:"telegram_payment_charge_id"`
+	ProviderPaymentChargeID string     `json:"provider_payment_charge_id"`
+}
+
+// AnswerPreCheckoutQueryParams параметры для ответа на pre-checkout
+type AnswerPreCheckoutQueryParams struct {
+	PreCheckoutQueryID string `json:"pre_checkout_query_id"`
+	OK                 bool   `json:"ok"`
+	ErrorMessage       string `json:"error_message,omitempty"`
+}
+type User struct {
+	ID           int64  `json:"id"`
+	IsBot        bool   `json:"is_bot"`
+	FirstName    string `json:"first_name"`
+	LastName     string `json:"last_name,omitempty"`
+	Username     string `json:"username,omitempty"`
+	LanguageCode string `json:"language_code,omitempty"`
 }

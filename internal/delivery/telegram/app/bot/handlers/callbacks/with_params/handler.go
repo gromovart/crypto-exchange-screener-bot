@@ -59,8 +59,6 @@ func (h *withParamsHandler) Execute(params handlers.HandlerParams) (handlers.Han
 		result, err = h.handleThreshold(params, data, "fall")
 	case strings.HasPrefix(data, "sensitivity:"):
 		result, err = h.handleSensitivity(params, data)
-	case strings.HasPrefix(data, "quiet_hours_"):
-		result, err = h.handleQuietHours(params, data)
 	default:
 		return handlers.HandlerResult{}, fmt.Errorf("неизвестный callback с параметрами: %s", data)
 	}
@@ -177,30 +175,6 @@ func (h *withParamsHandler) handleSensitivity(params handlers.HandlerParams, dat
 		Metadata: map[string]interface{}{
 			"user_id":           params.User.ID,
 			"sensitivity_level": sensitivityLevel,
-		},
-	}, nil
-}
-
-// handleQuietHours обрабатывает настройку тихих часов
-func (h *withParamsHandler) handleQuietHours(params handlers.HandlerParams, data string) (handlers.HandlerResult, error) {
-	// TODO: Реализовать настройку тихих часов
-	message := "⏱️ *Тихие часы*\n\nНастройка тихих часов в разработке."
-
-	// Создаем клавиатуру
-	keyboard := map[string]interface{}{
-		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackSignalsMenu},
-			},
-		},
-	}
-
-	return handlers.HandlerResult{
-		Message:  message,
-		Keyboard: keyboard,
-		Metadata: map[string]interface{}{
-			"user_id": params.User.ID,
-			"action":  data,
 		},
 	}, nil
 }

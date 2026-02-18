@@ -42,9 +42,11 @@ show_help() {
     echo "  stop                Остановить службу"
     echo "  restart             Перезапустить службу"
     echo "  status              Показать статус службы"
-    echo "  logs [N]            Показать N строк логов (по умолчанию: 50)"
-    echo "  logs-follow         Показать логи в реальном времени"
-    echo "  logs-error          Показать только ошибки"
+    echo "  logs [N]            Показать N строк логов app.log (по умолчанию: 50)"
+    echo "  logs-error [N]      Показать N строк логов error.log (по умолчанию: 50)"
+    echo "  logs-follow         Показать логи app.log в реальном времени"
+    echo "  logs-follow-error   Показать логи error.log в реальном времени"
+    echo "  logs-webhook        Показать логи webhook.log в реальном времени"
     echo "  monitor             Мониторинг состояния системы"
     echo "  backup              Создать резервную копию"
     echo "  cleanup             Очистка старых логов и резервных копий"
@@ -67,9 +69,10 @@ show_help() {
     echo ""
     echo "Примеры:"
     echo "  $0 status --ip=95.142.40.244"
-    echo "  $0 logs 100                   # 100 строк логов"
-    echo "  $0 logs                       # 50 строк логов (по умолчанию)"
-    echo "  $0 logs-follow"
+    echo "  $0 logs 100                   # 100 строк app.log"
+    echo "  $0 logs-error 50              # 50 строк error.log"
+    echo "  $0 logs-follow                 # app.log в реальном времени"
+    echo "  $0 logs-follow-error           # error.log в реальном времени"
     echo "  $0 monitor"
     echo "  $0 health"
     echo "  $0 webhook-info"
@@ -143,38 +146,35 @@ service_status() {
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "systemctl status ${SERVICE_NAME}.service --no-pager"
 }
 
+# ⭐ ИСПРАВЛЕННЫЕ ФУНКЦИИ ДЛЯ ЛОГОВ
 service_logs() {
     local lines=${1:-50}
-    echo "Последние ${lines} строк логов:"
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "journalctl -u ${SERVICE_NAME}.service -n ${lines} --no-pager"
-}
-
-service_logs_follow() {
-    echo "Логи в реальном времени (Ctrl+C для выхода):"
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "journalctl -u ${SERVICE_NAME}.service -f"
+    echo "Последние ${lines} строк app.log:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "tail -n ${lines} /var/log/crypto-screener-bot/app.log"
 }
 
 service_logs_error() {
-    echo "Ошибки в логах (последний час):"
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
-#!/bin/bash
-echo "=== ОШИБКИ В ЛОГАХ ==="
-echo "Период: последний час"
-echo ""
-
-ERRORS=$(journalctl -u crypto-screener.service --since "1 hour ago" 2>/dev/null | \
-    grep -i "error\|fail\|panic\|fatal" | head -20)
-
-if [ -n "${ERRORS}" ]; then
-    echo "${ERRORS}"
-    echo ""
-    echo "Всего ошибок: $(echo "${ERRORS}" | wc -l)"
-else
-    echo "✅ Ошибок не обнаружено"
-fi
-EOF
+    local lines=${1:-50}
+    echo "Последние ${lines} строк error.log:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "tail -n ${lines} /var/log/crypto-screener-bot/error.log"
 }
 
+service_logs_follow() {
+    echo "Логи app.log в реальном времени (Ctrl+C для выхода):"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "tail -f /var/log/crypto-screener-bot/app.log"
+}
+
+service_logs_follow_error() {
+    echo "Логи error.log в реальном времени (Ctrl+C для выхода):"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "tail -f /var/log/crypto-screener-bot/error.log"
+}
+
+service_logs_follow_webhook() {
+    echo "Логи webhook.log в реальном времени (Ctrl+C для выхода):"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" "tail -f /var/log/crypto-screener-bot/webhook.log 2>/dev/null || echo 'Webhook лог не найден'"
+}
+
+# Остальные функции без изменений...
 service_monitor() {
     echo "Мониторинг системы:"
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
@@ -239,10 +239,7 @@ echo ""
 
 # 7. Логи (последние ошибки)
 echo "7. Последние ошибки в логах:"
-journalctl -u crypto-screener.service --since "10 minutes ago" 2>/dev/null | \
-    grep -i "error\|warn\|fail" | tail -5 | while read line; do
-    echo "  📝 $line"
-done || echo "  ✅ Ошибок не найдено"
+tail -20 /var/log/crypto-screener-bot/error.log 2>/dev/null | grep -i "error\|fail\|panic" | tail -5 || echo "  ✅ Ошибок не найдено"
 echo ""
 
 # 8. Проверка конфигурации webhook
@@ -1074,7 +1071,7 @@ fi
 echo ""
 echo "📋 Рекомендации:"
 if ! $HEALTH_OK; then
-    echo "1. Проверьте логи: journalctl -u crypto-screener.service -n 50"
+    echo "1. Проверьте логи: tail -f /var/log/crypto-screener-bot/app.log"
     echo "2. Перезапустите сервис: systemctl restart crypto-screener"
     echo "3. Проверьте конфигурацию: nano /opt/crypto-screener-bot/.env"
 fi
@@ -1082,8 +1079,7 @@ echo "4. Мониторинг: ./service.sh monitor"
 EOF
 }
 
-# НОВЫЕ ФУНКЦИИ ДЛЯ WEBHOOK И SSL
-
+# Webhook и SSL функции
 service_webhook_info() {
     echo "Информация о настройках webhook:"
     ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
@@ -1631,7 +1627,7 @@ parse_args() {
 
     for arg in "$@"; do
         case $arg in
-            start|stop|restart|status|logs|logs-follow|logs-error|monitor|backup|cleanup|config-show|config-check|health|restart-app|webhook-info|webhook-setup|webhook-remove|webhook-check|ssl-check|ssl-renew)
+            start|stop|restart|status|logs|logs-error|logs-follow|logs-follow-error|logs-follow-webhook|monitor|backup|cleanup|config-show|config-check|health|restart-app|webhook-info|webhook-setup|webhook-remove|webhook-check|ssl-check|ssl-renew)
                 command="$arg"
                 shift
                 ;;
@@ -1653,7 +1649,7 @@ parse_args() {
                 ;;
             *)
                 # Проверяем, является ли аргумент числом (для количества строк)
-                if [[ $arg =~ ^[0-9]+$ ]] && [ "$command" = "logs" ]; then
+                if [[ $arg =~ ^[0-9]+$ ]] && [ "$command" = "logs" || "$command" = "logs-error" ]; then
                     LINES="$arg"
                     shift
                 else
@@ -1699,11 +1695,17 @@ main() {
         logs)
             service_logs "$LINES"
             ;;
+        logs-error)
+            service_logs_error "$LINES"
+            ;;
         logs-follow)
             service_logs_follow
             ;;
-        logs-error)
-            service_logs_error
+        logs-follow-error)
+            service_logs_follow_error
+            ;;
+        logs-follow-webhook)
+            service_logs_follow_webhook
             ;;
         monitor)
             service_monitor

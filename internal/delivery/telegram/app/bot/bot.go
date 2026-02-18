@@ -2,6 +2,7 @@
 package bot
 
 import (
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
@@ -10,7 +11,10 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
+	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
+	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -19,6 +23,11 @@ import (
 	"time"
 )
 
+// Dependencies зависимости для TelegramBot
+type Dependencies struct {
+	ServiceFactory *services_factory.ServiceFactory
+}
+
 // TelegramBot - бот для отправки уведомлений в Telegram
 type TelegramBot struct {
 	config *config.Config
@@ -26,14 +35,15 @@ type TelegramBot struct {
 	// HTTP клиенты
 	telegramClient *telegram_http.TelegramClient
 	pollingClient  *telegram_http.PollingClient
+	starsClient    *telegram_http.StarsClient
 
 	// MessageSender для отправки сообщений
 	messageSender message_sender.MessageSender
 
-	// Новая система хэндлеров
-	handlerFactory *handlers.HandlerFactory
-	router         router.Router
-	authMiddleware *middlewares.AuthMiddleware
+	// Роутер для обработки команд
+	router                 router.Router
+	authMiddleware         *middlewares.AuthMiddleware
+	subscriptionMiddleware *middlewares.SubscriptionMiddleware
 
 	// Режимы работы
 	pollingHandler *PollingClient
@@ -41,11 +51,6 @@ type TelegramBot struct {
 	mu             sync.RWMutex
 	startupTime    time.Time
 	currentMode    string // "polling" или "webhook"
-}
-
-// Dependencies зависимости для TelegramBot
-type Dependencies struct {
-	UserService *users.Service
 }
 
 // NewTelegramBot создает новый экземпляр TelegramBot
@@ -58,33 +63,88 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 	telegramClient := telegram_http.NewTelegramClient(baseURL)
 	pollingClient := telegram_http.NewPollingClient(baseURL)
 
-	// Создаем middleware аутентификации
-	authMiddleware := middlewares.NewAuthMiddleware(deps.UserService)
+	// Создаем StarsClient для работы с платежами Telegram Stars
+	// Для цифровых товаров provider_token может быть пустой строкой ""
+	starsClient := telegram_http.NewStarsClient(baseURL, "")
+	logger.Info("✅ StarsClient создан для работы с Telegram Stars API")
 
-	// Создаем фабрику хэндлеров
+	// Получаем UserService из ServiceFactory
+	var userService *users.Service
+	if deps.ServiceFactory != nil {
+		userService = deps.ServiceFactory.GetUserService()
+	} else {
+		logger.Error("❌ ServiceFactory не предоставлена в зависимостях")
+		userService = nil
+	}
+
+	// Получаем SubscriptionService из ServiceFactory
+	var subscriptionService *subscription.Service
+	if deps.ServiceFactory != nil {
+		subscriptionService = deps.ServiceFactory.GetSubscriptionService()
+	} else {
+		logger.Warn("⚠️ ServiceFactory не предоставлена, SubscriptionService будет nil")
+	}
+
+	// Создаем middleware аутентификации
+	authMiddleware := middlewares.NewAuthMiddleware(
+		userService,
+		subscriptionService,
+		deps.ServiceFactory.GetSubscriptionRepository(),
+	)
+
+	// Создаем middleware подписки
+	subscriptionMiddleware := middlewares.NewSubscriptionMiddleware(subscriptionService)
+
+	// Создаем фабрику хэндлеров и роутер
 	handlerFactory := handlers.NewHandlerFactory()
 
-	// Создаем сервис для переключения уведомлений
-	notificationsToggleService := notifications_toggle.NewService(deps.UserService)
+	// Создаем сервисы
+	var profileSvc profile_service.Service
+	if deps.ServiceFactory != nil {
+		profileSvc = deps.ServiceFactory.CreateProfileService()
+		logger.Info("✅ ProfileService создан через фабрику")
+	} else {
+		logger.Error("❌ ServiceFactory не предоставлена, ProfileService не может быть создан")
+		profileSvc = nil
+	}
 
-	// Создаем сервис настройки сигналов
-	signalSettingsService := signal_settings_service.NewServiceWithDependencies(deps.UserService)
+	notificationsToggleService := notifications_toggle.NewService(userService)
+	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
 
-	// Инициализируем фабрику с сервисом
-	InitHandlerFactory(handlerFactory, notificationsToggleService, signalSettingsService)
+	// Получаем PaymentService из ServiceFactory
+	var paymentService payment_service.Service
+	if deps.ServiceFactory != nil {
+		paymentService = deps.ServiceFactory.CreatePaymentService()
+	} else {
+		logger.Warn("⚠️ ServiceFactory не предоставлена, PaymentService будет nil")
+		paymentService = nil
+	}
+
+	// Создаем структуру сервисов
+	services := &Services{
+		signalSettingsService:      signalSettingsService,
+		notificationsToggleService: notificationsToggleService,
+		paymentService:             paymentService,
+		profileService:             profileSvc,
+		starsClient:                starsClient,
+	}
+
+	// Инициализируем фабрику с сервисами
+	InitHandlerFactory(handlerFactory, config, services, subscriptionMiddleware)
 
 	// Регистрируем все хэндлеры
 	router := handlerFactory.RegisterAllHandlers()
 
 	bot := &TelegramBot{
-		config:         config,
-		telegramClient: telegramClient,
-		pollingClient:  pollingClient,
-		messageSender:  ms,
-		handlerFactory: handlerFactory,
-		router:         router,
-		authMiddleware: authMiddleware,
-		startupTime:    time.Now(),
+		config:                 config,
+		telegramClient:         telegramClient,
+		pollingClient:          pollingClient,
+		starsClient:            starsClient,
+		messageSender:          ms,
+		router:                 router,
+		authMiddleware:         authMiddleware,
+		subscriptionMiddleware: subscriptionMiddleware,
+		startupTime:            time.Now(),
 	}
 
 	// Определяем текущий режим работы
@@ -173,43 +233,103 @@ func (b *TelegramBot) startWebhook() error {
 
 // stopWebhook останавливает webhook режим
 func (b *TelegramBot) stopWebhook() error {
-	if b.webhookServer == nil {
-		return nil
+	if b.webhookServer != nil {
+		return b.webhookServer.Stop()
 	}
-
-	logger.Info("🛑 Остановка webhook режима...")
-	return b.webhookServer.Stop()
+	return nil
 }
 
-// HandleUpdate обрабатывает обновление от Telegram (новая система)
-func (b *TelegramBot) HandleUpdate(update *middlewares.TelegramUpdate) error {
+// HandleUpdate обрабатывает обновление от Telegram
+func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Обрабатываем обновление через auth middleware
+	// СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ PRE-CHECKOUT QUERY (ЭВЕНТ)
+	if update.PreCheckoutQuery != nil {
+		logger.Info("💰 Получен PreCheckoutQuery эвент: ID=%s, пользователь=%d, сумма=%d %s, payload=%s",
+			update.PreCheckoutQuery.ID,
+			update.PreCheckoutQuery.From.ID,
+			update.PreCheckoutQuery.TotalAmount,
+			update.PreCheckoutQuery.Currency,
+			update.PreCheckoutQuery.InvoicePayload)
+
+		// Обрабатываем через auth middleware
+		handlerParams, err := b.authMiddleware.ProcessUpdate(update)
+		if err != nil {
+			logger.Error("❌ Ошибка аутентификации pre_checkout_query: %v", err)
+			return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, false, "Ошибка авторизации")
+		}
+
+		// Вызываем обработчик pre_checkout_query
+		result, err := b.router.Handle("pre_checkout_query", convertToRouterParams(handlerParams))
+		if err != nil {
+			logger.Error("❌ Ошибка обработки pre_checkout_query: %v", err)
+			return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, false, "Внутренняя ошибка сервера")
+		}
+
+		// Отправляем ответ через StarsClient
+		if result.Metadata != nil {
+			if params, ok := result.Metadata["telegram_params"].(map[string]interface{}); ok {
+				queryID, _ := params["pre_checkout_query_id"].(string)
+				ok, _ := params["ok"].(bool)
+				errorMessage, _ := params["error_message"].(string)
+				return b.starsClient.AnswerPreCheckoutQuery(queryID, ok, errorMessage)
+			}
+		}
+		return b.starsClient.AnswerPreCheckoutQuery(update.PreCheckoutQuery.ID, true, "")
+	}
+
+	// СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ SUCCESSFUL PAYMENT (ЭВЕНТ)
+	if update.Message != nil && update.Message.SuccessfulPayment != nil {
+		logger.Warn("💰💰💰 [SUCCESSFUL PAYMENT] ПОЛУЧЕН В BOT!")
+		logger.Warn("   • From: %d", update.Message.From.ID)
+		logger.Warn("   • Amount: %d %s", update.Message.SuccessfulPayment.TotalAmount, update.Message.SuccessfulPayment.Currency)
+		logger.Warn("   • Payload: %s", update.Message.SuccessfulPayment.InvoicePayload)
+		logger.Warn("   • TelegramChargeID: %s", update.Message.SuccessfulPayment.TelegramPaymentChargeID)
+		logger.Warn("   • ProviderChargeID: %s", update.Message.SuccessfulPayment.ProviderPaymentChargeID)
+
+		// Обрабатываем через auth middleware
+		handlerParams, err := b.authMiddleware.ProcessUpdate(update)
+		if err != nil {
+			logger.Error("❌ Ошибка аутентификации successful_payment: %v", err)
+			return b.messageSender.SendTextMessage(handlerParams.ChatID,
+				"❌ Ошибка авторизации. Пожалуйста, попробуйте позже.", nil)
+		}
+
+		// Вызываем обработчик successful_payment
+		logger.Warn("🔄 Вызов роутера для successful_payment")
+		result, err := b.router.Handle("successful_payment", convertToRouterParams(handlerParams))
+		if err != nil {
+			logger.Error("❌ Ошибка обработки successful_payment: %v", err)
+			return b.messageSender.SendTextMessage(handlerParams.ChatID,
+				"❌ Ошибка обработки платежа. Пожалуйста, обратитесь в поддержку.", nil)
+		}
+
+		// Отправляем сообщение пользователю
+		logger.Warn("✅ Отправка подтверждения пользователю")
+		return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
+	}
+
+	// Обычная обработка сообщений и callback-ов
 	handlerParams, err := b.authMiddleware.ProcessUpdate(update)
 	if err != nil {
-		// Если ошибка авторизации, отправляем сообщение об ошибке
 		return b.sendAuthError(handlerParams.ChatID, err.Error())
 	}
 
-	// Определяем команду/callback для обработки
 	var command string
 	if update.Message != nil && update.Message.Text != "" {
 		command = update.Message.Text
 	} else if update.CallbackQuery != nil {
 		command = update.CallbackQuery.Data
 	} else {
-		return nil // Игнорируем другие типы обновлений
+		return nil
 	}
 
-	// Обрабатываем команду через роутер
 	result, err := b.router.Handle(command, convertToRouterParams(handlerParams))
 	if err != nil {
 		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+err.Error(), nil)
 	}
 
-	// Отправляем результат пользователю
 	return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
 }
 
@@ -298,7 +418,7 @@ func (b *TelegramBot) StopPolling() error {
 // Вспомогательные методы
 
 // convertToRouterParams конвертирует HandlerParams в router.HandlerParams
-func convertToRouterParams(params middlewares.HandlerParams) router.HandlerParams {
+func convertToRouterParams(params handlers.HandlerParams) router.HandlerParams {
 	return router.HandlerParams{
 		User:     params.User,
 		ChatID:   params.ChatID,
@@ -324,11 +444,6 @@ func (b *TelegramBot) sendAuthError(chatID int64, message string) error {
 	return b.messageSender.SendTextMessage(chatID, errorMessage, keyboard)
 }
 
-// GetHandlerFactory возвращает фабрику хэндлеров
-func (b *TelegramBot) GetHandlerFactory() *handlers.HandlerFactory {
-	return b.handlerFactory
-}
-
 // GetRouter возвращает роутер
 func (b *TelegramBot) GetRouter() router.Router {
 	return b.router
@@ -339,6 +454,11 @@ func (b *TelegramBot) GetAuthMiddleware() *middlewares.AuthMiddleware {
 	return b.authMiddleware
 }
 
+// GetSubscriptionMiddleware возвращает middleware подписки
+func (b *TelegramBot) GetSubscriptionMiddleware() *middlewares.SubscriptionMiddleware {
+	return b.subscriptionMiddleware
+}
+
 // SetMyCommands устанавливает меню команд в Telegram
 func (b *TelegramBot) SetMyCommands() error {
 	logger.Info("Установка меню команд в Telegram API")
@@ -347,6 +467,7 @@ func (b *TelegramBot) SetMyCommands() error {
 	commands := []telegram.BotCommand{
 		{Command: "/start", Description: constants.CommandDescriptions.Start},
 		{Command: "/help", Description: constants.CommandDescriptions.Help},
+		{Command: "/buy", Description: constants.CommandDescriptions.Buy},
 		{Command: "/profile", Description: constants.CommandDescriptions.Profile},
 		{Command: "/settings", Description: constants.CommandDescriptions.Settings},
 		{Command: "/notifications", Description: constants.CommandDescriptions.Notifications},

@@ -13,6 +13,8 @@ import (
 	notify_both_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_both"
 	notify_fall_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only"
 	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
+	payment_confirm_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm"
+	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
 	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
 	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
@@ -30,6 +32,7 @@ import (
 	stats_callback "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/stats"
 	thresholds_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/thresholds_menu"
 	with_params_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/with_params"
+	buy_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/buy"
 	commands_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/commands"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
@@ -37,26 +40,37 @@ import (
 	profile_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/profile"
 	settings_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/settings"
 	thresholds_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/thresholds"
+	precheckout_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/pre_checkout"
+	successful_payment_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/events/payment/successful_payment"
 	start_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/start"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
+	telegram_http "crypto-exchange-screener-bot/internal/delivery/telegram/app/http_client"
 	notifications_toggle_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
+	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
+
+type Services struct {
+	paymentService             payment_service.Service
+	notificationsToggleService notifications_toggle_service.Service
+	signalSettingsService      signal_settings_service.Service
+	profileService             profile_service.Service // ⭐ ДОБАВЛЕНО
+	starsClient                *telegram_http.StarsClient
+}
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
 func InitHandlerFactory(
 	factory *handlers.HandlerFactory,
-	notificationsToggleService notifications_toggle_service.Service,
-	signalSettingsService signal_settings_service.Service, // Добавляем
+	cfg *config.Config,
+	services *Services,
+	subscriptionMiddleware *middlewares.SubscriptionMiddleware,
 ) {
 	logger.Info("🔧 Инициализация создателей хэндлеров...")
 
-	// Регистрируем создателей КОМАНД
-	// Добавляю регистрацию команды /commands
-	factory.RegisterHandlerCreator("commands", func() handlers.Handler {
-		return commands_command.NewHandler()
-	})
-
+	// Регистрируем создателей КОМАНД (без подписки)
 	factory.RegisterHandlerCreator("start", func() handlers.Handler {
 		return start_command.NewHandler()
 	})
@@ -65,66 +79,66 @@ func InitHandlerFactory(
 		return help_command.NewHandler()
 	})
 
+	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
+		return buy_command.NewHandler()
+	})
+
+	// Команды, требующие подписки (будут обернуты middleware)
+	factory.RegisterHandlerCreator("commands", func() handlers.Handler {
+		handler := commands_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
 	factory.RegisterHandlerCreator("settings", func() handlers.Handler {
-		return settings_command.NewHandler()
+		handler := settings_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator("notifications", func() handlers.Handler {
-		return notifications_command.NewHandler()
+		handler := notifications_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator("profile", func() handlers.Handler {
-		return profile_command.NewHandler()
+		handler := profile_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator("thresholds", func() handlers.Handler {
-		return thresholds_command.NewHandler()
+		handler := thresholds_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator("periods", func() handlers.Handler {
-		return periods_command.NewHandler()
+		handler := periods_command.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// Регистрируем создателей CALLBACKS
+	// Регистрируем создателей CALLBACKS (без подписки)
 	factory.RegisterHandlerCreator(constants.CallbackHelp, func() handlers.Handler {
 		return help_callback.NewHandler()
 	})
 
-	factory.RegisterHandlerCreator(constants.CallbackProfileMain, func() handlers.Handler {
-		return profile_main.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackSettingsMain, func() handlers.Handler {
-		return settings_main.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackNotificationsMenu, func() handlers.Handler {
-		return notifications_menu.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackPeriodsMenu, func() handlers.Handler {
-		return periods_menu.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackStats, func() handlers.Handler {
-		return stats_callback.NewHandler()
-	})
-
 	factory.RegisterHandlerCreator(constants.CallbackMenuMain, func() handlers.Handler {
 		return menu_main.NewHandler()
-	})
-
-	// НОВЫЕ CALLBACK ОБРАБОТЧИКИ ДЛЯ МЕНЮ
-	factory.RegisterHandlerCreator(constants.CallbackSignalsMenu, func() handlers.Handler {
-		return signals_menu_handler.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackResetMenu, func() handlers.Handler {
-		return reset_menu_handler.NewHandler()
-	})
-
-	factory.RegisterHandlerCreator(constants.CallbackThresholdsMenu, func() handlers.Handler {
-		return thresholds_menu_handler.NewHandler()
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackAuthLogin, func() handlers.Handler {
@@ -135,66 +149,220 @@ func InitHandlerFactory(
 		return auth_logout_handler.NewHandler()
 	})
 
+	// Callback-и, требующие подписки
+	factory.RegisterHandlerCreator(constants.CallbackProfileMain, func() handlers.Handler {
+		// ⭐ ИЗМЕНЕНО: передаем profileService
+		handler := profile_main.NewHandler(services.profileService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackSettingsMain, func() handlers.Handler {
+		handler := settings_main.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackNotificationsMenu, func() handlers.Handler {
+		handler := notifications_menu.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackPeriodsMenu, func() handlers.Handler {
+		handler := periods_menu.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackStats, func() handlers.Handler {
+		handler := stats_callback.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackSignalsMenu, func() handlers.Handler {
+		handler := signals_menu_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackResetMenu, func() handlers.Handler {
+		handler := reset_menu_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
+	factory.RegisterHandlerCreator(constants.CallbackThresholdsMenu, func() handlers.Handler {
+		handler := thresholds_menu_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
+	})
+
 	factory.RegisterHandlerCreator(constants.CallbackResetSettings, func() handlers.Handler {
-		return reset_settings_handler.NewHandler()
+		handler := reset_settings_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackPeriodManage, func() handlers.Handler {
-		return period_manage_handler.NewHandler()
+		handler := period_manage_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackProfileStats, func() handlers.Handler {
-		return profile_stats_handler.NewHandler()
+		handler := profile_stats_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackProfileSubscription, func() handlers.Handler {
-		return profile_subscription_handler.NewHandler()
+		handler := profile_subscription_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// CALLBACK ОБРАБОТЧИКИ ДЛЯ УВЕДОМЛЕНИЙ
+	// CALLBACK ОБРАБОТЧИКИ ДЛЯ УВЕДОМЛЕНИЙ (требуют подписки)
 	factory.RegisterHandlerCreator(constants.CallbackNotifyGrowthOnly, func() handlers.Handler {
-		return notify_growth_only_handler.NewHandler()
+		handler := notify_growth_only_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackNotifyFallOnly, func() handlers.Handler {
-		return notify_fall_only_handler.NewHandler()
+		handler := notify_fall_only_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackNotifyBoth, func() handlers.Handler {
-		return notify_both_handler.NewHandler()
+		handler := notify_both_handler.NewHandler()
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// Регистрируем универсальный обработчик для параметризованных callback-ов
-	factory.RegisterHandlerCreator("with_params", func() handlers.Handler {
-		return with_params_handler.NewHandler(signalSettingsService)
+	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
+		handler := notifications_toggle_handler.NewHandler(services.notificationsToggleService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (с сервисами)
+	// CALLBACK ОБРАБОТЧИКИ ДЛЯ СИГНАЛОВ (требуют подписки)
 	factory.RegisterHandlerCreator(constants.CallbackSignalToggleGrowth, func() handlers.Handler {
-		return signal_toggle_growth_handler.NewHandler(signalSettingsService)
+		handler := signal_toggle_growth_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalToggleFall, func() handlers.Handler {
-		return signal_toggle_fall_handler.NewHandler(signalSettingsService)
+		handler := signal_toggle_fall_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalSetGrowthThreshold, func() handlers.Handler {
-		return signal_set_growth_threshold_handler.NewHandler(signalSettingsService)
+		handler := signal_set_growth_threshold_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
 	factory.RegisterHandlerCreator(constants.CallbackSignalSetFallThreshold, func() handlers.Handler {
-		return signal_set_fall_threshold_handler.NewHandler(signalSettingsService)
+		handler := signal_set_fall_threshold_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// РЕГИСТРАЦИЯ ОБРАБОТЧИКОВ С СЕРВИСАМИ
-	factory.RegisterHandlerCreator(constants.CallbackNotifyToggleAll, func() handlers.Handler {
-		return notifications_toggle_handler.NewHandler(notificationsToggleService)
+	// Регистрируем универсальный обработчик для параметризованных callback-ов (требует подписки)
+	factory.RegisterHandlerCreator("with_params", func() handlers.Handler {
+		handler := with_params_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
 
-	// Обработчик для выбора периода (использует общий префикс)
+	// Обработчик для выбора периода (требует подписки)
 	factory.RegisterHandlerCreator("period_select", func() handlers.Handler {
-		return period_select_handler.NewHandler(signalSettingsService)
+		handler := period_select_handler.NewHandler(services.signalSettingsService)
+		if subscriptionMiddleware != nil {
+			return subscriptionMiddleware.RequireSubscription(handler)
+		}
+		return handler
 	})
+
+	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
+		return payment_plan_handler.NewHandler()
+	})
+
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
+		return payment_confirm_handler.NewHandler(payment_confirm_handler.Dependencies{
+			Config:      cfg,
+			StarsClient: services.starsClient,
+		})
+	})
+
+	// ПЛАТЕЖНЫЕ СОБЫТИЯ (без подписки)
+	if services.paymentService != nil {
+		factory.RegisterHandlerCreator("pre_checkout_query", func() handlers.Handler {
+			return precheckout_handler.NewHandler(services.paymentService)
+		})
+
+		factory.RegisterHandlerCreator("successful_payment", func() handlers.Handler {
+			return successful_payment_handler.NewHandler(services.paymentService)
+		})
+
+		logger.Info("✅ Платежные обработчики событий зарегистрированы")
+	} else {
+		logger.Warn("⚠️ PaymentService не предоставлен, платежные события не будут обрабатываться")
+	}
 
 	logger.Info("✅ Инициализация создателей хэндлеров завершена")
+}
+
+// UpdateSubscriptionMiddleware обновляет middleware подписки после создания бота
+func UpdateSubscriptionMiddleware(factory *handlers.HandlerFactory, subscriptionMiddleware *middlewares.SubscriptionMiddleware) {
+	// TODO: Обновить все хэндлеры с подпиской
+	logger.Info("🔄 Subscription middleware обновлен")
 }

@@ -110,11 +110,17 @@ func (f *HandlerFactory) RegisterHandler(handler Handler) {
 	switch handler.GetType() {
 	case TypeCommand:
 		f.router.RegisterCommand(handler.GetCommand(), adapter)
+		logger.Info("✅ Зарегистрирована команда: %s → %s", handler.GetCommand(), handler.GetName())
+
 	case TypeCallback:
 		f.router.RegisterCallback(handler.GetCommand(), adapter)
+		logger.Info("✅ Зарегистрирован callback: %s → %s", handler.GetCommand(), handler.GetName())
+
 	case TypeMessage:
-		// Для текстовых сообщений пока не регистрируем
-		logger.Warn("  ⚠️ Текстовый хэндлер пропущен: %s", handler.GetName())
+		// Регистрируем как эвент
+		f.router.RegisterEvent(handler.GetCommand(), adapter)
+		logger.Info("✅ Зарегистрирован эвент: %s → %s", handler.GetCommand(), handler.GetName())
+
 	default:
 		logger.Warn("  ⚠️ Неизвестный тип хэндлера: %s", handler.GetName())
 	}

@@ -32,7 +32,8 @@ type CandleSystem struct {
 func NewCandleSystemFactory() *CandleSystemFactory {
 	return &CandleSystemFactory{
 		config: storage.CandleConfig{
-			SupportedPeriods: []string{"5m", "15m", "30m", "1h", "4h", "1d"},
+			// ✅ ДОБАВЛЯЕМ ПЕРИОД 1m
+			SupportedPeriods: []string{"1m", "5m", "15m", "30m", "1h", "4h", "1d"},
 			MaxHistory:       1000,
 			CleanupInterval:  5 * time.Minute,
 			AutoBuild:        true,

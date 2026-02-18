@@ -25,8 +25,6 @@ type User struct {
 	NotifyGrowth         bool `db:"notify_growth" json:"notify_growth"`
 	NotifyFall           bool `db:"notify_fall" json:"notify_fall"`
 	NotifyContinuous     bool `db:"notify_continuous" json:"notify_continuous"`
-	QuietHoursStart      int  `db:"quiet_hours_start" json:"quiet_hours_start"`
-	QuietHoursEnd        int  `db:"quiet_hours_end" json:"quiet_hours_end"`
 
 	// Настройки анализа (плоские поля для маппинга с БД)
 	MinGrowthThreshold float64 `db:"min_growth_threshold" json:"min_growth_threshold"`
@@ -120,6 +118,13 @@ type UpdateProfileRequest struct {
 	DisplayMode string `json:"display_mode"`
 }
 
+// ==================== МЕТОД ДЛЯ ИНТЕРФЕЙСА PAYMENT.USER ====================
+
+// GetID возвращает ID пользователя (для интерфейса payment.User)
+func (u *User) GetID() int {
+	return u.ID
+}
+
 // ==================== МЕТОДЫ ПОЛЬЗОВАТЕЛЯ ====================
 
 // CanReceiveNotifications проверяет, может ли пользователь получать уведомления
@@ -135,24 +140,6 @@ func (u *User) CanReceiveGrowthSignals() bool {
 // CanReceiveFallSignals проверяет, может ли пользователь получать уведомления о падении
 func (u *User) CanReceiveFallSignals() bool {
 	return u.CanReceiveNotifications() && u.NotifyFall
-}
-
-// IsInQuietHours проверяет, находится ли текущее время в тихих часах пользователя
-func (u *User) IsInQuietHours() bool {
-	now := time.Now().UTC()
-	hour := now.Hour()
-
-	// Если тихие часы не настроены
-	if u.QuietHoursStart == 0 && u.QuietHoursEnd == 0 {
-		return false
-	}
-
-	// Обработка случая когда start > end (например, 23-8)
-	if u.QuietHoursStart > u.QuietHoursEnd {
-		return hour >= u.QuietHoursStart || hour < u.QuietHoursEnd
-	}
-
-	return hour >= u.QuietHoursStart && hour < u.QuietHoursEnd
 }
 
 // HasReachedDailyLimit проверяет, достиг ли пользователь дневного лимита сигналов
@@ -181,11 +168,6 @@ func (u *User) ShouldReceiveSignal(signalType string, changePercent float64) boo
 	}
 	// Для падения changePercent отрицательный, сравниваем модуль с порогом
 	if signalType == "fall" && math.Abs(changePercent) < u.MinFallThreshold {
-		return false
-	}
-
-	// Проверка тихих часов
-	if u.IsInQuietHours() {
 		return false
 	}
 
@@ -260,8 +242,6 @@ func NewUser(telegramID int64, username, firstName, lastName, chatID string) *Us
 		NotifyGrowth:         true,
 		NotifyFall:           true,
 		NotifyContinuous:     true,
-		QuietHoursStart:      23,
-		QuietHoursEnd:        8,
 		MinGrowthThreshold:   2.0,
 		MinFallThreshold:     2.0,
 		MinVolumeFilter:      100000,

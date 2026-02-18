@@ -94,6 +94,14 @@ type AnalyzerConfigs struct {
 	CounterAnalyzer      AnalyzerConfig `mapstructure:"COUNTER_ANALYZER"`
 }
 
+// UserDefaultsConfig - настройки пользователей по умолчанию
+type UserDefaultsConfig struct {
+	MinGrowthThreshold float64 `mapstructure:"COUNTER_GROWTH_THRESHOLD"`
+	MinFallThreshold   float64 `mapstructure:"COUNTER_FALL_THRESHOLD"`
+	Language           string  `mapstructure:"DEFAULT_LANGUAGE"`
+	Timezone           string  `mapstructure:"DEFAULT_TIMEZONE"`
+}
+
 // ============================================
 // ОСНОВНАЯ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЯ (добавлено DatabaseConfig)
 // ============================================
@@ -204,6 +212,7 @@ type Config struct {
 	Telegram struct {
 		Enabled         bool    `mapstructure:"TELEGRAM_ENABLED"`
 		BotToken        string  `mapstructure:"TG_API_KEY"`
+		BotUsername     string  `mapstructure:"TG_BOT_USERNAME"`
 		ChatID          string  `mapstructure:"TG_CHAT_ID"`
 		NotifyGrowth    bool    `mapstructure:"TELEGRAM_NOTIFY_GROWTH"`
 		NotifyFall      bool    `mapstructure:"TELEGRAM_NOTIFY_FALL"`
@@ -240,6 +249,14 @@ type Config struct {
 		Limit         int `mapstructure:"POLLING_LIMIT"`          // лимит обновлений
 		RetryInterval int `mapstructure:"POLLING_RETRY_INTERVAL"` // интервал переподключения
 	} `mapstructure:",squash"`
+
+	// =============================
+	// TELEGRAM STARS КОНФИГУРАЦИЯ
+	// =============================
+	TelegramStars struct {
+		ProviderToken string `mapstructure:"TELEGRAM_STARS_PROVIDER_TOKEN"`
+		BotUsername   string `mapstructure:"TELEGRAM_STARS_BOT_USERNAME"`
+	}
 
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
@@ -283,6 +300,11 @@ type Config struct {
 		RateLimitDelay        time.Duration `mapstructure:"RATE_LIMIT_DELAY,omitempty"`
 		MaxConcurrentRequests int           `mapstructure:"MAX_CONCURRENT_REQUESTS,omitempty"`
 	} `mapstructure:",squash"`
+
+	// ======================
+	// НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ ПО УМОЛЧАНИЮ
+	// ======================
+	UserDefaults UserDefaultsConfig `mapstructure:",squash"`
 
 	// ======================
 	// ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ
@@ -334,6 +356,14 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Environment = getEnv("ENVIRONMENT", "dev")
 	cfg.Version = getEnv("VERSION", "1.0.0")
+
+	// ======================
+	// НАСТРОЙКИ ПОЛЬЗОВАТЕЛЕЙ ПО УМОЛЧАНИЮ
+	// ======================
+	cfg.UserDefaults.MinGrowthThreshold = getEnvFloat("COUNTER_GROWTH_THRESHOLD", 2.0)
+	cfg.UserDefaults.MinFallThreshold = getEnvFloat("COUNTER_FALL_THRESHOLD", 2.0)
+	cfg.UserDefaults.Language = getEnv("DEFAULT_LANGUAGE", "ru")
+	cfg.UserDefaults.Timezone = getEnv("DEFAULT_TIMEZONE", "Europe/Moscow")
 
 	// ======================
 	// БАЗА ДАННЫХ
@@ -429,7 +459,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ДВИЖОК АНАЛИЗА
 	// ======================
 	cfg.AnalysisEngine.UpdateInterval = getEnvInt("ANALYSIS_UPDATE_INTERVAL", 30)
-	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "5,15,30"))
+	cfg.AnalysisEngine.AnalysisPeriods = parseIntList(getEnv("ANALYSIS_PERIODS", "1,5,15,30"))
 	cfg.AnalysisEngine.MaxSymbolsPerRun = getEnvInt("ANALYSIS_MAX_SYMBOLS_PER_RUN", 50)
 	cfg.AnalysisEngine.SignalThreshold = getEnvFloat("ANALYSIS_SIGNAL_THRESHOLD", 2.0)
 	cfg.AnalysisEngine.RetentionPeriod = getEnvInt("ANALYSIS_RETENTION_PERIOD", 24)
@@ -541,6 +571,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	cfg.Telegram.Enabled = getEnvBool("TELEGRAM_ENABLED", false)
 	cfg.Telegram.BotToken = getEnv("TG_API_KEY", "")
+	cfg.Telegram.BotUsername = getEnv("TG_BOT_USERNAME", "")
 	cfg.Telegram.ChatID = getEnv("TG_CHAT_ID", "")
 	cfg.Telegram.NotifyGrowth = getEnvBool("TELEGRAM_NOTIFY_GROWTH", true)
 	cfg.Telegram.NotifyFall = getEnvBool("TELEGRAM_NOTIFY_FALL", true)
@@ -572,6 +603,12 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Polling.Timeout = getEnvInt("POLLING_TIMEOUT", 30)
 	cfg.Polling.Limit = getEnvInt("POLLING_LIMIT", 100)
 	cfg.Polling.RetryInterval = getEnvInt("POLLING_RETRY_INTERVAL", 5)
+
+	// =============================
+	// TELEGRAM STARS КОНФИГУРАЦИЯ
+	// =============================
+	cfg.TelegramStars.ProviderToken = getEnv("TELEGRAM_STARS_PROVIDER_TOKEN", "")
+	cfg.TelegramStars.BotUsername = getEnv("TELEGRAM_STARS_BOT_USERNAME", "")
 
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
@@ -776,6 +813,13 @@ func (c *Config) PrintSummary() {
 	log.Printf("   • Telegram режим: %s", c.TelegramMode)
 	log.Printf("   • Telegram включен: %v", c.Telegram.Enabled)
 
+	// Настройки пользователей по умолчанию
+	log.Printf("   • Настройки по умолчанию:")
+	log.Printf("     - Порог роста: %.1f%%", c.UserDefaults.MinGrowthThreshold)
+	log.Printf("     - Порог падения: %.1f%%", c.UserDefaults.MinFallThreshold)
+	log.Printf("     - Язык: %s", c.UserDefaults.Language)
+	log.Printf("     - Часовой пояс: %s", c.UserDefaults.Timezone)
+
 	// База данных
 	log.Printf("   • PostgreSQL: %s:%d/%s", c.Database.Host, c.Database.Port, c.Database.Name)
 	log.Printf("   • Redis: %s:%d (DB: %d, Pool: %d)",
@@ -908,6 +952,7 @@ func parsePatterns(value string) []string {
 
 func isValidPeriod(period string) bool {
 	validPeriods := map[string]bool{
+		"1m":  true,
 		"5m":  true,
 		"15m": true,
 		"30m": true,

@@ -1,5 +1,4 @@
 // internal/delivery/telegram/app/bot/handlers/callbacks/period_select/handler.go
-
 package period_select
 
 import (
@@ -10,6 +9,8 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	signal_settings_svc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/pkg/logger"
+	"crypto-exchange-screener-bot/pkg/period"
 )
 
 // periodSelectHandler реализация обработчика выбора периода
@@ -37,15 +38,15 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 	}
 
 	// Определяем период из callback data (формат: "period_5m")
-	period := params.Data
-	if period == "" {
+	periodStr := params.Data
+	if periodStr == "" {
 		return h.showPeriodsMenu(params)
 	}
 
 	// Определяем действие
 	var action string
-	if strings.HasPrefix(period, "period_manage_") {
-		action = strings.TrimPrefix(period, "period_manage_")
+	if strings.HasPrefix(periodStr, "period_manage_") {
+		action = strings.TrimPrefix(periodStr, "period_manage_")
 		return h.handlePeriodManagement(params, action)
 	}
 
@@ -57,7 +58,7 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 		Action: action,
 		UserID: params.User.ID,
 		ChatID: params.ChatID,
-		Value:  period,
+		Value:  periodStr,
 	}
 
 	// Вызываем сервис
@@ -70,25 +71,32 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 	periods, _ := result.NewValue.([]int)
 	periodsStr := formatPeriodsToString(periods)
 
-	// Создаем сообщение с результатом
-	var emoji string
+	// Убираем эмодзи из result.Message
+	cleanMessage := strings.TrimPrefix(result.Message, "✅ ")
+	cleanMessage = strings.TrimPrefix(cleanMessage, "❌ ")
+
+	// Определяем эмодзи для заголовка
+	emoji := "✅"
 	if actionResult, ok := result.Metadata["action"].(string); ok {
-		if actionResult == "added" {
-			emoji = "✅"
-		} else {
+		if actionResult == "removed" {
 			emoji = "❌"
 		}
-	} else {
-		emoji = "✅"
 	}
 
+	// Формируем сообщение
 	message := fmt.Sprintf(
 		"%s *Период обновлен*\n\n%s\n\n"+
 			"Текущие периоды анализа: %s",
 		emoji,
-		result.Message,
+		cleanMessage,
 		periodsStr,
 	)
+
+	// ⭐ Экранируем все Markdown-символы в сообщении
+	message = escapeMarkdown(message)
+
+	// Логируем финальное сообщение для отладки
+	logger.Info("📨 FINAL MESSAGE: %s", message)
 
 	// Создаем клавиатуру
 	keyboard := map[string]interface{}{
@@ -103,6 +111,17 @@ func (h *periodSelectHandler) Execute(params handlers.HandlerParams) (handlers.H
 		Message:  message,
 		Keyboard: keyboard,
 	}, nil
+}
+
+// Вспомогательная функция для экранирования Markdown-символов
+func escapeMarkdown(text string) string {
+	// Экранируем символы, которые имеют специальное значение в Markdown
+	text = strings.ReplaceAll(text, "_", "\\_")
+	text = strings.ReplaceAll(text, "*", "\\*")
+	text = strings.ReplaceAll(text, "`", "\\`")
+	text = strings.ReplaceAll(text, "[", "\\[")
+	text = strings.ReplaceAll(text, "]", "\\]")
+	return text
 }
 
 // showPeriodsMenu показывает меню управления периодами
@@ -161,16 +180,19 @@ func (h *periodSelectHandler) showAddPeriodMenu(params handlers.HandlerParams) (
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "5 минут", "callback_data": "period_5m"},
-				{"text": "15 минут", "callback_data": "period_15m"},
+				{"text": "1 минута", "callback_data": constants.CallbackPeriod1m},
+				{"text": "5 минут", "callback_data": constants.CallbackPeriod5m},
 			},
 			{
-				{"text": "30 минут", "callback_data": "period_30m"},
-				{"text": "1 час", "callback_data": "period_1h"},
+				{"text": "15 минут", "callback_data": constants.CallbackPeriod15m},
+				{"text": "30 минут", "callback_data": constants.CallbackPeriod30m},
 			},
 			{
-				{"text": "4 часа", "callback_data": "period_4h"},
-				{"text": "1 день", "callback_data": "period_1d"},
+				{"text": "1 час", "callback_data": constants.CallbackPeriod1h},
+				{"text": "4 часа", "callback_data": constants.CallbackPeriod4h},
+			},
+			{
+				{"text": "1 день", "callback_data": constants.CallbackPeriod1d},
 			},
 			{
 				{"text": constants.ButtonTexts.Back, "callback_data": "period_select"},
@@ -189,12 +211,12 @@ func (h *periodSelectHandler) showRemovePeriodMenu(params handlers.HandlerParams
 	// Создаем кнопки только для текущих периодов пользователя
 	var buttons [][]map[string]string
 
-	for _, period := range params.User.PreferredPeriods {
-		period := formatMinutesToPeriod(period)
-		callbackData := fmt.Sprintf("period_%s", period)
+	for _, periodMinutes := range params.User.PreferredPeriods {
+		periodStr := period.MinutesToString(periodMinutes)
+		callbackData := fmt.Sprintf("period_%s", periodStr)
 
 		buttons = append(buttons, []map[string]string{
-			{"text": period, "callback_data": callbackData},
+			{"text": periodStr, "callback_data": callbackData},
 		})
 	}
 
@@ -253,28 +275,8 @@ func formatPeriodsToString(periods []int) string {
 	}
 
 	var parts []string
-	for _, period := range periods {
-		parts = append(parts, formatMinutesToPeriod(period))
+	for _, periodMinutes := range periods {
+		parts = append(parts, period.MinutesToString(periodMinutes))
 	}
 	return strings.Join(parts, ", ")
-}
-
-// Вспомогательная функция для форматирования минут в период
-func formatMinutesToPeriod(minutes int) string {
-	switch minutes {
-	case 5:
-		return "5m"
-	case 15:
-		return "15m"
-	case 30:
-		return "30m"
-	case 60:
-		return "1h"
-	case 240:
-		return "4h"
-	case 1440:
-		return "1d"
-	default:
-		return fmt.Sprintf("%dm", minutes)
-	}
 }
