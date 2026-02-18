@@ -66,8 +66,10 @@ func (h *notificationsCommandHandler) createNotificationsMessage(user *models.Us
 
 // createNotificationsKeyboard создает клавиатуру для команды /notifications
 func (h *notificationsCommandHandler) createNotificationsKeyboard(user *models.User) interface{} {
-	// Используем методы через h.BaseHandler
-	toggleAllText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.ToggleAll, user.NotificationsEnabled)
+	// ⭐ ИСПРАВЛЕНО: для ToggleAll не используем GetToggleText
+	toggleAllText := constants.NotificationButtonTexts.ToggleAll
+
+	// Для остальных кнопок используем GetToggleText как обычно
 	growthText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.GrowthOnly, user.NotifyGrowth)
 	fallText := h.BaseHandler.GetToggleText(constants.NotificationButtonTexts.FallOnly, user.NotifyFall)
 

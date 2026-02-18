@@ -56,6 +56,7 @@ func (h *notificationsMenuHandler) createNotificationsMessage(user *models.User)
 			"🔊 Общие уведомления: %s\n"+
 			"%s\n"+
 			"%s\n"+
+
 			"Выберите настройку для изменения:",
 		constants.MenuButtonTexts.Notifications,
 		h.BaseHandler.GetBoolDisplay(user.NotificationsEnabled),
