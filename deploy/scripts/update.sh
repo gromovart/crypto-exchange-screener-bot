@@ -995,17 +995,22 @@ echo ""
 
 # 4. Проверка логов на ошибки
 echo "4. Ошибки в логах (последние 5 минут):"
-ERROR_COUNT=\$(journalctl -u \${SERVICE_NAME}.service --since "5 minutes ago" 2>/dev/null | \
-    grep -i -c "error\|fail\|panic\|fatal")
-if [ "\${ERROR_COUNT}" -gt 0 ]; then
-    echo "  ⚠️  Найдено ошибок: \${ERROR_COUNT}"
-    echo "  Последние ошибки:"
-    journalctl -u \${SERVICE_NAME}.service --since "5 minutes ago" 2>/dev/null | \
-        grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
-        echo "    📛 \$(echo "\$line" | cut -d' ' -f6-)"
-    done
+LOG_FILE="/opt/crypto-screener-bot/logs/app.log"
+if [ -f "${LOG_FILE}" ]; then
+    ERROR_COUNT=$(tail -n 1000 ${LOG_FILE} 2>/dev/null | \
+        grep -i -c "error\|fail\|panic\|fatal")
+    if [ "${ERROR_COUNT}" -gt 0 ]; then
+        echo "  ⚠️  Найдено ошибок: ${ERROR_COUNT}"
+        echo "  Последние ошибки:"
+        tail -n 100 ${LOG_FILE} 2>/dev/null | \
+            grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
+            echo "    📛 $(echo "$line" | cut -d' ' -f6-)"
+        done
+    else
+        echo "  ✅ Ошибок не обнаружено"
+    fi
 else
-    echo "  ✅ Ошибок не обнаружено"
+    echo "  ⚠️  Файл лога не найден: ${LOG_FILE}"
 fi
 echo ""
 
