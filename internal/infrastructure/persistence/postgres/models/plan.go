@@ -12,6 +12,7 @@ const (
 	PlanBasic      = "basic"
 	PlanPro        = "pro"
 	PlanEnterprise = "enterprise"
+	PlanTest       = "test" // только для dev окружения
 )
 
 // PlanLimits лимиты по тарифам

@@ -121,7 +121,7 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		}, fmt.Errorf("платеж уже существует")
 	}
 
-	// Обрабатываем через StarsService
+	// ⭐ Обрабатываем через StarsService (теперь он создаст/обновит подписку)
 	result, err := s.starsService.ProcessPayment(request)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка обработки платежа в Stars: %w", err)
@@ -142,11 +142,11 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 	now := time.Now()
 	expiresAt := now.Add(30 * 24 * time.Hour)
 
-	// ⭐ Правильная конвертация Stars → USD (курс 36.23 Stars = 1 USD)
+	// Конвертация Stars → USD (курс 36.23 Stars = 1 USD)
 	usdAmount := float64(request.StarsAmount) / 36.23
-	centsAmount := int(usdAmount * 100) // 500/36.23*100 = 1380 центов = $13.80
+	centsAmount := int(usdAmount * 100)
 
-	// ⭐ Создаем metadata из invoiceData
+	// Создаем metadata из invoiceData
 	metadataMap := map[string]interface{}{
 		"invoice_data": map[string]interface{}{
 			"plan_id":          invoiceData.SubscriptionPlanID,
@@ -155,10 +155,11 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 			"original_payload": request.Payload,
 		},
 		"stars_result": map[string]interface{}{
-			"payment_id": result.PaymentID,
-			"user_id":    result.UserID,
-			"plan_id":    result.PlanID,
-			"success":    result.Success,
+			"payment_id":      result.PaymentID,
+			"user_id":         result.UserID,
+			"plan_id":         result.PlanID,
+			"subscription_id": result.SubscriptionID, // ⭐ ДОБАВЛЯЕМ В МЕТАДАННЫЕ
+			"success":         result.Success,
 		},
 		"conversion": map[string]interface{}{
 			"rate":         36.23,
@@ -175,16 +176,16 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		metadataJSON = []byte("{}")
 	}
 
-	// ⭐ 1. Сначала создаем инвойс в БД
+	// Создаем инвойс в БД
 	invoice := &models.Invoice{
 		UserID:      userID,
 		PlanID:      result.PlanID,
 		ExternalID:  request.TelegramPaymentID,
 		Title:       fmt.Sprintf("Подписка %s", result.PlanID),
 		Description: fmt.Sprintf("Оплата подписки %s через Telegram Stars", result.PlanID),
-		AmountUSD:   usdAmount,           // ⭐ $13.80 для 500 Stars
-		StarsAmount: request.StarsAmount, // ⭐ 500 Stars
-		FiatAmount:  centsAmount,         // ⭐ 1380 центов
+		AmountUSD:   usdAmount,
+		StarsAmount: request.StarsAmount,
+		FiatAmount:  centsAmount,
 		Currency:    "USD",
 		Status:      models.InvoiceStatusPaid,
 		Provider:    models.InvoiceProviderTelegram,
@@ -204,16 +205,19 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 	s.logger.Info("✅ Инвойс создан в БД: ID=%d, ExternalID=%s, Stars=%d, USD=$%.2f",
 		invoice.ID, request.TelegramPaymentID, request.StarsAmount, usdAmount)
 
-	// ⭐ 2. Теперь создаем платеж с invoice_id
+	// ⭐ ТЕПЕРЬ У НАС ЕСТЬ SUBSCRIPTION_ID!
+	subscriptionID := int64(result.SubscriptionID)
+
+	// Создаем платеж с subscription_id
 	payment := &models.Payment{
 		UserID:         userID,
-		SubscriptionID: nil,
-		InvoiceID:      &invoice.ID, // Заполняем ID созданного инвойса
+		SubscriptionID: &subscriptionID, // ⭐ УЖЕ НЕ NULL!
+		InvoiceID:      &invoice.ID,
 		ExternalID:     request.TelegramPaymentID,
-		Amount:         usdAmount, // ⭐ $13.80
+		Amount:         usdAmount,
 		Currency:       models.CurrencyUSD,
-		StarsAmount:    request.StarsAmount, // ⭐ 500
-		FiatAmount:     centsAmount,         // ⭐ 1380 центов
+		StarsAmount:    request.StarsAmount,
+		FiatAmount:     centsAmount,
 		PaymentType:    models.PaymentTypeStars,
 		Status:         models.PaymentStatusCompleted,
 		Provider:       "telegram_stars",
@@ -234,9 +238,17 @@ func (s *PaymentService) ProcessPayment(ctx context.Context, request ProcessPaym
 		return nil, fmt.Errorf("ошибка сохранения платежа: %w", err)
 	}
 
+	// ⭐ Обновляем payment_id в подписке (опционально)
+	if subscriptionID > 0 {
+		// Здесь можно обновить payment_id в подписке
+		s.logger.Info("🔄 Подписка %d связана с платежом %d", subscriptionID, payment.ID)
+	}
+
 	result.InvoiceID = fmt.Sprintf("%d", payment.ID)
-	s.logger.Info("✅ Платеж сохранен в БД: ID=%d, ExternalID=%s, InvoiceID=%d, Amount=$%.2f",
-		payment.ID, request.TelegramPaymentID, invoice.ID, usdAmount)
+	result.SubscriptionID = int(subscriptionID) // Возвращаем ID подписки
+
+	s.logger.Info("✅ Платеж сохранен в БД: ID=%d, ExternalID=%s, InvoiceID=%d, SubscriptionID=%d, Amount=$%.2f",
+		payment.ID, request.TelegramPaymentID, invoice.ID, subscriptionID, usdAmount)
 
 	return result, nil
 }

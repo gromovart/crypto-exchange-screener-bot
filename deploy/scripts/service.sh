@@ -959,18 +959,33 @@ echo ""
 
 # 5. Проверка логов на ошибки
 echo "5. 📝 ПРОВЕРКА ЛОГОВ (последние 5 минут):"
-RECENT_ERRORS=$(journalctl -u crypto-screener.service --since "5 minutes ago" 2>/dev/null | \
-    grep -i -c "error\|fail\|panic\|fatal")
-if [ "${RECENT_ERRORS}" -gt 0 ]; then
-    echo "   ⚠️  Найдено ошибок: ${RECENT_ERRORS}"
-    echo "   Последние ошибки:"
-    journalctl -u crypto-screener.service --since "5 minutes ago" 2>/dev/null | \
-        grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
-        echo "     📛 $(echo "$line" | cut -d' ' -f6-)"
-    done
-    HEALTH_OK=false
+
+LOG_FILE="/opt/crypto-screener-bot/logs/app.log"
+if [ -f "${LOG_FILE}" ]; then
+    # Получаем логи за последние 5 минут (по времени модификации)
+    RECENT_ERRORS=$(tail -n 2000 "${LOG_FILE}" 2>/dev/null | grep -i -c "error\|fail\|panic\|fatal" || echo "0")
+
+    if [ "${RECENT_ERRORS}" -gt 0 ]; then
+        echo "   ⚠️  Найдено ошибок: ${RECENT_ERRORS}"
+        echo "   Последние ошибки:"
+        tail -n 500 "${LOG_FILE}" 2>/dev/null | grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
+            echo "     📛 $(echo "$line" | cut -d' ' -f6-)"
+        done
+        HEALTH_OK=false
+    else
+        echo "   ✅ Ошибок не обнаружено"
+    fi
 else
-    echo "   ✅ Ошибок не найдено"
+    echo "   ⚠️  Файл лога не найден: ${LOG_FILE}"
+fi
+
+# Проверяем также error.log для полноты картины
+ERROR_LOG="/opt/crypto-screener-bot/logs/error.log"
+if [ -f "${ERROR_LOG}" ]; then
+    ERROR_COUNT=$(tail -n 500 "${ERROR_LOG}" 2>/dev/null | grep -i -c "error\|fail\|panic\|fatal" || echo "0")
+    if [ "${ERROR_COUNT}" -gt 0 ]; then
+        echo "   ⚠️  Найдено ошибок в error.log: ${ERROR_COUNT}"
+    fi
 fi
 echo ""
 

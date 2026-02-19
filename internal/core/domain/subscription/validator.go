@@ -210,7 +210,8 @@ func (s *Service) upgradeFreeToPaid(ctx context.Context,
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
 		Type:           "subscription_upgraded_from_free",
 		UserID:         payment.UserID,
 		SubscriptionID: sub.ID,
@@ -221,8 +222,9 @@ func (s *Service) upgradeFreeToPaid(ctx context.Context,
 		Metadata: map[string]interface{}{
 			"payment_id": payment.ID,
 			"incident":   true,
-		},
-	})
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(payment.UserID)
@@ -329,7 +331,8 @@ func (s *Service) restoreSubscription(ctx context.Context, payment *PaymentData)
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
 		Type:           "subscription_restored",
 		UserID:         payment.UserID,
 		SubscriptionID: subscription.ID,
@@ -339,8 +342,9 @@ func (s *Service) restoreSubscription(ctx context.Context, payment *PaymentData)
 		Metadata: map[string]interface{}{
 			"payment_id": payment.ID,
 			"incident":   true,
-		},
-	})
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(payment.UserID)
@@ -392,7 +396,8 @@ func (s *Service) fixPlanMismatch(ctx context.Context,
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
 		Type:           "subscription_fixed_plan",
 		UserID:         payment.UserID,
 		SubscriptionID: sub.ID,
@@ -403,8 +408,9 @@ func (s *Service) fixPlanMismatch(ctx context.Context,
 		Metadata: map[string]interface{}{
 			"payment_id": payment.ID,
 			"incident":   true,
-		},
-	})
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(payment.UserID)
@@ -431,7 +437,8 @@ func (s *Service) fixEndDate(ctx context.Context, sub *models.UserSubscription, 
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
 		Type:           "subscription_fixed_period",
 		UserID:         sub.UserID,
 		SubscriptionID: sub.ID,
@@ -442,8 +449,9 @@ func (s *Service) fixEndDate(ctx context.Context, sub *models.UserSubscription, 
 			"old_end_date": sub.CurrentPeriodEnd,
 			"new_end_date": expectedEndDate,
 			"incident":     true,
-		},
-	})
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(sub.UserID)
@@ -455,6 +463,8 @@ func (s *Service) fixEndDate(ctx context.Context, sub *models.UserSubscription, 
 func (s *Service) calculateEndDate(payment *PaymentData) time.Time {
 	var period time.Duration
 	switch payment.PlanCode {
+	case "test":
+		period = 5 * time.Minute
 	case "basic":
 		period = 30 * 24 * time.Hour
 	case "pro":
@@ -462,7 +472,7 @@ func (s *Service) calculateEndDate(payment *PaymentData) time.Time {
 	case "enterprise":
 		period = 365 * 24 * time.Hour
 	default:
-		return time.Time{}
+		return time.Time{} // free и другие — не проверяем
 	}
 	return payment.CreatedAt.Add(period)
 }

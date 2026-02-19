@@ -86,6 +86,7 @@ func (cl *CoreLayer) Initialize() error {
 
 	// Создаем конфигурацию для фабрики ядра со значениями по умолчанию
 	coreConfig := &core_factory.Config{
+		Environment: cl.config.Environment, // ⭐ Передаем окружение
 		UserConfig: users.Config{
 			UserDefaults: struct {
 				MinGrowthThreshold float64
@@ -107,6 +108,7 @@ func (cl *CoreLayer) Initialize() error {
 			TrialPeriodDays: 1,
 			GracePeriodDays: 3,
 			AutoRenew:       true,
+			IsDev:           cl.config.IsDev(),
 		},
 		PaymentsConfig: payment.Config{
 			TelegramBotToken:           cl.config.Telegram.BotToken,

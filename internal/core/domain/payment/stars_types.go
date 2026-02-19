@@ -2,6 +2,7 @@
 package payment
 
 import (
+	"context"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"time"
 )
@@ -66,12 +67,13 @@ const (
 
 // StarsPaymentResult результат обработки платежа
 type StarsPaymentResult struct {
-	Success   bool
-	PaymentID string
-	InvoiceID string
-	UserID    string
-	PlanID    string
-	Timestamp time.Time
+	Success        bool
+	PaymentID      string
+	InvoiceID      string
+	UserID         string
+	PlanID         string
+	SubscriptionID int // ⭐ ДОБАВЛЕНО: ID созданной или обновленной подписки
+	Timestamp      time.Time
 }
 
 // InvoiceData данные из парсинга payload
@@ -79,4 +81,27 @@ type InvoiceData struct {
 	UserID             string
 	SubscriptionPlanID string
 	InvoiceID          string
+}
+
+
+// ToMap конвертирует PaymentEventData в map
+func (d PaymentEventData) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"payment_id":      d.PaymentID,
+		"user_id":         d.UserID,
+		"plan_id":         d.PlanID,
+		"stars_amount":    d.StarsAmount,
+		"payment_type":    d.PaymentType,
+		"timestamp":       d.Timestamp,
+		"invoice_id":      d.InvoiceID,
+		"subscription_id": d.SubscriptionID,
+		"metadata":        d.Metadata,
+	}
+}
+
+// ⭐ НОВЫЙ ИНТЕРФЕЙС: SubscriptionService для работы с подписками
+type SubscriptionService interface {
+	GetActiveSubscription(ctx context.Context, userID int) (*models.UserSubscription, error)
+	CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error)
+	UpgradeSubscription(ctx context.Context, userID int, newPlanCode string, paymentID *int64) (*models.UserSubscription, error)
 }

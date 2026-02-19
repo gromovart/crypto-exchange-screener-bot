@@ -1190,3 +1190,8 @@ func (c *Config) GetRedisPoolSize() int {
 func (c *Config) GetRedisMinIdleConns() int {
 	return c.Redis.MinIdleConns
 }
+
+// IsDev возвращает true если текущее окружение — разработка
+func (c *Config) IsDev() bool {
+	return c.Environment == "dev"
+}

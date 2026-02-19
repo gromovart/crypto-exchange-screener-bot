@@ -13,14 +13,15 @@ type EventPublisher interface {
 
 // PaymentEventData данные события платежа
 type PaymentEventData struct {
-	PaymentID   string                 `json:"payment_id"`
-	UserID      string                 `json:"user_id"`
-	PlanID      string                 `json:"plan_id"`
-	StarsAmount int                    `json:"stars_amount"`
-	PaymentType string                 `json:"payment_type"`
-	Timestamp   time.Time              `json:"timestamp"`
-	InvoiceID   string                 `json:"invoice_id,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	PaymentID      string                 `json:"payment_id"`
+	UserID         string                 `json:"user_id"`
+	PlanID         string                 `json:"plan_id"`
+	StarsAmount    int                    `json:"stars_amount"`
+	PaymentType    string                 `json:"payment_type"`
+	Timestamp      time.Time              `json:"timestamp"`
+	InvoiceID      string                 `json:"invoice_id,omitempty"`
+	SubscriptionID int                    `json:"subscription_id"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // PaymentEventTypes типы событий платежей
@@ -32,15 +33,17 @@ func CreatePaymentEventData(
 	starsAmount int,
 	paymentType string,
 	invoiceID string,
+	subscriptionID int,
 ) PaymentEventData {
 	return PaymentEventData{
-		PaymentID:   paymentID,
-		UserID:      userID,
-		PlanID:      planID,
-		StarsAmount: starsAmount,
-		PaymentType: paymentType,
-		Timestamp:   time.Now(),
-		InvoiceID:   invoiceID,
-		Metadata:    make(map[string]interface{}),
+		PaymentID:      paymentID,
+		UserID:         userID,
+		PlanID:         planID,
+		StarsAmount:    starsAmount,
+		PaymentType:    paymentType,
+		Timestamp:      time.Now(),
+		InvoiceID:      invoiceID,
+		Metadata:       make(map[string]interface{}),
+		SubscriptionID: subscriptionID,
 	}
 }

@@ -25,6 +25,7 @@ type Config struct {
 	TrialPeriodDays int  // Для free плана
 	GracePeriodDays int  // Льготный период после истечения
 	AutoRenew       bool // Автопродление (для платных планов)
+	IsDev           bool // Только для dev окружения
 }
 
 // AnalyticsService интерфейс для аналитики
@@ -90,6 +91,11 @@ func (s *Service) loadPlans() error {
 	defer s.mu.Unlock()
 
 	for _, plan := range plans {
+		// Тестовый план доступен только в dev окружении
+		if plan.Code == models.PlanTest && !s.config.IsDev {
+			logger.Info("⏭️ Пропускаем тестовый план (не dev окружение)")
+			continue
+		}
 		s.plans[plan.Code] = plan
 		logger.Info("📋 Загружен план: %s (%s)", plan.Name, plan.Code)
 	}
@@ -129,6 +135,8 @@ func (s *Service) GetSubscriptionPeriod(planCode string) (time.Duration, error) 
 	switch planCode {
 	case models.PlanFree:
 		return 24 * time.Hour, nil // 24 часа для бесплатного
+	case "test": // ⭐ ТЕСТОВЫЙ ПЛАН
+		return 5 * time.Minute, nil // 5 минут для тестирования
 	case models.PlanBasic:
 		return 30 * 24 * time.Hour, nil // 1 месяц
 	case models.PlanPro:
@@ -142,13 +150,17 @@ func (s *Service) GetSubscriptionPeriod(planCode string) (time.Duration, error) 
 
 // CreateSubscription создает подписку для пользователя
 func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error) {
-	// ⭐ Получаем ВСЕ подписки пользователя (не только активные)
+	if s == nil || s.planRepo == nil {
+		return nil, fmt.Errorf("сервис подписок не инициализирован")
+	}
+
+	// Получаем ВСЕ подписки пользователя
 	allSubscriptions, err := s.subRepo.GetAllByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		return nil, fmt.Errorf("ошибка получения подписок пользователя: %w", err)
 	}
 
-	// ⭐ Проверяем, была ли уже бесплатная пробная подписка
+	// Проверяем, была ли уже бесплатная пробная подписка
 	hadFreeTrial := false
 	var activeSubscription *models.UserSubscription
 
@@ -159,6 +171,7 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 				hadFreeTrial = true
 			}
 		}
+
 
 		// Проверяем, есть ли активная подписка
 		if sub.IsActive() && (activeSubscription == nil || sub.CreatedAt.After(activeSubscription.CreatedAt)) {
@@ -171,16 +184,15 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 		return nil, fmt.Errorf("бесплатный пробный период уже был использован")
 	}
 
-	// ⭐ Если есть активная подписка, проверяем возможность апгрейда
-	if activeSubscription != nil {
-		// Если пытаются создать новую подписку (не апгрейд)
+	// ⭐ Тестовая подписка: разрешаем повторную оплату (для тестирования)
+	// Существующая активная тестовая подписка будет продлена
+
+	// ⭐ Если есть активная подписка (не тестовая) и мы пытаемся создать другую (не тест) - ошибка
+	if activeSubscription != nil && planCode != "test" && activeSubscription.PlanCode != "test" {
 		if activeSubscription.PlanCode != planCode {
-			// Это апгрейд - используем UpgradeSubscription вместо Create
 			return nil, fmt.Errorf("у пользователя уже есть активная подписка %s. Используйте UpgradeSubscription для смены плана",
 				activeSubscription.PlanCode)
 		}
-
-		// Если тот же план - запрещаем дублирование
 		return nil, fmt.Errorf("у пользователя уже есть активная подписка на план %s", planCode)
 	}
 
@@ -211,7 +223,7 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 		Metadata: map[string]interface{}{
 			"trial":          isTrial,
 			"period_days":    int(period.Hours() / 24),
-			"auto_renew":     s.config.AutoRenew && !isTrial && planCode != models.PlanFree,
+			"auto_renew":     s.config.AutoRenew && !isTrial && planCode != models.PlanFree && planCode != "test",
 			"payment_method": "stars",
 			"created_at":     now.Format(time.RFC3339),
 		},
@@ -223,33 +235,42 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 		subscription.Metadata["expires_after_hours"] = 24
 	}
 
+	// ⭐ Для тестового плана добавляем метку
+	if planCode == "test" {
+		subscription.Metadata["type"] = "test"
+		subscription.Metadata["expires_after_minutes"] = 5
+		subscription.Metadata["test_payment"] = true
+	}
+
 	// Сохраняем в БД
 	if err := s.subRepo.Create(ctx, subscription); err != nil {
 		return nil, fmt.Errorf("ошибка создания подписки: %w", err)
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
-		Type:           "subscription_created",
-		UserID:         userID,
-		SubscriptionID: subscription.ID,
-		PlanCode:       planCode,
-		Status:         models.StatusActive,
-		Timestamp:      now,
-		Metadata: map[string]interface{}{
-			"trial":       isTrial,
-			"period_days": int(period.Hours() / 24),
-		},
-	})
-
-	// Кэшируем
-	s.cacheSubscription(subscription)
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+			Type:           "subscription_created",
+			UserID:         userID,
+			SubscriptionID: subscription.ID,
+			PlanCode:       planCode,
+			Status:         models.StatusActive,
+			Timestamp:      now,
+			Metadata: map[string]interface{}{
+				"trial":       isTrial,
+				"period_days": int(period.Hours() / 24),
+			},
+		})
+	}
 
 	logMsg := fmt.Sprintf("✅ Создана подписка: пользователь %d, план %s, период %d дней",
 		userID, planCode, int(period.Hours()/24))
 
 	if isTrial {
 		logMsg += " (пробный период)"
+	}
+	if planCode == "test" {
+		logMsg = fmt.Sprintf("🧪 Создана тестовая подписка: пользователь %d, план %s, период 5 минут", userID, planCode)
 	}
 	logger.Info(logMsg)
 
@@ -313,18 +334,20 @@ func (s *Service) UpgradeSubscription(ctx context.Context, userID int, newPlanCo
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
-		Type:           "subscription_upgraded",
-		UserID:         userID,
-		SubscriptionID: existing.ID,
-		PlanCode:       newPlanCode,
-		OldPlanCode:    oldPlanCode,
-		Status:         models.StatusActive,
-		Timestamp:      now,
-		Metadata: map[string]interface{}{
-			"period_days": int(period.Hours() / 24),
-		},
-	})
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+			Type:           "subscription_upgraded",
+			UserID:         userID,
+			SubscriptionID: existing.ID,
+			PlanCode:       newPlanCode,
+			OldPlanCode:    oldPlanCode,
+			Status:         models.StatusActive,
+			Timestamp:      now,
+			Metadata: map[string]interface{}{
+				"period_days": int(period.Hours() / 24),
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(userID)
@@ -368,17 +391,19 @@ func (s *Service) CancelSubscription(ctx context.Context, userID int, cancelAtPe
 	}
 
 	// Трекаем событие
-	s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
-		Type:           "subscription_cancelled",
-		UserID:         userID,
-		SubscriptionID: sub.ID,
-		PlanCode:       sub.PlanCode,
-		Status:         newStatus,
-		Timestamp:      time.Now(),
-		Metadata: map[string]interface{}{
-			"cancel_at_period_end": cancelAtPeriodEnd,
-		},
-	})
+	if s.analytics != nil {
+		s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
+			Type:           "subscription_cancelled",
+			UserID:         userID,
+			SubscriptionID: sub.ID,
+			PlanCode:       sub.PlanCode,
+			Status:         newStatus,
+			Timestamp:      time.Now(),
+			Metadata: map[string]interface{}{
+				"cancel_at_period_end": cancelAtPeriodEnd,
+			},
+		})
+	}
 
 	// Инвалидируем кэш
 	s.invalidateSubscriptionCache(userID)

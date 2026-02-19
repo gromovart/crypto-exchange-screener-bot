@@ -28,6 +28,7 @@ type Config struct {
 	UserConfig         users.Config
 	SubscriptionConfig subscription.Config
 	PaymentsConfig     payment.Config
+	Environment        string // ⭐ Окружение (dev/prod)
 }
 
 // CoreServiceDependencies зависимости для фабрики ядра
@@ -74,12 +75,14 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 				TrialPeriodDays: 7,
 				GracePeriodDays: 3,
 				AutoRenew:       true,
+				IsDev:           true, // По умолчанию dev
 			},
 			PaymentsConfig: payment.Config{
 				TelegramBotToken:           "",
 				TelegramStarsProviderToken: "",
 				TelegramBotUsername:        "",
 			},
+			Environment: "dev", // По умолчанию dev
 		}
 	}
 
@@ -227,17 +230,25 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, er
 		return nil, fmt.Errorf("не удалось создать UserService: %w", err)
 	}
 
+	// ⭐ ПОЛУЧАЕМ SUBSCRIPTION SERVICE
+	subscriptionService, err := f.CreateSubscriptionService()
+	if err != nil {
+		logger.Warn("⚠️ SubscriptionService недоступен: %v", err)
+		subscriptionService = nil
+	}
+
 	// Создаем StarsClient
 	baseURL := "https://api.telegram.org/bot" + f.config.PaymentsConfig.TelegramBotToken + "/"
 	starsClient := http_client.NewStarsClient(baseURL, f.config.PaymentsConfig.TelegramStarsProviderToken)
 
-	// Создаем StarsService
+	// ⭐ СОЗДАЕМ STARS SERVICE С SUBSCRIPTION SERVICE
 	starsService := payment.NewStarsService(
-		userService,
-		eventBus,
-		logger.GetLogger(),
-		starsClient,
-		f.config.PaymentsConfig.TelegramBotUsername,
+		userService,        // UserManager
+		eventBus,           // EventPublisher
+		logger.GetLogger(), // Logger
+		starsClient,        // StarsClient
+		f.config.PaymentsConfig.TelegramBotUsername, // BotUsername
+		subscriptionService,                         // ⭐ SubscriptionService (может быть nil)
 	)
 
 	// Получаем PaymentRepository

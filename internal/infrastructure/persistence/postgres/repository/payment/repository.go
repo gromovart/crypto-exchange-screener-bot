@@ -3,12 +3,14 @@ package payment
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
+	"crypto-exchange-screener-bot/pkg/logger"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -330,8 +332,12 @@ func (r *paymentRepositoryImpl) GetSuccessfulPayments(ctx context.Context, days 
 	SELECT
 		id,
 		user_id,
-		metadata->>'plan_code' as plan_code,
-		amount,
+		COALESCE(
+			metadata->'invoice_data'->>'plan_id',
+			metadata->'stars_result'->>'plan_id',
+			metadata->>'plan_code'
+		) as plan_code,
+		stars_amount,
 		created_at
 	FROM payments
 	WHERE status = 'completed'
@@ -348,21 +354,38 @@ func (r *paymentRepositoryImpl) GetSuccessfulPayments(ctx context.Context, days 
 	var result []*subscription.PaymentData
 	for rows.Next() {
 		var data subscription.PaymentData
-		var planCode string
+		var planCode sql.NullString
+		var starsAmount int
+		var userID int64
 
 		if err := rows.Scan(
 			&data.ID,
-			&data.UserID,
+			&userID,
 			&planCode,
-			&data.Amount,
+			&starsAmount,
 			&data.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("ошибка сканирования платежа: %w", err)
 		}
 
-		data.PlanCode = planCode
-		result = append(result, &data)
+		// Конвертируем int64 в int для UserID
+		data.UserID = int(userID)
+		data.Amount = starsAmount
+
+		// Если planCode валидный, используем его, иначе пропускаем платеж
+		if planCode.Valid {
+			data.PlanCode = planCode.String
+			result = append(result, &data)
+		} else {
+			// Логируем проблему, но не прерываем выполнение
+			logger.Warn("⚠️ Платеж ID=%d не содержит plan_code в metadata (проверены invoice_data, stars_result, верхний уровень)", data.ID)
+		}
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("ошибка при обработке строк платежей: %w", err)
+	}
+
+	logger.Info("📊 [PAYMENT REPO] Получено %d успешных платежей за %d дней", len(result), days)
 	return result, nil
 }

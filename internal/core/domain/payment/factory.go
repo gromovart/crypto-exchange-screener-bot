@@ -11,13 +11,14 @@ import (
 
 // StarsServiceFactory фабрика для создания StarsService
 type StarsServiceFactory struct {
-	config         *Config
-	userManager    UserManager
-	eventPublisher EventPublisher
-	logger         *logger.Logger
-	starsClient    *http_client.StarsClient
-	botUsername    string
-	initialized    bool
+	config              *Config
+	userManager         UserManager
+	eventPublisher      EventPublisher
+	subscriptionService SubscriptionService
+	logger              *logger.Logger
+	starsClient         *http_client.StarsClient
+	botUsername         string
+	initialized         bool
 }
 
 // Config конфигурация для StarsService
@@ -29,10 +30,11 @@ type Config struct {
 
 // Dependencies зависимости для фабрики StarsService
 type Dependencies struct {
-	Config         *Config
-	UserManager    UserManager
-	EventPublisher EventPublisher
-	Logger         *logger.Logger
+	Config              *Config
+	UserManager         UserManager
+	EventPublisher      EventPublisher
+	SubscriptionService SubscriptionService // ⭐ НОВОЕ ПОЛЕ
+	Logger              *logger.Logger
 }
 
 // NewStarsServiceFactory создает новую фабрику StarsService
@@ -49,6 +51,10 @@ func NewStarsServiceFactory(deps Dependencies) (*StarsServiceFactory, error) {
 		return nil, fmt.Errorf("EventPublisher обязателен")
 	}
 
+	if deps.SubscriptionService == nil {
+		return nil, fmt.Errorf("SubscriptionService обязателен")
+	}
+
 	// Проверяем обязательные поля конфигурации
 	if deps.Config.TelegramBotToken == "" {
 		return nil, fmt.Errorf("TelegramBotToken обязателен")
@@ -63,11 +69,12 @@ func NewStarsServiceFactory(deps Dependencies) (*StarsServiceFactory, error) {
 	}
 
 	factory := &StarsServiceFactory{
-		config:         deps.Config,
-		userManager:    deps.UserManager,
-		eventPublisher: deps.EventPublisher,
-		logger:         deps.Logger,
-		botUsername:    deps.Config.TelegramBotUsername,
+		config:              deps.Config,
+		userManager:         deps.UserManager,
+		eventPublisher:      deps.EventPublisher,
+		subscriptionService: deps.SubscriptionService,
+		logger:              deps.Logger,
+		botUsername:         deps.Config.TelegramBotUsername,
 	}
 
 	// Создаем StarsClient
@@ -97,6 +104,7 @@ func (f *StarsServiceFactory) CreateStarsService() (*StarsService, error) {
 		f.logger,
 		f.starsClient,
 		f.botUsername,
+		f.subscriptionService,
 	)
 
 	f.logger.Info("✅ StarsService создан")

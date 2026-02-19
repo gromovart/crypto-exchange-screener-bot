@@ -120,6 +120,7 @@ func (s *StarsService) recordPaymentTransaction(
 func (s *StarsService) publishPaymentSuccessEvent(
 	paymentID, userID, planID, invoiceID string,
 	starsAmount int,
+	subscriptionID int,
 ) error {
 	eventData := CreatePaymentEventData(
 		paymentID,
@@ -128,6 +129,7 @@ func (s *StarsService) publishPaymentSuccessEvent(
 		starsAmount,
 		"stars",
 		invoiceID,
+		subscriptionID,
 	)
 
 	event := types.Event{

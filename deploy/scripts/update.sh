@@ -174,7 +174,8 @@ if systemctl is-active redis-server >/dev/null 2>&1; then
 
     # Проверка подключения к Redis
     if command -v redis-cli >/dev/null 2>&1; then
-        if redis-cli ping | grep -q "PONG"; then
+        REDIS_PASSWORD=$(grep "^REDIS_PASSWORD=" "${INSTALL_DIR}/.env" | cut -d= -f2)
+        if redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q "PONG"; then
             echo "  ✅ Redis: доступен для подключения"
         else
             echo "  ⚠️  Redis: не отвечает на ping"
@@ -938,7 +939,9 @@ EOF
 verify_update() {
     log_step "Проверка обновления..."
 
-    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
+    # ⭐ Добавляем таймаут 30 секунд на всю SSH сессию
+    ssh -o ConnectTimeout=10 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 \
+        -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << EOF
 #!/bin/bash
 set -e
 
@@ -951,7 +954,7 @@ echo "===================="
 echo "Время проверки: \$(date)"
 echo ""
 
-# 1. Проверка версии приложения
+# 1. Версия приложения
 echo "1. Версия приложения:"
 if [ -f "\${INSTALL_DIR}/bin/\${APP_NAME}" ]; then
     "\${INSTALL_DIR}/bin/\${APP_NAME}" --version 2>&1 | head -1 || echo "  ❌ Не удалось определить версию"
@@ -960,9 +963,9 @@ else
 fi
 echo ""
 
-# 2. Проверка сервиса
+# 2. Статус сервиса
 echo "2. Статус сервиса:"
-SERVICE_STATUS=\$(systemctl is-active \${SERVICE_NAME}.service)
+SERVICE_STATUS=\$(systemctl is-active \${SERVICE_NAME}.service 2>/dev/null || echo "unknown")
 case "\${SERVICE_STATUS}" in
     active) echo "  ✅ Активен" ;;
     inactive) echo "  ⏸️  Не активен" ;;
@@ -971,7 +974,7 @@ case "\${SERVICE_STATUS}" in
 esac
 echo ""
 
-# 3. Проверка webhook статуса
+# 3. Webhook статус
 echo "3. Webhook статус:"
 if [ -f "\${INSTALL_DIR}/.env" ]; then
     TELEGRAM_MODE=\$(grep "^TELEGRAM_MODE=" "\${INSTALL_DIR}/.env" | cut -d= -f2 2>/dev/null || echo "webhook")
@@ -996,21 +999,29 @@ echo ""
 # 4. Проверка логов на ошибки
 echo "4. Ошибки в логах (последние 5 минут):"
 LOG_FILE="/opt/crypto-screener-bot/logs/app.log"
-if [ -f "${LOG_FILE}" ]; then
-    ERROR_COUNT=$(tail -n 1000 ${LOG_FILE} 2>/dev/null | \
-        grep -i -c "error\|fail\|panic\|fatal")
-    if [ "${ERROR_COUNT}" -gt 0 ]; then
-        echo "  ⚠️  Найдено ошибок: ${ERROR_COUNT}"
+if [ -f "\${LOG_FILE}" ]; then
+    ERROR_COUNT=\$(tail -n 1000 "\${LOG_FILE}" 2>/dev/null | grep -i -c "error\|fail\|panic\|fatal" || echo "0")
+
+    if [ "\${ERROR_COUNT}" -gt 0 ]; then
+        echo "  ⚠️  Найдено ошибок: \${ERROR_COUNT}"
         echo "  Последние ошибки:"
-        tail -n 100 ${LOG_FILE} 2>/dev/null | \
-            grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
-            echo "    📛 $(echo "$line" | cut -d' ' -f6-)"
+        tail -n 100 "\${LOG_FILE}" 2>/dev/null | grep -i "error\|fail\|panic\|fatal" | tail -3 | while read line; do
+            echo "    📛 \$(echo "\$line" | cut -d' ' -f6-)"
         done
     else
         echo "  ✅ Ошибок не обнаружено"
     fi
 else
-    echo "  ⚠️  Файл лога не найден: ${LOG_FILE}"
+    echo "  ⚠️  Файл лога не найден: \${LOG_FILE}"
+fi
+
+# Проверяем также error.log
+ERROR_LOG="/opt/crypto-screener-bot/logs/error.log"
+if [ -f "\${ERROR_LOG}" ]; then
+    ERROR_COUNT=\$(tail -n 500 "\${ERROR_LOG}" 2>/dev/null | grep -i -c "error\|fail\|panic\|fatal" || echo "0")
+    if [ "\${ERROR_COUNT}" -gt 0 ]; then
+        echo "  ⚠️  Найдено ошибок в error.log: \${ERROR_COUNT}"
+    fi
 fi
 echo ""
 
@@ -1034,16 +1045,26 @@ else
 fi
 echo ""
 
-# 7. Проверка Redis
+# 7. Статус Redis
 echo "7. Статус Redis:"
 if systemctl is-active redis-server >/dev/null 2>&1; then
     echo "  ✅ Redis: активен"
 
     if command -v redis-cli >/dev/null 2>&1; then
-        if redis-cli ping | grep -q "PONG"; then
-            echo "  ✅ Redis: доступен для подключения"
+        # ⭐ Добавляем пароль из конфига
+        REDIS_PASSWORD=$(grep "^REDIS_PASSWORD=" "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2)
+        if [ -n "${REDIS_PASSWORD}" ]; then
+            if redis-cli -a "${REDIS_PASSWORD}" ping 2>/dev/null | grep -q "PONG"; then
+                echo "  ✅ Redis: доступен для подключения"
+            else
+                echo "  ⚠️  Redis: не отвечает на ping"
+            fi
         else
-            echo "  ⚠️  Redis: не отвечает на ping"
+            if redis-cli ping 2>/dev/null | grep -q "PONG"; then
+                echo "  ✅ Redis: доступен для подключения"
+            else
+                echo "  ⚠️  Redis: не отвечает на ping"
+            fi
         fi
     fi
 else
@@ -1055,7 +1076,6 @@ echo ""
 echo "8. Проверка конфигурации:"
 if [ -f "\${INSTALL_DIR}/.env" ]; then
     echo "  ✅ Конфиг найден"
-    # Проверка основных настроек
     echo "  Основные настройки:"
     grep -E "^(APP_ENV|LOG_LEVEL|EXCHANGE|TELEGRAM_ENABLED|TELEGRAM_MODE|DB_ENABLE_AUTO_MIGRATE|REDIS_ENABLED)=" \
         "\${INSTALL_DIR}/.env" 2>/dev/null | head -7 | while read line; do
@@ -1085,6 +1105,11 @@ else
     echo "Проверьте сообщения выше"
 fi
 EOF
+
+    if [ $? -ne 0 ]; then
+        log_error "❌ Ошибка при проверке обновления (возможно таймаут)"
+        return 1
+    fi
 
     log_info "Проверка завершена"
 }

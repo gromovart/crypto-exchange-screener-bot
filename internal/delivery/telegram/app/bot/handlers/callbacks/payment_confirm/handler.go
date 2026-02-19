@@ -32,8 +32,7 @@ func NewHandler(deps Dependencies) handlers.Handler {
 	// Создаем базовый URL с токеном бота
 	baseURL := fmt.Sprintf("https://api.telegram.org/bot%s/", botToken)
 
-	// ВАЖНО: Создаем StarsClient с пустым providerToken,
-	// но сохраняем его в структуре Dependencies как требуется
+	// ВАЖНО: Создаем StarsClient с пустым providerToken
 	starsClient := telegram_http.NewStarsClient(baseURL, "")
 
 	return &paymentConfirmHandler{
@@ -43,13 +42,13 @@ func NewHandler(deps Dependencies) handlers.Handler {
 			Type:    handlers.TypeCallback,
 		},
 		config:      deps.Config,
-		starsClient: starsClient, // Используем созданный клиент
+		starsClient: starsClient,
 	}
 }
 
 // Execute выполняет обработку подтверждения платежа
 func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	// Извлекаем ID плана из callback_data (формат: payment_confirm:basic)
+	// Извлекаем ID плана из callback_data
 	planID := h.extractPlanID(params.Data)
 	if planID == "" {
 		return handlers.HandlerResult{}, fmt.Errorf("неверный формат callback: %s", params.Data)
@@ -96,7 +95,6 @@ func (h *paymentConfirmHandler) Execute(params handlers.HandlerParams) (handlers
 // createTelegramInvoice создает инвойс через Telegram API
 func (h *paymentConfirmHandler) createTelegramInvoice(userID int, plan *SubscriptionPlan) (string, error) {
 	// Создаем уникальный payload для инвойса
-	// Формат: sub_{plan_id}_{user_id}_{timestamp}
 	timestamp := time.Now().Unix()
 	payload := fmt.Sprintf("sub_%s_%d_%d", plan.ID, userID, timestamp)
 
@@ -107,8 +105,6 @@ func (h *paymentConfirmHandler) createTelegramInvoice(userID int, plan *Subscrip
 	logger.Info("💰 Создание инвойса Stars: план=%s, пользователь=%d, сумма=%d Stars, payload=%s",
 		plan.ID, userID, starsAmount, payload)
 
-	// Используем StarsClient для создания инвойса
-	// provider_token будет пустым внутри клиента (мы передали "" при создании)
 	invoiceLink, err := h.starsClient.CreateSubscriptionInvoice(title, description, payload, starsAmount)
 	if err != nil {
 		logger.Error("❌ Ошибка создания инвойса: %v", err)
@@ -131,20 +127,25 @@ func (h *paymentConfirmHandler) extractPlanID(callbackData string) string {
 // getPlanByID возвращает план по ID
 func (h *paymentConfirmHandler) getPlanByID(planID string) *SubscriptionPlan {
 	plans := map[string]*SubscriptionPlan{
+		"test": { // ⭐ ТЕСТОВЫЙ ПЛАН
+			ID:         "test",
+			Name:       "🧪 Тестовый доступ (2⭐)",
+			PriceCents: 6, // 2 Stars = 6 центов
+		},
 		"basic": {
 			ID:         "basic",
 			Name:       "📱 Доступ на 1 месяц",
-			PriceCents: 1500, // ⭐ $15.00 = 1500 центов
+			PriceCents: 1500,
 		},
 		"pro": {
 			ID:         "pro",
 			Name:       "🚀 Доступ на 3 месяца",
-			PriceCents: 3000, // ⭐ $30.00 = 3000 центов
+			PriceCents: 3000,
 		},
 		"enterprise": {
 			ID:         "enterprise",
 			Name:       "🏢 Доступ на 12 месяцев",
-			PriceCents: 7500, // ⭐ $75.00 = 7500 центов
+			PriceCents: 7500,
 		},
 	}
 	return plans[planID]
@@ -159,6 +160,14 @@ func (h *paymentConfirmHandler) createPaymentMessage(plan *SubscriptionPlan, inv
 	message += fmt.Sprintf("План: *%s*\n", plan.Name)
 	message += fmt.Sprintf("Сумма: *%d Stars* ($%.2f)\n\n", starsAmount, usdPrice)
 
+	// ⭐ Для тестового плана добавляем предупреждение
+	if plan.ID == "test" {
+		message += "⚠️ *Тестовый режим*\n"
+		message += "• Подписка действует 5 минут\n"
+		message += "• Средства не возвращаются\n"
+		message += "• Используйте для проверки работы платежей\n\n"
+	}
+
 	message += "📋 *Как оплатить:*\n"
 	message += "1. Убедитесь, что у вас есть Stars в @wallet\n"
 	message += "2. Нажмите кнопку '💳 Оплатить сейчас'\n"
@@ -166,7 +175,11 @@ func (h *paymentConfirmHandler) createPaymentMessage(plan *SubscriptionPlan, inv
 	message += "4. После успешной оплаты вы получите уведомление\n\n"
 
 	message += "🔄 *После оплаты:*\n"
-	message += "• Подписка активируется автоматически\n"
+	if plan.ID == "test" {
+		message += "• Тестовый доступ активируется на 5 минут\n"
+	} else {
+		message += "• Подписка активируется автоматически\n"
+	}
 	message += "• Вы получите подтверждение в этот чат\n"
 	message += "• Все функции плана будут доступны сразу\n\n"
 
@@ -195,9 +208,11 @@ func (h *paymentConfirmHandler) createPaymentKeyboard(planID, invoiceLink string
 	}
 }
 
-// calculateStars рассчитывает количество Stars с учетом комиссии Telegram
-// Согласно документации, комиссия уже включена в цену Stars для пользователя
+// calculateStars рассчитывает количество Stars
 func (h *paymentConfirmHandler) calculateStars(usdCents int) int {
+	if usdCents == 6 { // ⭐ тестовый план
+		return 2
+	}
 	return usdCents / 3 // 1500/3 = 500, 3000/3 = 1000, 7500/3 = 2500
 }
 

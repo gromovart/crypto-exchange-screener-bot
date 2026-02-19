@@ -47,7 +47,7 @@ func (h *paysupportCommandHandler) Execute(params handlers.HandlerParams) (handl
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "💬 Написать в Telegram", "url": "https://t.me/gromovart"},
+				{"text": "💬 Написать в Telegram", "url": "https://t.me/artemgrrr"},
 			},
 			{
 				{"text": "🏠 Главное меню", "callback_data": constants.CallbackMenuMain},

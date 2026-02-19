@@ -8,11 +8,12 @@ import (
 
 // StarsService сервис обработки платежей через Telegram Stars
 type StarsService struct {
-	logger         *logger.Logger
-	userManager    UserManager
-	eventPublisher EventPublisher
-	starsClient    *http_client.StarsClient
-	botUsername    string
+	logger              *logger.Logger
+	userManager         UserManager
+	eventPublisher      EventPublisher
+	starsClient         *http_client.StarsClient
+	botUsername         string
+	subscriptionService SubscriptionService
 }
 
 // NewStarsService создает новый сервис оплаты Stars
@@ -22,24 +23,26 @@ func NewStarsService(
 	logger *logger.Logger,
 	starsClient *http_client.StarsClient,
 	botUsername string,
+	subscriptionService SubscriptionService,
 ) *StarsService {
 	return &StarsService{
-		logger:         logger,
-		userManager:    userManager,
-		eventPublisher: eventPublisher,
-		starsClient:    starsClient,
-		botUsername:    botUsername,
+		logger:              logger,
+		userManager:         userManager,
+		eventPublisher:      eventPublisher,
+		starsClient:         starsClient,
+		botUsername:         botUsername,
+		subscriptionService: subscriptionService,
 	}
 }
 
 // CreateInvoice создает инвойс для оплаты через Stars
 func (s *StarsService) CreateInvoice(request CreateInvoiceRequest) (*StarsInvoice, error) {
-	return s.createInvoice(request)
+	return s.createInvoice(request) // ⭐ метод должен быть определен в stars_processor.go
 }
 
 // ProcessPayment обрабатывает успешный платеж Stars
 func (s *StarsService) ProcessPayment(request ProcessPaymentRequest) (*StarsPaymentResult, error) {
-	return s.processPayment(request)
+	return s.processPayment(request) // ⭐ метод должен быть определен в stars_processor.go
 }
 
 // ValidateWebhook проверяет валидность webhook от Telegram

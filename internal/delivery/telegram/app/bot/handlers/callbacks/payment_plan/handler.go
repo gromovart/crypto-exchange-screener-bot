@@ -67,6 +67,17 @@ func (h *paymentPlanHandler) extractPlanID(callbackData string) string {
 // getPlanByID возвращает план по ID
 func (h *paymentPlanHandler) getPlanByID(planID string) *SubscriptionPlan {
 	plans := map[string]*SubscriptionPlan{
+		"test": { // ⭐ ТЕСТОВЫЙ ПЛАН
+			ID:          "test",
+			Name:        "🧪 Тестовый доступ (2⭐)",
+			Description: "Для проверки работы платежей",
+			PriceCents:  6, // 2 Stars = 6 центов
+			Features: []string{
+				"✅ Проверка оплаты через Stars",
+				"✅ Доступ на 5 минут",
+				"✅ Не влияет на основную подписку",
+			},
+		},
 		"basic": {
 			ID:          "basic",
 			Name:        "📱 Доступ на 1 месяц",
@@ -150,7 +161,10 @@ func (h *paymentPlanHandler) createConfirmationKeyboard(planID string) interface
 
 // calculateStars рассчитывает количество Stars с учетом комиссии
 func (h *paymentPlanHandler) calculateStars(usdCents int) int {
-	return usdCents / 3 // 1500/3 = 500, 3000/3 = 1000, 7500/3 = 2500
+	if usdCents == 6 { // тестовый план
+		return 2
+	}
+	return usdCents / 3
 }
 
 // Вспомогательный тип

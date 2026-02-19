@@ -125,6 +125,13 @@ func (h *buyCommandHandler) createUnauthorizedMessage() (handlers.HandlerResult,
 func (h *buyCommandHandler) getAvailablePlans() []*SubscriptionPlan {
 	return []*SubscriptionPlan{
 		{
+			ID:          "test",
+			Name:        "🧪 Тестовый доступ (2⭐)",
+			Description: "• Проверка платежей\n• Действует 5 минут\n• Не влияет на основную подписку",
+			PriceCents:  6, // 2 Stars = 6 центов
+			Features:    []string{"test_payment", "5_minutes"},
+		},
+		{
 			ID:          "basic",
 			Name:        "📱 Доступ на 1 месяц",
 			Description: "• Получение сигналов в течении 1 месяца\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
