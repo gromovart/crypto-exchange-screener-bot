@@ -6,26 +6,31 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/plan"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 // SubscriptionServiceFactory фабрика для создания SubscriptionService
 type SubscriptionServiceFactory struct {
-	planRepo  plan.PlanRepository
-	cache     *redis.Cache
-	analytics AnalyticsService
-	config    Config
-	database  *sqlx.DB
-	redis     interface{} // Для совместимости
+	planRepo          plan.PlanRepository
+	cache             *redis.Cache
+	analytics         AnalyticsService
+	paymentRepo       PaymentRepository // ⭐ Добавляем репозиторий платежей
+	config            Config
+	database          *sqlx.DB
+	redis             interface{}   // Для совместимости
+	validatorInterval time.Duration // Интервал для валидатора
 }
 
 // SubscriptionServiceDependencies зависимости для фабрики SubscriptionService
 type Dependencies struct {
-	PlanRepo  plan.PlanRepository
-	Cache     *redis.Cache
-	Analytics AnalyticsService
-	Config    Config
+	PlanRepo          plan.PlanRepository
+	Cache             *redis.Cache
+	Analytics         AnalyticsService
+	PaymentRepo       PaymentRepository // ⭐ Добавляем
+	Config            Config
+	ValidatorInterval time.Duration // Интервал для валидатора (по умолчанию 10 мин)
 }
 
 // NewSubscriptionServiceFactory создает фабрику SubscriptionService
@@ -39,11 +44,19 @@ func NewSubscriptionServiceFactory(deps Dependencies) (*SubscriptionServiceFacto
 		return nil, fmt.Errorf("Cache не может быть nil")
 	}
 
+	// Устанавливаем интервал по умолчанию
+	validatorInterval := deps.ValidatorInterval
+	if validatorInterval == 0 {
+		validatorInterval = 10 * time.Minute
+	}
+
 	factory := &SubscriptionServiceFactory{
-		planRepo:  deps.PlanRepo,
-		cache:     deps.Cache,
-		analytics: deps.Analytics,
-		config:    deps.Config,
+		planRepo:          deps.PlanRepo,
+		cache:             deps.Cache,
+		analytics:         deps.Analytics,
+		paymentRepo:       deps.PaymentRepo, // ⭐ Сохраняем
+		config:            deps.Config,
+		validatorInterval: validatorInterval,
 	}
 
 	logger.Info("✅ Фабрика SubscriptionService создана")
@@ -68,6 +81,14 @@ func (f *SubscriptionServiceFactory) CreateSubscriptionService(db *sqlx.DB) (*Se
 	)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать SubscriptionService: %w", err)
+	}
+
+	// ⭐ Если есть репозиторий платежей, запускаем валидатор
+	if f.paymentRepo != nil {
+		logger.Info("🔄 Запуск валидатора подписок с интервалом %v", f.validatorInterval)
+		service.StartSubscriptionValidator(f.validatorInterval, f.paymentRepo)
+	} else {
+		logger.Warn("⚠️ PaymentRepository не предоставлен, валидатор подписок не запущен")
 	}
 
 	logger.Info("✅ SubscriptionService успешно создан через фабрику")
@@ -104,6 +125,18 @@ func (f *SubscriptionServiceFactory) SetAnalytics(analytics AnalyticsService) {
 	logger.Debug("✅ Установлен AnalyticsService для фабрики SubscriptionService")
 }
 
+// SetPaymentRepository устанавливает репозиторий платежей
+func (f *SubscriptionServiceFactory) SetPaymentRepository(paymentRepo PaymentRepository) {
+	f.paymentRepo = paymentRepo
+	logger.Debug("✅ Установлен PaymentRepository для фабрики SubscriptionService")
+}
+
+// SetValidatorInterval устанавливает интервал валидатора
+func (f *SubscriptionServiceFactory) SetValidatorInterval(interval time.Duration) {
+	f.validatorInterval = interval
+	logger.Debug("✅ Установлен интервал валидатора: %v", interval)
+}
+
 // UpdateConfig обновляет конфигурацию
 func (f *SubscriptionServiceFactory) UpdateConfig(config Config) {
 	f.config = config
@@ -125,14 +158,17 @@ func (f *SubscriptionServiceFactory) Validate() bool {
 
 // GetDependenciesInfo возвращает информацию о зависимостях
 func (f *SubscriptionServiceFactory) GetDependenciesInfo() map[string]interface{} {
-	return map[string]interface{}{
-		"plan_repo_set": f.planRepo != nil,
-		"cache_set":     f.cache != nil,
-		"analytics_set": f.analytics != nil,
-		"database_set":  f.database != nil,
-		"redis_set":     f.redis != nil,
-		"config":        f.config,
+	info := map[string]interface{}{
+		"plan_repo_set":      f.planRepo != nil,
+		"cache_set":          f.cache != nil,
+		"analytics_set":      f.analytics != nil,
+		"payment_repo_set":   f.paymentRepo != nil,
+		"database_set":       f.database != nil,
+		"redis_set":          f.redis != nil,
+		"validator_interval": f.validatorInterval.String(),
+		"config":             f.config,
 	}
+	return info
 }
 
 // GetPlanRepo возвращает репозиторий планов
@@ -148,4 +184,9 @@ func (f *SubscriptionServiceFactory) GetCache() *redis.Cache {
 // GetConfig возвращает конфигурацию
 func (f *SubscriptionServiceFactory) GetConfig() Config {
 	return f.config
+}
+
+// GetPaymentRepo возвращает репозиторий платежей
+func (f *SubscriptionServiceFactory) GetPaymentRepo() PaymentRepository {
+	return f.paymentRepo
 }

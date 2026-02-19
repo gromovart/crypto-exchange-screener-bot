@@ -27,29 +27,25 @@ type CoreServiceFactory struct {
 type Config struct {
 	UserConfig         users.Config
 	SubscriptionConfig subscription.Config
-	PaymentsConfig     payment.Config // Добавляем по аналогии с другими сервисами
+	PaymentsConfig     payment.Config
 }
 
 // CoreServiceDependencies зависимости для фабрики ядра
 type CoreServiceDependencies struct {
-	// Основная зависимость - фабрика инфраструктуры
 	InfrastructureFactory *infrastructure_factory.InfrastructureFactory
-	// Остальные зависимости остаются без изменений
-	UserNotifier users.NotificationService
-	Analytics    subscription.AnalyticsService
-	Config       *Config
+	UserNotifier          users.NotificationService
+	Analytics             subscription.AnalyticsService
+	Config                *Config
 }
 
 // NewCoreServiceFactory создает главную фабрику сервисов ядра
 func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, error) {
 	logger.Info("🏗️  Создание главной фабрики сервисов ядра...")
 
-	// Проверяем обязательные зависимости
 	if deps.InfrastructureFactory == nil {
 		return nil, fmt.Errorf("InfrastructureFactory не может быть nil")
 	}
 
-	// Проверяем готовность инфраструктурной фабрики
 	if !deps.InfrastructureFactory.IsReady() {
 		return nil, fmt.Errorf("InfrastructureFactory не готова")
 	}
@@ -58,7 +54,7 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 	if deps.Config == nil {
 		deps.Config = &Config{
 			UserConfig: users.Config{
-				UserDefaults: struct { // ⭐ Добавить структуру UserDefaults
+				UserDefaults: struct {
 					MinGrowthThreshold float64
 					MinFallThreshold   float64
 					Language           string
@@ -87,25 +83,26 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		}
 	}
 
-	// Лениво получаем DatabaseService и RedisService через инфраструктурную фабрику
+	// Получаем сервисы из инфраструктурной фабрики
 	databaseService, err := deps.InfrastructureFactory.CreateDatabaseService()
 	if err != nil {
 		logger.Warn("⚠️ DatabaseService недоступен: %v", err)
-		// Не падаем, если БД не доступна - сервисы могут создаваться позже
 	}
 
 	redisService, err := deps.InfrastructureFactory.CreateRedisService()
 	if err != nil {
 		logger.Warn("⚠️ RedisService недоступен: %v", err)
-		// Не падаем, если Redis не доступен - сервисы могут создаваться позже
 	}
 
 	planRepo, err := deps.InfrastructureFactory.GetPlanRepository()
 	if err != nil {
 		logger.Warn("⚠️ Не удалось получить PlanRepository: %v", err)
-	} else {
-		logger.Info("✅ PlanRepository получен через InfrastructureFactory")
-		// Используем planRepo для создания SubscriptionServiceFactory
+	}
+
+	// ⭐ Получаем PaymentRepository из инфраструктурной фабрики
+	paymentRepo, err := deps.InfrastructureFactory.GetPaymentRepository()
+	if err != nil {
+		logger.Warn("⚠️ Не удалось получить PaymentRepository: %v", err)
 	}
 
 	// Создаем фабрику UserService
@@ -115,21 +112,21 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 		RedisService: redisService,
 		Notifier:     deps.UserNotifier,
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику UserService: %w", err)
 	}
 
-	// Создаем фабрику SubscriptionService
-	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(
-		subscription.Dependencies{
-			Config:    deps.Config.SubscriptionConfig,
-			PlanRepo:  planRepo,
-			Cache:     redisService.GetCache(),
-			Analytics: deps.Analytics,
-		},
-	)
+	// Создаем фабрику SubscriptionService с PaymentRepository
+	subscriptionDeps := subscription.Dependencies{
+		Config:            deps.Config.SubscriptionConfig,
+		PlanRepo:          planRepo,
+		Cache:             redisService.GetCache(),
+		Analytics:         deps.Analytics,
+		PaymentRepo:       paymentRepo,     // ⭐ Передаем PaymentRepository
+		ValidatorInterval: 1 * time.Minute, // Интервал для валидатора
+	}
 
+	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(subscriptionDeps)
 	if err != nil {
 		return nil, fmt.Errorf("не удалось создать фабрику SubscriptionService: %w", err)
 	}
@@ -243,14 +240,14 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, er
 		f.config.PaymentsConfig.TelegramBotUsername,
 	)
 
-	// ⭐ Получаем PaymentRepository
+	// Получаем PaymentRepository
 	paymentRepo, err := infraFactory.GetPaymentRepository()
 	if err != nil {
 		logger.Error("❌ PaymentRepository недоступен: %v", err)
 		return nil, fmt.Errorf("PaymentRepository не доступен: %w", err)
 	}
 
-	// ⭐ Получаем InvoiceRepository
+	// Получаем InvoiceRepository
 	invoiceRepo, err := infraFactory.GetInvoiceRepository()
 	if err != nil {
 		logger.Error("❌ InvoiceRepository недоступен: %v", err)
@@ -261,7 +258,7 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, er
 	paymentServiceFactory, err := payment.NewPaymentServiceFactory(payment.PaymentServiceDependencies{
 		StarsService: starsService,
 		PaymentRepo:  paymentRepo,
-		InvoiceRepo:  invoiceRepo, // ⭐ Передаем InvoiceRepository
+		InvoiceRepo:  invoiceRepo,
 		Logger:       logger.GetLogger(),
 	})
 	if err != nil {
@@ -277,7 +274,7 @@ func (f *CoreServiceFactory) CreatePaymentService() (*payment.PaymentService, er
 	return paymentService, nil
 }
 
-// CreateSubscriptionService создает SubscriptionService
+// CreateSubscriptionService создает SubscriptionService (автоматически запускает валидатор)
 func (f *CoreServiceFactory) CreateSubscriptionService() (*subscription.Service, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -305,6 +302,7 @@ func (f *CoreServiceFactory) CreateSubscriptionService() (*subscription.Service,
 	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
 	f.subscriptionFactory.SetRedisService(redisService)
 
+	// Создаем сервис (валидатор запустится автоматически)
 	return f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
 }
 
@@ -335,8 +333,8 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	// Обновляем зависимости фабрик
 	f.userFactory.SetDatabase(databaseService)
 	f.userFactory.SetRedisService(redisService)
-	// f.subscriptionFactory.SetDatabase(databaseService.GetDB())
-	// f.subscriptionFactory.SetRedisService(redisService)
+	f.subscriptionFactory.SetDatabase(databaseService.GetDB())
+	f.subscriptionFactory.SetRedisService(redisService)
 
 	// Создаем UserService
 	userService, err := f.userFactory.CreateUserService()
@@ -346,16 +344,15 @@ func (f *CoreServiceFactory) CreateAllServices() (map[string]interface{}, error)
 	services["UserService"] = userService
 	logger.Info("✅ UserService создан")
 
-	// Создаем SubscriptionService
-	// subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
-	// if err != nil {
-	// 	// Не падаем, если SubscriptionService не создан
-	// 	logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
-	// 	services["SubscriptionService"] = nil
-	// } else {
-	// 	services["SubscriptionService"] = subscriptionService
-	// 	logger.Info("✅ SubscriptionService создан")
-	// }
+	// Создаем SubscriptionService (с валидатором)
+	subscriptionService, err := f.subscriptionFactory.CreateSubscriptionService(databaseService.GetDB())
+	if err != nil {
+		logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
+		services["SubscriptionService"] = nil
+	} else {
+		services["SubscriptionService"] = subscriptionService
+		logger.Info("✅ SubscriptionService создан (валидатор запущен)")
+	}
 
 	logger.Info("✅ Все сервисы ядра созданы")
 	return services, nil
@@ -520,7 +517,6 @@ func (f *CoreServiceFactory) IsReady() bool {
 	}
 
 	// Проверяем что инфраструктурная фабрика хотя бы создана
-	// (полная готовность будет проверяться позже)
 	if !f.infrastructureFactory.IsReady() {
 		logger.Debug("⚠️ InfrastructureFactory не готова")
 		return false
@@ -534,6 +530,16 @@ func (f *CoreServiceFactory) IsReady() bool {
 
 	if !f.userFactory.IsReady() {
 		logger.Debug("⚠️ Фабрика UserService не готова")
+		return false
+	}
+
+	if f.subscriptionFactory == nil {
+		logger.Debug("⚠️ Фабрика SubscriptionService не создана")
+		return false
+	}
+
+	if !f.subscriptionFactory.Validate() { // ⭐ Используем Validate вместо IsReady
+		logger.Debug("⚠️ Фабрика SubscriptionService не готова")
 		return false
 	}
 
@@ -559,7 +565,6 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 
 	// Обновляем зависимости вложенных фабрик если они существуют
 	if f.userFactory != nil {
-		// Получаем сервисы из новой инфраструктурной фабрики
 		databaseService, err := deps.InfrastructureFactory.CreateDatabaseService()
 		if err == nil && databaseService != nil {
 			f.userFactory.SetDatabase(databaseService)
@@ -576,7 +581,6 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 	}
 
 	if f.subscriptionFactory != nil {
-		// Получаем сервисы из новой инфраструктурной фабрики
 		databaseService, err := deps.InfrastructureFactory.CreateDatabaseService()
 		if err == nil && databaseService != nil {
 			f.subscriptionFactory.SetDatabase(databaseService.GetDB())
@@ -589,6 +593,12 @@ func (f *CoreServiceFactory) UpdateDependencies(deps CoreServiceDependencies) er
 
 		if deps.Analytics != nil {
 			f.subscriptionFactory.SetAnalytics(deps.Analytics)
+		}
+
+		// Обновляем PaymentRepository
+		paymentRepo, err := deps.InfrastructureFactory.GetPaymentRepository()
+		if err == nil && paymentRepo != nil {
+			f.subscriptionFactory.SetPaymentRepository(paymentRepo)
 		}
 	}
 

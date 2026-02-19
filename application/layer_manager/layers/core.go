@@ -189,7 +189,6 @@ func (cl *CoreLayer) Start() error {
 	}
 
 	// НОВОЕ: Запускаем AnalysisEngine если CounterAnalyzer включен в конфигурации
-	// Вместо AnalysisEngine.Enabled используем AnalyzerConfigs.CounterAnalyzer.Enabled
 	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		logger.Info("🔧 Проверка условий запуска AnalysisEngine:")
 		logger.Info("   - TelegramEnabled: %v", cl.config.Telegram.Enabled)
@@ -203,6 +202,14 @@ func (cl *CoreLayer) Start() error {
 		} else {
 			logger.Info("ℹ️ CounterAnalyzer отключен в конфигурации, AnalysisEngine не запускается")
 		}
+	}
+
+	// ⭐ ПРИНУДИТЕЛЬНО СОЗДАЕМ SUBSCRIPTIONSERVICE (ЧТОБЫ ЗАПУСТИТЬ ВАЛИДАТОР)
+	logger.Info("🔧 Инициализация SubscriptionService для запуска валидатора...")
+	if _, err := cl.GetSubscriptionService(); err != nil {
+		logger.Warn("⚠️ Не удалось создать SubscriptionService: %v", err)
+	} else {
+		logger.Info("✅ SubscriptionService создан, валидатор запущен")
 	}
 
 	// Фабрика ядра не требует отдельного запуска,

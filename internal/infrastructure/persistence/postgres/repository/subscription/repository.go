@@ -24,6 +24,7 @@ type SubscriptionRepository interface {
 	GetExpiringSubscriptions(ctx context.Context, daysBefore int) ([]*models.UserSubscription, error)
 	GetExpiredSubscriptions(ctx context.Context) ([]*models.UserSubscription, error)
 	GetByPaymentID(ctx context.Context, paymentID int64) (*models.UserSubscription, error)
+	GetAllByUserID(ctx context.Context, userID int) ([]*models.UserSubscription, error)
 }
 
 // subscriptionRepositoryImpl реализация SubscriptionRepository
@@ -503,4 +504,59 @@ func (r *subscriptionRepositoryImpl) GetByPaymentID(ctx context.Context, payment
 	}
 
 	return &subscription, nil
+}
+
+// GetAllByUserID получает ВСЕ подписки пользователя (любого статуса)
+func (r *subscriptionRepositoryImpl) GetAllByUserID(ctx context.Context, userID int) ([]*models.UserSubscription, error) {
+	query := `
+    SELECT
+        us.*,
+        sp.name as plan_name,
+        sp.code as plan_code
+    FROM user_subscriptions us
+    LEFT JOIN subscription_plans sp ON us.plan_id = sp.id
+    WHERE us.user_id = $1
+    ORDER BY us.created_at DESC
+    `
+
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения подписок пользователя %d: %w", userID, err)
+	}
+	defer rows.Close()
+
+	var subscriptions []*models.UserSubscription
+	for rows.Next() {
+		var sub models.UserSubscription
+		var metadataJSON []byte
+		var planName, planCode sql.NullString
+
+		if err := rows.Scan(
+			&sub.ID, &sub.UserID, &sub.PlanID, &sub.PaymentID,
+			&sub.StripeSubscriptionID, &sub.Status,
+			&sub.CurrentPeriodStart, &sub.CurrentPeriodEnd,
+			&sub.CancelAtPeriodEnd, &metadataJSON,
+			&sub.CreatedAt, &sub.UpdatedAt,
+			&planName, &planCode,
+		); err != nil {
+			return nil, fmt.Errorf("ошибка сканирования подписки: %w", err)
+		}
+
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &sub.Metadata); err != nil {
+				return nil, fmt.Errorf("ошибка десериализации metadata: %w", err)
+			}
+		}
+
+		if planName.Valid {
+			sub.PlanName = planName.String
+		}
+		if planCode.Valid {
+			sub.PlanCode = planCode.String
+		}
+
+		subscriptions = append(subscriptions, &sub)
+	}
+
+	return subscriptions, nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 
 	"github.com/jmoiron/sqlx"
@@ -22,6 +23,7 @@ type PaymentRepository interface {
 	Update(ctx context.Context, payment *models.Payment) error
 	Delete(ctx context.Context, id int64) error
 	GetSummary(ctx context.Context, userID int64) (*models.PaymentSummary, error)
+	GetSuccessfulPayments(ctx context.Context, days int) ([]*subscription.PaymentData, error)
 }
 
 // paymentRepositoryImpl реализация PaymentRepository
@@ -320,4 +322,47 @@ func (r *paymentRepositoryImpl) GetByInvoiceID(ctx context.Context, invoiceID in
 	}
 
 	return &payment, nil
+}
+
+// GetSuccessfulPayments получает успешные платежи за последние N дней
+func (r *paymentRepositoryImpl) GetSuccessfulPayments(ctx context.Context, days int) ([]*subscription.PaymentData, error) {
+	query := `
+	SELECT
+		id,
+		user_id,
+		metadata->>'plan_code' as plan_code,
+		amount,
+		created_at
+	FROM payments
+	WHERE status = 'completed'
+	AND created_at >= NOW() - INTERVAL '1 day' * $1
+	ORDER BY created_at DESC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, days)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения успешных платежей за %d дней: %w", days, err)
+	}
+	defer rows.Close()
+
+	var result []*subscription.PaymentData
+	for rows.Next() {
+		var data subscription.PaymentData
+		var planCode string
+
+		if err := rows.Scan(
+			&data.ID,
+			&data.UserID,
+			&planCode,
+			&data.Amount,
+			&data.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("ошибка сканирования платежа: %w", err)
+		}
+
+		data.PlanCode = planCode
+		result = append(result, &data)
+	}
+
+	return result, nil
 }

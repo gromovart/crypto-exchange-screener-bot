@@ -142,15 +142,46 @@ func (s *Service) GetSubscriptionPeriod(planCode string) (time.Duration, error) 
 
 // CreateSubscription создает подписку для пользователя
 func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error) {
-	// Проверяем существующую подписку
-	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
+	// ⭐ Получаем ВСЕ подписки пользователя (не только активные)
+	allSubscriptions, err := s.subRepo.GetAllByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, context.Canceled) {
-		return nil, fmt.Errorf("ошибка проверки существующей подписки: %w", err)
+		return nil, fmt.Errorf("ошибка получения подписок пользователя: %w", err)
 	}
 
-	// Если уже есть активная подписка
-	if existing != nil && existing.IsActive() {
-		return nil, errors.New("у пользователя уже есть активная подписка")
+	// ⭐ Проверяем, была ли уже бесплатная пробная подписка
+	hadFreeTrial := false
+	var activeSubscription *models.UserSubscription
+
+	for _, sub := range allSubscriptions {
+		// Проверяем, была ли уже free пробная подписка
+		if sub.PlanCode == models.PlanFree {
+			if trial, ok := sub.Metadata["trial"].(bool); ok && trial {
+				hadFreeTrial = true
+			}
+		}
+
+		// Проверяем, есть ли активная подписка
+		if sub.IsActive() && (activeSubscription == nil || sub.CreatedAt.After(activeSubscription.CreatedAt)) {
+			activeSubscription = sub
+		}
+	}
+
+	// ⭐ Если это пробная free подписка, но пользователь уже имел trial - запрещаем
+	if planCode == models.PlanFree && isTrial && hadFreeTrial {
+		return nil, fmt.Errorf("бесплатный пробный период уже был использован")
+	}
+
+	// ⭐ Если есть активная подписка, проверяем возможность апгрейда
+	if activeSubscription != nil {
+		// Если пытаются создать новую подписку (не апгрейд)
+		if activeSubscription.PlanCode != planCode {
+			// Это апгрейд - используем UpgradeSubscription вместо Create
+			return nil, fmt.Errorf("у пользователя уже есть активная подписка %s. Используйте UpgradeSubscription для смены плана",
+				activeSubscription.PlanCode)
+		}
+
+		// Если тот же план - запрещаем дублирование
+		return nil, fmt.Errorf("у пользователя уже есть активная подписка на план %s", planCode)
 	}
 
 	// Получаем план
@@ -186,6 +217,12 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 		},
 	}
 
+	// Для free плана добавляем дополнительную метку
+	if planCode == models.PlanFree {
+		subscription.Metadata["type"] = "trial"
+		subscription.Metadata["expires_after_hours"] = 24
+	}
+
 	// Сохраняем в БД
 	if err := s.subRepo.Create(ctx, subscription); err != nil {
 		return nil, fmt.Errorf("ошибка создания подписки: %w", err)
@@ -208,8 +245,13 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 	// Кэшируем
 	s.cacheSubscription(subscription)
 
-	logger.Info("✅ Создана подписка: пользователь %d, план %s, период %d дней",
+	logMsg := fmt.Sprintf("✅ Создана подписка: пользователь %d, план %s, период %d дней",
 		userID, planCode, int(period.Hours()/24))
+
+	if isTrial {
+		logMsg += " (пробный период)"
+	}
+	logger.Info(logMsg)
 
 	return subscription, nil
 }
@@ -413,59 +455,24 @@ func (s *Service) CheckUserLimit(ctx context.Context, userID int, limitType stri
 
 // ProcessExpiredSubscriptions обрабатывает истекшие подписки
 func (s *Service) ProcessExpiredSubscriptions(ctx context.Context) error {
-	// Получаем истекшие подписки
-	logger.Info("🔍 [PROCESS] Начинаем обработку истекших подписок")
-
-	// Получаем истекшие подписки
 	expiredSubs, err := s.subRepo.GetExpiredSubscriptions(ctx)
 	if err != nil {
-		return fmt.Errorf("ошибка получения истекших подписок: %w", err)
+		return err
 	}
 
-	logger.Info("📊 [PROCESS] Найдено истекших подписок: %d", len(expiredSubs))
 	for _, sub := range expiredSubs {
-		// Для free плана - просто удаляем
-		if sub.PlanCode == models.PlanFree {
-			if err := s.subRepo.UpdateStatus(ctx, sub.ID, models.StatusExpired); err != nil {
-				logger.Error("Ошибка обновления статуса free подписки %d: %v", sub.ID, err)
-				continue
-			}
-		} else {
-			// Для платных планов - переводим на free с ограничениями
-			// Создаем free подписку на 24 часа
-			freeSub, err := s.CreateSubscription(ctx, sub.UserID, models.PlanFree, nil, false)
-			if err != nil {
-				logger.Error("Ошибка создания free подписки для пользователя %d: %v", sub.UserID, err)
-				continue
-			}
+		// Проверяем, есть ли у пользователя другая активная подписка
+		activeSub, _ := s.GetActiveSubscription(ctx, sub.UserID)
 
-			// Помечаем старую подписку как истекшую
-			if err := s.subRepo.UpdateStatus(ctx, sub.ID, models.StatusExpired); err != nil {
-				logger.Error("Ошибка обновления статуса подписки %d: %v", sub.ID, err)
-			}
+		// Помечаем старую подписку как истекшую
+		s.subRepo.UpdateStatus(ctx, sub.ID, models.StatusExpired)
 
-			logger.Info("📉 Подписка %d истекла, пользователь %d переведен на free тариф на 24 часа",
-				sub.ID, sub.UserID)
-
-			// Трекаем событие
-			s.analytics.TrackSubscriptionEvent(models.SubscriptionEvent{
-				Type:           "subscription_expired",
-				UserID:         sub.UserID,
-				SubscriptionID: sub.ID,
-				PlanCode:       sub.PlanCode,
-				Status:         models.StatusExpired,
-				Timestamp:      time.Now(),
-				Metadata: map[string]interface{}{
-					"new_subscription_id": freeSub.ID,
-					"new_plan":            models.PlanFree,
-				},
-			})
+		// ⭐ НИКОГДА не создаем новую free автоматически!
+		if activeSub == nil && sub.PlanCode != models.PlanFree {
+			// Только если нет активной подписки и это не free
+			logger.Info("⚠️ Пользователь %d остался без подписки", sub.UserID)
 		}
-
-		// Инвалидируем кэш
-		s.invalidateSubscriptionCache(sub.UserID)
 	}
-
 	return nil
 }
 

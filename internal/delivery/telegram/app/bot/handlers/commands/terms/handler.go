@@ -65,7 +65,7 @@ func (h *termsCommandHandler) Execute(params handlers.HandlerParams) (handlers.H
 
 			"*8. Контакты*\n" +
 			"📧 Email: support@gromovart.ru\n" +
-			"💬 Telegram: @gromovart\n\n" +
+			"💬 Telegram: @artemgrrr\n\n" +
 
 			"*9. Подтверждение*\n" +
 			"Нажимая кнопку \"💳 Оплатить\", вы подтверждаете, что прочитали и согласны с условиями.",

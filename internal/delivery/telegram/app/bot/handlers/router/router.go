@@ -63,7 +63,7 @@ func (r *routerImpl) RegisterHandler(handler Handler) {
 	}
 
 	r.handlers[command] = handler
-	logger.Debug("Зарегистрирован хэндлер: %s для %s: %s",
+	logger.Debug("✅ Зарегистрирован хэндлер: %s для %s: %s",
 		handler.GetName(), handler.GetType(), command)
 }
 
@@ -74,7 +74,7 @@ func (r *routerImpl) RegisterCommand(command string, handler Handler) {
 		command = "/" + command
 	}
 	r.handlers[command] = handler
-	logger.Debug("Зарегистрирована команда: %s → %s", command, handler.GetName())
+	logger.Info("✅ Зарегистрирована команда: %s → %s", command, handler.GetName())
 }
 
 // RegisterCallback регистрирует callback (без префикса /)
@@ -84,7 +84,7 @@ func (r *routerImpl) RegisterCallback(callback string, handler Handler) {
 		callback = callback[1:]
 	}
 	r.handlers[callback] = handler
-	logger.Warn("Зарегистрирован callback: %s → %s", callback, handler.GetName())
+	logger.Info("✅ Зарегистрирован callback: %s → %s", callback, handler.GetName())
 }
 
 // RegisterEvent регистрирует эвент
