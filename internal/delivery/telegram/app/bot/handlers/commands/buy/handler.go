@@ -22,19 +22,30 @@ var (
 	duplicateThreshold = 2 * time.Second // Защита от дублирования в течение 2 секунд
 )
 
+// Dependencies зависимости хэндлера
+type Dependencies struct {
+	IsDev bool
+}
+
 // buyCommandHandler реализация обработчика команды /buy
 type buyCommandHandler struct {
 	*base.BaseHandler
+	isDev bool
 }
 
 // NewHandler создает новый обработчик команды /buy
-func NewHandler() handlers.Handler {
+func NewHandler(deps ...Dependencies) handlers.Handler {
+	isDev := false
+	if len(deps) > 0 {
+		isDev = deps[0].IsDev
+	}
 	return &buyCommandHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "buy_command_handler",
 			Command: constants.PaymentConstants.CommandBuy,
 			Type:    handlers.TypeCommand,
 		},
+		isDev: isDev,
 	}
 }
 
@@ -123,36 +134,39 @@ func (h *buyCommandHandler) createUnauthorizedMessage() (handlers.HandlerResult,
 
 // getAvailablePlans возвращает доступные планы
 func (h *buyCommandHandler) getAvailablePlans() []*SubscriptionPlan {
-	return []*SubscriptionPlan{
-		{
+	var plans []*SubscriptionPlan
+	logger.Info("Получение доступных планов для пользователя (isDev=%v)", h.isDev)
+	if h.isDev {
+		plans = append(plans, &SubscriptionPlan{
 			ID:          "test",
 			Name:        "🧪 Тестовый доступ (2⭐)",
 			Description: "• Проверка платежей\n• Действует 5 минут\n• Не влияет на основную подписку",
 			PriceCents:  6, // 2 Stars = 6 центов
 			Features:    []string{"test_payment", "5_minutes"},
-		},
-		{
-			ID:          "basic",
-			Name:        "📱 Доступ на 1 месяц",
-			Description: "• Получение сигналов в течении 1 месяца\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
-			PriceCents:  1500, // ⭐ $15.00
-			Features:    []string{"10_symbols", "50_signals", "basic_notifications"},
-		},
-		{
-			ID:          "pro",
-			Name:        "🚀 Доступ на 3 месяца",
-			Description: "• Получение сигналов в течении 3 месяцев\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
-			PriceCents:  3000, // ⭐ $30.00
-			Features:    []string{"50_symbols", "200_signals", "advanced_notifications", "priority_support"},
-		},
-		{
-			ID:          "enterprise",
-			Name:        "🏢 Доступ на 12 месяцев",
-			Description: "• Неограниченные символы\n• После завершения периода требуется ручное продление\n• Кастомные настройки\n• Все виды уведомлений",
-			PriceCents:  7500, // ⭐ $75.00
-			Features:    []string{"unlimited_symbols", "1000_signals", "custom_settings", "api_access"},
-		},
+		})
 	}
+	plans = append(plans, &SubscriptionPlan{
+		ID:          "basic",
+		Name:        "📱 Доступ на 1 месяц",
+		Description: "• Получение сигналов в течении 1 месяца\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
+		PriceCents:  1500,
+		Features:    []string{"10_symbols", "50_signals", "basic_notifications"},
+	})
+	plans = append(plans, &SubscriptionPlan{
+		ID:          "pro",
+		Name:        "🚀 Доступ на 3 месяца",
+		Description: "• Получение сигналов в течении 3 месяцев\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
+		PriceCents:  3000,
+		Features:    []string{"50_symbols", "200_signals", "advanced_notifications", "priority_support"},
+	})
+	plans = append(plans, &SubscriptionPlan{
+		ID:          "enterprise",
+		Name:        "🏢 Доступ на 12 месяцев",
+		Description: "• Неограниченные символы\n• После завершения периода требуется ручное продление\n• Кастомные настройки\n• Все виды уведомлений",
+		PriceCents:  7500,
+		Features:    []string{"unlimited_symbols", "1000_signals", "custom_settings", "api_access"},
+	})
+	return plans
 }
 
 // getUserSubscription возвращает текущую подписку пользователя

@@ -652,28 +652,25 @@ chown -R cryptoapp:cryptoapp "\${INSTALL_DIR}"
 # Восстановление конфигурации
 echo "8. Восстановление конфигурации..."
 # Ищем последний backup configs
+# НЕ восстанавливаем configs из бэкапа — новый код уже содержит актуальный configs/prod/.env
 LATEST_CONFIGS_BACKUP=\$(find "\${INSTALL_DIR}" -type d -name "configs_backup_*" | sort -r | head -1)
-if [ -n "\${LATEST_CONFIGS_BACKUP}" ] && [ -d "\${LATEST_CONFIGS_BACKUP}" ]; then
-    # Восстанавливаем configs
-    rm -rf "\${INSTALL_DIR}/configs" 2>/dev/null || true
-    mv "\${LATEST_CONFIGS_BACKUP}" "\${INSTALL_DIR}/configs"
-    echo "  ✅ Конфиги восстановлены из backup"
+if [ -n "\${LATEST_CONFIGS_BACKUP}" ]; then
+    rm -rf "\${LATEST_CONFIGS_BACKUP}" 2>/dev/null || true
 fi
+echo "  ✅ Конфиги взяты из нового кода"
 
-# Ищем последний backup .env
+
+# ПРИОРИТЕТ: берём .env из нового кода, бэкап только как запасной вариант
 LATEST_ENV_BACKUP=\$(find "\${INSTALL_DIR}" -type f -name ".env_backup_*" | sort -r | head -1)
-if [ -n "\${LATEST_ENV_BACKUP}" ] && [ -f "\${LATEST_ENV_BACKUP}" ]; then
-    # Восстанавливаем .env симлинк
-    if [ -f "\${INSTALL_DIR}/configs/prod/.env" ]; then
-        ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
-        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
-    else
-        # Используем backup .env
-        cp "\${LATEST_ENV_BACKUP}" "\${INSTALL_DIR}/.env"
-        chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
-        chmod 600 "\${INSTALL_DIR}/.env"
-    fi
-    echo "  ✅ .env восстановлен из backup"
+if [ -f "\${INSTALL_DIR}/configs/prod/.env" ]; then
+    ln -sf "\${INSTALL_DIR}/configs/prod/.env" "\${INSTALL_DIR}/.env"
+    chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env" 2>/dev/null || true
+    echo "  ✅ .env взят из нового кода (configs/prod/.env)"
+elif [ -n "\${LATEST_ENV_BACKUP}" ] && [ -f "\${LATEST_ENV_BACKUP}" ]; then
+    cp "\${LATEST_ENV_BACKUP}" "\${INSTALL_DIR}/.env"
+    chown cryptoapp:cryptoapp "\${INSTALL_DIR}/.env"
+    chmod 600 "\${INSTALL_DIR}/.env"
+    echo "  ✅ .env восстановлен из backup (configs/prod/.env не найден)"
 fi
 
 # Восстановление webhook токена если он был

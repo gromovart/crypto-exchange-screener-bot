@@ -1290,7 +1290,7 @@ Environment="APP_ENV=production"
 EnvironmentFile=${INSTALL_DIR}/.env
 
 # ИСПРАВЛЕННЫЙ ПУТЬ: bin/crypto-screener-bot
-ExecStart=${INSTALL_DIR}/bin/${APP_NAME}
+ExecStart=${INSTALL_DIR}/bin/${APP_NAME} --env=prod
 Restart=always
 RestartSec=10
 StandardOutput=append:/var/log/${APP_NAME}/app.log

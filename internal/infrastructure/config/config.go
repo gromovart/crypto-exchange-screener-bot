@@ -354,7 +354,7 @@ func LoadConfig(path string) (*Config, error) {
 	// ======================
 	// ОСНОВНЫЕ НАСТРОЙКИ
 	// ======================
-	cfg.Environment = getEnv("ENVIRONMENT", "dev")
+	cfg.Environment = getEnv("ENVIRONMENT", "production")
 	cfg.Version = getEnv("VERSION", "1.0.0")
 
 	// ======================

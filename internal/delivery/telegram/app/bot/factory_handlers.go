@@ -85,7 +85,7 @@ func InitHandlerFactory(
 	})
 
 	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
-		return buy_command.NewHandler()
+		return buy_command.NewHandler(buy_command.Dependencies{IsDev: cfg.IsDev()})
 	})
 
 	// Команды, требующие подписки (будут обернуты middleware)
@@ -342,7 +342,7 @@ func InitHandlerFactory(
 
 	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
-		return payment_plan_handler.NewHandler()
+		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{IsDev: cfg.IsDev()})
 	})
 
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {

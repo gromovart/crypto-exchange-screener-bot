@@ -9,19 +9,30 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 )
 
+// Dependencies зависимости хэндлера
+type Dependencies struct {
+	IsDev bool
+}
+
 // paymentPlanHandler обработчик выбора платежного плана
 type paymentPlanHandler struct {
 	*base.BaseHandler
+	isDev bool
 }
 
 // NewHandler создает новый обработчик выбора плана
-func NewHandler() handlers.Handler {
+func NewHandler(deps ...Dependencies) handlers.Handler {
+	isDev := false
+	if len(deps) > 0 {
+		isDev = deps[0].IsDev
+	}
 	return &paymentPlanHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "payment_plan_handler",
 			Command: constants.PaymentConstants.CallbackPaymentPlan,
 			Type:    handlers.TypeCallback,
 		},
+		isDev: isDev,
 	}
 }
 
@@ -66,6 +77,10 @@ func (h *paymentPlanHandler) extractPlanID(callbackData string) string {
 
 // getPlanByID возвращает план по ID
 func (h *paymentPlanHandler) getPlanByID(planID string) *SubscriptionPlan {
+	// Тестовый план только в dev
+	if planID == "test" && !h.isDev {
+		return nil
+	}
 	plans := map[string]*SubscriptionPlan{
 		"test": { // ⭐ ТЕСТОВЫЙ ПЛАН
 			ID:          "test",
