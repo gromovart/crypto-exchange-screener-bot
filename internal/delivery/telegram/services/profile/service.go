@@ -4,7 +4,6 @@ package profile
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -102,7 +101,7 @@ func (s *serviceImpl) getProfile(userID int64) (ProfileResult, error) {
 		isActive = s.isSubscriptionActive(userSubscription)
 
 		// Получаем информацию о плане
-		if plan, err := s.subscriptionService.GetPlan(strconv.Itoa(userSubscription.PlanID)); err == nil && plan != nil {
+		if plan, err := s.subscriptionService.GetPlanByID(context.Background(), userSubscription.PlanID); err == nil && plan != nil {
 			planName = plan.Name
 			planCode = plan.Code
 		}
