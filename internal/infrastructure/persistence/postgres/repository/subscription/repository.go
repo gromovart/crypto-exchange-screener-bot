@@ -55,8 +55,16 @@ func (r *subscriptionRepositoryImpl) Create(ctx context.Context, subscription *m
 	) ON CONFLICT (user_id, plan_id) DO UPDATE SET
 		payment_id = EXCLUDED.payment_id,
 		status = EXCLUDED.status,
-		current_period_start = EXCLUDED.current_period_start,
-		current_period_end = EXCLUDED.current_period_end,
+		current_period_start = CASE
+			WHEN user_subscriptions.current_period_end > NOW()
+			THEN user_subscriptions.current_period_start
+			ELSE EXCLUDED.current_period_start
+		END,
+		current_period_end = CASE
+			WHEN user_subscriptions.current_period_end > NOW()
+			THEN user_subscriptions.current_period_end + (EXCLUDED.current_period_end - EXCLUDED.current_period_start)
+			ELSE EXCLUDED.current_period_end
+		END,
 		cancel_at_period_end = EXCLUDED.cancel_at_period_end,
 		metadata = EXCLUDED.metadata,
 		updated_at = NOW()
