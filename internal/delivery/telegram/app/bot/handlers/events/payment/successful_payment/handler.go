@@ -181,6 +181,7 @@ func (h *successfulPaymentHandler) getPlanNameFromPayload(payload string) string
 
 	planID := parts[1]
 	plans := map[string]string{
+		"test":       "🧪 Тестовый доступ",
 		"basic":      "📱 Доступ на 1 месяц",
 		"pro":        "🚀 Доступ на 3 месяца",
 		"enterprise": "🏢 Доступ на 12 месяцев",

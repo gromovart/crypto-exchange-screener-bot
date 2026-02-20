@@ -222,7 +222,6 @@ func (r *UserRepositoryImpl) ResetDailySignals(ctx context.Context) error {
 
 // Create создает нового пользователя
 func (r *UserRepositoryImpl) Create(user *models.User) error {
-	// Начинаем транзакцию
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -235,7 +234,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			email, phone,
 			notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
-			preferred_periods, min_volume_filter, exclude_patterns,  -- ЭТИ ПОЛЯ ЕСТЬ!
+			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified,
 			subscription_tier, max_signals_per_day,
@@ -244,12 +243,11 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11,
 			$12, $13,
-			$14, $15,
-			$16, $17, $18,  -- ЭТИ ПАРАМЕТРЫ ДОБАВЛЯЕМ
-			$19, $20, $21,
-			$22, $23, $24,
-			$25, $26,
-			$27, $28
+			$14, $15, $16,
+			$17, $18, $19,
+			$20, $21, $22,
+			$23, $24,
+			$25, $26
 		)
 		RETURNING id
 	`
@@ -260,7 +258,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		user.Email, user.Phone,
 		user.NotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
 		user.MinGrowthThreshold, user.MinFallThreshold,
-		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns), // ДОБАВЛЯЕМ!
+		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns),
 		user.Language, user.Timezone, user.DisplayMode,
 		user.Role, user.IsActive, user.IsVerified,
 		user.SubscriptionTier, user.MaxSignalsPerDay,
@@ -271,7 +269,6 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
 
-	// Фиксируем транзакцию
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
