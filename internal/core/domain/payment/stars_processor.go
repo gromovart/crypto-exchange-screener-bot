@@ -95,6 +95,10 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 			}
 			s.logger.Info("✅ Подписка обновлена с FREE до %s для user %d",
 				invoiceData.SubscriptionPlanID, userID)
+			// Обновляем SubscriptionTier у пользователя
+			if err := s.userManager.UpdateSubscriptionTier(userID, invoiceData.SubscriptionPlanID); err != nil {
+				s.logger.Error("⚠️ Ошибка обновления тарифа пользователя", "error", err)
+			}
 		} else {
 			// Есть платная подписка (не тестовая) - ошибка
 			s.logger.Error("❌ У пользователя уже есть активная платная подписка",
@@ -127,6 +131,10 @@ func (s *StarsService) processPayment(request ProcessPaymentRequest) (*StarsPaym
 		}
 		s.logger.Info("✅ Создана новая подписка %s для user %d",
 			invoiceData.SubscriptionPlanID, userID)
+		// Обновляем SubscriptionTier у пользователя
+		if err := s.userManager.UpdateSubscriptionTier(userID, invoiceData.SubscriptionPlanID); err != nil {
+			s.logger.Error("⚠️ Ошибка обновления тарифа пользователя", "error", err)
+		}
 	}
 
 	// Записываем транзакцию

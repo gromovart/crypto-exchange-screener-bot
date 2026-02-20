@@ -13,6 +13,7 @@ const StarsCommissionRate = 0.05
 // UserManager интерфейс менеджера пользователей
 type UserManager interface {
 	GetUserByID(userID int) (*models.User, error) // ⬅️ ИЗМЕНЕНО: int вместо string
+	UpdateSubscriptionTier(userID int, tier string) error
 }
 
 // SubscriptionPlan интерфейс плана подписки

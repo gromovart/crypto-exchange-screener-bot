@@ -257,6 +257,24 @@ func (s *Service) fixUserDefaults(user *models.User) {
 }
 
 // UpdateUser обновляет данные пользователя
+// UpdateSubscriptionTier обновляет тариф пользователя
+func (s *Service) UpdateSubscriptionTier(userID int, tier string) error {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("ошибка получения пользователя: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("пользователь %d не найден", userID)
+	}
+	user.SubscriptionTier = tier
+	if err := s.UpdateUser(user); err != nil {
+		return fmt.Errorf("ошибка обновления тарифа: %w", err)
+	}
+	// Инвалидируем кэш пользователей
+	s.cache.Delete(context.Background(), "all_users_for_notify")
+	return nil
+}
+
 func (s *Service) UpdateUser(user *models.User) error {
 	user.UpdatedAt = time.Now()
 
@@ -573,6 +591,20 @@ func (s *Service) SearchUsers(query string, limit, offset int) ([]*models.User, 
 
 // GetAllUsers возвращает всех пользователей с пагинацией
 func (s *Service) GetAllUsers(limit, offset int) ([]*models.User, error) {
+	ctx := context.Background()
+	cacheKey := "all_users_for_notify"
+
+	// Пробуем получить из кэша (TTL 1 минута)
+	var cachedUsers []*models.User
+	if err := s.cache.Get(ctx, cacheKey, &cachedUsers); err == nil && len(cachedUsers) > 0 {
+		// logger.Info("👥 GetAllUsers: из кэша Redis (%d пользователей)", len(cachedUsers))
+		return cachedUsers, nil
+	}
+
+	// Кэш пуст — идём в БД
+	// logger.Info("👥 GetAllUsers: запрос к БД (кэш пуст)")
+	// Кэш пуст — идём в БД
+	// logger.Info("👥 GetAllUsers: запрос к БД (кэш пуст)")
 	users, err := s.repo.GetAll(limit, offset)
 	if err != nil {
 		return nil, err
@@ -582,6 +614,9 @@ func (s *Service) GetAllUsers(limit, offset int) ([]*models.User, error) {
 	for _, user := range users {
 		s.fixUserDefaults(user)
 	}
+
+	// Сохраняем в кэш на 1 минуту
+	_ = s.cache.Set(ctx, cacheKey, users, 1*time.Minute)
 
 	return users, nil
 }
@@ -730,6 +765,7 @@ func (s *Service) invalidateUserCache(user *models.User) {
 		s.cachePrefix + fmt.Sprintf("id:%d", user.ID),
 		s.cachePrefix + fmt.Sprintf("telegram:%d", user.TelegramID),
 		"users:stats:*",
+		"all_users_for_notify",
 	}
 
 	s.cache.DeleteMulti(ctx, keys...)
