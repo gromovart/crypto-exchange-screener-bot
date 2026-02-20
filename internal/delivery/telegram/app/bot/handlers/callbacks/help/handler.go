@@ -75,8 +75,8 @@ func (h *helpHandler) createHelpKeyboard() interface{} {
 	return map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
-				{"text": "📚 Полная документация", "url": "https://github.com/your-repo/docs"},
-				{"text": "📧 Поддержка", "url": "https://t.me/support_bot"},
+				{"text": "📚 Полная документация", "url": "https://teletype.in/@gromovart/pj2UIVlmr55"},
+				{"text": "📧 Поддержка", "url": "https://t.me/artemgrrr"},
 			},
 			{
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},

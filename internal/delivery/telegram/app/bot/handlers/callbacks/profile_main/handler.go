@@ -214,10 +214,10 @@ func (h *profileMainHandler) getRoleDisplay(role string) string {
 func (h *profileMainHandler) createProfileKeyboard() interface{} {
 	return map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.AuthButtonTexts.Stats, "callback_data": constants.CallbackProfileStats},
-				{"text": constants.AuthButtonTexts.Premium, "callback_data": constants.CallbackProfileSubscription},
-			},
+			// {
+			// 	{"text": constants.AuthButtonTexts.Stats, "callback_data": constants.CallbackProfileStats},
+			// 	{"text": constants.AuthButtonTexts.Premium, "callback_data": constants.CallbackProfileSubscription},
+			// },
 			{
 				{"text": constants.ButtonTexts.Settings, "callback_data": constants.CallbackSettingsMain},
 				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},

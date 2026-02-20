@@ -4,6 +4,7 @@ package middlewares
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
@@ -131,6 +132,12 @@ func (m *AuthMiddleware) ProcessUpdate(update *telegram.TelegramUpdate) (handler
 	// if err := m.ensureSubscription(user.ID); err != nil {
 	//     return handlers.HandlerParams{}, err
 	// }
+
+	// Обновляем LastLoginAt при каждом запросе
+	user.LastLoginAt = time.Now()
+	if err := m.userService.UpdateUser(user); err != nil {
+		logger.Warn("⚠️ ProcessUpdate: Не удалось обновить LastLoginAt для user %d: %v", user.ID, err)
+	}
 
 	// Добавляем ChatID если его нет
 	if user.ChatID == "" {

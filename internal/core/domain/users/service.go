@@ -479,6 +479,24 @@ func (s *Service) RevokeSession(sessionID, reason string) error {
 }
 
 // LogoutUser выполняет выход пользователя
+// LogSignalSent логирует отправку сигнала пользователю
+func (s *Service) LogSignalSent(userID int, signalType, symbol string, changePercent float64, periodMinutes int) {
+	user, err := s.GetUserByID(userID)
+	if err != nil || user == nil {
+		logger.Warn("⚠️ LogSignalSent: пользователь %d не найден", userID)
+		return
+	}
+	// Логируем в user_activities (заполняет activity_summary через триггер)
+	if err := s.activityRepo.LogSignalReceived(user, signalType, symbol, changePercent, periodMinutes, false, ""); err != nil {
+		logger.Warn("⚠️ LogSignalSent: ошибка записи user_activities: %v", err)
+	}
+	// Логируем в signal_activities
+	signalID := fmt.Sprintf("%s_%s_%d_%d", symbol, signalType, periodMinutes, time.Now().Unix())
+	if err := s.activityRepo.LogSignalActivity(userID, signalID, symbol, signalType, changePercent); err != nil {
+		logger.Warn("⚠️ LogSignalSent: ошибка записи signal_activities: %v", err)
+	}
+}
+
 func (s *Service) LogoutUser(userID int, sessionID, ip, userAgent string) error {
 	// Отзываем конкретную сессию если указана
 	if sessionID != "" {

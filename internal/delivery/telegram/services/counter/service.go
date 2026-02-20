@@ -87,6 +87,7 @@ func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
 			logger.Error("❌ Ошибка отправки уведомления: %v", err)
 		} else {
 			sentCount++
+			s.userService.LogSignalSent(user.ID, counterData.Direction, counterData.Symbol, counterData.ChangePercent, int(signalPeriod.Minutes()))
 		}
 	}
 

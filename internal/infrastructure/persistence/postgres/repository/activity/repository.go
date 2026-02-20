@@ -36,6 +36,7 @@ type ActivityRepository interface {
 	LogUserLogin(user *models.User, ip, userAgent string, success bool, failureReason string) error
 	LogUserLogout(user *models.User, ip, userAgent, reason string) error
 	LogSignalReceived(user *models.User, signalType string, symbol string, changePercent float64, period int, filtered bool, filterReason string) error
+	LogSignalActivity(userID int, signalID, symbol, signalType string, changePercent float64) error
 	LogSettingsUpdate(user *models.User, settingType string, oldValue, newValue interface{}, ip, userAgent string) error
 	LogSecurityEvent(user *models.User, eventType, description string, severity models.ActivitySeverity, ip, userAgent string, metadata models.JSONMap) error
 	LogError(user *models.User, errorType, errorMessage, stackTrace string, severity models.ActivitySeverity, additionalData models.JSONMap) error
@@ -527,6 +528,17 @@ func (r *ActivityRepositoryImpl) LogSignalReceived(user *models.User, signalType
 	return r.Create(activity)
 }
 
+
+// LogSignalActivity логирует сигнал в таблицу signal_activities
+func (r *ActivityRepositoryImpl) LogSignalActivity(userID int, signalID, symbol, signalType string, changePercent float64) error {
+	_, err := r.db.Exec(`
+		INSERT INTO signal_activities (user_id, signal_id, symbol, signal_type, change_percent, confidence, action, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (user_id, signal_id, action) DO NOTHING`,
+		userID, signalID, symbol, signalType, changePercent, 0.0, "received", "telegram",
+	)
+	return err
+}
 // LogSettingsUpdate логирует изменение настроек
 func (r *ActivityRepositoryImpl) LogSettingsUpdate(user *models.User, settingType string, oldValue, newValue interface{}, ip, userAgent string) error {
 	activity := models.NewUserActivity(
