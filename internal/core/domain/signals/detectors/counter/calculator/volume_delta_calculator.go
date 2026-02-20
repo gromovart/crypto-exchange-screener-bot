@@ -163,9 +163,10 @@ func (c *VolumeDeltaCalculator) setToCache(symbol string, deltaData *types.Volum
 }
 
 // CalculateWithFallback получает дельту с многоуровневым fallback
-func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) *types.VolumeDeltaData {
+func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction, period string) *types.VolumeDeltaData {
 	// 1. Проверяем кэш (используем исправленный метод)
-	if cached, found := c.getFromCache(symbol); found {
+	cacheKey := fmt.Sprintf("%s_%s", symbol, period)
+	if cached, found := c.getFromCache(cacheKey); found {
 		logger.Debug("📦 Дельта из кэша для %s: $%.0f (%.1f%%, источник: %s, возраст: %v)",
 			symbol, cached.deltaData.Delta, cached.deltaData.DeltaPercent,
 			cached.deltaData.Source, time.Since(cached.updateTime).Round(time.Second))
@@ -173,11 +174,11 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 	}
 
 	// 2. Пробуем получить реальные данные через API
-	apiDeltaData, apiErr := c.getFromAPI(symbol)
+	apiDeltaData, apiErr := c.getFromAPI(symbol, period)
 	if apiErr == nil && (apiDeltaData.Delta != 0 || apiDeltaData.DeltaPercent != 0) {
 		logger.Debug("✅ Получена реальная дельта из API для %s: $%.0f (%.1f%%)",
 			symbol, apiDeltaData.Delta, apiDeltaData.DeltaPercent)
-		c.setToCache(symbol, apiDeltaData)
+		c.setToCache(cacheKey, apiDeltaData)
 		return apiDeltaData
 	}
 
@@ -187,7 +188,7 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 	if storageDeltaData != nil {
 		logger.Debug("📊 Используем дельту из хранилища для %s: $%.0f (%.1f%%)",
 			symbol, storageDeltaData.Delta, storageDeltaData.DeltaPercent)
-		c.setToCache(symbol, storageDeltaData)
+		c.setToCache(cacheKey, storageDeltaData)
 		return storageDeltaData
 	}
 
@@ -195,12 +196,12 @@ func (c *VolumeDeltaCalculator) CalculateWithFallback(symbol, direction string) 
 	emulatedDeltaData := c.calculateBasicDelta(symbol, direction)
 	logger.Debug("📊 Используем базовую дельту для %s: $%.0f (%.1f%%)",
 		symbol, emulatedDeltaData.Delta, emulatedDeltaData.DeltaPercent)
-	c.setToCache(symbol, emulatedDeltaData)
+	c.setToCache(cacheKey, emulatedDeltaData)
 	return emulatedDeltaData
 }
 
 // getFromAPI получает реальную дельту через API
-func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaData, error) {
+func (c *VolumeDeltaCalculator) getFromAPI(symbol, period string) (*types.VolumeDeltaData, error) {
 	if c.marketFetcher == nil {
 		logger.Error("❌ MARKET FETCHER IS NIL для %s!", symbol)
 		return nil, fmt.Errorf("market fetcher not available")
@@ -210,11 +211,11 @@ func (c *VolumeDeltaCalculator) getFromAPI(symbol string) (*types.VolumeDeltaDat
 
 	// 🔴 ПРОВЕРКА 1: Полный интерфейс
 	if fetcher, ok := c.marketFetcher.(interface {
-		GetRealTimeVolumeDelta(string) (*bybit.VolumeDelta, error)
+		GetVolumeDelta(string, time.Duration) (*bybit.VolumeDelta, error)
 	}); ok {
-		logger.Debug("✅ MarketFetcher реализует GetRealTimeVolumeDelta для %s", symbol)
-
-		volumeDelta, err := fetcher.GetRealTimeVolumeDelta(symbol)
+		logger.Debug("✅ MarketFetcher реализует GetVolumeDelta для %s период %s", symbol, period)
+		dur := periodToDuration(period)
+		volumeDelta, err := fetcher.GetVolumeDelta(symbol, dur)
 		if err != nil {
 			logger.Error("❌ Ошибка API дельты для %s: %v", symbol, err)
 			return nil, fmt.Errorf("API error: %w", err)
@@ -387,4 +388,26 @@ func (c *VolumeDeltaCalculator) ClearCache() {
 	c.volumeDeltaCache = make(map[string]*volumeDeltaCache)
 
 	logger.Debug("🧹 Полная очистка кэша дельты: удалено %d записей", count)
+}
+
+// periodToDuration конвертирует строку периода в time.Duration
+func periodToDuration(period string) time.Duration {
+	switch period {
+	case "1m":
+		return 1 * time.Minute
+	case "5m":
+		return 5 * time.Minute
+	case "15m":
+		return 15 * time.Minute
+	case "30m":
+		return 30 * time.Minute
+	case "1h":
+		return 1 * time.Hour
+	case "4h":
+		return 4 * time.Hour
+	case "1d":
+		return 24 * time.Hour
+	default:
+		return 5 * time.Minute
+	}
 }

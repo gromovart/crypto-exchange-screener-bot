@@ -19,7 +19,8 @@ type Ticker struct {
 	Volume24h    string `json:"volume24h"`
 	Price24hPcnt string `json:"price24hPcnt,omitempty"`
 	Turnover24h  string `json:"turnover24h,omitempty"`
-	OpenInterest string `json:"openInterest,omitempty"` // ✅ Убедитесь, что это поле есть
+	OpenInterest      string `json:"openInterest,omitempty"`
+	OpenInterestValue string `json:"openInterestValue,omitempty"` // ✅ Убедитесь, что это поле есть
 	FundingRate  string `json:"fundingRate,omitempty"`
 	High24h      string `json:"high24h"`
 	Low24h       string `json:"low24h"`

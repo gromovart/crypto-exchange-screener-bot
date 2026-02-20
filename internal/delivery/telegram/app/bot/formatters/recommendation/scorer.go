@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
 )
 
 // Scorer подсчитывает баллы для рекомендаций

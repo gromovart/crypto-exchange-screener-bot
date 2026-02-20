@@ -174,7 +174,8 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 				Turnover24h  string `json:"turnover24h"`
 				High24h      string `json:"high24h"`
 				Low24h       string `json:"low24h"`
-				OpenInterest string `json:"openInterest"`
+				OpenInterest      string `json:"openInterest"`
+				OpenInterestValue string `json:"openInterestValue"`
 				FundingRate  string `json:"fundingRate"`
 			} `json:"list"`
 		} `json:"result"`
@@ -195,7 +196,8 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 			Turnover24h:  t.Turnover24h,
 			High24h:      t.High24h,
 			Low24h:       t.Low24h,
-			OpenInterest: t.OpenInterest,
+			OpenInterest:      t.OpenInterest,
+			OpenInterestValue: t.OpenInterestValue,
 			FundingRate:  t.FundingRate,
 		})
 	}
@@ -461,7 +463,8 @@ func (c *BybitClient) GetOpenInterestWithParams(symbol, category, interval strin
 		Result  struct {
 			List []struct {
 				Symbol       string `json:"symbol"`
-				OpenInterest string `json:"openInterest"`
+				OpenInterest      string `json:"openInterest"`
+				OpenInterestValue string `json:"openInterestValue"`
 				Timestamp    string `json:"timestamp"`
 			} `json:"list"`
 		} `json:"result"`
@@ -679,8 +682,8 @@ func (c *BybitClient) CalculateVolumeDelta(symbol string, period time.Duration) 
 
 	// Оцениваем количество сделок (~60 сделок в минуту для активного символа)
 	estimatedTrades := int(period.Minutes() * 60)
-	if estimatedTrades > 200 {
-		estimatedTrades = 200 // Максимальный лимит API
+	if estimatedTrades > 1000 {
+		estimatedTrades = 1000 // Максимальный лимит API
 	}
 	if estimatedTrades < 10 {
 		estimatedTrades = 10 // Минимум 10 сделок

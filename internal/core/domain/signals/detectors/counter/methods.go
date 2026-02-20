@@ -26,7 +26,7 @@ func (a *CounterAnalyzer) GetOI(symbol string) float64 {
 }
 
 // GetVolumeDelta получает дельту объема
-func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.VolumeDeltaData {
+func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction, period string) *types.VolumeDeltaData {
 	// ✅ Используем общий калькулятор из зависимостей
 	if a.deps.VolumeCalculator == nil {
 		// Создаем временно, если не передан в зависимостях
@@ -34,10 +34,10 @@ func (a *CounterAnalyzer) GetVolumeDelta(symbol, direction string) *types.Volume
 		tempCalculator := calculator.NewVolumeDeltaCalculator(a.deps.MarketFetcher, a.deps.Storage)
 		defer tempCalculator.Stop() // ✅ ВАЖНО: останавливаем временный калькулятор
 
-		return tempCalculator.CalculateWithFallback(symbol, direction)
+		return tempCalculator.CalculateWithFallback(symbol, direction, period)
 	}
 
-	return a.deps.VolumeCalculator.CalculateWithFallback(symbol, direction)
+	return a.deps.VolumeCalculator.CalculateWithFallback(symbol, direction, period)
 }
 
 // AnalyzeCandle анализирует свечу (закрытую или активную)
@@ -571,7 +571,7 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	eventData["macd_description"] = macdDescription
 
 	// Получаем реальную дельту и процент
-	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction)
+	deltaData := a.GetVolumeDelta(signal.Symbol, signal.Direction, period)
 	eventData["volume_delta"] = deltaData.Delta
 	eventData["volume_delta_percent"] = deltaData.DeltaPercent
 	eventData["delta_source"] = deltaData.Source

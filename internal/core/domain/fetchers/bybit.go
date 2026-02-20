@@ -702,7 +702,11 @@ func (f *BybitPriceFetcher) fetchPrices() error {
 
 		if oiErr == nil && oiFromTicker > 0 {
 			// OI есть в тикере - используем его
-			openInterest = oiFromTicker
+			if oiUSD, err := parseFloat(ticker.OpenInterestValue); err == nil && oiUSD > 0 {
+				openInterest = oiUSD
+			} else {
+				openInterest = oiFromTicker * price
+			}
 
 			// Обновляем кэш
 			f.oiCacheMu.Lock()
