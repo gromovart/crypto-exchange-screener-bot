@@ -5,20 +5,25 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/queue"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
+
+	goredis "github.com/go-redis/redis/v8"
 )
 
 // ComponentFactory фабрика компонентов инфраструктуры Telegram
 type ComponentFactory struct {
-	config   *config.Config
-	exchange string
+	config      *config.Config
+	exchange    string
+	redisClient *goredis.Client // nil → очередь отключена
 }
 
 // ComponentDependencies зависимости для фабрики компонентов
 type ComponentDependencies struct {
-	Config   *config.Config
-	Exchange string
+	Config      *config.Config
+	Exchange    string
+	RedisClient *goredis.Client // опционально
 }
 
 // NewComponentFactory создает фабрику компонентов
@@ -30,12 +35,15 @@ func NewComponentFactory(deps ComponentDependencies) *ComponentFactory {
 	}
 
 	return &ComponentFactory{
-		config:   deps.Config,
-		exchange: deps.Exchange,
+		config:      deps.Config,
+		exchange:    deps.Exchange,
+		redisClient: deps.RedisClient,
 	}
 }
 
-// CreateMessageSender создает MessageSender
+// CreateMessageSender создает MessageSender.
+// Если redisClient доступен — возвращает QueuedMessageSender (сигналы через очередь).
+// Иначе — прямой MessageSenderImpl (текущее поведение).
 func (f *ComponentFactory) CreateMessageSender() message_sender.MessageSender {
 	if f.config == nil {
 		logger.Error("❌ ComponentFactory: конфиг не доступен")
@@ -47,7 +55,30 @@ func (f *ComponentFactory) CreateMessageSender() message_sender.MessageSender {
 		return &stubMessageSender{}
 	}
 
-	return message_sender.NewMessageSender(f.config)
+	direct := message_sender.NewMessageSender(f.config)
+
+	if f.redisClient != nil {
+		producer := queue.NewProducer(f.redisClient)
+		logger.Info("✅ MessageSender: режим Redis-очереди активен")
+		return queue.NewQueuedMessageSender(direct, producer)
+	}
+
+	logger.Info("✅ MessageSender: прямой режим (Redis недоступен)")
+	return direct
+}
+
+// CreateWorker создает Worker для обработки очереди.
+// Возвращает nil если Redis недоступен.
+func (f *ComponentFactory) CreateWorker() *queue.Worker {
+	if f.redisClient == nil || f.config == nil || f.config.TelegramBotToken == "" {
+		return nil
+	}
+	return queue.NewWorker(
+		f.redisClient,
+		f.config.TelegramBotToken,
+		f.config.MonitoringTestMode,
+		f.config.Telegram.Enabled,
+	)
 }
 
 // CreateButtonBuilder создает ButtonBuilder
@@ -66,14 +97,16 @@ func (f *ComponentFactory) CreateAllComponents() ComponentSet {
 		MessageSender:     f.CreateMessageSender(),
 		ButtonBuilder:     f.CreateButtonBuilder(),
 		FormatterProvider: f.CreateFormatterProvider(),
+		Worker:            f.CreateWorker(),
 	}
 }
 
-// ComponentSet набор компонентов инфраструктуры
+// ComponentSet набор компонентов инфраструктуры Telegram
 type ComponentSet struct {
 	MessageSender     message_sender.MessageSender
 	ButtonBuilder     *buttons.ButtonBuilder
 	FormatterProvider *formatters.FormatterProvider
+	Worker            *queue.Worker // nil если Redis недоступен
 }
 
 // Validate проверяет фабрику компонентов

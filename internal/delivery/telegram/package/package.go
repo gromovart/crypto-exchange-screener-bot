@@ -12,6 +12,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
 	components_factory "crypto-exchange-screener-bot/internal/delivery/telegram/components/factory"
 	controllers_factory "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/factory"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/queue"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/transport"
@@ -19,6 +20,8 @@ import (
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
+
+	goredis "github.com/go-redis/redis/v8"
 )
 
 // TelegramDeliveryPackage основной пакет доставки через Telegram
@@ -27,6 +30,7 @@ type TelegramDeliveryPackage struct {
 	config      *config.Config
 	coreFactory *core_factory.CoreServiceFactory
 	eventBus    *events.EventBus
+	redisClient *goredis.Client // опционально, для очереди
 
 	// Созданные сервисы ядра (ленивое создание)
 	userService         *users.Service
@@ -43,6 +47,9 @@ type TelegramDeliveryPackage struct {
 	services    map[string]interface{}
 	controllers map[string]types.EventSubscriber
 
+	// Queue worker (nil если Redis недоступен)
+	worker *queue.Worker
+
 	// Telegram бот и транспорт
 	bot         *bot.TelegramBot
 	transport   transport.TelegramTransport
@@ -55,6 +62,7 @@ type TelegramDeliveryPackageDependencies struct {
 	Config      *config.Config
 	CoreFactory *core_factory.CoreServiceFactory
 	Exchange    string
+	RedisClient *goredis.Client // опционально, для Redis-очереди
 }
 
 // NewTelegramDeliveryPackage создает новый пакет доставки Telegram
@@ -68,6 +76,7 @@ func NewTelegramDeliveryPackage(deps TelegramDeliveryPackageDependencies) *Teleg
 	return &TelegramDeliveryPackage{
 		config:      deps.Config,
 		coreFactory: deps.CoreFactory,
+		redisClient: deps.RedisClient,
 		services:    make(map[string]interface{}),
 		controllers: make(map[string]types.EventSubscriber),
 	}
@@ -159,8 +168,9 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 
 	p.componentFactory = components_factory.NewComponentFactory(
 		components_factory.ComponentDependencies{
-			Config:   p.config,
-			Exchange: "BYBIT",
+			Config:      p.config,
+			Exchange:    "BYBIT",
+			RedisClient: p.redisClient,
 		},
 	)
 
@@ -169,6 +179,12 @@ func (p *TelegramDeliveryPackage) createComponentFactory() error {
 	}
 
 	p.components = p.componentFactory.CreateAllComponents()
+	p.worker = p.components.Worker
+	if p.worker != nil {
+		logger.Info("✅ Queue worker создан")
+	} else {
+		logger.Info("ℹ️  Queue worker не создан (Redis недоступен)")
+	}
 	logger.Info("✅ ComponentFactory создана")
 	return nil
 }
@@ -457,6 +473,11 @@ func (p *TelegramDeliveryPackage) Start() error {
 		return fmt.Errorf("ошибка запуска транспорта %s: %w", p.transport.Name(), err)
 	}
 
+	// Запускаем queue worker если доступен
+	if p.worker != nil {
+		p.worker.Start()
+	}
+
 	p.isRunning = true
 	logger.Info("✅ Telegram бот запущен через %s", p.transport.Name())
 
@@ -507,6 +528,11 @@ func (p *TelegramDeliveryPackage) Stop() error {
 		if err := p.transport.Stop(); err != nil {
 			logger.Warn("⚠️ Ошибка остановки транспорта %s: %v", p.transport.Name(), err)
 		}
+	}
+
+	// Останавливаем queue worker
+	if p.worker != nil {
+		p.worker.Stop()
 	}
 
 	p.isRunning = false
@@ -670,6 +696,7 @@ func (p *TelegramDeliveryPackage) Reset() {
 	p.controllers = make(map[string]types.EventSubscriber)
 	p.bot = nil
 	p.transport = nil
+	p.worker = nil
 	p.isRunning = false
 	p.initialized = false
 	p.userService = nil

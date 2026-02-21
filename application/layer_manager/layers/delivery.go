@@ -3,6 +3,7 @@ package layers
 
 import (
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
+	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -70,14 +71,30 @@ func (dl *DeliveryLayer) Initialize() error {
 		return fmt.Errorf("фабрика ядра не создана")
 	}
 
+	// Получаем Redis клиент для очереди (опционально)
+	var redisClient *redis_service.RedisService
+	if redisComp, exists := dl.coreLayer.infraLayer.GetComponent("RedisService"); exists {
+		if lc, ok := redisComp.(*LazyComponent); ok {
+			if val, err := lc.Get(); err == nil {
+				redisClient, _ = val.(*redis_service.RedisService)
+			}
+		}
+	}
+
 	// Создаем TelegramDeliveryPackage
-	dl.telegramPackage = telegram_package.NewTelegramDeliveryPackage(
-		telegram_package.TelegramDeliveryPackageDependencies{
-			Config:      dl.config,
-			CoreFactory: coreFactory,
-			Exchange:    "BYBIT",
-		},
-	)
+	deps := telegram_package.TelegramDeliveryPackageDependencies{
+		Config:      dl.config,
+		CoreFactory: coreFactory,
+		Exchange:    "BYBIT",
+	}
+	if redisClient != nil && redisClient.IsRunning() {
+		deps.RedisClient = redisClient.GetClient()
+		logger.Info("🔗 DeliveryLayer: Redis клиент передан в TelegramDeliveryPackage")
+	} else {
+		logger.Info("ℹ️  DeliveryLayer: Redis недоступен, очередь отключена")
+	}
+
+	dl.telegramPackage = telegram_package.NewTelegramDeliveryPackage(deps)
 
 	// Получаем EventBus из InfrastructureLayer
 	// Для этого нужно получить доступ к InfrastructureLayer через CoreLayer
