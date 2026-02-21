@@ -246,3 +246,6 @@ func (w *subscriptionWrapper) GetCommand() string {
 func (w *subscriptionWrapper) GetType() handlers.HandlerType {
 	return w.handler.GetType()
 }
+func (m *SubscriptionMiddleware) GetSubscriptionService() *subscription.Service {
+	return m.subscriptionService
+}

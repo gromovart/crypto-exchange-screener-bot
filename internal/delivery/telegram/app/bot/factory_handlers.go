@@ -74,9 +74,8 @@ func InitHandlerFactory(
 
 	// Регистрируем создателей КОМАНД (без подписки)
 	factory.RegisterHandlerCreator("start", func() handlers.Handler {
-		return start_command.NewHandler()
+		return start_command.NewHandler(subscriptionMiddleware)
 	})
-
 	factory.RegisterHandlerCreator("help", func() handlers.Handler {
 		return help_command.NewHandler()
 	})

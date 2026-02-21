@@ -2,6 +2,7 @@
 package start
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -16,22 +18,23 @@ import (
 // startHandlerImpl реализация StartHandler
 type startHandlerImpl struct {
 	*base.BaseHandler
+	subscriptionMiddleware *middlewares.SubscriptionMiddleware
 }
 
 // NewHandler создает новый хэндлер команды /start
-func NewHandler() handlers.Handler {
+func NewHandler(subscriptionMiddleware *middlewares.SubscriptionMiddleware) handlers.Handler {
 	return &startHandlerImpl{
 		BaseHandler: &base.BaseHandler{
 			Name:    "start_handler",
 			Command: "start",
 			Type:    handlers.TypeCommand,
 		},
+		subscriptionMiddleware: subscriptionMiddleware,
 	}
 }
 
 // Execute выполняет обработку команды /start
 func (h *startHandlerImpl) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	// Логируем полученную команду для отладки
 	logger.Debug("Обработка /start: текст='%s', data='%s'", params.Text, params.Data)
 
 	// Проверяем есть ли параметры после /start
@@ -57,20 +60,16 @@ func (h *startHandlerImpl) handleStartWithPayload(user *models.User, payload str
 	logger.Info("Обработка /start с payload: %s для пользователя %d", payload, user.ID)
 
 	// Проверяем формат платежного payload: pay_{user_id}_{plan_id}
-	// Более строгая проверка для предотвращения ложных успешных сообщений
 	if strings.HasPrefix(payload, "pay_") {
-		// ВСЕГДА обрабатываем как платежный payload, даже если формат не идеален
 		result, err := h.handlePaymentStart(user, payload)
 		if err != nil {
 			logger.Warn("Ошибка обработки платежного payload %s: %v", payload, err)
-			// В случае ошибки показываем сообщение об ошибке, НЕ стандартное приветствие
-			message := h.formatWelcomeMessage(user)
-			message += "\n\n⚠️ *Ошибка обработки платежной ссылки*\n"
+			message := "⚠️ *Ошибка обработки платежной ссылки*\n\n"
 			message += "Пожалуйста, используйте команду /buy для выбора плана оплаты."
 
 			return handlers.HandlerResult{
 				Message:  message,
-				Keyboard: h.createWelcomeKeyboard(),
+				Keyboard: h.createBuyKeyboard(),
 				Metadata: map[string]interface{}{
 					"user_id":   user.ID,
 					"payload":   payload,
@@ -82,17 +81,13 @@ func (h *startHandlerImpl) handleStartWithPayload(user *models.User, payload str
 		return result, nil
 	}
 
-	// Другие типы payload можно добавить здесь
-	// Например: ref_{referral_code}, promo_{promo_code} и т.д.
-
 	// Если payload не распознан, показываем стандартное приветствие с уведомлением
-	message := h.formatWelcomeMessage(user)
-	message += "\n\n⚠️ *Неизвестный параметр:* `" + payload + "`\n"
+	message := "⚠️ *Неизвестный параметр:* `" + payload + "`\n\n"
 	message += "Используйте команду /help для получения списка доступных команд."
 
 	return handlers.HandlerResult{
 		Message:  message,
-		Keyboard: h.createWelcomeKeyboard(),
+		Keyboard: h.createBuyKeyboard(),
 		Metadata: map[string]interface{}{
 			"user_id":   user.ID,
 			"payload":   payload,
@@ -108,21 +103,11 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 	// Извлекаем параметры: pay_{user_id}_{plan_id}
 	parts := strings.Split(payload, "_")
 	if len(parts) != 3 {
-		// Неверный формат - возвращаем сообщение об ошибке
 		logger.Warn("Неверный формат платежного payload: %s", payload)
 		return handlers.HandlerResult{
 			Message: "⚠️ *Неверный формат платежной ссылки*\n\n" +
 				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
-			Keyboard: map[string]interface{}{
-				"inline_keyboard": [][]map[string]string{
-					{
-						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
-					},
-					{
-						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-					},
-				},
-			},
+			Keyboard: h.createBuyKeyboard(),
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -141,16 +126,7 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 		return handlers.HandlerResult{
 			Message: "⚠️ *Ошибка в платежной ссылке*\n\n" +
 				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
-			Keyboard: map[string]interface{}{
-				"inline_keyboard": [][]map[string]string{
-					{
-						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
-					},
-					{
-						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-					},
-				},
-			},
+			Keyboard: h.createBuyKeyboard(),
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -164,16 +140,7 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 		return handlers.HandlerResult{
 			Message: "⚠️ *Ссылка предназначена для другого пользователя*\n\n" +
 				"Пожалуйста, используйте команду /buy для выбора плана оплаты.",
-			Keyboard: map[string]interface{}{
-				"inline_keyboard": [][]map[string]string{
-					{
-						{"text": "💳 Выбрать план", "callback_data": constants.PaymentConstants.CommandBuy},
-					},
-					{
-						{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-					},
-				},
-			},
+			Keyboard: h.createBuyKeyboard(),
 			Metadata: map[string]interface{}{
 				"user_id":   user.ID,
 				"payload":   payload,
@@ -184,13 +151,12 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 
 	logger.Info("Начало процесса оплаты: пользователь=%d, план=%s", user.ID, planID)
 
-	// Показываем ТОЛЬКО сообщение о начале оплаты
+	// Показываем сообщение о начале оплаты
 	message := "💳 *Начинаем процесс оплаты*\n\n"
 	message += fmt.Sprintf("План: *%s*\n", h.getPlanName(planID))
 	message += "Для продолжения оплаты используйте команду /buy\n\n"
 	message += "Или нажмите кнопку ниже:"
 
-	// Создаем клавиатуру с кнопкой для оплаты
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
@@ -208,7 +174,7 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 		Metadata: map[string]interface{}{
 			"user_id":         user.ID,
 			"plan_id":         planID,
-			"payment_status":  "pending", // Ожидание оплаты
+			"payment_status":  "pending",
 			"payment_started": true,
 			"timestamp":       time.Now(),
 		},
@@ -217,91 +183,70 @@ func (h *startHandlerImpl) handlePaymentStart(user *models.User, payload string)
 
 // handleStandardStart стандартное приветствие без параметров
 func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.HandlerResult, error) {
-	message := h.formatWelcomeMessage(user)
-	keyboard := h.createWelcomeKeyboard()
+	ctx := context.Background()
 
-	return handlers.HandlerResult{
-		Message:  message,
-		Keyboard: keyboard,
-		Metadata: map[string]interface{}{
-			"user_id":    user.ID,
-			"first_name": user.FirstName,
-			"timestamp":  time.Now(),
-		},
-	}, nil
-}
+	// Получаем активную подписку пользователя
+	subscription, err := h.subscriptionMiddleware.GetSubscriptionService().GetActiveSubscription(ctx, user.ID)
 
-// parseUserID парсит user_id из строки
-func (h *startHandlerImpl) parseUserID(userIDStr string) (int, error) {
-	// Пытаемся распарсить как число
-	var userID int
-	_, err := fmt.Sscanf(userIDStr, "%d", &userID)
-	if err != nil {
-		return 0, fmt.Errorf("не удалось распарсить user_id: %w", err)
-	}
-	return userID, nil
-}
+	var subscriptionStatus string
 
-// getPlanName возвращает читаемое название плана по ID
-func (h *startHandlerImpl) getPlanName(planID string) string {
-	plans := map[string]string{
-		"basic":      "📱 Доступ на 1 месяц",
-		"pro":        "🚀 Доступ на 3 месяца",
-		"enterprise": "🏢 Доступ на 12 месяцев",
-	}
-	if name, exists := plans[planID]; exists {
-		return name
-	}
-	return "Неизвестный план"
-}
+	if err == nil && subscription != nil {
+		// Есть активная подписка
+		if subscription.PlanCode == "free" {
+			// Бесплатный период - показываем таймер
+			remaining := subscription.CurrentPeriodEnd.Sub(time.Now())
+			hours := int(remaining.Hours())
+			minutes := int(remaining.Minutes()) % 60
 
-// formatWelcomeMessage форматирует приветственное сообщение
-func (h *startHandlerImpl) formatWelcomeMessage(user *models.User) string {
-	firstName := user.FirstName
-	if firstName == "" {
-		firstName = "Гость"
-	}
+			var timeLeft string
+			if hours > 0 {
+				timeLeft = fmt.Sprintf("%dч %dмин", hours, minutes)
+			} else {
+				timeLeft = fmt.Sprintf("%dмин", minutes)
+			}
 
-	username := user.Username
-	if username == "" {
-		username = "не указан"
-	} else {
-		username = "@" + username
-	}
-
-	// Рассчитываем время окончания бесплатного периода (24 часа с момента регистрации)
-	trialEndTime := user.CreatedAt.Add(24 * time.Hour)
-	now := time.Now()
-	var trialStatus string
-	var trialEndStr string
-
-	if now.Before(trialEndTime) {
-		// Бесплатный период еще активен
-		remaining := trialEndTime.Sub(now)
-		hours := int(remaining.Hours())
-		minutes := int(remaining.Minutes()) % 60
-
-		if hours > 0 {
-			trialEndStr = fmt.Sprintf("⏳ Осталось: %dч %dмин", hours, minutes)
+			subscriptionStatus = fmt.Sprintf(
+				"🎁 *Бесплатный период*\n"+
+					"   • Осталось: *%s*\n"+
+					"   • Действует до: *%s*",
+				timeLeft,
+				subscription.CurrentPeriodEnd.Format("02.01.2006 15:04"))
 		} else {
-			trialEndStr = fmt.Sprintf("⏳ Осталось: %dмин", minutes)
-		}
+			// Платная подписка - показываем дату окончания
+			// Определяем название плана
+			planName := subscription.PlanName
+			if planName == "" {
+				switch subscription.PlanCode {
+				case "basic":
+					planName = "📱 Доступ на 1 месяц"
+				case "pro":
+					planName = "🚀 Доступ на 3 месяца"
+				case "enterprise":
+					planName = "🏢 Доступ на 12 месяцев"
+				case "test":
+					planName = "🧪 Тестовый доступ"
+				default:
+					planName = subscription.PlanCode
+				}
+			}
 
-		trialStatus = fmt.Sprintf(
-			"🎁 *БЕСПЛАТНЫЙ ПЕРИОД АКТИВЕН*\n"+
-				"   • Доступ ко всем функциям бота\n"+
-				"   • %s\n", trialEndStr)
+			subscriptionStatus = fmt.Sprintf(
+				"✅ *Подписка активна*\n"+
+					"   • План: *%s*\n"+
+					"   • Действует до: *%s*",
+				planName,
+				subscription.CurrentPeriodEnd.Format("02.01.2006 15:04"))
+		}
 	} else {
-		// Бесплатный период закончился
-		trialStatus = "⏰ *БЕСПЛАТНЫЙ ПЕРИОД ЗАКОНЧИЛСЯ*\n" +
-			"   • Для продолжения использования необходима подписка\n" +
-			"   • Используйте команду /buy для выбора тарифа"
+		// Нет активной подписки
+		subscriptionStatus = "❌ *Нет активной подписки*\n" +
+			"   • Используйте /buy для покупки"
 	}
 
-	return fmt.Sprintf(
+	message := fmt.Sprintf(
 		"👋 *Добро пожаловать, %s!*\n"+
 			"🚀 *Crypto Exchange Screener Bot*\n\n"+
-			"✅ %s  •  👤 %s  •  📅 %s\n"+
+			"✅ @%s  •  👤 %s  •  📅 %s\n"+
 			"⭐ Роль: %s\n\n"+
 			"━━━ 🎁 ПОДПИСКА ━━━\n"+
 			"%s\n"+
@@ -320,13 +265,39 @@ func (h *startHandlerImpl) formatWelcomeMessage(user *models.User) string {
 			"▫️ *Временной лаг* — пока вы анализируете сигнал, цена может существенно измениться\n\n"+
 			"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"+
 			"Используйте меню ниже для управления ботом:",
-		firstName,
-		username,
-		firstName,
+		user.FirstName,
+		user.Username,
+		user.FirstName,
 		user.CreatedAt.Format("02.01.2006"),
 		h.GetRoleDisplay(user.Role),
-		trialStatus,
+		subscriptionStatus,
 	)
+
+	keyboard := h.createWelcomeKeyboard()
+
+	return handlers.HandlerResult{
+		Message:  message,
+		Keyboard: keyboard,
+		Metadata: map[string]interface{}{
+			"user_id":    user.ID,
+			"first_name": user.FirstName,
+			"timestamp":  time.Now(),
+		},
+	}, nil
+}
+
+// createBuyKeyboard создает клавиатуру для покупки подписки
+func (h *startHandlerImpl) createBuyKeyboard() interface{} {
+	return map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{
+				{"text": "💎 Купить подписку", "callback_data": constants.PaymentConstants.CommandBuy},
+			},
+			{
+				{"text": constants.ButtonTexts.Help, "callback_data": constants.CallbackHelp},
+			},
+		},
+	}
 }
 
 // createWelcomeKeyboard создает клавиатуру для приветствия
@@ -343,4 +314,28 @@ func (h *startHandlerImpl) createWelcomeKeyboard() interface{} {
 			},
 		},
 	}
+}
+
+// parseUserID парсит user_id из строки
+func (h *startHandlerImpl) parseUserID(userIDStr string) (int, error) {
+	var userID int
+	_, err := fmt.Sscanf(userIDStr, "%d", &userID)
+	if err != nil {
+		return 0, fmt.Errorf("не удалось распарсить user_id: %w", err)
+	}
+	return userID, nil
+}
+
+// getPlanName возвращает читаемое название плана по ID
+func (h *startHandlerImpl) getPlanName(planID string) string {
+	plans := map[string]string{
+		"basic":      "📱 Доступ на 1 месяц",
+		"pro":        "🚀 Доступ на 3 месяца",
+		"enterprise": "🏢 Доступ на 12 месяцев",
+		"test":       "🧪 Тестовый доступ",
+	}
+	if name, exists := plans[planID]; exists {
+		return name
+	}
+	return "Неизвестный план"
 }

@@ -37,6 +37,7 @@ type UserRepository interface {
 	UpdateStatus(userID int, isActive bool) error                   // Обновить статус пользователя
 	UpdateRole(userID int, role string) error                       // Обновить роль пользователя
 	ResetDailySignals(ctx context.Context) error                    // Alias для ResetDailyCounters
+	GetUserRole(ctx context.Context, userID int) (string, error)
 }
 
 // UserRepositoryImpl реализация репозитория пользователей
@@ -752,4 +753,12 @@ func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int
 	}
 
 	return &user, nil
+}
+func (r *UserRepositoryImpl) GetUserRole(ctx context.Context, userID int) (string, error) {
+	var role string
+	err := r.db.QueryRowContext(ctx, "SELECT role FROM users WHERE id = $1", userID).Scan(&role)
+	if err != nil {
+		return "", fmt.Errorf("ошибка получения роли пользователя %d: %w", userID, err)
+	}
+	return role, nil
 }
