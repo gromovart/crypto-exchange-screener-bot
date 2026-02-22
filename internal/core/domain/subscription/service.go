@@ -44,6 +44,7 @@ type Service struct {
 	mu          sync.RWMutex
 	analytics   AnalyticsService
 	config      Config
+	paymentRepo PaymentRepository // для валидатора подписок
 }
 
 // NewService создает новый сервис подписок

@@ -4,6 +4,7 @@ package bootstrap
 // Импорты для вспомогательных функций
 import (
 	layer_manager "crypto-exchange-screener-bot/application/layer_manager"
+	"crypto-exchange-screener-bot/application/scheduler"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ type Application struct {
 	// Компоненты
 	config       *config.Config
 	layerManager *layer_manager.LayerManager
+	scheduler    *scheduler.Scheduler
 
 	// Состояние
 	running   bool

@@ -82,7 +82,7 @@ func (h *profileCommandHandler) formatProfileMessage(user *models.User) string {
 			"📅 Регистрация: %s\n"+
 			"🔐 Последний вход: %s\n\n"+
 			"%s\n"+
-			"📈 Сигналов сегодня: %d/%d\n"+
+			"📈 Сигналов сегодня: %d\n"+
 			"🎯 Мин. рост: %.2f%%\n"+
 			"📉 Мин. падение: %.2f%%\n",
 		constants.AuthButtonTexts.Profile,
@@ -97,7 +97,6 @@ func (h *profileCommandHandler) formatProfileMessage(user *models.User) string {
 		lastLoginDisplay,
 		constants.AuthButtonTexts.Stats,
 		user.SignalsToday,
-		user.MaxSignalsPerDay,
 		user.MinGrowthThreshold,
 		user.MinFallThreshold,
 	)
