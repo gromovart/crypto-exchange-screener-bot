@@ -121,12 +121,11 @@ func NewCoreServiceFactory(deps CoreServiceDependencies) (*CoreServiceFactory, e
 
 	// Создаем фабрику SubscriptionService с PaymentRepository
 	subscriptionDeps := subscription.Dependencies{
-		Config:            deps.Config.SubscriptionConfig,
-		PlanRepo:          planRepo,
-		Cache:             redisService.GetCache(),
-		Analytics:         deps.Analytics,
-		PaymentRepo:       paymentRepo,     // ⭐ Передаем PaymentRepository
-		ValidatorInterval: 1 * time.Minute, // Интервал для валидатора
+		Config:      deps.Config.SubscriptionConfig,
+		PlanRepo:    planRepo,
+		Cache:       redisService.GetCache(),
+		Analytics:   deps.Analytics,
+		PaymentRepo: paymentRepo,
 	}
 
 	subscriptionFactory, err := subscription.NewSubscriptionServiceFactory(subscriptionDeps)

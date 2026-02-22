@@ -108,7 +108,6 @@ func (h *profileMainHandler) formatProfileMessage(data interface{}) string {
 
 	subscriptionActive := getBool(subData, "is_active")
 	signalsToday := getInt(userData, "signals_today")
-	maxSignals := getInt(userData, "max_signals_per_day")
 	growthMin := getFloat64(userData, "min_growth_threshold")
 	fallMin := getFloat64(userData, "min_fall_threshold")
 
@@ -172,7 +171,7 @@ func (h *profileMainHandler) formatProfileMessage(data interface{}) string {
 			"   Статус: %s\n"+
 			"   Действует до: %s\n\n"+
 			"📊 *Статистика*\n"+
-			"   📈 Сигналов сегодня: %d/%d\n"+
+			"   📈 Сигналов сегодня: %d\n"+
 			"   🎯 Мин. рост: %.2f%%\n"+
 			"   📉 Мин. падение: %.2f%%\n\n"+
 			"📅 Регистрация: %s\n"+
@@ -188,7 +187,6 @@ func (h *profileMainHandler) formatProfileMessage(data interface{}) string {
 		subscriptionStatus,
 		expiresAtDisplay,
 		signalsToday,
-		maxSignals,
 		growthMin,
 		fallMin,
 		createdAt.Format("02.01.2006"),

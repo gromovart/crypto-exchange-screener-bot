@@ -2,6 +2,8 @@
 package bootstrap
 
 import (
+	"crypto-exchange-screener-bot/application/layer_manager/layers"
+	"crypto-exchange-screener-bot/application/scheduler"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"errors"
@@ -63,7 +65,12 @@ func (app *Application) shutdown() error {
 
 	app.logger.Println("🛑 Останавливаем приложение...")
 
-	// 1. Останавливаем LayerManager
+	// 1. Останавливаем Scheduler
+	if app.scheduler != nil {
+		app.scheduler.Stop()
+	}
+
+	// 2. Останавливаем LayerManager
 	if app.layerManager != nil {
 		if err := app.layerManager.Stop(); err != nil {
 			app.logger.Printf("⚠️  Ошибка остановки LayerManager: %v", err)
@@ -109,6 +116,12 @@ func (app *Application) Run() error {
 	if err := app.layerManager.Start(); err != nil {
 		app.logger.Printf("❌ Ошибка запуска LayerManager: %v", err)
 		return fmt.Errorf("запуск LayerManager: %w", err)
+	}
+
+	// Запускаем Scheduler
+	if err := app.startScheduler(); err != nil {
+		app.logger.Printf("⚠️  Ошибка запуска Scheduler: %v", err)
+		// Не фатально — продолжаем работу без планировщика
 	}
 
 	app.logger.Println("✅ Приложение запущено и работает")
@@ -302,6 +315,58 @@ func WithTelegramBot(enabled bool, chatID string) AppOption {
 		}
 		return nil
 	}
+}
+
+// startScheduler инициализирует и запускает планировщик задач.
+// Получает *sqlx.DB из InfrastructureFactory, регистрирует все задачи и стартует.
+func (app *Application) startScheduler() error {
+	// Получаем InfrastructureLayer через LayerRegistry
+	layerRaw, ok := app.layerManager.GetLayerRegistry().Get("InfrastructureLayer")
+	if !ok {
+		return fmt.Errorf("InfrastructureLayer не найден в LayerRegistry")
+	}
+
+	infraLayer, ok := layerRaw.(*layers.InfrastructureLayer)
+	if !ok {
+		return fmt.Errorf("InfrastructureLayer имеет неожиданный тип")
+	}
+
+	factory := infraLayer.GetInfrastructureFactory()
+	if factory == nil {
+		return fmt.Errorf("InfrastructureFactory не инициализирована")
+	}
+
+	dbSvc, err := factory.CreateDatabaseService()
+	if err != nil {
+		return fmt.Errorf("получение DatabaseService: %w", err)
+	}
+
+	db := dbSvc.GetDB()
+	if db == nil {
+		return fmt.Errorf("GetDB вернул nil")
+	}
+
+	deps := scheduler.Deps{DB: db}
+
+	// Подключаем SubscriptionService если доступен
+	coreLayerRaw, ok := app.layerManager.GetLayerRegistry().Get("CoreLayer")
+	if ok {
+		if coreLayer, ok := coreLayerRaw.(*layers.CoreLayer); ok {
+			if svc, err := coreLayer.GetSubscriptionService(); err == nil {
+				if sv, ok := svc.(scheduler.SubscriptionValidator); ok {
+					deps.SubscriptionService = sv
+					logger.Info("✅ [Scheduler] SubscriptionService подключен к планировщику")
+				}
+			}
+		}
+	}
+
+	sched := scheduler.New()
+	scheduler.RegisterAll(sched, deps)
+	sched.Start()
+
+	app.scheduler = sched
+	return nil
 }
 
 // WithTelegramBotToken устанавливает токен Telegram бота

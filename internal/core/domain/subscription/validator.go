@@ -35,21 +35,20 @@ type ValidationStats struct {
 	Errors          int
 }
 
-// StartSubscriptionValidator запускает валидатор подписок
-func (s *Service) StartSubscriptionValidator(interval time.Duration, paymentRepo PaymentRepository) {
-	logger.Info("🚀 [VALIDATOR] Запуск валидатора подписок с интервалом %v", interval)
+// SetPaymentRepo сохраняет репозиторий платежей для валидатора.
+// Вызывается из фабрики после создания сервиса.
+func (s *Service) SetPaymentRepo(paymentRepo PaymentRepository) {
+	s.paymentRepo = paymentRepo
+}
 
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-
-		// Сразу выполняем первую проверку
-		s.runValidation(paymentRepo)
-
-		for range ticker.C {
-			s.runValidation(paymentRepo)
-		}
-	}()
+// RunValidation запускает одну итерацию валидации подписок.
+// Вызывается планировщиком задач (scheduler).
+func (s *Service) RunValidation(ctx context.Context) error {
+	if s.paymentRepo == nil {
+		return nil // PaymentRepo не настроен — пропускаем
+	}
+	s.runValidation(s.paymentRepo)
+	return nil
 }
 
 // runValidation выполняет одну проверку

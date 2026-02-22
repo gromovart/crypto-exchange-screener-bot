@@ -6,31 +6,28 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/plan"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
 // SubscriptionServiceFactory фабрика для создания SubscriptionService
 type SubscriptionServiceFactory struct {
-	planRepo          plan.PlanRepository
-	cache             *redis.Cache
-	analytics         AnalyticsService
-	paymentRepo       PaymentRepository // ⭐ Добавляем репозиторий платежей
-	config            Config
-	database          *sqlx.DB
-	redis             interface{}   // Для совместимости
-	validatorInterval time.Duration // Интервал для валидатора
+	planRepo    plan.PlanRepository
+	cache       *redis.Cache
+	analytics   AnalyticsService
+	paymentRepo PaymentRepository
+	config      Config
+	database    *sqlx.DB
+	redis       interface{} // для совместимости
 }
 
-// SubscriptionServiceDependencies зависимости для фабрики SubscriptionService
+// Dependencies зависимости для фабрики SubscriptionService
 type Dependencies struct {
-	PlanRepo          plan.PlanRepository
-	Cache             *redis.Cache
-	Analytics         AnalyticsService
-	PaymentRepo       PaymentRepository // ⭐ Добавляем
-	Config            Config
-	ValidatorInterval time.Duration // Интервал для валидатора (по умолчанию 10 мин)
+	PlanRepo    plan.PlanRepository
+	Cache       *redis.Cache
+	Analytics   AnalyticsService
+	PaymentRepo PaymentRepository
+	Config      Config
 }
 
 // NewSubscriptionServiceFactory создает фабрику SubscriptionService
@@ -44,19 +41,12 @@ func NewSubscriptionServiceFactory(deps Dependencies) (*SubscriptionServiceFacto
 		return nil, fmt.Errorf("Cache не может быть nil")
 	}
 
-	// Устанавливаем интервал по умолчанию
-	validatorInterval := deps.ValidatorInterval
-	if validatorInterval == 0 {
-		validatorInterval = 10 * time.Minute
-	}
-
 	factory := &SubscriptionServiceFactory{
-		planRepo:          deps.PlanRepo,
-		cache:             deps.Cache,
-		analytics:         deps.Analytics,
-		paymentRepo:       deps.PaymentRepo, // ⭐ Сохраняем
-		config:            deps.Config,
-		validatorInterval: validatorInterval,
+		planRepo:    deps.PlanRepo,
+		cache:       deps.Cache,
+		analytics:   deps.Analytics,
+		paymentRepo: deps.PaymentRepo,
+		config:      deps.Config,
 	}
 
 	logger.Info("✅ Фабрика SubscriptionService создана")
@@ -83,12 +73,12 @@ func (f *SubscriptionServiceFactory) CreateSubscriptionService(db *sqlx.DB) (*Se
 		return nil, fmt.Errorf("не удалось создать SubscriptionService: %w", err)
 	}
 
-	// ⭐ Если есть репозиторий платежей, запускаем валидатор
+	// Передаём репозиторий платежей в сервис — планировщик вызовет RunValidation по расписанию
 	if f.paymentRepo != nil {
-		logger.Info("🔄 Запуск валидатора подписок с интервалом %v", f.validatorInterval)
-		service.StartSubscriptionValidator(f.validatorInterval, f.paymentRepo)
+		service.SetPaymentRepo(f.paymentRepo)
+		logger.Info("✅ PaymentRepository передан в SubscriptionService для планировщика")
 	} else {
-		logger.Warn("⚠️ PaymentRepository не предоставлен, валидатор подписок не запущен")
+		logger.Warn("⚠️ PaymentRepository не предоставлен, валидация подписок отключена")
 	}
 
 	logger.Info("✅ SubscriptionService успешно создан через фабрику")
@@ -131,12 +121,6 @@ func (f *SubscriptionServiceFactory) SetPaymentRepository(paymentRepo PaymentRep
 	logger.Debug("✅ Установлен PaymentRepository для фабрики SubscriptionService")
 }
 
-// SetValidatorInterval устанавливает интервал валидатора
-func (f *SubscriptionServiceFactory) SetValidatorInterval(interval time.Duration) {
-	f.validatorInterval = interval
-	logger.Debug("✅ Установлен интервал валидатора: %v", interval)
-}
-
 // UpdateConfig обновляет конфигурацию
 func (f *SubscriptionServiceFactory) UpdateConfig(config Config) {
 	f.config = config
@@ -165,8 +149,7 @@ func (f *SubscriptionServiceFactory) GetDependenciesInfo() map[string]interface{
 		"payment_repo_set":   f.paymentRepo != nil,
 		"database_set":       f.database != nil,
 		"redis_set":          f.redis != nil,
-		"validator_interval": f.validatorInterval.String(),
-		"config":             f.config,
+		"config": f.config,
 	}
 	return info
 }
