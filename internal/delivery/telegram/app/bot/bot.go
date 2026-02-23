@@ -16,6 +16,7 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -110,6 +111,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 
 	notificationsToggleService := notifications_toggle.NewService(userService)
 	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
+	tradingSessionService := trading_session.NewService(userService, ms)
 
 	// Получаем PaymentService из ServiceFactory
 	var paymentService payment_service.Service
@@ -127,6 +129,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		paymentService:             paymentService,
 		profileService:             profileSvc,
 		starsClient:                starsClient,
+		tradingSessionService:      tradingSessionService,
 	}
 
 	// Инициализируем фабрику с сервисами
