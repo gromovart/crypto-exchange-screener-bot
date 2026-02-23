@@ -81,6 +81,9 @@ const (
 	CallbackSignalHistory            = "signal_history"              // 📊 История сигналов
 	CallbackSignalTest               = "signal_test"                 // ⚡ Тестовый сигнал
 
+	// ============== SESSION ==============
+	CallbackSessionDuration = "session_duration:" // session_duration:{2h|4h|8h|day}
+
 	// ============== TEST & DEBUG ==============
 	CallbackTest           = "test"             // 🧪 Тестовое сообщение
 	CallbackTestOK         = "test_ok"          // ✅ Тест OK

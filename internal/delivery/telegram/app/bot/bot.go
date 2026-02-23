@@ -16,9 +16,11 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -110,6 +112,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 
 	notificationsToggleService := notifications_toggle.NewService(userService)
 	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
+	tradingSessionService := trading_session.NewService(userService, ms)
 
 	// Получаем PaymentService из ServiceFactory
 	var paymentService payment_service.Service
@@ -127,6 +130,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		paymentService:             paymentService,
 		profileService:             profileSvc,
 		starsClient:                starsClient,
+		tradingSessionService:      tradingSessionService,
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -327,7 +331,8 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 
 	result, err := b.router.Handle(command, convertToRouterParams(handlerParams))
 	if err != nil {
-		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+err.Error(), nil)
+		errText := strings.ReplaceAll(err.Error(), "_", "\\_")
+		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+errText, nil)
 	}
 
 	return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)

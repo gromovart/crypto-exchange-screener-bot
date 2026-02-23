@@ -23,6 +23,9 @@ import (
 	profile_subscription_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/profile_subscription"
 	reset_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_menu"
 	reset_settings_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/reset_settings"
+	session_duration_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/session_duration"
+	session_start_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/session_start"
+	session_stop_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/session_stop"
 	settings_main "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/settings_main"
 	signal_set_fall_threshold_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_set_fall_threshold"
 	signal_set_growth_threshold_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/signal_set_growth_threshold"
@@ -51,6 +54,7 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -59,7 +63,8 @@ type Services struct {
 	paymentService             payment_service.Service
 	notificationsToggleService notifications_toggle_service.Service
 	signalSettingsService      signal_settings_service.Service
-	profileService             profile_service.Service // ⭐ ДОБАВЛЕНО
+	profileService             profile_service.Service
+	tradingSessionService      trading_session_service.Service
 	starsClient                *telegram_http.StarsClient
 }
 
@@ -74,7 +79,7 @@ func InitHandlerFactory(
 
 	// Регистрируем создателей КОМАНД (без подписки)
 	factory.RegisterHandlerCreator("start", func() handlers.Handler {
-		return start_command.NewHandler(subscriptionMiddleware)
+		return start_command.NewHandler(subscriptionMiddleware, services.tradingSessionService)
 	})
 	factory.RegisterHandlerCreator("help", func() handlers.Handler {
 		return help_command.NewHandler()
@@ -364,6 +369,25 @@ func InitHandlerFactory(
 		logger.Info("✅ Платежные обработчики событий зарегистрированы")
 	} else {
 		logger.Warn("⚠️ PaymentService не предоставлен, платежные события не будут обрабатываться")
+	}
+
+	// ТОРГОВЫЕ СЕССИИ (без подписки — доступны всем авторизованным)
+	if services.tradingSessionService != nil {
+		factory.RegisterHandlerCreator("session_start", func() handlers.Handler {
+			return session_start_handler.NewHandler(services.tradingSessionService)
+		})
+
+		factory.RegisterHandlerCreator("session_stop", func() handlers.Handler {
+			return session_stop_handler.NewHandler(services.tradingSessionService)
+		})
+
+		factory.RegisterHandlerCreator(constants.CallbackSessionDuration, func() handlers.Handler {
+			return session_duration_handler.NewHandler(services.tradingSessionService)
+		})
+
+		logger.Info("✅ Обработчики торговых сессий зарегистрированы")
+	} else {
+		logger.Warn("⚠️ TradingSessionService не предоставлен, торговые сессии недоступны")
 	}
 
 	logger.Info("✅ Инициализация создателей хэндлеров завершена")

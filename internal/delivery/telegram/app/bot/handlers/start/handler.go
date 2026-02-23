@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/middlewares"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -19,10 +21,11 @@ import (
 type startHandlerImpl struct {
 	*base.BaseHandler
 	subscriptionMiddleware *middlewares.SubscriptionMiddleware
+	tradingSessionService  trading_session.Service
 }
 
 // NewHandler создает новый хэндлер команды /start
-func NewHandler(subscriptionMiddleware *middlewares.SubscriptionMiddleware) handlers.Handler {
+func NewHandler(subscriptionMiddleware *middlewares.SubscriptionMiddleware, tradingSessionSvc trading_session.Service) handlers.Handler {
 	return &startHandlerImpl{
 		BaseHandler: &base.BaseHandler{
 			Name:    "start_handler",
@@ -30,6 +33,7 @@ func NewHandler(subscriptionMiddleware *middlewares.SubscriptionMiddleware) hand
 			Type:    handlers.TypeCommand,
 		},
 		subscriptionMiddleware: subscriptionMiddleware,
+		tradingSessionService:  tradingSessionSvc,
 	}
 }
 
@@ -273,7 +277,7 @@ func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.Hand
 		subscriptionStatus,
 	)
 
-	keyboard := h.createWelcomeKeyboard()
+	keyboard := h.createSessionReplyKeyboard(user.ID)
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -300,19 +304,24 @@ func (h *startHandlerImpl) createBuyKeyboard() interface{} {
 	}
 }
 
-// createWelcomeKeyboard создает клавиатуру для приветствия
-func (h *startHandlerImpl) createWelcomeKeyboard() interface{} {
-	return map[string]interface{}{
-		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.MenuButtonTexts.Profile, "callback_data": constants.CallbackProfileMain},
-				{"text": constants.ButtonTexts.Settings, "callback_data": constants.CallbackSettingsMain},
-			},
-			{
-				{"text": constants.MenuButtonTexts.Notifications, "callback_data": constants.CallbackNotificationsMenu},
-				{"text": constants.ButtonTexts.Help, "callback_data": constants.CallbackHelp},
-			},
+// createSessionReplyKeyboard создает reply keyboard с кнопкой сессии
+func (h *startHandlerImpl) createSessionReplyKeyboard(userID int) interface{} {
+	buttonText := constants.SessionButtonTexts.Start
+	if h.tradingSessionService != nil {
+		if session, ok := h.tradingSessionService.GetActive(userID); ok {
+			buttonText = fmt.Sprintf("%s (%s)",
+				constants.SessionButtonTexts.Stop,
+				trading_session.FormatRemaining(session.ExpiresAt),
+			)
+		}
+	}
+
+	return telegram.ReplyKeyboardMarkup{
+		Keyboard: [][]telegram.ReplyKeyboardButton{
+			{{Text: buttonText}},
 		},
+		ResizeKeyboard: true,
+		IsPersistent:   true,
 	}
 }
 

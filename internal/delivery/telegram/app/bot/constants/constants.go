@@ -240,6 +240,23 @@ var SymbolButtonTexts = struct {
 	Back:    "🔙 Назад к сбросу",
 }
 
+// SessionButtonTexts содержит тексты кнопок торговой сессии
+var SessionButtonTexts = struct {
+	Start       string
+	Stop        string
+	Duration2h  string
+	Duration4h  string
+	Duration8h  string
+	DurationDay string
+}{
+	Start:       "🟢 Начать торговую сессию",
+	Stop:        "🔴 Завершить торговую сессию",
+	Duration2h:  "⏱ 2 часа",
+	Duration4h:  "⏱ 4 часа",
+	Duration8h:  "⏱ 8 часов",
+	DurationDay: "🕐 Весь день",
+}
+
 // TestButtonTexts содержит тексты для тестовых кнопок
 var TestButtonTexts = struct {
 	Test       string

@@ -102,8 +102,6 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 	if strings.HasPrefix(command, "pre_checkout_query") {
 		logger.Debug("💰 Обнаружен pre_checkout_query: %s", command)
 		if handler, exists := r.handlers["pre_checkout_query"]; exists {
-			// ⚠️ ВАЖНО: params.Data уже содержит полную строку с параметрами
-			// Не нужно ничего менять, просто вызываем хэндлер
 			logger.Debug("💰 Вызов хэндлера pre_checkout_query с data='%s'", params.Data)
 			return r.executeHandler(handler, command, params)
 		}
@@ -113,24 +111,32 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 	if strings.HasPrefix(command, "successful_payment") {
 		logger.Debug("💰 Обнаружен successful_payment: %s", command)
 		if handler, exists := r.handlers["successful_payment"]; exists {
-			// ⚠️ ВАЖНО: params.Data уже содержит полную строку с параметрами
 			logger.Debug("💰 Вызов хэндлера successful_payment с data='%s'", params.Data)
 			return r.executeHandler(handler, command, params)
 		}
 	}
 
+	// ⭐ НОВОЕ: Поиск по паттернам с *
+	for key, handler := range r.handlers {
+		// Если ключ заканчивается на *, проверяем что команда начинается с префикса
+		if strings.HasSuffix(key, "*") {
+			prefix := strings.TrimSuffix(key, "*")
+			if strings.HasPrefix(command, prefix) {
+				logger.Debug("✅ Найдено совпадение по паттерну: '%s' соответствует '%s'", command, key)
+				return r.executeHandler(handler, command, params)
+			}
+		}
+	}
+
 	// Если команда начинается с / и содержит пробел (параметры)
 	if strings.HasPrefix(command, "/") && strings.Contains(command, " ") {
-		// Разделяем команду и параметры
 		parts := strings.SplitN(command, " ", 2)
 		baseCommand := parts[0]
 		payload := parts[1]
 
-		// Пробуем найти обработчик для базовой команды
 		if handler, exists := r.handlers[baseCommand]; exists {
-			// Передаем полный текст в params для обработки параметров
 			params.Text = command
-			params.Data = payload // Дополнительно сохраняем payload в Data
+			params.Data = payload
 			logger.Debug("Обработка команды с параметрами: %s → %s (payload: %s)",
 				command, baseCommand, payload)
 			return r.executeHandler(handler, command, params)
@@ -146,46 +152,31 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 
 	// Проверяем, является ли command параметризованным callback (содержит :)
 	if strings.Contains(command, ":") {
-		// Определяем префикс (часть до :)
 		prefix := strings.Split(command, ":")[0]
-
 		logger.Debug("🔄 Обработка параметризованного callback: '%s', префикс: '%s'", command, prefix)
 
-		// Проверяем специальные платежные префиксы
 		if prefix == "payment_plan" || prefix == "payment_confirm" {
 			paymentKey := prefix + ":"
 			logger.Debug("💰 Проверка платежного обработчика для ключа: '%s'", paymentKey)
 
-			// Пробуем найти обработчик по префиксу
 			if handler, exists := r.handlers[paymentKey]; exists {
 				params.Data = command
 				logger.Debug("✅ Перенаправление платежного callback '%s' в %s", command, paymentKey)
 				return r.executeHandler(handler, command, params)
 			} else {
 				logger.Debug("❌ Платежный обработчик не найден для ключа: '%s'", paymentKey)
-				// Выводим все зарегистрированные обработчики для отладки
 				r.debugRegisteredHandlers()
 			}
 		}
-
-		// Перенаправляем в универсальный обработчик with_params
-		if handler, exists := r.handlers["with_params"]; exists {
-			// Сохраняем полный callback data для обработки
-			params.Data = command
-			logger.Debug("🔄 Перенаправление параметризованного callback '%s' в with_params", command)
-			return r.executeHandler(handler, command, params)
-		}
 	}
 
-	// Проверяем префиксы для периодов (period_5m, period_15m и т.д.)
+	// Проверяем префиксы для периодов
 	if strings.HasPrefix(command, "period_") {
-		// Пробуем найти обработчик period_select
 		if handler, exists := r.handlers["period_select"]; exists {
 			params.Data = command
 			logger.Debug("🔄 Перенаправление периода '%s' в period_select", command)
 			return r.executeHandler(handler, command, params)
 		}
-		// Или пробуем найти обработчик с префиксом period_
 		for key, h := range r.handlers {
 			if strings.HasPrefix(key, "period_") && strings.HasPrefix(command, key) {
 				params.Data = command
@@ -195,20 +186,26 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 		}
 	}
 
-	// Пробуем найти обработчик по префиксу (для callback-ов с параметрами)
+	// Пробуем найти обработчик по префиксу
 	for key, h := range r.handlers {
 		if strings.HasPrefix(command, key+":") {
-			// Обновляем data в params для передачи параметров
 			params.Data = command
 			logger.Debug("🔄 Перенаправление по префиксу '%s' в %s", command, key)
 			return r.executeHandler(h, command, params)
 		}
-
-		// Проверяем специальные случаи с префиксами в конце (payment_plan:)
 		if strings.HasSuffix(key, ":") && strings.HasPrefix(command, key) {
 			params.Data = command
 			logger.Debug("🔄 Перенаправление по префиксу с двоеточием '%s' в %s", command, key)
 			return r.executeHandler(h, command, params)
+		}
+	}
+
+	// Перенаправляем в with_params
+	if strings.Contains(command, ":") {
+		if handler, exists := r.handlers["with_params"]; exists {
+			params.Data = command
+			logger.Debug("🔄 Перенаправление параметризованного callback '%s' в with_params", command)
+			return r.executeHandler(handler, command, params)
 		}
 	}
 
@@ -225,7 +222,6 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 	}
 
 	logger.Error("❌ Хэндлер для '%s' не найден", command)
-	// Выводим все зарегистрированные обработчики для отладки
 	r.debugRegisteredHandlers()
 
 	return HandlerResult{},
