@@ -15,6 +15,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	activity_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/activity"
 	session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
+	trading_session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/trading_session"
 	users_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
 	"crypto-exchange-screener-bot/pkg/logger"
 
@@ -41,15 +42,16 @@ type NotificationService interface {
 
 // Service сервис управления пользователями
 type Service struct {
-	repo         users_repo.UserRepository
-	sessionRepo  session_repo.SessionRepository
-	activityRepo activity_repo.ActivityRepository
-	cache        *redis.Cache
-	cachePrefix  string
-	cacheTTL     time.Duration
-	mu           sync.RWMutex
-	notifier     NotificationService
-	config       Config
+	repo               users_repo.UserRepository
+	sessionRepo        session_repo.SessionRepository
+	activityRepo       activity_repo.ActivityRepository
+	tradingSessionRepo trading_session_repo.TradingSessionRepository
+	cache              *redis.Cache
+	cachePrefix        string
+	cacheTTL           time.Duration
+	mu                 sync.RWMutex
+	notifier           NotificationService
+	config             Config
 }
 
 // NewService создает новый сервис пользователей
@@ -63,15 +65,17 @@ func NewService(
 	userRepo := users_repo.NewUserRepository(db, cache)
 	sessionRepo := session_repo.NewSessionRepository(db, cache)
 	activityRepo := activity_repo.NewActivityRepository(db, cache)
+	tradingSessionRepo := trading_session_repo.NewTradingSessionRepository(db)
 
 	service := &Service{
-		repo:         userRepo,
-		sessionRepo:  sessionRepo,
-		activityRepo: activityRepo,
-		cache:        cache,
-		cachePrefix:  "users:",
-		cacheTTL:     30 * time.Minute,
-		notifier:     notifier,
+		repo:               userRepo,
+		sessionRepo:        sessionRepo,
+		activityRepo:       activityRepo,
+		tradingSessionRepo: tradingSessionRepo,
+		cache:              cache,
+		cachePrefix:        "users:",
+		cacheTTL:           30 * time.Minute,
+		notifier:           notifier,
 		config: Config{
 			UserDefaults: struct {
 				MinGrowthThreshold float64
@@ -79,10 +83,10 @@ func NewService(
 				Language           string
 				Timezone           string
 			}{
-				MinGrowthThreshold: cfg.UserDefaults.MinGrowthThreshold, // ⭐ используем параметр cfg
-				MinFallThreshold:   cfg.UserDefaults.MinFallThreshold,   // ⭐ используем параметр cfg
-				Language:           cfg.UserDefaults.Language,           // ⭐ используем параметр cfg
-				Timezone:           cfg.UserDefaults.Timezone,           // ⭐ используем параметр cfg
+				MinGrowthThreshold: cfg.UserDefaults.MinGrowthThreshold,
+				MinFallThreshold:   cfg.UserDefaults.MinFallThreshold,
+				Language:           cfg.UserDefaults.Language,
+				Timezone:           cfg.UserDefaults.Timezone,
 			},
 			DefaultMaxSignalsPerDay: 50,
 			SessionTTL:              24 * time.Hour,
@@ -888,4 +892,19 @@ func (s *Service) logSessionActivity(session *models.Session, activityType, desc
 func generateUUID() string {
 	// Временная реализация, в production использовать github.com/google/uuid
 	return fmt.Sprintf("session_%d", time.Now().UnixNano())
+}
+
+// SaveTradingSession сохраняет торговую сессию
+func (s *Service) SaveTradingSession(session *models.TradingSession) error {
+	return s.tradingSessionRepo.Save(session)
+}
+
+// DeactivateTradingSession деактивирует торговую сессию
+func (s *Service) DeactivateTradingSession(userID int) error {
+	return s.tradingSessionRepo.Deactivate(userID)
+}
+
+// FindAllActiveTradingSessions возвращает все активные сессии
+func (s *Service) FindAllActiveTradingSessions() ([]*models.TradingSession, error) {
+	return s.tradingSessionRepo.FindAllActive()
 }

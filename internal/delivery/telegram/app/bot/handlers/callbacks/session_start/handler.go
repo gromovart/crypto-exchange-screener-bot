@@ -1,4 +1,4 @@
-// internal/delivery/telegram/app/bot/handlers/session_start/handler.go
+// internal/delivery/telegram/app/bot/handlers/callbacks/session_start/handler.go
 package session_start
 
 import (

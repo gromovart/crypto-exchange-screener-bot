@@ -11,6 +11,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/plan"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/session"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
+	trading_session_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/users"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -19,19 +20,20 @@ import (
 
 // RepositoryFactory фабрика для создания репозиториев PostgreSQL
 type RepositoryFactory struct {
-	db                     *database.DatabaseService
-	cache                  *redis.Cache
-	encryptionKey          string
-	userRepository         users.UserRepository
-	activityRepository     activity.ActivityRepository
-	apiKeyRepository       api_key.APIKeyRepository
-	sessionRepository      session.SessionRepository
-	subscriptionRepository subscription.SubscriptionRepository
-	planRepository         plan.PlanRepository
-	invoiceRepository      invoice.InvoiceRepository
-	paymentRepository      payment.PaymentRepository
-	mu                     sync.RWMutex
-	initialized            bool
+	db                       *database.DatabaseService
+	cache                    *redis.Cache
+	encryptionKey            string
+	userRepository           users.UserRepository
+	activityRepository       activity.ActivityRepository
+	apiKeyRepository         api_key.APIKeyRepository
+	sessionRepository        session.SessionRepository
+	subscriptionRepository   subscription.SubscriptionRepository
+	planRepository           plan.PlanRepository
+	invoiceRepository        invoice.InvoiceRepository
+	paymentRepository        payment.PaymentRepository
+	tradingSessionRepository trading_session_repo.TradingSessionRepository
+	mu                       sync.RWMutex
+	initialized              bool
 }
 
 // RepositoryDependencies зависимости для фабрики репозиториев
@@ -270,6 +272,28 @@ func (rf *RepositoryFactory) CreatePlanRepository() (plan.PlanRepository, error)
 	return rf.planRepository, nil
 }
 
+// CreateTradingSessionRepository создает или возвращает репозиторий торговых сессий
+func (rf *RepositoryFactory) CreateTradingSessionRepository() (trading_session_repo.TradingSessionRepository, error) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if !rf.initialized {
+		return nil, fmt.Errorf("фабрика репозиториев не инициализирована")
+	}
+
+	if rf.tradingSessionRepository == nil {
+		db := rf.db.GetDB()
+		if db == nil {
+			return nil, fmt.Errorf("соединение с базой данных не установлено")
+		}
+
+		rf.tradingSessionRepository = trading_session_repo.NewTradingSessionRepository(db)
+		logger.Info("✅ TradingSessionRepository создан")
+	}
+
+	return rf.tradingSessionRepository, nil
+}
+
 // GetAllRepositories создает и возвращает все репозитории
 func (rf *RepositoryFactory) GetAllRepositories() (map[string]interface{}, error) {
 	rf.mu.Lock()
@@ -324,6 +348,11 @@ func (rf *RepositoryFactory) GetAllRepositories() (map[string]interface{}, error
 		logger.Warn("⚠️ Не удалось создать CreatePlanRepository: %v", err)
 	}
 
+	repositories["CreateTradingSessionRepository"], err = rf.CreateTradingSessionRepository()
+	if err != nil {
+		logger.Warn("⚠️ Не удалось создать CreateTradingSessionRepository: %v", err)
+	}
+
 	logger.Info("✅ Все репозитории PostgreSQL созданы")
 	return repositories, nil
 }
@@ -352,15 +381,19 @@ func (rf *RepositoryFactory) GetHealthStatus() map[string]interface{} {
 	defer rf.mu.RUnlock()
 
 	status := map[string]interface{}{
-		"initialized":                   rf.initialized,
-		"database_service_ready":        rf.db != nil,
-		"cache_ready":                   rf.cache != nil,
-		"encryption_key_set":            rf.encryptionKey != "",
-		"user_repository_ready":         rf.userRepository != nil,
-		"activity_repository_ready":     rf.activityRepository != nil,
-		"api_key_repository_ready":      rf.apiKeyRepository != nil,
-		"session_repository_ready":      rf.sessionRepository != nil,
-		"subscription_repository_ready": rf.subscriptionRepository != nil,
+		"initialized":                      rf.initialized,
+		"database_service_ready":           rf.db != nil,
+		"cache_ready":                      rf.cache != nil,
+		"encryption_key_set":               rf.encryptionKey != "",
+		"user_repository_ready":            rf.userRepository != nil,
+		"activity_repository_ready":        rf.activityRepository != nil,
+		"api_key_repository_ready":         rf.apiKeyRepository != nil,
+		"session_repository_ready":         rf.sessionRepository != nil,
+		"subscription_repository_ready":    rf.subscriptionRepository != nil,
+		"invoice_repository_ready":         rf.invoiceRepository != nil,
+		"payment_repository_ready":         rf.paymentRepository != nil,
+		"plan_repository_ready":            rf.planRepository != nil,
+		"trading_session_repository_ready": rf.tradingSessionRepository != nil,
 	}
 
 	// Добавляем статус базы данных если она доступна
@@ -404,6 +437,10 @@ func (rf *RepositoryFactory) Reset() {
 	rf.apiKeyRepository = nil
 	rf.sessionRepository = nil
 	rf.subscriptionRepository = nil
+	rf.invoiceRepository = nil
+	rf.paymentRepository = nil
+	rf.planRepository = nil
+	rf.tradingSessionRepository = nil
 	rf.initialized = false
 
 	logger.Info("🔄 Фабрика репозиториев сброшена")
@@ -459,6 +496,11 @@ func (rf *RepositoryFactory) GetRepository(name string) (interface{}, error) {
 			return nil, fmt.Errorf("PlanRepository еще не создан")
 		}
 		return rf.planRepository, nil
+	case "TradingSessionRepository":
+		if rf.tradingSessionRepository == nil {
+			return nil, fmt.Errorf("TradingSessionRepository еще не создан")
+		}
+		return rf.tradingSessionRepository, nil
 	default:
 		return nil, fmt.Errorf("неизвестный репозиторий: %s", name)
 	}
@@ -490,6 +532,8 @@ func (rf *RepositoryFactory) HasRepository(name string) bool {
 		return rf.paymentRepository != nil
 	case "PlanRepository":
 		return rf.planRepository != nil
+	case "TradingSessionRepository":
+		return rf.tradingSessionRepository != nil
 	default:
 		return false
 	}

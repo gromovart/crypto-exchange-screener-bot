@@ -1,9 +1,9 @@
-// internal/delivery/telegram/app/bot/handlers/session_start/interface.go
+// internal/delivery/telegram/app/bot/handlers/callbacks/session_start/interface.go
 package session_start
 
 import (
-	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 )
 
 // NewHandler создает обработчик кнопки "🟢 Начать сессию"

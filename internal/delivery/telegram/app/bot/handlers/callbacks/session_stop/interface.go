@@ -1,9 +1,9 @@
-// internal/delivery/telegram/app/bot/handlers/session_stop/interface.go
+// internal/delivery/telegram/app/bot/handlers/callbacks/session_stop/interface.go
 package session_stop
 
 import (
-	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 )
 
 // NewHandler создает обработчик кнопки "🔴 Завершить сессию"
