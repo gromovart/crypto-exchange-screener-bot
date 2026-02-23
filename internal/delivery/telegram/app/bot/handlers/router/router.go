@@ -168,13 +168,6 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 			}
 		}
 
-		// Перенаправляем в универсальный обработчик with_params
-		if handler, exists := r.handlers["with_params"]; exists {
-			// Сохраняем полный callback data для обработки
-			params.Data = command
-			logger.Debug("🔄 Перенаправление параметризованного callback '%s' в with_params", command)
-			return r.executeHandler(handler, command, params)
-		}
 	}
 
 	// Проверяем префиксы для периодов (period_5m, period_15m и т.д.)
@@ -209,6 +202,15 @@ func (r *routerImpl) Handle(command string, params HandlerParams) (HandlerResult
 			params.Data = command
 			logger.Debug("🔄 Перенаправление по префиксу с двоеточием '%s' в %s", command, key)
 			return r.executeHandler(h, command, params)
+		}
+	}
+
+	// Перенаправляем в универсальный обработчик with_params (fallback для параметризованных callback-ов)
+	if strings.Contains(command, ":") {
+		if handler, exists := r.handlers["with_params"]; exists {
+			params.Data = command
+			logger.Debug("🔄 Перенаправление параметризованного callback '%s' в with_params", command)
+			return r.executeHandler(handler, command, params)
 		}
 	}
 

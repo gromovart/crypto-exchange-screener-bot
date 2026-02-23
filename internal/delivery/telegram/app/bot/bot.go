@@ -20,6 +20,7 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -330,7 +331,8 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 
 	result, err := b.router.Handle(command, convertToRouterParams(handlerParams))
 	if err != nil {
-		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+err.Error(), nil)
+		errText := strings.ReplaceAll(err.Error(), "_", "\\_")
+		return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка: "+errText, nil)
 	}
 
 	return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
