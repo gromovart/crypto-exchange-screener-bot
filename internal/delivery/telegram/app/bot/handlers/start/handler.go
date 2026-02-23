@@ -307,8 +307,13 @@ func (h *startHandlerImpl) createBuyKeyboard() interface{} {
 // createSessionReplyKeyboard создает reply keyboard с кнопкой сессии
 func (h *startHandlerImpl) createSessionReplyKeyboard(userID int) interface{} {
 	buttonText := constants.SessionButtonTexts.Start
-	if h.tradingSessionService != nil && h.tradingSessionService.IsActive(userID) {
-		buttonText = constants.SessionButtonTexts.Stop
+	if h.tradingSessionService != nil {
+		if session, ok := h.tradingSessionService.GetActive(userID); ok {
+			buttonText = fmt.Sprintf("%s (%s)",
+				constants.SessionButtonTexts.Stop,
+				trading_session.FormatRemaining(session.ExpiresAt),
+			)
+		}
 	}
 
 	return telegram.ReplyKeyboardMarkup{

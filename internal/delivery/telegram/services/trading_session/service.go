@@ -139,6 +139,25 @@ func (s *serviceImpl) cancelTimerLocked(userID int) {
 	}
 }
 
+// FormatRemaining возвращает строку вида "1ч 45м", "45м" или "< 1м"
+func FormatRemaining(expiresAt time.Time) string {
+	remaining := time.Until(expiresAt)
+	if remaining <= 0 {
+		return "< 1м"
+	}
+	h := int(remaining.Hours())
+	m := int(remaining.Minutes()) % 60
+	if h > 0 && m > 0 {
+		return fmt.Sprintf("%dч %dм", h, m)
+	} else if h > 0 {
+		return fmt.Sprintf("%dч", h)
+	}
+	if m == 0 {
+		return "< 1м"
+	}
+	return fmt.Sprintf("%dм", m)
+}
+
 // expire автоматически завершает сессию по истечении времени
 func (s *serviceImpl) expire(userID int, chatID int64) {
 	logger.Info("⏰ Торговая сессия истекла для пользователя %d", userID)
