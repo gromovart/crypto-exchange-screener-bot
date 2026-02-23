@@ -126,7 +126,7 @@ func (ce *CandleEngine) createPriceSubscriber() {
 
 // handlePriceEvent обрабатывает события цен из EventBus
 func (ce *CandleEngine) handlePriceEvent(event types.Event) error {
-	logger.Warn("🕯️ CandleEngine получил событие цены: %s", event.Type)
+	logger.Info("🕯️ CandleEngine получил событие цены: %s", event.Type)
 	logger.Info("📨 CandleEngine: Событие %s в %v", event.Type, event.Timestamp.Format("15:04:05.000"))
 
 	switch event.Type {
