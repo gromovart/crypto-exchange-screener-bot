@@ -309,9 +309,9 @@ func (h *startHandlerImpl) createSessionReplyKeyboard(userID int) interface{} {
 	buttonText := constants.SessionButtonTexts.Start
 	if h.tradingSessionService != nil {
 		if session, ok := h.tradingSessionService.GetActive(userID); ok {
-			buttonText = fmt.Sprintf("%s (%s)",
+			buttonText = fmt.Sprintf("%s (до %s)",
 				constants.SessionButtonTexts.Stop,
-				trading_session.FormatRemaining(session.ExpiresAt),
+				session.ExpiresAt.Format("15:04"),
 			)
 		}
 	}
