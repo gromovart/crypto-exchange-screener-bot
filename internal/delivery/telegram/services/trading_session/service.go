@@ -19,10 +19,6 @@ type serviceImpl struct {
 	mu     sync.Mutex
 	timers map[int]*time.Timer
 
-	// ID последнего сообщения-таймера кнопки (per userID) — удаляется перед отправкой нового
-	timerMsgIDsMu sync.Mutex
-	timerMsgIDs   map[int]int64
-
 	userService   *users.Service
 	messageSender message_sender.MessageSender
 }
@@ -31,7 +27,6 @@ type serviceImpl struct {
 func NewService(userService *users.Service, ms message_sender.MessageSender) Service {
 	svc := &serviceImpl{
 		timers:        make(map[int]*time.Timer),
-		timerMsgIDs:   make(map[int]int64),
 		userService:   userService,
 		messageSender: ms,
 	}
@@ -91,13 +86,13 @@ func (s *serviceImpl) Start(userID int, chatID int64, duration time.Duration) (*
 		return nil, fmt.Errorf("не удалось сохранить сессию: %w", err)
 	}
 
+	// Запускаем таймер автозавершения
+	s.scheduleExpiryLocked(session)
+
 	// Включаем уведомления
 	_ = s.userService.UpdateSettings(userID, map[string]interface{}{
 		"notifications_enabled": true,
 	})
-
-	// Запускаем таймер автозавершения и обновление времени
-	s.scheduleExpiryLocked(session)
 
 	logger.Info("✅ Торговая сессия запущена для пользователя %d", userID)
 	return s.toDTO(session), nil
@@ -114,19 +109,6 @@ func (s *serviceImpl) Stop(userID int) error {
 
 	s.cancelTimerLocked(userID)
 
-	// Получаем сессию для chatID
-	var chatID int64
-	rows, _ := s.userService.FindAllActiveTradingSessions()
-	for _, r := range rows {
-		if r.UserID == userID {
-			chatID = r.ChatID
-			break
-		}
-	}
-
-	// Удаляем сообщение-таймер если есть
-	s.deleteTimerMessage(userID, chatID)
-
 	// Деактивируем в БД через userService
 	if err := s.userService.DeactivateTradingSession(userID); err != nil {
 		return fmt.Errorf("не удалось деактивировать сессию: %w", err)
@@ -136,20 +118,6 @@ func (s *serviceImpl) Stop(userID int) error {
 	_ = s.userService.UpdateSettings(userID, map[string]interface{}{
 		"notifications_enabled": false,
 	})
-
-	// Возвращаем кнопку "Начать сессию"
-	if chatID != 0 {
-		keyboard := telegram.ReplyKeyboardMarkup{
-			Keyboard: [][]telegram.ReplyKeyboardButton{
-				{{Text: constants.SessionButtonTexts.Start}},
-			},
-			ResizeKeyboard: true,
-			IsPersistent:   true,
-		}
-		_ = s.messageSender.SendMenuMessage(chatID,
-			"🔴 *Сессия завершена*\n\nУведомления отключены.",
-			keyboard)
-	}
 
 	logger.Info("✅ Торговая сессия завершена для пользователя %d", userID)
 	return nil
@@ -200,8 +168,6 @@ func (s *serviceImpl) restore() {
 
 	for _, r := range rows {
 		s.scheduleExpiryLocked(r)
-		// При восстановлении отправляем актуальную клавиатуру
-		s.updateSessionKeyboard(r.ChatID, r)
 	}
 
 	if len(rows) > 0 {
@@ -209,20 +175,16 @@ func (s *serviceImpl) restore() {
 	}
 }
 
-// scheduleExpiryLocked планирует автозавершение и периодическое обновление
+// scheduleExpiryLocked планирует автозавершение
 func (s *serviceImpl) scheduleExpiryLocked(session *models.TradingSession) {
 	delay := time.Until(session.ExpiresAt)
 	if delay < 0 {
 		delay = 0
 	}
 
-	// Основной таймер на завершение
 	s.timers[session.UserID] = time.AfterFunc(delay, func() {
 		s.expire(session.UserID, session.ChatID)
 	})
-
-	// Запускаем горутину для обновления времени на кнопке
-	go s.updateTimePeriodically(session)
 }
 
 // cancelTimerLocked отменяет таймер
@@ -233,79 +195,6 @@ func (s *serviceImpl) cancelTimerLocked(userID int) {
 	}
 }
 
-// updateTimePeriodically обновляет время на кнопке каждую минуту
-func (s *serviceImpl) updateTimePeriodically(session *models.TradingSession) {
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			s.mu.Lock()
-			// Проверяем, активна ли еще сессия
-			if _, exists := s.timers[session.UserID]; !exists {
-				s.mu.Unlock()
-				return
-			}
-
-			// Проверяем не истекла ли сессия
-			if time.Now().After(session.ExpiresAt) {
-				s.mu.Unlock()
-				return
-			}
-			s.mu.Unlock()
-
-			// Обновляем клавиатуру
-			s.updateSessionKeyboard(session.ChatID, session)
-		}
-	}
-}
-
-// deleteTimerMessage удаляет предыдущее сообщение-таймер для пользователя
-func (s *serviceImpl) deleteTimerMessage(userID int, chatID int64) {
-	s.timerMsgIDsMu.Lock()
-	oldMsgID, hasOld := s.timerMsgIDs[userID]
-	if hasOld {
-		delete(s.timerMsgIDs, userID)
-	}
-	s.timerMsgIDsMu.Unlock()
-
-	if hasOld && chatID != 0 && s.messageSender != nil {
-		_ = s.messageSender.DeleteMessage(chatID, oldMsgID)
-	}
-}
-
-// updateSessionKeyboard обновляет кнопку таймера: удаляет старое сообщение, отправляет новое
-func (s *serviceImpl) updateSessionKeyboard(chatID int64, session *models.TradingSession) {
-	if s.messageSender == nil {
-		return
-	}
-
-	// Удаляем предыдущее сообщение-таймер (если есть), чтобы не накапливался спам
-	s.deleteTimerMessage(session.UserID, chatID)
-
-	remaining := FormatRemaining(session.ExpiresAt)
-	stopButtonText := fmt.Sprintf("%s (%s)", constants.SessionButtonTexts.Stop, remaining)
-
-	keyboard := telegram.ReplyKeyboardMarkup{
-		Keyboard: [][]telegram.ReplyKeyboardButton{
-			{{Text: stopButtonText}},
-		},
-		ResizeKeyboard: true,
-		IsPersistent:   true,
-	}
-
-	// Отправляем новое сообщение с обновлённой кнопкой и сохраняем его ID
-	msgID, err := s.messageSender.SendMenuMessageWithID(chatID, fmt.Sprintf("🕐 *%s*", remaining), keyboard)
-	if err != nil || msgID == 0 {
-		return
-	}
-
-	s.timerMsgIDsMu.Lock()
-	s.timerMsgIDs[session.UserID] = msgID
-	s.timerMsgIDsMu.Unlock()
-}
-
 // expire автоматически завершает сессию по истечении времени
 func (s *serviceImpl) expire(userID int, chatID int64) {
 	logger.Info("⏰ Торговая сессия истекла для пользователя %d", userID)
@@ -313,9 +202,6 @@ func (s *serviceImpl) expire(userID int, chatID int64) {
 	s.mu.Lock()
 	delete(s.timers, userID)
 	s.mu.Unlock()
-
-	// Удаляем сообщение-таймер
-	s.deleteTimerMessage(userID, chatID)
 
 	if s.userService != nil {
 		// Деактивируем в БД
@@ -329,7 +215,7 @@ func (s *serviceImpl) expire(userID int, chatID int64) {
 		})
 	}
 
-	// Возвращаем обычную кнопку "Начать сессию"
+	// Отправляем уведомление
 	if s.messageSender != nil {
 		keyboard := telegram.ReplyKeyboardMarkup{
 			Keyboard: [][]telegram.ReplyKeyboardButton{
