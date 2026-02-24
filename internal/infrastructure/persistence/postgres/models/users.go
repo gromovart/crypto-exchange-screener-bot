@@ -255,7 +255,7 @@ func NewUser(telegramID int64, username, firstName, lastName, chatID string) *Us
 		IsVerified:           false,
 		SubscriptionTier:     TierFree,
 		SignalsToday:         0,
-		MaxSignalsPerDay:     50,
+		MaxSignalsPerDay:     1500,
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}

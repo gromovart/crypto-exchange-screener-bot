@@ -88,7 +88,7 @@ func NewService(
 				Language:           cfg.UserDefaults.Language,
 				Timezone:           cfg.UserDefaults.Timezone,
 			},
-			DefaultMaxSignalsPerDay: 50,
+			DefaultMaxSignalsPerDay: 1500,
 			SessionTTL:              24 * time.Hour,
 			MaxSessionsPerUser:      5,
 		},

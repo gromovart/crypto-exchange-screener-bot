@@ -99,7 +99,7 @@ func (cl *CoreLayer) Initialize() error {
 				Language:           "ru",
 				Timezone:           "Europe/Moscow",
 			},
-			DefaultMaxSignalsPerDay: 50,
+			DefaultMaxSignalsPerDay: 1500,
 			SessionTTL:              24 * time.Hour,
 			MaxSessionsPerUser:      5,
 		},
