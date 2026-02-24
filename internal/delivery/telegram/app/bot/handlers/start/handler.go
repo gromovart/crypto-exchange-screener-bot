@@ -277,7 +277,7 @@ func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.Hand
 		subscriptionStatus,
 	)
 
-	keyboard := h.createSessionReplyKeyboard(user.ID)
+	keyboard := h.createSessionReplyKeyboard(user.ID, user.Timezone)
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -305,13 +305,13 @@ func (h *startHandlerImpl) createBuyKeyboard() interface{} {
 }
 
 // createSessionReplyKeyboard создает reply keyboard с кнопкой сессии
-func (h *startHandlerImpl) createSessionReplyKeyboard(userID int) interface{} {
+func (h *startHandlerImpl) createSessionReplyKeyboard(userID int, timezone string) interface{} {
 	buttonText := constants.SessionButtonTexts.Start
 	if h.tradingSessionService != nil {
 		if session, ok := h.tradingSessionService.GetActive(userID); ok {
 			buttonText = fmt.Sprintf("%s (до %s)",
 				constants.SessionButtonTexts.Stop,
-				session.ExpiresAt.Format("15:04"),
+				formatInUserTZ(session.ExpiresAt, timezone),
 			)
 		}
 	}
@@ -323,6 +323,18 @@ func (h *startHandlerImpl) createSessionReplyKeyboard(userID int) interface{} {
 		ResizeKeyboard: true,
 		IsPersistent:   true,
 	}
+}
+
+// formatInUserTZ форматирует время в часовом поясе пользователя
+func formatInUserTZ(t time.Time, timezone string) string {
+	if timezone == "" {
+		timezone = "Europe/Moscow"
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return t.Format("15:04")
+	}
+	return t.In(loc).Format("15:04")
 }
 
 // parseUserID парсит user_id из строки
