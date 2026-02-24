@@ -48,10 +48,12 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 		return handlers.HandlerResult{}, fmt.Errorf("не удалось запустить сессию: %w", err)
 	}
 
+	expiresAtStr := formatInUserTZ(session.ExpiresAt, params.User.Timezone)
+
 	// Возвращаем кнопку "🔴 Завершить сессию (до ЧЧ:ММ)" в reply keyboard
 	stopButtonText := fmt.Sprintf("%s (до %s)",
 		constants.SessionButtonTexts.Stop,
-		session.ExpiresAt.Format("15:04"),
+		expiresAtStr,
 	)
 	stopKeyboard := telegram.ReplyKeyboardMarkup{
 		Keyboard: [][]telegram.ReplyKeyboardButton{
@@ -67,7 +69,7 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 			"🕐 Завершится в: *%s*\n\n"+
 			"✅ Уведомления включены. Кнопка управления сессией обновлена.",
 		label,
-		session.ExpiresAt.Format("15:04"),
+		expiresAtStr,
 	)
 
 	return handlers.HandlerResult{
@@ -78,6 +80,18 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 			"expires_at":      session.ExpiresAt,
 		},
 	}, nil
+}
+
+// formatInUserTZ форматирует время в часовом поясе пользователя
+func formatInUserTZ(t time.Time, timezone string) string {
+	if timezone == "" {
+		timezone = "Europe/Moscow"
+	}
+	loc, err := time.LoadLocation(timezone)
+	if err != nil {
+		return t.Format("15:04")
+	}
+	return t.In(loc).Format("15:04")
 }
 
 // parseDuration извлекает time.Duration и метку из callback data
