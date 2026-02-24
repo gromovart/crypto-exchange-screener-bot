@@ -35,6 +35,18 @@ type CounterParams struct {
 	ProgressFilledGroups int     `json:"progress_filled_groups,omitempty"`
 	ProgressTotalGroups  int     `json:"progress_total_groups,omitempty"`
 	ProgressPercentage   float64 `json:"progress_percentage,omitempty"`
+
+	// Зоны S/R
+	SRSupportPrice       float64
+	SRSupportStrength    float64
+	SRSupportDistPct     float64
+	SRSupportHasWall     bool
+	SRSupportWallUSD     float64
+	SRResistancePrice    float64
+	SRResistanceStrength float64
+	SRResistanceDistPct  float64
+	SRResistanceHasWall  bool
+	SRResistanceWallUSD  float64
 }
 
 // CounterResult результат Exec
@@ -77,4 +89,16 @@ type RawCounterData struct {
 	NextAnalysis       time.Time `json:"next_analysis"`       // следующий анализ
 	NextSignal         time.Time `json:"next_signal"`         // следующий сигнал
 	ProgressPercentage float64   `json:"progress_percentage"` // процент прогресса (вычисляемое)
+
+	// Зоны S/R
+	SRSupportPrice       float64
+	SRSupportStrength    float64
+	SRSupportDistPct     float64
+	SRSupportHasWall     bool
+	SRSupportWallUSD     float64
+	SRResistancePrice    float64
+	SRResistanceStrength float64
+	SRResistanceDistPct  float64
+	SRResistanceHasWall  bool
+	SRResistanceWallUSD  float64
 }

@@ -98,5 +98,17 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 		}
 	}
 
+	// Зоны S/R
+	params.SRSupportPrice = getFloat64(dataMap, "sr_support_price")
+	params.SRSupportStrength = getFloat64(dataMap, "sr_support_strength")
+	params.SRSupportDistPct = getFloat64(dataMap, "sr_support_dist_pct")
+	params.SRSupportHasWall = getBool(dataMap, "sr_support_has_wall")
+	params.SRSupportWallUSD = getFloat64(dataMap, "sr_support_wall_usd")
+	params.SRResistancePrice = getFloat64(dataMap, "sr_resistance_price")
+	params.SRResistanceStrength = getFloat64(dataMap, "sr_resistance_strength")
+	params.SRResistanceDistPct = getFloat64(dataMap, "sr_resistance_dist_pct")
+	params.SRResistanceHasWall = getBool(dataMap, "sr_resistance_has_wall")
+	params.SRResistanceWallUSD = getFloat64(dataMap, "sr_resistance_wall_usd")
+
 	return params, nil
 }

@@ -112,6 +112,24 @@ func (s *serviceImpl) convertToFormatterData(rawData RawCounterData) formatters.
 		ProgressPercentage:    rawData.ProgressPercentage, // Используем переданное
 		NextAnalysis:          rawData.NextAnalysis,
 		NextSignal:            rawData.NextSignal,
+
+		// Зоны S/R
+		SRSupport:    buildSRZoneData(rawData.SRSupportPrice, rawData.SRSupportStrength, rawData.SRSupportDistPct, rawData.SRSupportHasWall, rawData.SRSupportWallUSD),
+		SRResistance: buildSRZoneData(rawData.SRResistancePrice, rawData.SRResistanceStrength, rawData.SRResistanceDistPct, rawData.SRResistanceHasWall, rawData.SRResistanceWallUSD),
+	}
+}
+
+// buildSRZoneData строит SRZoneData если цена > 0, иначе nil.
+func buildSRZoneData(price, strength, distPct float64, hasWall bool, wallUSD float64) *formatters.SRZoneData {
+	if price <= 0 {
+		return nil
+	}
+	return &formatters.SRZoneData{
+		Price:       price,
+		Strength:    strength,
+		DistPct:     distPct,
+		HasWall:     hasWall,
+		WallSizeUSD: wallUSD,
 	}
 }
 

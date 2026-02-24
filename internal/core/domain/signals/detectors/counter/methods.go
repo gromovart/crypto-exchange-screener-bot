@@ -621,6 +621,27 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 		"percentage":    50.0, // Заглушка
 	}
 
+	// 5. Зоны S/R (если хранилище доступно)
+	if a.deps.SRZoneStorage != nil && signal.EndPrice > 0 {
+		nearest, err := a.deps.SRZoneStorage.GetNearestZones(signal.Symbol, period, signal.EndPrice)
+		if err == nil {
+			if nearest.Support != nil {
+				eventData["sr_support_price"] = nearest.Support.PriceCenter
+				eventData["sr_support_strength"] = nearest.Support.Strength
+				eventData["sr_support_dist_pct"] = nearest.DistToSupportPct
+				eventData["sr_support_has_wall"] = nearest.Support.HasOrderWall
+				eventData["sr_support_wall_usd"] = nearest.Support.OrderWallSizeUSD
+			}
+			if nearest.Resistance != nil {
+				eventData["sr_resistance_price"] = nearest.Resistance.PriceCenter
+				eventData["sr_resistance_strength"] = nearest.Resistance.Strength
+				eventData["sr_resistance_dist_pct"] = nearest.DistToResistPct
+				eventData["sr_resistance_has_wall"] = nearest.Resistance.HasOrderWall
+				eventData["sr_resistance_wall_usd"] = nearest.Resistance.OrderWallSizeUSD
+			}
+		}
+	}
+
 	logger.Debug("📊 CounterAnalyzer: реальные индикаторы для %s/%s - RSI: %.1f (%s), MACD: %.4f (%s), ликвидации: $%.0f",
 		signal.Symbol, period, rsi, rsiStatus, macdSignal, macdStatus, liquidationVolume)
 

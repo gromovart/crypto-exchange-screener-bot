@@ -42,6 +42,18 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 		MaxSignals:        GetRequiredConfirmations(params.Period),
 	}
 
+	// Зоны S/R
+	data.SRSupportPrice = params.SRSupportPrice
+	data.SRSupportStrength = params.SRSupportStrength
+	data.SRSupportDistPct = params.SRSupportDistPct
+	data.SRSupportHasWall = params.SRSupportHasWall
+	data.SRSupportWallUSD = params.SRSupportWallUSD
+	data.SRResistancePrice = params.SRResistancePrice
+	data.SRResistanceStrength = params.SRResistanceStrength
+	data.SRResistanceDistPct = params.SRResistanceDistPct
+	data.SRResistanceHasWall = params.SRResistanceHasWall
+	data.SRResistanceWallUSD = params.SRResistanceWallUSD
+
 	// Логируем полученные данные прогресса
 	logger.Debug("📊 Service: Использованы данные прогресса из параметров: заполнено %d из %d (%.0f%%)",
 		data.FilledSlots, data.TotalSlots, data.ProgressPercentage)

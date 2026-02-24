@@ -90,4 +90,5 @@ const (
 	EventPaymentCreated             EventType = "payment.created"
 	EventPaymentFailed              EventType = "payment.failed"
 	EventPaymentRefunded            EventType = "payment.refunded"
+	EventCandleClosed               EventType = "candle_closed"
 )

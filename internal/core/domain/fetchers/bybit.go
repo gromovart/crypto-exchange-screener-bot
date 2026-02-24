@@ -1010,6 +1010,11 @@ func (f *BybitPriceFetcher) GetStats() map[string]interface{} {
 	}
 }
 
+// GetOrderBook возвращает стакан ордеров для символа (делегирует к BybitClient)
+func (f *BybitPriceFetcher) GetOrderBook(symbol string, depth int) (*bybit.OrderBookV5, error) {
+	return f.client.GetOrderBook(symbol, depth)
+}
+
 // Вспомогательная функция для парсинга
 func parseFloat(s string) (float64, error) {
 	if s == "" {

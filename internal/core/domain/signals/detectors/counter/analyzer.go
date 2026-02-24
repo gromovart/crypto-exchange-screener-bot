@@ -7,6 +7,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/common"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	sr_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/sr_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"sync"
@@ -21,6 +22,7 @@ type Dependencies struct {
 	MarketFetcher       interface{}
 	VolumeCalculator    *calculator.VolumeDeltaCalculator
 	TechnicalCalculator *calculator.TechnicalCalculator
+	SRZoneStorage       *sr_storage.SRZoneStorage // опционально: зоны S/R
 }
 
 // CounterAnalyzer - анализатор счетчика сигналов

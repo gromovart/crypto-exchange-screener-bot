@@ -8,6 +8,7 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
+	sr_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/sr_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
@@ -15,8 +16,9 @@ import (
 )
 
 type Factory struct {
-	priceFetcher interface{}
-	candleSystem *candle.CandleSystem
+	priceFetcher  interface{}
+	candleSystem  *candle.CandleSystem
+	srZoneStorage *sr_storage.SRZoneStorage
 }
 
 // NewFactory создает фабрику
@@ -178,6 +180,7 @@ func (f *Factory) configureCounterAnalyzer(
 		CandleSystem:     f.candleSystem,
 		MarketFetcher:    f.priceFetcher,
 		VolumeCalculator: calculator.NewVolumeDeltaCalculator(f.priceFetcher, storage),
+		SRZoneStorage:    f.srZoneStorage,
 	}
 
 	counterAnalyzer := counter.NewCounterAnalyzer(counterConfig, deps)
@@ -202,4 +205,9 @@ func (e *AnalysisEngine) GetStorage() storage.PriceStorageInterface {
 func (f *Factory) SetCandleSystem(candleSystem *candle.CandleSystem) {
 	f.candleSystem = candleSystem
 	log.Printf("✅ Factory: свечная система установлена")
+}
+
+// SetSRZoneStorage устанавливает хранилище зон S/R для передачи в CounterAnalyzer
+func (f *Factory) SetSRZoneStorage(storage *sr_storage.SRZoneStorage) {
+	f.srZoneStorage = storage
 }

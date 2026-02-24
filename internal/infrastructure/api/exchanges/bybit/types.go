@@ -138,6 +138,19 @@ type bybitTickerResponse struct {
 	Time int64 `json:"time"`
 }
 
+// OrderLevelV5 — уровень стакана ордеров (V5 API)
+type OrderLevelV5 struct {
+	Price float64
+	Size  float64
+}
+
+// OrderBookV5 — стакан ордеров (V5 API)
+type OrderBookV5 struct {
+	Symbol string
+	Bids   []OrderLevelV5
+	Asks   []OrderLevelV5
+}
+
 // LiquidationData данные о ликвидации
 type LiquidationData struct {
 	Symbol        string    `json:"symbol"`

@@ -13,10 +13,13 @@ import (
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
+	sr_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/sr_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"time"
+
+	sr_engine "crypto-exchange-screener-bot/internal/core/domain/analysis/sr_engine"
 )
 
 // CoreLayer слой ядра (бизнес-логика)
@@ -30,6 +33,8 @@ type CoreLayer struct {
 	fetcherFactory    *fetchers.MarketFetcherFactory
 	candleSystem      *candle.CandleSystem
 	analysisEngine    *engine.AnalysisEngine
+	srZoneEngine      *sr_engine.Engine
+	srZoneStorage     *sr_storage.SRZoneStorage
 }
 
 // NewCoreLayer создает слой ядра
@@ -190,6 +195,13 @@ func (cl *CoreLayer) Start() error {
 		cl.startBybitPriceFetcher()
 	}
 
+	// НОВОЕ: Запускаем SRZoneEngine если включен Telegram
+	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
+		if err := cl.startSRZoneEngine(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить SRZoneEngine: %v (зоны S/R будут недоступны)", err)
+		}
+	}
+
 	// НОВОЕ: Запускаем AnalysisEngine если CounterAnalyzer включен в конфигурации
 	if cl.config.Telegram.Enabled && cl.infraLayer != nil {
 		logger.Info("🔧 Проверка условий запуска AnalysisEngine:")
@@ -281,6 +293,12 @@ func (cl *CoreLayer) startAnalysisEngine() error {
 
 	// 6. Создаем фабрику движка анализа
 	engineFactory := engine.NewFactory(priceFetcher, cl.candleSystem)
+
+	// Передаем SRZoneStorage если уже создано
+	if cl.srZoneStorage != nil {
+		engineFactory.SetSRZoneStorage(cl.srZoneStorage)
+		logger.Info("✅ SRZoneStorage передан в AnalysisEngine Factory")
+	}
 
 	// 7. Создаем движок анализа через фабрику
 	analysisEngine := engineFactory.NewAnalysisEngineFromConfig(
@@ -575,6 +593,75 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 	}
 }
 
+// startSRZoneEngine запускает движок зон S/R
+func (cl *CoreLayer) startSRZoneEngine() error {
+	logger.Info("📐 CoreLayer: запуск SRZoneEngine...")
+
+	// 1. Получаем RedisService для SRZoneStorage
+	redisServiceComp, exists := cl.infraLayer.GetComponent("RedisService")
+	if !exists {
+		return fmt.Errorf("RedisService не найден")
+	}
+
+	redisServiceInterface, err := cl.getComponentValue(redisServiceComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить RedisService: %w", err)
+	}
+
+	redisService, ok := redisServiceInterface.(*redis_service.RedisService)
+	if !ok {
+		return fmt.Errorf("неверный тип RedisService")
+	}
+
+	// 2. Создаем SRZoneStorage
+	srStorage, err := sr_storage.NewSRZoneStorage(redisService)
+	if err != nil {
+		return fmt.Errorf("ошибка создания SRZoneStorage: %w", err)
+	}
+	cl.srZoneStorage = srStorage
+
+	// 3. Получаем EventBus
+	eventBusComp, exists := cl.infraLayer.GetComponent("EventBus")
+	if !exists {
+		return fmt.Errorf("EventBus не найден")
+	}
+
+	eventBusInterface, err := cl.getComponentValue(eventBusComp)
+	if err != nil {
+		return fmt.Errorf("не удалось получить EventBus: %w", err)
+	}
+
+	eventBus, ok := eventBusInterface.(*events.EventBus)
+	if !ok {
+		return fmt.Errorf("неверный тип EventBus")
+	}
+
+	// 4. Проверяем CandleSystem
+	if cl.candleSystem == nil {
+		return fmt.Errorf("CandleSystem не запущена")
+	}
+
+	// 5. Проверяем BybitPriceFetcher
+	if cl.bybitPriceFetcher == nil {
+		return fmt.Errorf("BybitPriceFetcher не создан")
+	}
+
+	// 6. Создаем SRZoneEngine
+	cl.srZoneEngine = sr_engine.NewEngine(
+		cl.candleSystem.Storage,
+		srStorage,
+		cl.bybitPriceFetcher,
+		eventBus,
+	)
+
+	// 7. Запускаем движок
+	cl.srZoneEngine.Start()
+
+	cl.registerComponent("SRZoneEngine", cl.srZoneEngine)
+	logger.Info("✅ SRZoneEngine запущен и зарегистрирован")
+	return nil
+}
+
 // Stop останавливает слой ядра
 func (cl *CoreLayer) Stop() error {
 	if !cl.IsRunning() {
@@ -583,6 +670,12 @@ func (cl *CoreLayer) Stop() error {
 
 	cl.updateState(StateStopping)
 	logger.Info("🛑 Остановка слоя ядра...")
+
+	// Останавливаем SRZoneEngine если запущен
+	if cl.srZoneEngine != nil {
+		cl.srZoneEngine.Stop()
+		logger.Info("📐 SRZoneEngine остановлен")
+	}
 
 	// Останавливаем AnalysisEngine если запущен
 	if cl.analysisEngine != nil {
@@ -627,6 +720,14 @@ func (cl *CoreLayer) Reset() error {
 	// Сбрасываем фабрику
 	if cl.coreFactory != nil {
 		cl.coreFactory.Reset()
+	}
+
+	// Сбрасываем SRZoneEngine
+	if cl.srZoneEngine != nil {
+		cl.srZoneEngine = nil
+	}
+	if cl.srZoneStorage != nil {
+		cl.srZoneStorage = nil
 	}
 
 	// Сбрасываем AnalysisEngine
