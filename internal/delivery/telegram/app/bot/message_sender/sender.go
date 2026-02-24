@@ -18,6 +18,8 @@ type MessageSender interface {
 	SendCounterMessage(chatID int64, text string, keyboard interface{}) error
 	// Отправка сообщений меню (приоритетные, с защитой от блокировок)
 	SendMenuMessage(chatID int64, text string, keyboard interface{}) error
+	// Отправка menu сообщения с возвратом message_id (для последующего удаления)
+	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error)
 
 	// Управление сообщениями
 	EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error
@@ -69,6 +71,28 @@ func (ms *MessageSenderImpl) SendCounterMessage(chatID int64, text string, keybo
 // SendMenuMessage отправляет сообщение меню (приоритетное, с отдельным rate limiter)
 func (ms *MessageSenderImpl) SendMenuMessage(chatID int64, text string, keyboard interface{}) error {
 	return ms.sendMenuMessage(chatID, text, keyboard)
+}
+
+// SendMenuMessageWithID отправляет menu сообщение и возвращает message_id для последующего удаления
+func (ms *MessageSenderImpl) SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error) {
+	if !ms.enabled {
+		return 0, nil
+	}
+	if ms.testMode {
+		log.Printf("[TEST] SendMenuMessageWithID to %d: %s", chatID, text[:min(50, len(text))])
+		return 0, nil
+	}
+
+	request := map[string]interface{}{
+		"chat_id":    chatID,
+		"text":       text,
+		"parse_mode": "Markdown",
+	}
+	if keyboard != nil {
+		request["reply_markup"] = keyboard
+	}
+
+	return ms.sendTelegramRequestGetMsgID("sendMessage", request)
 }
 
 // sendMessageWithoutRateLimit внутренний метод без rate limiting

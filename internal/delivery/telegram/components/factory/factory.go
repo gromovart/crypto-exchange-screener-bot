@@ -143,6 +143,11 @@ func (s *stubMessageSender) SendMenuMessage(chatID int64, text string, keyboard 
 	return nil
 }
 
+func (s *stubMessageSender) SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error) {
+	logger.Debug("[STUB] Отправка menu сообщения с ID в %d: %s", chatID, text[:min(50, len(text))])
+	return 0, nil
+}
+
 func (s *stubMessageSender) EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error {
 	logger.Debug("[STUB] Редактирование сообщения %d в %d: %s", messageID, chatID, text[:min(50, len(text))])
 	return nil

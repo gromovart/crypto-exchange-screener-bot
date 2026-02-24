@@ -11,6 +11,59 @@ import (
 	"time"
 )
 
+// sendTelegramRequestGetMsgID отправляет запрос к Telegram API и возвращает message_id ответа
+func (ms *MessageSenderImpl) sendTelegramRequestGetMsgID(method string, request map[string]interface{}) (int64, error) {
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		return 0, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := ms.baseURL + method
+	resp, err := ms.httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return 0, fmt.Errorf("failed to send request to %s: %w", method, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var telegramResp struct {
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code,omitempty"`
+		Description string `json:"description,omitempty"`
+		Result      struct {
+			MessageID int64 `json:"message_id"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &telegramResp); err != nil {
+		return 0, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	if !telegramResp.OK {
+		if telegramResp.ErrorCode == 429 {
+			retryAfter := 5
+			var retryResp struct {
+				Parameters struct {
+					RetryAfter int `json:"retry_after"`
+				} `json:"parameters"`
+			}
+			if json.Unmarshal(body, &retryResp) == nil && retryResp.Parameters.RetryAfter > 0 {
+				retryAfter = retryResp.Parameters.RetryAfter
+			}
+			log.Printf("⚠️ Telegram API rate limit, waiting %d seconds", retryAfter)
+			time.Sleep(time.Duration(retryAfter) * time.Second)
+			return ms.sendTelegramRequestGetMsgID(method, request)
+		}
+		return 0, fmt.Errorf("telegram API error %d: %s", telegramResp.ErrorCode, telegramResp.Description)
+	}
+
+	return telegramResp.Result.MessageID, nil
+}
+
 // sendTelegramRequest отправляет запрос к Telegram API
 func (ms *MessageSenderImpl) sendTelegramRequest(method string, request map[string]interface{}) error {
 	jsonData, err := json.Marshal(request)

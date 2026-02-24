@@ -65,6 +65,11 @@ func (q *QueuedMessageSender) SendMenuMessage(chatID int64, text string, keyboar
 	return q.direct.SendMenuMessage(chatID, text, keyboard)
 }
 
+// SendMenuMessageWithID → прямая отправка с возвратом message_id
+func (q *QueuedMessageSender) SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error) {
+	return q.direct.SendMenuMessageWithID(chatID, text, keyboard)
+}
+
 // EditMessageText → прямая отправка
 func (q *QueuedMessageSender) EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error {
 	return q.direct.EditMessageText(chatID, messageID, text, keyboard)
