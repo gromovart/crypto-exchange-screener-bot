@@ -48,10 +48,10 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 		return handlers.HandlerResult{}, fmt.Errorf("не удалось запустить сессию: %w", err)
 	}
 
-	// Возвращаем кнопку "🔴 Завершить сессию (Xч Yм)" в reply keyboard
-	stopButtonText := fmt.Sprintf("%s (%s)",
+	// Возвращаем кнопку "🔴 Завершить сессию (до ЧЧ:ММ)" в reply keyboard
+	stopButtonText := fmt.Sprintf("%s (до %s)",
 		constants.SessionButtonTexts.Stop,
-		trading_session.FormatRemaining(session.ExpiresAt),
+		session.ExpiresAt.Format("15:04"),
 	)
 	stopKeyboard := telegram.ReplyKeyboardMarkup{
 		Keyboard: [][]telegram.ReplyKeyboardButton{
