@@ -19,10 +19,11 @@ type Zone struct {
 	PriceCenter      float64   `json:"price_center"`
 	PriceHigh        float64   `json:"price_high"`
 	PriceLow         float64   `json:"price_low"`
-	Strength         float64   `json:"strength"`          // 0-100
-	TouchCount       int       `json:"touch_count"`       // сколько раз цена касалась уровня
-	Volume           float64   `json:"volume"`            // суммарный объём при касаниях
-	HasOrderWall     bool      `json:"has_order_wall"`    // есть ли крупная стена в стакане
+	Strength         float64   `json:"strength"`            // 0-100, с учётом пробоев
+	TouchCount       int       `json:"touch_count"`         // сколько раз уровень устоял
+	BreakthroughCount int      `json:"breakthrough_count"`  // сколько раз уровень был пробит
+	Volume           float64   `json:"volume"`              // суммарный объём при касаниях
+	HasOrderWall     bool      `json:"has_order_wall"`      // есть ли крупная стена в стакане
 	OrderWallSizeUSD float64   `json:"order_wall_size_usd"` // объём стены в USDT
 	LastTouch        time.Time `json:"last_touch"`
 	CreatedAt        time.Time `json:"created_at"`

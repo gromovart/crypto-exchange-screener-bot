@@ -41,6 +41,22 @@ const (
 	// даже при равномерном распределении ордеров (малом σ).
 	// Пример: средний бакет $50K → минимальная стена $150K.
 	wallMultiplier = 3.0
+
+	// Параметры скоринга зон с учётом пробоев.
+
+	// breachBuffer — буфер для фильтрации шума при определении пробоя (0.1%).
+	// Закрытие ниже PriceLow на 0.1% считается пробоем поддержки.
+	// Исключает ситуации когда цена «дышит» вблизи уровня.
+	breachBuffer = 0.001
+
+	// breakthroughPenalty — вес одного пробоя относительно касания.
+	// Пробой = 2 «отрицательных касания». Итого:
+	//   reliability = touches / (touches + breakthroughs × 2)
+	breakthroughPenalty = 2.0
+
+	// interactionCooldown — минимальное расстояние между касаниями (в свечах).
+	// Предотвращает многократный счёт одного флета как множества касаний.
+	interactionCooldown = 3
 )
 
 // Calculator вычисляет S/R зоны по истории свечей.
@@ -71,6 +87,9 @@ func (c *Calculator) FindZones(symbol, period string, candles []storage.CandleIn
 	supports := c.clusterLevels(symbol, period, pivotLows, ZoneTypeSupport)
 
 	all := append(resistances, supports...)
+
+	// Пересчитываем силу зон с учётом реальных касаний и пробоев по всем свечам.
+	all = c.evaluateZones(all, candles)
 
 	// Сортируем по силе убыванием и берём топ maxZones
 	sort.Slice(all, func(i, j int) bool {
@@ -216,14 +235,10 @@ func (c *Calculator) buildZone(symbol, period string, zoneType ZoneType, cluster
 	}
 
 	center := sumPrice / float64(len(cluster))
+	// Начальное TouchCount = число пивот-точек в кластере.
+	// Финальное значение TouchCount и Strength будут пересчитаны в evaluateZones()
+	// по полному сканированию всех свечей с учётом пробоев.
 	touchCount := len(cluster)
-
-	// Скоринг: базовый вклад каждого касания — 15 баллов, макс 100
-	strength := math.Min(100, float64(touchCount)*15)
-	// +10 баллов за высокий объём (если суммарный объём > 0)
-	if sumVolume > 0 {
-		strength = math.Min(100, strength+10)
-	}
 
 	return Zone{
 		Symbol:      symbol,
@@ -232,12 +247,106 @@ func (c *Calculator) buildZone(symbol, period string, zoneType ZoneType, cluster
 		PriceCenter: center,
 		PriceHigh:   priceMax,
 		PriceLow:    priceMin,
-		Strength:    strength,
+		Strength:    0, // будет пересчитано в evaluateZones
 		TouchCount:  touchCount,
 		Volume:      sumVolume,
 		LastTouch:   lastTouch,
 		CreatedAt:   time.Now(),
 	}
+}
+
+// evaluateZones пересчитывает TouchCount, BreakthroughCount и Strength для каждой зоны
+// путём полного сканирования всех свечей.
+func (c *Calculator) evaluateZones(zones []Zone, candles []storage.CandleInterface) []Zone {
+	for i := range zones {
+		z := &zones[i]
+		touches, breakthroughs := c.scanZoneInteractions(z, candles)
+
+		z.TouchCount = touches
+		z.BreakthroughCount = breakthroughs
+
+		// Надёжность: touches / (touches + breakthroughs × penalty)
+		// Пробой штрафуется в 2× сильнее касания.
+		denominator := float64(touches) + float64(breakthroughs)*breakthroughPenalty
+		reliability := 1.0
+		if denominator > 0 {
+			reliability = float64(touches) / denominator
+		}
+
+		// Сила = min(100, touches×20) × reliability + volumeBonus
+		// 5 касаний без пробоев = 100% × 1.0 + 5 = 100%
+		// 3 касания, 1 пробой   =  60% × 0.60 + 5 = 41%
+		// 5 касаний, 5 пробоев  = 100% × 0.33 + 5 = 38%
+		touchScore := math.Min(100, float64(touches)*20)
+		strength := touchScore * reliability
+
+		if z.Volume > 0 {
+			strength = math.Min(100, strength+5)
+		}
+		z.Strength = math.Round(strength)
+	}
+	return zones
+}
+
+// scanZoneInteractions сканирует все свечи и считает:
+//   - touches: сколько раз цена вошла в зону и уровень устоял
+//   - breakthroughs: сколько раз цена закрылась за зоной
+//
+// Алгоритм:
+//  1. Свеча "входит" в зону если её экстремум (low для поддержки, high для сопротивления)
+//     пересекает границу зоны.
+//  2. Касание — цена вошла и закрылась на "правильной" стороне (выше PriceLow для поддержки).
+//  3. Пробой — цена закрылась за зоной с буфером 0.1% (фильтрует ложные пробои-тени).
+//  4. Кулдаун — после каждого события пропускаем interactionCooldown свечей,
+//     чтобы не считать флет как множество касаний.
+func (c *Calculator) scanZoneInteractions(z *Zone, candles []storage.CandleInterface) (touches, breakthroughs int) {
+	cooldown := 0
+
+	for _, candle := range candles {
+		if cooldown > 0 {
+			cooldown--
+			continue
+		}
+
+		if z.Type == ZoneTypeSupport {
+			low := candle.GetLow()
+			closePrice := candle.GetClose()
+
+			// Свеча вошла в зону сверху (low достиг или пробил верхнюю границу)
+			if low <= z.PriceHigh {
+				breachLine := z.PriceLow * (1 - breachBuffer)
+				if closePrice < breachLine {
+					// Закрытие ниже зоны — пробой
+					breakthroughs++
+					cooldown = interactionCooldown
+				} else if closePrice > z.PriceCenter {
+					// Закрытие выше центра зоны — касание (уровень устоял)
+					touches++
+					cooldown = interactionCooldown
+				}
+				// Закрытие внутри зоны — неопределённость, не считаем
+			}
+		} else { // ZoneTypeResistance
+			high := candle.GetHigh()
+			closePrice := candle.GetClose()
+
+			// Свеча вошла в зону снизу (high достиг или пробил нижнюю границу)
+			if high >= z.PriceLow {
+				breachLine := z.PriceHigh * (1 + breachBuffer)
+				if closePrice > breachLine {
+					// Закрытие выше зоны — пробой
+					breakthroughs++
+					cooldown = interactionCooldown
+				} else if closePrice < z.PriceCenter {
+					// Закрытие ниже центра зоны — касание (уровень устоял)
+					touches++
+					cooldown = interactionCooldown
+				}
+				// Закрытие внутри зоны — неопределённость, не считаем
+			}
+		}
+	}
+	return
 }
 
 // priceBucket — агрегированный ценовой бакет стакана ордеров.
