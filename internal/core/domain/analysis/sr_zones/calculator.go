@@ -16,10 +16,24 @@ const (
 	// maxZones — максимум зон на один период
 	maxZones = 10
 
-	// minWallUSD — минимальный абсолютный размер стены ордеров в USD.
-	// Ордер считается "стеной" только если его USD-объём превышает этот порог
-	// И статистически значимо превышает средний размер ордеров в стакане (mean+2σ).
-	// Предотвращает ложные стены на монетах с маленькими ордерами.
+	// Параметры определения стены ордеров.
+
+	// bucketWidthPct — ширина ценового бакета при агрегации стакана (0.1%).
+	// Ордера в пределах 0.1% ценового диапазона объединяются в один бакет.
+	// Это позволяет учитывать скопление (плотность) ордеров на уровне,
+	// а не только размер отдельных ордеров.
+	bucketWidthPct = 0.001
+
+	// wallSearchRadiusPct — радиус поиска стены вокруг центра зоны (±0.5%).
+	// Стена ищется в диапазоне [center*(1-radius), center*(1+radius)].
+	wallSearchRadiusPct = 0.005
+
+	// minWallVolumePct — минимальный порог стены как процент от 24h объёма (0.05%).
+	// Для ARCUSDT $241M → порог $120K; для BTC $30B → порог $15M.
+	minWallVolumePct = 0.0005
+
+	// minWallUSD — абсолютный минимальный порог стены в USD.
+	// Применяется если 24h объём недоступен или даёт меньшее значение.
 	minWallUSD = 50_000
 )
 
@@ -220,41 +234,133 @@ func (c *Calculator) buildZone(symbol, period string, zoneType ZoneType, cluster
 	}
 }
 
+// priceBucket — агрегированный ценовой бакет стакана ордеров.
+type priceBucket struct {
+	priceKey  float64 // нижняя граница бакета
+	volumeUSD float64 // суммарный USD-объём всех ордеров в бакете
+	count     int     // количество ордеров в бакете
+}
+
+// buildBuckets агрегирует ордера в ценовые бакеты шириной bucketWidthPct.
+// Ордера в пределах одного бакета суммируются — это даёт "плотность" на уровне.
+func buildBuckets(levels []OrderLevel, widthPct float64) []priceBucket {
+	if len(levels) == 0 {
+		return nil
+	}
+
+	buckets := make(map[float64]*priceBucket)
+	for _, l := range levels {
+		if l.Price <= 0 {
+			continue
+		}
+		// Ключ бакета: округляем цену вниз до ближайшего кратного bucketWidthPct
+		key := math.Floor(l.Price/l.Price*l.Price/(l.Price*widthPct)) * (l.Price * widthPct)
+		// Более простая формула: key = floor(price / (price * widthPct)) * (price * widthPct)
+		// Эквивалентно: round price to nearest bucketWidthPct fraction
+		bucketSize := l.Price * widthPct
+		key = math.Floor(l.Price/bucketSize) * bucketSize
+
+		b, ok := buckets[key]
+		if !ok {
+			b = &priceBucket{priceKey: key}
+			buckets[key] = b
+		}
+		b.volumeUSD += l.Size * l.Price
+		b.count++
+	}
+
+	result := make([]priceBucket, 0, len(buckets))
+	for _, b := range buckets {
+		result = append(result, *b)
+	}
+	return result
+}
+
+// bucketMeanStd вычисляет среднее и стандартное отклонение USD-объёма бакетов.
+func bucketMeanStd(buckets []priceBucket) (mean, std float64) {
+	if len(buckets) == 0 {
+		return 0, 0
+	}
+	sum := 0.0
+	for _, b := range buckets {
+		sum += b.volumeUSD
+	}
+	mean = sum / float64(len(buckets))
+
+	variance := 0.0
+	for _, b := range buckets {
+		d := b.volumeUSD - mean
+		variance += d * d
+	}
+	variance /= float64(len(buckets))
+	std = math.Sqrt(variance)
+	return
+}
+
+// wallThreshold вычисляет порог стены:
+// max(volume24hUSD * minWallVolumePct, minWallUSD).
+// Если volume24hUSD == 0 (недоступен), возвращает minWallUSD.
+func wallThreshold(volume24hUSD float64) float64 {
+	dynThreshold := volume24hUSD * minWallVolumePct
+	if dynThreshold > minWallUSD {
+		return dynThreshold
+	}
+	return minWallUSD
+}
+
 // EnrichWithOrderBook обогащает зоны данными стакана ордеров.
-func EnrichWithOrderBook(zones []Zone, book *OrderBook) []Zone {
+//
+// Алгоритм:
+//  1. Агрегируем ордера в ценовые бакеты по 0.1% — учитываем плотность (много
+//     мелких ордеров на одном уровне суммируются).
+//  2. Вычисляем статистический порог (mean + 2σ) по USD-объёму бакетов.
+//  3. Вычисляем динамический порог от 24h объёма: max(0.05% * vol24h, $50K).
+//  4. Стена = бакет превышает ОБА порога одновременно.
+//  5. Ищем стены в радиусе ±0.5% от центра зоны.
+func EnrichWithOrderBook(zones []Zone, book *OrderBook, volume24hUSD float64) []Zone {
 	if book == nil || (len(book.Bids) == 0 && len(book.Asks) == 0) {
 		return zones
 	}
 
-	// Считаем mean+2σ для bids и asks отдельно
-	bidMean, bidStd := meanStd(book.Bids)
-	askMean, askStd := meanStd(book.Asks)
+	// Строим бакеты
+	bidBuckets := buildBuckets(book.Bids, bucketWidthPct)
+	askBuckets := buildBuckets(book.Asks, bucketWidthPct)
 
-	wallThresholdBid := bidMean + 2*bidStd
-	wallThresholdAsk := askMean + 2*askStd
+	// Статистические пороги по бакетам
+	bidMean, bidStd := bucketMeanStd(bidBuckets)
+	askMean, askStd := bucketMeanStd(askBuckets)
+	bidStatThreshold := bidMean + 2*bidStd
+	askStatThreshold := askMean + 2*askStd
+
+	// Динамический порог от 24h объёма
+	dynThreshold := wallThreshold(volume24hUSD)
 
 	for i := range zones {
 		z := &zones[i]
-		var wallUSD float64
 
-		// Ищем крупные ордера в диапазоне зоны
+		// Диапазон поиска стены: ±wallSearchRadiusPct вокруг центра зоны
+		searchLow := z.PriceCenter * (1 - wallSearchRadiusPct)
+		searchHigh := z.PriceCenter * (1 + wallSearchRadiusPct)
+
+		var wallUSD float64
+		var statThreshold float64
+		var buckets []priceBucket
+
 		if z.Type == ZoneTypeSupport {
-			for _, level := range book.Bids {
-				if level.Price >= z.PriceLow && level.Price <= z.PriceHigh {
-					levelUSD := level.Size * level.Price
-					if level.Size >= wallThresholdBid && levelUSD >= minWallUSD {
-						wallUSD += levelUSD
-					}
-				}
-			}
+			buckets = bidBuckets
+			statThreshold = bidStatThreshold
 		} else {
-			for _, level := range book.Asks {
-				if level.Price >= z.PriceLow && level.Price <= z.PriceHigh {
-					levelUSD := level.Size * level.Price
-					if level.Size >= wallThresholdAsk && levelUSD >= minWallUSD {
-						wallUSD += levelUSD
-					}
-				}
+			buckets = askBuckets
+			statThreshold = askStatThreshold
+		}
+
+		for _, b := range buckets {
+			if b.priceKey < searchLow || b.priceKey > searchHigh {
+				continue
+			}
+			// Стена = превышает И статистический, И динамический порог
+			if b.volumeUSD >= statThreshold && b.volumeUSD >= dynThreshold {
+				wallUSD += b.volumeUSD
 			}
 		}
 
@@ -264,25 +370,4 @@ func EnrichWithOrderBook(zones []Zone, book *OrderBook) []Zone {
 		}
 	}
 	return zones
-}
-
-// meanStd вычисляет среднее и стандартное отклонение размеров ордеров.
-func meanStd(levels []OrderLevel) (mean, std float64) {
-	if len(levels) == 0 {
-		return 0, 0
-	}
-	sum := 0.0
-	for _, l := range levels {
-		sum += l.Size
-	}
-	mean = sum / float64(len(levels))
-
-	variance := 0.0
-	for _, l := range levels {
-		d := l.Size - mean
-		variance += d * d
-	}
-	variance /= float64(len(levels))
-	std = math.Sqrt(variance)
-	return
 }

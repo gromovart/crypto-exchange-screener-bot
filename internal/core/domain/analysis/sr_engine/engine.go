@@ -23,14 +23,21 @@ type CandleHistoryProvider interface {
 	GetHistory(symbol, period string, limit int) ([]candleStorage.CandleInterface, error)
 }
 
+// Volume24hProvider — интерфейс для получения суточного объёма торгов в USD.
+// Используется при расчёте динамического порога стены ордеров.
+type Volume24hProvider interface {
+	GetVolume24hUSD(symbol string) float64
+}
+
 // Engine — движок расчёта S/R зон.
 // Подписывается на EventCandleClosed и пересчитывает зоны при каждом закрытии свечи.
 type Engine struct {
-	candleStorage CandleHistoryProvider
-	srStorage     *sr_storage.SRZoneStorage
-	orderBook     OrderBookFetcher
-	eventBus      *event_bus.EventBus
-	calculator    *sr_zones.Calculator
+	candleStorage  CandleHistoryProvider
+	srStorage      *sr_storage.SRZoneStorage
+	orderBook      OrderBookFetcher
+	volume24h      Volume24hProvider
+	eventBus       *event_bus.EventBus
+	calculator     *sr_zones.Calculator
 
 	// Кэш стакана: symbol → (book, expiry)
 	obCacheMu sync.RWMutex
@@ -57,12 +64,14 @@ func NewEngine(
 	candleStorage CandleHistoryProvider,
 	srStorage *sr_storage.SRZoneStorage,
 	orderBook OrderBookFetcher,
+	volume24h Volume24hProvider,
 	eventBus *event_bus.EventBus,
 ) *Engine {
 	return &Engine{
 		candleStorage: candleStorage,
 		srStorage:     srStorage,
 		orderBook:     orderBook,
+		volume24h:     volume24h,
 		eventBus:      eventBus,
 		calculator:    sr_zones.NewCalculator(),
 		obCache:       make(map[string]obCacheEntry),
@@ -119,10 +128,11 @@ func (e *Engine) recalculate(symbol, period string) {
 	// Получаем стакан (с кэшем)
 	book := e.getOrderBookCached(symbol)
 
-	// Конвертируем bybit.OrderBookV5 → *sr_zones.OrderBook
+	// Конвертируем bybit.OrderBookV5 → *sr_zones.OrderBook и обогащаем зоны
 	if book != nil {
 		srBook := convertOrderBook(book)
-		zones = sr_zones.EnrichWithOrderBook(zones, srBook)
+		vol24h := e.volume24h.GetVolume24hUSD(symbol)
+		zones = sr_zones.EnrichWithOrderBook(zones, srBook, vol24h)
 	}
 
 	if err := e.srStorage.SaveZones(symbol, period, zones); err != nil {

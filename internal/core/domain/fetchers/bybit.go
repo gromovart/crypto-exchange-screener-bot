@@ -345,6 +345,17 @@ func (f *BybitPriceFetcher) startCacheCleanupLoop() {
 }
 
 // GetLiquidationMetrics получает метрики ликвидаций для символа
+// GetVolume24hUSD возвращает дневной объём торгов в USD для символа.
+// Использует кэшированный снапшот из priceStorage.
+// Возвращает 0 если данные недоступны.
+func (f *BybitPriceFetcher) GetVolume24hUSD(symbol string) float64 {
+	snapshot, exists := f.storage.GetCurrentSnapshot(symbol)
+	if !exists {
+		return 0
+	}
+	return snapshot.GetVolumeUSD()
+}
+
 func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.LiquidationMetrics, bool) {
 	f.liqCacheMu.RLock()
 	metrics, exists := f.liqCache[symbol]

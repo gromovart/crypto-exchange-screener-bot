@@ -650,7 +650,8 @@ func (cl *CoreLayer) startSRZoneEngine() error {
 	cl.srZoneEngine = sr_engine.NewEngine(
 		cl.candleSystem.Storage,
 		srStorage,
-		cl.bybitPriceFetcher,
+		cl.bybitPriceFetcher, // OrderBookFetcher
+		cl.bybitPriceFetcher, // Volume24hProvider
 		eventBus,
 	)
 
