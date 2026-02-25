@@ -35,6 +35,12 @@ const (
 	// minWallUSD — абсолютный минимальный порог стены в USD.
 	// Применяется если 24h объём недоступен или даёт меньшее значение.
 	minWallUSD = 50_000
+
+	// wallMultiplier — бакет стены должен быть минимум в 3× больше среднего бакета.
+	// Это гарантирует, что стена ВСЕГДА выделяется на фоне обычного стакана —
+	// даже при равномерном распределении ордеров (малом σ).
+	// Пример: средний бакет $50K → минимальная стена $150K.
+	wallMultiplier = 3.0
 )
 
 // Calculator вычисляет S/R зоны по истории свечей.
@@ -297,15 +303,34 @@ func bucketMeanStd(buckets []priceBucket) (mean, std float64) {
 	return
 }
 
-// wallThreshold вычисляет порог стены:
-// max(volume24hUSD * minWallVolumePct, minWallUSD).
-// Если volume24hUSD == 0 (недоступен), возвращает minWallUSD.
-func wallThreshold(volume24hUSD float64) float64 {
-	dynThreshold := volume24hUSD * minWallVolumePct
-	if dynThreshold > minWallUSD {
-		return dynThreshold
+// computeWallThreshold вычисляет итоговый порог стены как максимум из трёх критериев:
+//
+//  1. Относительный: bucketMean × wallMultiplier (3×)
+//     Бакет всегда должен быть в 3× выше среднего — независимо от σ.
+//     Если средний бакет $50K, минимальная стена = $150K, а не $50K.
+//
+//  2. Статистический: bucketMean + 2σ
+//     Стена статистически выделяется на фоне остального стакана.
+//
+//  3. Динамический: max(vol24h × 0.05%, minWallUSD)
+//     Стена осмысленна в контексте торгового объёма монеты.
+//
+// Итоговый порог = max(1, 2, 3). Бакет обязан превышать все три условия
+// через единое значение — нет дублирующих AND-проверок.
+func computeWallThreshold(bucketMean, bucketStd, volume24hUSD float64) float64 {
+	// 1. Относительный: в wallMultiplier раз выше среднего
+	relative := bucketMean * wallMultiplier
+
+	// 2. Статистический: mean + 2σ
+	statistical := bucketMean + 2*bucketStd
+
+	// 3. Динамический: процент от 24h объёма или абсолютный минимум
+	dynamic := volume24hUSD * minWallVolumePct
+	if dynamic < minWallUSD {
+		dynamic = minWallUSD
 	}
-	return minWallUSD
+
+	return math.Max(relative, math.Max(statistical, dynamic))
 }
 
 // EnrichWithOrderBook обогащает зоны данными стакана ордеров.
@@ -313,10 +338,10 @@ func wallThreshold(volume24hUSD float64) float64 {
 // Алгоритм:
 //  1. Агрегируем ордера в ценовые бакеты по 0.1% — учитываем плотность (много
 //     мелких ордеров на одном уровне суммируются).
-//  2. Вычисляем статистический порог (mean + 2σ) по USD-объёму бакетов.
-//  3. Вычисляем динамический порог от 24h объёма: max(0.05% * vol24h, $50K).
-//  4. Стена = бакет превышает ОБА порога одновременно.
-//  5. Ищем стены в радиусе ±0.5% от центра зоны.
+//  2. Единый порог = max(mean×3, mean+2σ, vol24h×0.05%) — бакет стены обязан
+//     быть в 3× выше среднего независимо от σ, статистически выделяться
+//     и быть значимым относительно объёма торгов.
+//  3. Ищем стены в радиусе ±0.5% от центра зоны.
 func EnrichWithOrderBook(zones []Zone, book *OrderBook, volume24hUSD float64) []Zone {
 	if book == nil || (len(book.Bids) == 0 && len(book.Asks) == 0) {
 		return zones
@@ -326,14 +351,11 @@ func EnrichWithOrderBook(zones []Zone, book *OrderBook, volume24hUSD float64) []
 	bidBuckets := buildBuckets(book.Bids, bucketWidthPct)
 	askBuckets := buildBuckets(book.Asks, bucketWidthPct)
 
-	// Статистические пороги по бакетам
+	// Единый порог для bids и asks: max(mean×3, mean+2σ, dynFloor)
 	bidMean, bidStd := bucketMeanStd(bidBuckets)
 	askMean, askStd := bucketMeanStd(askBuckets)
-	bidStatThreshold := bidMean + 2*bidStd
-	askStatThreshold := askMean + 2*askStd
-
-	// Динамический порог от 24h объёма
-	dynThreshold := wallThreshold(volume24hUSD)
+	bidThreshold := computeWallThreshold(bidMean, bidStd, volume24hUSD)
+	askThreshold := computeWallThreshold(askMean, askStd, volume24hUSD)
 
 	for i := range zones {
 		z := &zones[i]
@@ -343,23 +365,22 @@ func EnrichWithOrderBook(zones []Zone, book *OrderBook, volume24hUSD float64) []
 		searchHigh := z.PriceCenter * (1 + wallSearchRadiusPct)
 
 		var wallUSD float64
-		var statThreshold float64
+		var threshold float64
 		var buckets []priceBucket
 
 		if z.Type == ZoneTypeSupport {
 			buckets = bidBuckets
-			statThreshold = bidStatThreshold
+			threshold = bidThreshold
 		} else {
 			buckets = askBuckets
-			statThreshold = askStatThreshold
+			threshold = askThreshold
 		}
 
 		for _, b := range buckets {
 			if b.priceKey < searchLow || b.priceKey > searchHigh {
 				continue
 			}
-			// Стена = превышает И статистический, И динамический порог
-			if b.volumeUSD >= statThreshold && b.volumeUSD >= dynThreshold {
+			if b.volumeUSD >= threshold {
 				wallUSD += b.volumeUSD
 			}
 		}
