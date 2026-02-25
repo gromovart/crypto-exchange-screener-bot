@@ -54,7 +54,15 @@ type obCacheEntry struct {
 }
 
 const (
-	candleHistoryDepth = 200
+	// candleHistoryDepth — сколько свечей берём из Redis для расчёта S/R зон.
+	// Redis хранит до 1000 свечей (MaxHistory в candle_storage).
+	// Окно по периодам:
+	//   1m  → 500 свечей = ~8.3 часа
+	//   5m  → 500 свечей = ~41 час  (~1.7 дня)
+	//   15m → 500 свечей = ~5 дней
+	//   1h  → 500 свечей = ~20 дней
+	//   4h  → 500 свечей = ~83 дня
+	candleHistoryDepth = 500
 	orderBookDepth     = 200
 	obCacheTTL         = 60 * time.Second
 )
