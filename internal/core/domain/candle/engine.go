@@ -480,6 +480,16 @@ func (ce *CandleEngine) closeCandle(candle *storage.Candle) {
 	candle.EndTime = time.Now()
 	candle.IsClosedFlag = true
 	ce.storage.CloseAndArchiveCandle(candle)
+
+	// Публикуем событие закрытия свечи для SRZoneEngine
+	if ce.eventBus != nil {
+		_ = ce.eventBus.Publish(types.Event{
+			Type:      types.EventCandleClosed,
+			Source:    "candle_engine",
+			Timestamp: time.Now(),
+			Data:      types.CandleClosedData{Symbol: candle.Symbol, Period: candle.Period},
+		})
+	}
 }
 
 // recordBuildResult записывает результат построения и логирует статистику раз в statsInterval

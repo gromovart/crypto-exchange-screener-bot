@@ -20,6 +20,7 @@ type FormatterProvider struct {
 	LiquidationFormatter *LiquidationFormatter
 	Recommendation       *recommendation.RecommendationFormatter
 	NumberFormatter      *NumberFormatter
+	SRZonesFormatter     *SRZonesFormatter
 }
 
 // NewFormatterProvider создает новый провайдер форматтеров
@@ -34,6 +35,7 @@ func NewFormatterProvider(exchange string) *FormatterProvider {
 		LiquidationFormatter: NewLiquidationFormatter(),
 		Recommendation:       recommendation.NewRecommendationFormatter(),
 		NumberFormatter:      NewNumberFormatter(),
+		SRZonesFormatter:     NewSRZonesFormatter(),
 	}
 }
 
@@ -73,6 +75,10 @@ type CounterData struct {
 	ProgressPercentage    float64
 	NextAnalysis          time.Time
 	NextSignal            time.Time
+
+	// Зоны поддержки/сопротивления
+	SRSupport    *SRZoneData
+	SRResistance *SRZoneData
 }
 
 // FormatCounterSignal форматирует counter сигнал для отправки в Telegram
@@ -163,6 +169,14 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 			}
 			builder.WriteString("\n")
 		}
+		builder.WriteString("\n")
+	}
+
+	// 7. ЗОНЫ S/R (если есть данные)
+	if srBlock := p.SRZonesFormatter.FormatSRZonesBlock(
+		data.Period, data.SRSupport, data.SRResistance,
+	); srBlock != "" {
+		builder.WriteString(srBlock)
 		builder.WriteString("\n")
 	}
 

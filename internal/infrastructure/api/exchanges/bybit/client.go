@@ -147,6 +147,68 @@ func (c *BybitClient) sendPublicRequest(method, endpoint string, params url.Valu
 // ОСНОВНЫЕ API МЕТОДЫ
 // ============================================
 
+// GetOrderBook получает стакан ордеров для символа.
+// depth — глубина (1-200 для linear/inverse/spot).
+func (c *BybitClient) GetOrderBook(symbol string, depth int) (*OrderBookV5, error) {
+	if depth <= 0 || depth > 200 {
+		depth = 200
+	}
+
+	params := url.Values{}
+	params.Set("category", c.category)
+	params.Set("symbol", symbol)
+	params.Set("limit", strconv.Itoa(depth))
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/orderbook", params)
+	if err != nil {
+		return nil, fmt.Errorf("GetOrderBook %s: %w", symbol, err)
+	}
+
+	var resp struct {
+		RetCode int    `json:"retCode"`
+		RetMsg  string `json:"retMsg"`
+		Result  struct {
+			S  string     `json:"s"`
+			B  [][]string `json:"b"` // bids: [[price, size], ...]
+			A  [][]string `json:"a"` // asks: [[price, size], ...]
+			Ts int64      `json:"ts"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("GetOrderBook %s: ошибка парсинга: %w", symbol, err)
+	}
+	if resp.RetCode != 0 {
+		return nil, fmt.Errorf("GetOrderBook %s: API error %d: %s", symbol, resp.RetCode, resp.RetMsg)
+	}
+
+	book := &OrderBookV5{Symbol: symbol}
+	for _, row := range resp.Result.B {
+		if len(row) < 2 {
+			continue
+		}
+		price, err1 := strconv.ParseFloat(row[0], 64)
+		size, err2 := strconv.ParseFloat(row[1], 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		book.Bids = append(book.Bids, OrderLevelV5{Price: price, Size: size})
+	}
+	for _, row := range resp.Result.A {
+		if len(row) < 2 {
+			continue
+		}
+		price, err1 := strconv.ParseFloat(row[0], 64)
+		size, err2 := strconv.ParseFloat(row[1], 64)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		book.Asks = append(book.Asks, OrderLevelV5{Price: price, Size: size})
+	}
+
+	return book, nil
+}
+
 // GetTickers получает все тикеры для указанной категории
 func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 	if category == "" {

@@ -32,3 +32,11 @@ func getFloat64FromFloatMap(m map[string]float64, key string) float64 {
 	}
 	return 0.0
 }
+
+// getBool безопасно извлекает bool из map
+func getBool(m map[string]interface{}, key string) bool {
+	if val, ok := m[key].(bool); ok {
+		return val
+	}
+	return false
+}
