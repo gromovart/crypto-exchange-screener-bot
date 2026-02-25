@@ -15,6 +15,12 @@ const (
 	defaultTolerance = 0.005
 	// maxZones — максимум зон на один период
 	maxZones = 10
+
+	// minWallUSD — минимальный абсолютный размер стены ордеров в USD.
+	// Ордер считается "стеной" только если его USD-объём превышает этот порог
+	// И статистически значимо превышает средний размер ордеров в стакане (mean+2σ).
+	// Предотвращает ложные стены на монетах с маленькими ордерами.
+	minWallUSD = 50_000
 )
 
 // Calculator вычисляет S/R зоны по истории свечей.
@@ -235,16 +241,18 @@ func EnrichWithOrderBook(zones []Zone, book *OrderBook) []Zone {
 		if z.Type == ZoneTypeSupport {
 			for _, level := range book.Bids {
 				if level.Price >= z.PriceLow && level.Price <= z.PriceHigh {
-					if level.Size >= wallThresholdBid {
-						wallUSD += level.Size * level.Price
+					levelUSD := level.Size * level.Price
+					if level.Size >= wallThresholdBid && levelUSD >= minWallUSD {
+						wallUSD += levelUSD
 					}
 				}
 			}
 		} else {
 			for _, level := range book.Asks {
 				if level.Price >= z.PriceLow && level.Price <= z.PriceHigh {
-					if level.Size >= wallThresholdAsk {
-						wallUSD += level.Size * level.Price
+					levelUSD := level.Size * level.Price
+					if level.Size >= wallThresholdAsk && levelUSD >= minWallUSD {
+						wallUSD += levelUSD
 					}
 				}
 			}
