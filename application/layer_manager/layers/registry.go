@@ -136,6 +136,13 @@ func (lr *LayerRegistry) StartAll() map[string]error {
 	for _, layer := range sortedLayers {
 		name := layer.Name()
 
+		// Пропускаем уже запущенные слои (например, InfrastructureLayer
+		// запускается явно в LayerManager.Start() до вызова StartAll())
+		if layer.IsRunning() {
+			logger.Info("✅ Слой %s уже запущен, пропускаем", name)
+			continue
+		}
+
 		// Проверяем что слой инициализирован
 		if !layer.IsInitialized() {
 			errors[name] = fmt.Errorf("слой не инициализирован")
