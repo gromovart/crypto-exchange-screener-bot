@@ -131,28 +131,36 @@ func (e *Engine) Warmup(symbols []string, periods []string) {
 		return
 	}
 
-	logger.Info("🔥 SRZoneEngine: прогрев зон для %d символов × %d периодов...",
-		len(symbols), len(periods))
+	total := len(symbols) * len(periods)
+	logger.Info("🔥 SRZoneEngine: прогрев зон для %d символов × %d периодов (%d задач)...",
+		len(symbols), len(periods), total)
 
-	var wg sync.WaitGroup
-	// Ограничиваем параллелизм, чтобы не перегрузить Redis и Bybit API
-	sem := make(chan struct{}, 10)
-
-	for _, symbol := range symbols {
-		for _, period := range periods {
-			wg.Add(1)
-			sym, per := symbol, period // захватываем в замыкание
-			go func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				e.recalculate(sym, per)
-			}()
+	// Worker pool: ровно 10 горутин на весь прогрев.
+	// Предыдущий подход (semaphore) создавал total горутин сразу (3900 для 650×6),
+	// что давало резкий всплеск числа горутин. Pool создаёт ровно workers штук.
+	type task struct{ symbol, period string }
+	taskCh := make(chan task, total)
+	for _, sym := range symbols {
+		for _, per := range periods {
+			taskCh <- task{sym, per}
 		}
+	}
+	close(taskCh)
+
+	const workers = 10
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for t := range taskCh {
+				e.recalculate(t.symbol, t.period)
+			}
+		}()
 	}
 
 	wg.Wait()
-	logger.Info("✅ SRZoneEngine: прогрев завершён")
+	logger.Info("✅ SRZoneEngine: прогрев завершён (%d задач)", total)
 }
 
 // recalculate пересчитывает зоны для пары symbol/period.
