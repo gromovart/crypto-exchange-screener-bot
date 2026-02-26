@@ -15,8 +15,10 @@ import (
 	redis_storage_factory "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/factory"
 	sr_storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage/sr_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
+	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
+	"sync"
 	"time"
 
 	sr_engine "crypto-exchange-screener-bot/internal/core/domain/analysis/sr_engine"
@@ -658,9 +660,55 @@ func (cl *CoreLayer) startSRZoneEngine() error {
 	// 7. Запускаем движок
 	cl.srZoneEngine.Start()
 
+	// 8. Прогреваем зоны при первом поступлении батча цен (one-shot горутина).
+	// Это устраняет "холодный старт": без прогрева зоны появляются только
+	// после первого EventCandleClosed (~60с для 1m), а сигналы идут сразу.
+	go cl.warmupSRZonesOnFirstPriceEvent(eventBus)
+
 	cl.registerComponent("SRZoneEngine", cl.srZoneEngine)
 	logger.Info("✅ SRZoneEngine запущен и зарегистрирован")
 	return nil
+}
+
+// warmupSRZonesOnFirstPriceEvent подписывается на EventPriceUpdated,
+// берёт символы из первого батча и запускает Warmup, затем отписывается.
+func (cl *CoreLayer) warmupSRZonesOnFirstPriceEvent(eventBus *events.EventBus) {
+	if cl.srZoneEngine == nil {
+		return
+	}
+
+	symbolsCh := make(chan []string, 1)
+	var once sync.Once
+
+	subscriber := events.NewBaseSubscriber(
+		"sr_zone_warmup",
+		[]types.EventType{types.EventPriceUpdated},
+		func(event types.Event) error {
+			once.Do(func() {
+				if priceList, ok := event.Data.([]storage.PriceData); ok && len(priceList) > 0 {
+					symbols := make([]string, 0, len(priceList))
+					for _, p := range priceList {
+						symbols = append(symbols, p.Symbol)
+					}
+					symbolsCh <- symbols
+				}
+			})
+			return nil
+		},
+	)
+
+	eventBus.Subscribe(types.EventPriceUpdated, subscriber)
+
+	// Ждём первый батч (приходит через ~10с после старта)
+	symbols := <-symbolsCh
+
+	// Одноразовый подписчик — сразу отписываемся
+	eventBus.Unsubscribe(types.EventPriceUpdated, subscriber)
+
+	// Прогреваем все основные периоды параллельно
+	periods := []string{"1m", "5m", "15m", "30m", "1h", "4h"}
+	logger.Info("🔥 CoreLayer: прогрев S/R зон для %d символов × %d периодов", len(symbols), len(periods))
+	cl.srZoneEngine.Warmup(symbols, periods)
 }
 
 // Stop останавливает слой ядра
