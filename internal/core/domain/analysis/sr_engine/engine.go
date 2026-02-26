@@ -121,6 +121,40 @@ func (e *Engine) Stop() {
 	logger.Info("🛑 SRZoneEngine остановлен")
 }
 
+// Warmup прогревает кэш зон при старте системы.
+// Вызывается один раз до начала обработки сигналов, чтобы устранить
+// "холодный старт" — первые сигналы не будут ждать закрытия первой свечи.
+// symbols — список активных символов (например, из маркет-дата провайдера).
+// periods — список периодов для прогрева (обычно те же, что обрабатывает Engine).
+func (e *Engine) Warmup(symbols []string, periods []string) {
+	if len(symbols) == 0 || len(periods) == 0 {
+		return
+	}
+
+	logger.Info("🔥 SRZoneEngine: прогрев зон для %d символов × %d периодов...",
+		len(symbols), len(periods))
+
+	var wg sync.WaitGroup
+	// Ограничиваем параллелизм, чтобы не перегрузить Redis и Bybit API
+	sem := make(chan struct{}, 10)
+
+	for _, symbol := range symbols {
+		for _, period := range periods {
+			wg.Add(1)
+			sym, per := symbol, period // захватываем в замыкание
+			go func() {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				e.recalculate(sym, per)
+			}()
+		}
+	}
+
+	wg.Wait()
+	logger.Info("✅ SRZoneEngine: прогрев завершён")
+}
+
 // recalculate пересчитывает зоны для пары symbol/period.
 func (e *Engine) recalculate(symbol, period string) {
 	candles, err := e.candleStorage.GetHistory(symbol, period, candleHistoryDepth)

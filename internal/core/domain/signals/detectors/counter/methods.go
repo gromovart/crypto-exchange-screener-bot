@@ -622,9 +622,20 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	}
 
 	// 5. Зоны S/R (если хранилище доступно)
+	// Используем fallback по более старшим периодам, если для текущего зон нет.
+	// Причина: зоны пересчитываются только при закрытии свечи (EventCandleClosed),
+	// а сигналы генерируются каждые 30 секунд — возникает временной разрыв.
 	if a.deps.SRZoneStorage != nil && signal.EndPrice > 0 {
-		nearest, err := a.deps.SRZoneStorage.GetNearestZones(signal.Symbol, period, signal.EndPrice)
+		fallback := srFallbackPeriods(normalizedPeriod)
+		nearest, usedPeriod, err := a.deps.SRZoneStorage.GetNearestZonesWithFallback(
+			signal.Symbol, normalizedPeriod, signal.EndPrice, fallback,
+		)
 		if err == nil {
+			// Помечаем, какой период зон фактически использован (для отладки и аналитики)
+			eventData["sr_zone_period"] = usedPeriod
+			if usedPeriod != normalizedPeriod {
+				eventData["sr_zone_fallback"] = true
+			}
 			if nearest.Support != nil {
 				eventData["sr_support_price"] = nearest.Support.PriceCenter
 				eventData["sr_support_strength"] = nearest.Support.Strength
