@@ -304,3 +304,29 @@ func GetPeriodMinutes(period string) int {
 	}
 	return minutes
 }
+
+// srFallbackPeriods возвращает список периодов для fallback поиска S/R зон
+// в порядке от ближайшего старшего к первичному периоду.
+// Логика: если зоны для текущего периода ещё не рассчитаны (асинхронный пересчёт),
+// берём зоны от более старшего периода — они менее точны, но лучше чем ничего.
+func srFallbackPeriods(primaryPeriod string) []string {
+	// Полный порядок периодов от младшего к старшему
+	ordered := []string{"1m", "5m", "15m", "30m", "1h", "4h", "1d"}
+
+	// Найдём позицию первичного периода
+	primaryIdx := -1
+	for i, p := range ordered {
+		if p == primaryPeriod {
+			primaryIdx = i
+			break
+		}
+	}
+
+	// Если период не найден или уже самый старший — fallback не нужен
+	if primaryIdx < 0 || primaryIdx >= len(ordered)-1 {
+		return nil
+	}
+
+	// Возвращаем все периоды СТАРШЕ первичного (в порядке возрастания)
+	return ordered[primaryIdx+1:]
+}

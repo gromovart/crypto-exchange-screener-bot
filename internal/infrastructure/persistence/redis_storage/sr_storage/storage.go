@@ -151,9 +151,48 @@ func (s *SRZoneStorage) GetNearestZones(symbol, period string, currentPrice floa
 	return result, nil
 }
 
+// GetNearestZonesWithFallback ищет ближайшие зоны сначала для primaryPeriod,
+// затем последовательно для fallbackPeriods, если зоны не найдены.
+// Возвращает зоны, строку с фактически использованным периодом и ошибку.
+func (s *SRZoneStorage) GetNearestZonesWithFallback(
+	symbol, primaryPeriod string,
+	currentPrice float64,
+	fallbackPeriods []string,
+) (sr_zones.NearestZones, string, error) {
+	// Собираем полный список периодов для перебора: первичный + fallback (без дубликатов)
+	periodsToTry := make([]string, 0, 1+len(fallbackPeriods))
+	periodsToTry = append(periodsToTry, primaryPeriod)
+	for _, p := range fallbackPeriods {
+		if p != primaryPeriod {
+			periodsToTry = append(periodsToTry, p)
+		}
+	}
+
+	for _, period := range periodsToTry {
+		nearest, err := s.GetNearestZones(symbol, period, currentPrice)
+		if err != nil {
+			logger.Debug("⚠️ sr_storage: нет зон %s/%s: %v", symbol, period, err)
+			continue
+		}
+		// Считаем успехом наличие хотя бы одной зоны (поддержка ИЛИ сопротивление)
+		if nearest.Support != nil || nearest.Resistance != nil {
+			if period != primaryPeriod {
+				logger.Debug("📐 sr_storage: fallback зоны %s/%s → использован %s",
+					symbol, primaryPeriod, period)
+			}
+			return nearest, period, nil
+		}
+	}
+
+	return sr_zones.NearestZones{}, "", fmt.Errorf("нет зон ни для одного периода %s %v",
+		symbol, periodsToTry)
+}
+
 // periodTTL возвращает TTL для зон в зависимости от периода.
 func periodTTL(period string) time.Duration {
 	switch period {
+	case "1m":
+		return 3 * time.Minute
 	case "5m":
 		return 15 * time.Minute
 	case "15m":
