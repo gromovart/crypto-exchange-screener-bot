@@ -290,7 +290,7 @@ func (p *TelegramDeliveryPackage) getPaymentService() (*payment.PaymentService, 
 	}
 
 	// Создаем PaymentService через фабрику
-	logger.Warn("🔍 Создание PaymentService через CoreFactory...")
+	logger.Info("🔍 Создание PaymentService через CoreFactory...")
 	paymentSvc, err := p.coreFactory.CreatePaymentService()
 	if err != nil {
 		logger.Error("❌ Не удалось создать PaymentService: %v", err)

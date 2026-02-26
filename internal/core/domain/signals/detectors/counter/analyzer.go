@@ -117,7 +117,7 @@ func NewCounterAnalyzer(
 
 	// Проверяем и создаем TechnicalCalculator если не передан
 	if deps.TechnicalCalculator == nil {
-		logger.Warn("🔧 [CounterAnalyzer] Создаем TechnicalCalculator")
+		logger.Info("🔧 [CounterAnalyzer] Создаем TechnicalCalculator")
 		deps.TechnicalCalculator = calculator.NewTechnicalCalculator()
 	}
 
@@ -152,7 +152,7 @@ func NewCounterAnalyzer(
 		},
 	}
 
-	logger.Warn("✅ [CounterAnalyzer] Создан анализатор счетчика с разделенной статистикой")
+	logger.Info("✅ [CounterAnalyzer] Создан анализатор счетчика с разделенной статистикой")
 	return analyzer
 }
 
