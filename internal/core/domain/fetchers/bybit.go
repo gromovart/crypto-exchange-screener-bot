@@ -89,8 +89,8 @@ func NewPriceFetcher(apiClient *bybit.BybitClient, storage storage.PriceStorageI
 		lastOIUpdate:     time.Now(),
 		oiRetryCount:     0,
 
-		// Настройки ликвидаций
-		liqEnabled:        true,
+		// Настройки ликвидаций — отключены, данные поступают через LiquidationWatcher (WebSocket)
+		liqEnabled:        false,
 		liqUpdateInterval: 1 * time.Minute,
 		lastLiqUpdate:     time.Now(),
 
@@ -131,10 +131,6 @@ func (f *BybitPriceFetcher) Start(interval time.Duration) error {
 		if err := f.fetchPrices(); err != nil {
 			logger.Warn("⚠️ Ошибка первоначального получения цен: %v", err)
 		}
-
-		// Запускаем отдельный горутин для получения ликвидаций
-		f.wg.Add(1)
-		go f.fetchLiquidationsLoop(1 * time.Minute)
 
 		for {
 			select {
@@ -388,6 +384,29 @@ func (f *BybitPriceFetcher) GetLiquidationMetrics(symbol string) (*bybit.Liquida
 	}
 
 	return metrics, true
+}
+
+// SetLiquidationMetrics записывает агрегированные метрики ликвидаций в кэш.
+// Вызывается LiquidationWatcher по WebSocket-данным.
+func (f *BybitPriceFetcher) SetLiquidationMetrics(symbol string, m *bybit.LiquidationMetrics) {
+	f.liqCacheMu.Lock()
+	f.liqCache[symbol] = m
+	f.liqCacheMu.Unlock()
+}
+
+// GetTopSymbols возвращает топ-N символов по объёму в USD.
+// Используется LiquidationWatcher для определения, на какие символы подписаться.
+func (f *BybitPriceFetcher) GetTopSymbols(n int) []string {
+	tops, err := f.storage.GetTopSymbolsByVolumeUSD(n)
+	if err != nil {
+		logger.Debug("⚠️ GetTopSymbols: ошибка получения топ-символов: %v", err)
+		return nil
+	}
+	symbols := make([]string, 0, len(tops))
+	for _, sv := range tops {
+		symbols = append(symbols, sv.GetSymbol())
+	}
+	return symbols
 }
 
 // ==================== МЕТОДЫ OPEN INTEREST ====================
@@ -1059,8 +1078,8 @@ func NewPriceFetcherWithoutCandleSystem(apiClient *bybit.BybitClient, storage st
 		lastOIUpdate:     time.Now(),
 		oiRetryCount:     0,
 
-		// Настройки ликвидаций
-		liqEnabled:        true,
+		// Настройки ликвидаций — отключены, данные поступают через LiquidationWatcher (WebSocket)
+		liqEnabled:        false,
 		liqUpdateInterval: 1 * time.Minute,
 		lastLiqUpdate:     time.Now(),
 

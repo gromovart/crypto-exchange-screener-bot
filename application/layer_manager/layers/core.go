@@ -22,6 +22,7 @@ import (
 	"time"
 
 	sr_engine "crypto-exchange-screener-bot/internal/core/domain/analysis/sr_engine"
+	bybit_ws "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit/ws"
 )
 
 // CoreLayer слой ядра (бизнес-логика)
@@ -37,6 +38,7 @@ type CoreLayer struct {
 	analysisEngine    *engine.AnalysisEngine
 	srZoneEngine      *sr_engine.Engine
 	srZoneStorage     *sr_storage.SRZoneStorage
+	liqWatcher        *bybit_ws.LiquidationWatcher
 }
 
 // NewCoreLayer создает слой ядра
@@ -593,6 +595,14 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 	} else {
 		logger.Info("🚀 BybitPriceFetcher запущен с интервалом %v", interval)
 	}
+
+	// Запускаем WebSocket-наблюдатель ликвидаций
+	cl.liqWatcher = bybit_ws.NewLiquidationWatcher(fetcher)
+	if err := cl.liqWatcher.Start(); err != nil {
+		logger.Warn("⚠️ CoreLayer: не удалось запустить LiquidationWatcher: %v", err)
+	} else {
+		logger.Info("🌊 LiquidationWatcher запущен")
+	}
 }
 
 // startSRZoneEngine запускает движок зон S/R
@@ -740,6 +750,12 @@ func (cl *CoreLayer) Stop() error {
 		} else {
 			logger.Info("🕯️ Свечная система остановлена")
 		}
+	}
+
+	// Останавливаем LiquidationWatcher если запущен
+	if cl.liqWatcher != nil {
+		cl.liqWatcher.Stop()
+		logger.Info("🌊 LiquidationWatcher остановлен")
 	}
 
 	// Останавливаем BybitPriceFetcher если запущен

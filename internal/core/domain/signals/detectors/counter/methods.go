@@ -4,6 +4,7 @@ package counter
 import (
 	analysis "crypto-exchange-screener-bot/internal/core/domain/signals"
 	"crypto-exchange-screener-bot/internal/core/domain/signals/detectors/counter/calculator"
+	bybit "crypto-exchange-screener-bot/internal/infrastructure/api/exchanges/bybit"
 	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	"crypto-exchange-screener-bot/internal/types"
 	"crypto-exchange-screener-bot/pkg/logger"
@@ -582,22 +583,16 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	shortLiqVolume := 0.0
 
 	// Пробуем получить метрики ликвидаций через MarketFetcher
+	// Используем точный интерфейс с правильной сигнатурой (*bybit.LiquidationMetrics, bool)
+	type liqMetricsGetter interface {
+		GetLiquidationMetrics(string) (*bybit.LiquidationMetrics, bool)
+	}
 	if a.deps.MarketFetcher != nil {
-		// Пытаемся привести к интерфейсу с методом GetLiquidationMetrics
-		if fetcher, ok := a.deps.MarketFetcher.(interface {
-			GetLiquidationMetrics(string) (interface{}, bool)
-		}); ok {
-			if metrics, exists := fetcher.GetLiquidationMetrics(signal.Symbol); exists {
-				// Пытаемся извлечь данные из интерфейса
-				if m, ok := metrics.(struct {
-					TotalVolumeUSD float64
-					LongLiqVolume  float64
-					ShortLiqVolume float64
-				}); ok {
-					liquidationVolume = m.TotalVolumeUSD
-					longLiqVolume = m.LongLiqVolume
-					shortLiqVolume = m.ShortLiqVolume
-				}
+		if fetcher, ok := a.deps.MarketFetcher.(liqMetricsGetter); ok {
+			if metrics, exists := fetcher.GetLiquidationMetrics(signal.Symbol); exists && metrics != nil {
+				liquidationVolume = metrics.TotalVolumeUSD
+				longLiqVolume = metrics.LongLiqVolume
+				shortLiqVolume = metrics.ShortLiqVolume
 			}
 		}
 	}
