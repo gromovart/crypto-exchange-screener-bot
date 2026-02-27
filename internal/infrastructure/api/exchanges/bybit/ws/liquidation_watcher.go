@@ -172,9 +172,10 @@ func (w *LiquidationWatcher) runConnection(symbols []string) error {
 	logger.Info("✅ LiquidationWatcher: WS-соединение установлено")
 
 	// Подписываемся батчами (Bybit принимает до 10 args за раз)
+	// Используем новый топик allLiquidation.{symbol} (старый liquidation.{symbol} задепрекейтил Bybit)
 	topics := make([]string, 0, len(symbols))
 	for _, sym := range symbols {
-		topics = append(topics, "liquidation."+sym)
+		topics = append(topics, "allLiquidation."+sym)
 	}
 	if err := w.subscribeTopics(ctx, conn, topics); err != nil {
 		return fmt.Errorf("ошибка подписки: %w", err)
@@ -268,47 +269,52 @@ func (w *LiquidationWatcher) handleMessage(raw json.RawMessage) {
 		}
 	}
 
-	// Пробуем декодировать как ликвидацию
-	var msg LiquidationMsg
+	// Пробуем декодировать как ликвидацию (новый формат allLiquidation)
+	var msg AllLiquidationMsg
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		return
 	}
 
 	// Проверяем что это топик ликвидации
-	if !strings.HasPrefix(msg.Topic, "liquidation.") {
+	if !strings.HasPrefix(msg.Topic, "allLiquidation.") {
 		return
 	}
 
-	d := msg.Data
-	if d.Symbol == "" || d.Price == "" || d.Size == "" {
-		return
+	// data — массив событий (может быть несколько за один пуш)
+	now := time.Now()
+	for _, d := range msg.Data {
+		if d.Symbol == "" || d.Price == "" || d.Size == "" {
+			continue
+		}
+
+		price, err := strconv.ParseFloat(d.Price, 64)
+		if err != nil || price <= 0 {
+			continue
+		}
+
+		size, err := strconv.ParseFloat(d.Size, 64)
+		if err != nil || size <= 0 {
+			continue
+		}
+
+		sizeUSD := size * price
+
+		// В новом API S — это сторона ПОЗИЦИИ, а не ордера:
+		// "Buy"  = Buy-позиция (лонг) была ликвидирована
+		// "Sell" = Sell-позиция (шорт) была ликвидирована
+		isLong := d.Side == "Buy"
+
+		event := liqEvent{
+			sizeUSD:   sizeUSD,
+			isLong:    isLong,
+			timestamp: now,
+		}
+
+		w.aggregator.Add(d.Symbol, event)
+
+		logger.Debug("💥 LiquidationWatcher: %s %s $%.0f",
+			d.Symbol, d.Side, sizeUSD)
 	}
-
-	price, err := strconv.ParseFloat(d.Price, 64)
-	if err != nil || price <= 0 {
-		return
-	}
-
-	size, err := strconv.ParseFloat(d.Size, 64)
-	if err != nil || size <= 0 {
-		return
-	}
-
-	sizeUSD := size * price
-
-	// Side: "Sell" = лонг ликвидирован, "Buy" = шорт ликвидирован
-	isLong := d.Side == "Sell"
-
-	event := liqEvent{
-		sizeUSD:   sizeUSD,
-		isLong:    isLong,
-		timestamp: time.Now(),
-	}
-
-	w.aggregator.Add(d.Symbol, event)
-
-	logger.Debug("💥 LiquidationWatcher: %s %s $%.0f",
-		d.Symbol, d.Side, sizeUSD)
 }
 
 // flushLoop периодически записывает агрегированные данные в кэш

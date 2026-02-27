@@ -1,22 +1,24 @@
 // internal/infrastructure/api/exchanges/bybit/ws/types.go
 package ws
 
-// LiquidationMsg — входящее WS-сообщение с данными ликвидации
-type LiquidationMsg struct {
-	Topic string          `json:"topic"`
-	Type  string          `json:"type"`
-	Data  LiquidationData `json:"data"`
+// AllLiquidationMsg — входящее WS-сообщение нового топика allLiquidation.{symbol}
+// (старый топик liquidation.{symbol} задепрекейтил Bybit)
+type AllLiquidationMsg struct {
+	Topic string               `json:"topic"`
+	Type  string               `json:"type"`
+	Ts    int64                `json:"ts"` // системный timestamp ms
+	Data  []AllLiquidationData `json:"data"`
 }
 
-// LiquidationData — данные одной ликвидации
-// Side: "Buy"  — ликвидирован шорт (принудительная покупка)
-// Side: "Sell" — ликвидирован лонг (принудительная продажа)
-type LiquidationData struct {
-	Symbol      string `json:"symbol"`
-	Side        string `json:"side"`
-	Size        string `json:"size"`        // объём в базовой монете
-	Price       string `json:"price"`       // цена исполнения
-	UpdatedTime int64  `json:"updatedTime"` // Unix ms
+// AllLiquidationData — данные одной ликвидации в новом формате
+// S: "Buy"  — ликвидирован лонг (Buy-позиция принудительно закрыта)
+// S: "Sell" — ликвидирован шорт (Sell-позиция принудительно закрыта)
+type AllLiquidationData struct {
+	T      int64  `json:"T"` // timestamp ликвидации, ms
+	Symbol string `json:"s"` // символ
+	Side   string `json:"S"` // сторона позиции: "Buy"=лонг, "Sell"=шорт
+	Size   string `json:"v"` // объём в базовой монете
+	Price  string `json:"p"` // цена ликвидации
 }
 
 // wsSubscribeMsg — исходящее сообщение подписки
