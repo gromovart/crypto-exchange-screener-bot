@@ -275,6 +275,85 @@ func (c *BybitClient) GetTickers(category string) (*api.TickerResponse, error) {
 }
 
 // ============================================
+// KLINE (СВЕЧИ) API
+// ============================================
+
+// KlineCandle — одна свеча из ответа /v5/market/kline.
+// Bybit возвращает элементы в порядке: startTime, open, high, low, close, volume, turnover.
+type KlineCandle struct {
+	StartTime int64   // ms
+	Open      float64
+	High      float64
+	Low       float64
+	Close     float64
+	Volume    float64
+	Turnover  float64 // оборот в USDT
+}
+
+// GetKline получает исторические свечи для символа.
+// interval — строковый интервал Bybit: "1","3","5","15","30","60","120","240","360","720","D","W","M".
+// limit — максимальное кол-во свечей (до 1000, Bybit по умолчанию 200).
+// Результат отсортирован от старых к новым.
+func (c *BybitClient) GetKline(symbol, interval string, limit int) ([]KlineCandle, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+
+	params := url.Values{}
+	params.Set("category", "linear")
+	params.Set("symbol", symbol)
+	params.Set("interval", interval)
+	params.Set("limit", strconv.Itoa(limit))
+
+	body, err := c.sendPublicRequest(http.MethodGet, "/v5/market/kline", params)
+	if err != nil {
+		return nil, fmt.Errorf("GetKline %s/%s: %w", symbol, interval, err)
+	}
+
+	var resp KlineResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("GetKline %s/%s: parse error: %w", symbol, interval, err)
+	}
+	if resp.RetCode != 0 {
+		return nil, fmt.Errorf("GetKline %s/%s: API error %d: %s", symbol, interval, resp.RetCode, resp.RetMsg)
+	}
+
+	candles := make([]KlineCandle, 0, len(resp.Result.List))
+	for _, row := range resp.Result.List {
+		if len(row) < 7 {
+			continue
+		}
+		startMs, err := strconv.ParseInt(row[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		open, _ := strconv.ParseFloat(row[1], 64)
+		high, _ := strconv.ParseFloat(row[2], 64)
+		low, _ := strconv.ParseFloat(row[3], 64)
+		cls, _ := strconv.ParseFloat(row[4], 64)
+		vol, _ := strconv.ParseFloat(row[5], 64)
+		turnover, _ := strconv.ParseFloat(row[6], 64)
+
+		candles = append(candles, KlineCandle{
+			StartTime: startMs,
+			Open:      open,
+			High:      high,
+			Low:       low,
+			Close:     cls,
+			Volume:    vol,
+			Turnover:  turnover,
+		})
+	}
+
+	// Bybit возвращает свечи от новых к старым — разворачиваем
+	for i, j := 0, len(candles)-1; i < j; i, j = i+1, j-1 {
+		candles[i], candles[j] = candles[j], candles[i]
+	}
+
+	return candles, nil
+}
+
+// ============================================
 // API ЛИКВИДАЦИЙ
 // ============================================
 

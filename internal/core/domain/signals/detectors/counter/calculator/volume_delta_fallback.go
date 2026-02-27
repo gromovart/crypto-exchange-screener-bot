@@ -2,11 +2,11 @@
 package calculator
 
 import (
-	"log"
 	"math"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/types"
+	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // getFromStorage получает дельту из хранилища
@@ -56,7 +56,7 @@ func (c *VolumeDeltaCalculator) calculateBasicDelta(symbol, direction string) *t
 		deltaPercent = (delta / volume24h) * 100
 	}
 
-	log.Printf("📊 Базовая дельта для %s: $%.0f (%.1f%%) от объема $%.0f",
+	logger.Info("📊 Базовая дельта для %s: $%.0f (%.1f%%) от объема $%.0f",
 		symbol, delta, deltaPercent, volume24h)
 
 	return &types.VolumeDeltaData{

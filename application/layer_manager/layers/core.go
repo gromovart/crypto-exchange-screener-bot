@@ -39,6 +39,7 @@ type CoreLayer struct {
 	srZoneEngine      *sr_engine.Engine
 	srZoneStorage     *sr_storage.SRZoneStorage
 	liqWatcher        *bybit_ws.LiquidationWatcher
+	histLoader        *candle.HistoricalCandleLoader
 }
 
 // NewCoreLayer создает слой ядра
@@ -602,6 +603,37 @@ func (cl *CoreLayer) startBybitPriceFetcher() {
 		logger.Warn("⚠️ CoreLayer: не удалось запустить LiquidationWatcher: %v", err)
 	} else {
 		logger.Info("🌊 LiquidationWatcher запущен")
+	}
+
+	// Запускаем дозагрузку исторических свечей в фоне (если свечная система уже создана).
+	// Это устраняет «холодный старт» S/R зон: без исторических свечей recalculate()
+	// пропускает символы с < 10 свечами в хранилище.
+	if cl.candleSystem != nil {
+		cl.histLoader = candle.NewHistoricalCandleLoader(
+			fetcher.GetBybitClient(),
+			cl.candleSystem.Storage,
+		)
+		// Символы появляются после первого fetchPrices() (~2-5 с после Start).
+		// Ждём их в отдельной горутине, чтобы не блокировать старт приложения.
+		go func(loader *candle.HistoricalCandleLoader, f interface{ GetTopSymbols(int) []string }) {
+			periods := []string{"1m", "5m", "15m", "30m", "1h", "4h"}
+			var symbols []string
+			for attempt := 1; attempt <= 6; attempt++ {
+				symbols = f.GetTopSymbols(200)
+				if len(symbols) > 0 {
+					break
+				}
+				logger.Debug("⏳ HistoricalCandleLoader: ожидание символов (попытка %d/6)...", attempt)
+				time.Sleep(5 * time.Second)
+			}
+			if len(symbols) == 0 {
+				logger.Warn("⚠️ HistoricalCandleLoader: не удалось получить символы за 30 с, пропускаем")
+				return
+			}
+			loader.Load(symbols, periods)
+			logger.Info("📥 HistoricalCandleLoader: запущен для %d символов × %d периодов",
+				len(symbols), len(periods))
+		}(cl.histLoader, fetcher)
 	}
 }
 

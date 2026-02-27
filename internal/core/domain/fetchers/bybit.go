@@ -1045,6 +1045,12 @@ func (f *BybitPriceFetcher) GetOrderBook(symbol string, depth int) (*bybit.Order
 	return f.client.GetOrderBook(symbol, depth)
 }
 
+// GetBybitClient возвращает базовый HTTP-клиент Bybit для использования в сервисах,
+// которым нужен прямой доступ к REST API (например, HistoricalCandleLoader).
+func (f *BybitPriceFetcher) GetBybitClient() *bybit.BybitClient {
+	return f.client
+}
+
 // Вспомогательная функция для парсинга
 func parseFloat(s string) (float64, error) {
 	if s == "" {
