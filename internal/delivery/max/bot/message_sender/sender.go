@@ -14,10 +14,10 @@ type MessageSender interface {
 	SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error
 	SendCounterMessage(chatID int64, text string, keyboard interface{}) error
 	SendMenuMessage(chatID int64, text string, keyboard interface{}) error
-	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error)
-	EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error
-	DeleteMessage(chatID, messageID int64) error
-	AnswerCallback(callbackID, text string, showAlert bool) error
+	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (string, error)
+	EditMessageText(mid, text string, keyboard interface{}) error
+	DeleteMessage(mid string) error
+	AnswerCallback(callbackID, notification string) error
 	SetTestMode(enabled bool)
 	IsTestMode() bool
 }
@@ -56,40 +56,40 @@ func (s *senderImpl) SendMenuMessage(chatID int64, text string, keyboard interfa
 	return s.send(chatID, text, keyboard)
 }
 
-func (s *senderImpl) SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error) {
+func (s *senderImpl) SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (string, error) {
 	if !s.enabled || s.testMode {
-		return 0, nil
+		return "", nil
 	}
-	id, err := s.client.SendMessageGetID(chatID, text, keyboard)
+	mid, err := s.client.SendMessageGetID(chatID, text, keyboard)
 	if err != nil {
 		logger.Warn("⚠️ MAX SendMenuMessageWithID: %v", err)
 	}
-	return id, err
+	return mid, err
 }
 
-func (s *senderImpl) EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error {
+func (s *senderImpl) EditMessageText(mid, text string, keyboard interface{}) error {
 	if !s.enabled || s.testMode {
 		return nil
 	}
-	if err := s.client.EditMessageText(chatID, messageID, text, keyboard); err != nil {
+	if err := s.client.EditMessageText(mid, text, keyboard); err != nil {
 		logger.Warn("⚠️ MAX EditMessageText: %v", err)
 		return err
 	}
 	return nil
 }
 
-func (s *senderImpl) DeleteMessage(chatID, messageID int64) error {
+func (s *senderImpl) DeleteMessage(mid string) error {
 	if !s.enabled || s.testMode {
 		return nil
 	}
-	return s.client.DeleteMessage(chatID, messageID)
+	return s.client.DeleteMessage(mid)
 }
 
-func (s *senderImpl) AnswerCallback(callbackID, text string, showAlert bool) error {
+func (s *senderImpl) AnswerCallback(callbackID, notification string) error {
 	if !s.enabled || s.testMode {
 		return nil
 	}
-	return s.client.AnswerCallbackQuery(callbackID, text, showAlert)
+	return s.client.AnswerCallbackQuery(callbackID, notification)
 }
 
 func (s *senderImpl) SetTestMode(enabled bool) { s.testMode = enabled }

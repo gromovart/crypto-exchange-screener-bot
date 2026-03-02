@@ -31,7 +31,7 @@ type HandlerParams struct {
 	Data        string // callback data
 	UpdateID    string
 	CallbackID  string // ID callback запроса (для AnswerCallbackQuery)
-	MessageID   int64  // ID текущего сообщения (для Edit)
+	MessageID   string // mid текущего сообщения (для Edit, string в MAX API)
 }
 
 // HandlerResult — результат хэндлера

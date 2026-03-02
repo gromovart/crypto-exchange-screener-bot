@@ -70,7 +70,7 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 
 	// Отвечаем на callback (убираем loading spinner)
 	if params.CallbackID != "" {
-		if cbErr := b.sender.AnswerCallback(params.CallbackID, "", false); cbErr != nil {
+		if cbErr := b.sender.AnswerCallback(params.CallbackID, ""); cbErr != nil {
 			logger.Debug("⚠️ MAX AnswerCallback: %v", cbErr)
 		}
 	}
@@ -80,8 +80,8 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 	}
 
 	// Редактируем или отправляем новое сообщение
-	if result.EditMessage && params.MessageID > 0 {
-		if editErr := b.sender.EditMessageText(params.ChatID, params.MessageID, result.Message, result.Keyboard); editErr != nil {
+	if result.EditMessage && params.MessageID != "" {
+		if editErr := b.sender.EditMessageText(params.MessageID, result.Message, result.Keyboard); editErr != nil {
 			logger.Warn("⚠️ MAX EditMessage failed (%v), sending new", editErr)
 			_ = b.sender.SendMenuMessage(params.ChatID, result.Message, result.Keyboard)
 		}
@@ -114,24 +114,32 @@ func (b *Bot) SetMyCommands() {
 
 // resolveCommand определяет строку-команду для роутера из входящего Update
 func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
-	switch {
-	case upd.CallbackQuery != nil:
-		// Callback — используем data напрямую
-		return upd.CallbackQuery.Data
+	switch upd.UpdateType {
+	case "message_callback":
+		if upd.Callback != nil {
+			return upd.Callback.Payload
+		}
+		return ""
 
-	case upd.Message != nil:
-		text := strings.TrimSpace(upd.Message.Text)
+	case "message_created":
+		if upd.Message == nil {
+			return ""
+		}
+		text := strings.TrimSpace(upd.Message.Body.Text)
 		if text == "" {
 			return ""
 		}
 		// Команда начинается с /
 		if strings.HasPrefix(text, "/") {
-			// Убираем @botname если есть
 			cmd := strings.SplitN(text, "@", 2)[0]
 			return cmd
 		}
 		// Обычный текст — обрабатываем как текст
 		return text
+
+	case "bot_started":
+		// Пользователь нажал START — маршрутизируем как /start
+		return "/start"
 
 	default:
 		return ""

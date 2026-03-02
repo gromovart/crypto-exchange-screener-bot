@@ -12,19 +12,19 @@ import (
 )
 
 const (
-	maxBaseURL    = "https://botapi.max.ru"
+	maxBaseURL    = "https://platform-api.max.ru"
 	maxTimeout    = 10 * time.Second
-	maxLongPollTO = 35 * time.Second
+	maxLongPollTO = 40 * time.Second
 )
 
-// Client HTTP-клиент для MAX Bot API
+// Client — HTTP-клиент для MAX API (platform-api.max.ru)
 type Client struct {
-	token          string
-	httpClient     *http.Client // для обычных запросов
-	pollingClient  *http.Client // для long-polling (увеличенный timeout)
+	token         string
+	httpClient    *http.Client // для обычных запросов
+	pollingClient *http.Client // для long-polling
 }
 
-// NewClient создаёт новый MAX Bot API клиент
+// NewClient создаёт новый MAX API клиент
 func NewClient(token string) *Client {
 	return &Client{
 		token: token,
@@ -37,196 +37,188 @@ func NewClient(token string) *Client {
 	}
 }
 
-// url строит URL метода
-func (c *Client) url(method string) string {
-	return fmt.Sprintf("%s/bot%s/%s", maxBaseURL, c.token, method)
+// addAuth добавляет заголовок Authorization
+func (c *Client) addAuth(req *http.Request) {
+	req.Header.Set("Authorization", c.token)
 }
 
-// do выполняет POST-запрос с JSON-телом
-func (c *Client) do(method string, payload interface{}) ([]byte, error) {
+// doPost выполняет POST-запрос к path с JSON-телом
+func (c *Client) doPost(path string, payload interface{}) ([]byte, error) {
+	return c.doJSON(http.MethodPost, path, payload)
+}
+
+// doPut выполняет PUT-запрос к path с JSON-телом
+func (c *Client) doPut(path string, payload interface{}) ([]byte, error) {
+	return c.doJSON(http.MethodPut, path, payload)
+}
+
+// doDelete выполняет DELETE-запрос к path
+func (c *Client) doDelete(path string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodDelete, maxBaseURL+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("max DELETE %s: %w", path, err)
+	}
+	c.addAuth(req)
+	return c.exec(req, c.httpClient, "DELETE "+path)
+}
+
+// doJSON кодирует payload в JSON и выполняет HTTP-запрос
+func (c *Client) doJSON(method, path string, payload interface{}) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("max %s: marshal: %w", method, err)
+		return nil, fmt.Errorf("max %s %s: marshal: %w", method, path, err)
 	}
-
-	req, err := http.NewRequest(http.MethodPost, c.url(method), bytes.NewReader(body))
+	req, err := http.NewRequest(method, maxBaseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("max %s: new request: %w", method, err)
+		return nil, fmt.Errorf("max %s %s: new request: %w", method, path, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.addAuth(req)
+	return c.exec(req, c.httpClient, method+" "+path)
+}
 
-	resp, err := c.httpClient.Do(req)
+// exec выполняет запрос и возвращает тело ответа (2xx) или ошибку
+func (c *Client) exec(req *http.Request, hc *http.Client, label string) ([]byte, error) {
+	resp, err := hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("max %s: http: %w", method, err)
+		return nil, fmt.Errorf("max %s: http: %w", label, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("max %s: read response: %w", method, err)
+		return nil, fmt.Errorf("max %s: read: %w", label, err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("max %s: status %d: %s", method, resp.StatusCode, string(respBody))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("max %s: status %d: %s", label, resp.StatusCode, string(respBody))
 	}
-
 	return respBody, nil
 }
 
-// checkOK разбирает базовый ответ и возвращает ошибку при !ok
-func checkOK(data []byte, method string) error {
-	var r apiResponse
-	if err := json.Unmarshal(data, &r); err != nil {
-		return fmt.Errorf("max %s: unmarshal: %w", method, err)
-	}
-	if !r.OK {
-		return fmt.Errorf("max %s: api error: %s", method, r.Description)
-	}
-	return nil
-}
-
-// ───────────────────────────────────────
-// SendMessage — отправка текстового сообщения (без клавиатуры)
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
+// SendMessage — отправка текстового сообщения
+// ───────────────────────────────────────────────
 
 func (c *Client) SendMessage(chatID int64, text string) error {
 	_, err := c.SendMessageGetID(chatID, text, nil)
 	return err
 }
 
-// ───────────────────────────────────────
-// SendMessageWithKeyboard — отправка с inline-клавиатурой
-// ───────────────────────────────────────
-
+// SendMessageWithKeyboard — отправка сообщения с inline-клавиатурой
 func (c *Client) SendMessageWithKeyboard(chatID int64, text string, keyboard interface{}) error {
 	_, err := c.SendMessageGetID(chatID, text, keyboard)
 	return err
 }
 
-// SendMessageGetID отправляет сообщение и возвращает message_id
-func (c *Client) SendMessageGetID(chatID int64, text string, keyboard interface{}) (int64, error) {
+// SendMessageGetID отправляет сообщение и возвращает mid (string)
+// keyboard должен быть []interface{} (attachments array) из kb.Keyboard()
+func (c *Client) SendMessageGetID(chatID int64, text string, keyboard interface{}) (string, error) {
 	payload := map[string]interface{}{
-		"chat_id": chatID,
-		"text":    text,
+		"text": text,
 	}
 	if keyboard != nil {
-		payload["reply_markup"] = keyboard
+		payload["attachments"] = keyboard
 	}
 
-	data, err := c.do("sendMessage", payload)
+	path := "/messages?chat_id=" + strconv.FormatInt(chatID, 10)
+	data, err := c.doPost(path, payload)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 
 	var r sendMessageResponse
 	if err := json.Unmarshal(data, &r); err != nil {
-		return 0, fmt.Errorf("max sendMessage: unmarshal: %w", err)
+		return "", fmt.Errorf("max SendMessage: unmarshal: %w", err)
 	}
-	if !r.OK {
-		return 0, fmt.Errorf("max sendMessage: api error: %s", r.Description)
-	}
-	if r.Result != nil {
-		return r.Result.MessageID, nil
-	}
-	return 0, nil
+	return r.Body.Mid, nil
 }
 
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
 // EditMessageText — редактирование сообщения
-// ───────────────────────────────────────
+// PUT /messages?message_id=<mid>
+// ───────────────────────────────────────────────
 
-func (c *Client) EditMessageText(chatID, messageID int64, text string, keyboard interface{}) error {
+func (c *Client) EditMessageText(mid, text string, keyboard interface{}) error {
+	if mid == "" {
+		return fmt.Errorf("max EditMessage: пустой mid")
+	}
 	payload := map[string]interface{}{
-		"chat_id":    chatID,
-		"message_id": messageID,
-		"text":       text,
+		"text": text,
 	}
 	if keyboard != nil {
-		payload["reply_markup"] = keyboard
+		payload["attachments"] = keyboard
 	}
 
-	data, err := c.do("editMessageText", payload)
-	if err != nil {
-		return err
-	}
-	return checkOK(data, "editMessageText")
+	path := "/messages?message_id=" + mid
+	_, err := c.doPut(path, payload)
+	return err
 }
 
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
 // DeleteMessage — удаление сообщения
-// ───────────────────────────────────────
+// DELETE /messages?message_id=<mid>
+// ───────────────────────────────────────────────
 
-func (c *Client) DeleteMessage(chatID, messageID int64) error {
-	data, err := c.do("deleteMessage", map[string]interface{}{
-		"chat_id":    chatID,
-		"message_id": messageID,
-	})
-	if err != nil {
-		return err
+func (c *Client) DeleteMessage(mid string) error {
+	if mid == "" {
+		return fmt.Errorf("max DeleteMessage: пустой mid")
 	}
-	return checkOK(data, "deleteMessage")
+	_, err := c.doDelete("/messages?message_id=" + mid)
+	return err
 }
 
-// ───────────────────────────────────────
-// AnswerCallbackQuery — ответ на callback от кнопки
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
+// AnswerCallbackQuery — ответ на callback
+// POST /answers?callback_id=<id>
+// ───────────────────────────────────────────────
 
-func (c *Client) AnswerCallbackQuery(callbackQueryID, text string, showAlert bool) error {
+func (c *Client) AnswerCallbackQuery(callbackID, notification string) error {
+	if callbackID == "" {
+		return nil
+	}
 	payload := map[string]interface{}{
-		"callback_query_id": callbackQueryID,
-		"show_alert":        showAlert,
+		"notification": notification,
 	}
-	if text != "" {
-		payload["text"] = text
-	}
-
-	data, err := c.do("answerCallbackQuery", payload)
-	if err != nil {
-		return err
-	}
-	return checkOK(data, "answerCallbackQuery")
+	path := "/answers?callback_id=" + callbackID
+	_, err := c.doPost(path, payload)
+	return err
 }
 
-// ───────────────────────────────────────
-// SetMyCommands — установка команд бота в меню
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
+// SetMyCommands — MAX API не поддерживает это программно
+// ───────────────────────────────────────────────
 
-func (c *Client) SetMyCommands(commands []BotCommand) error {
-	data, err := c.do("setMyCommands", map[string]interface{}{
-		"commands": commands,
-	})
-	if err != nil {
-		return err
-	}
-	return checkOK(data, "setMyCommands")
+func (c *Client) SetMyCommands(_ []BotCommand) error {
+	// MAX API не имеет аналога setMyCommands — команды задаются в панели бота
+	return nil
 }
 
-// ───────────────────────────────────────
-// GetUpdates — long-polling получение обновлений
-// ───────────────────────────────────────
+// ───────────────────────────────────────────────
+// GetUpdates — long-polling
+// GET /updates?timeout=N&limit=100&marker=M
+// ───────────────────────────────────────────────
 
-func (c *Client) GetUpdates(offset int64, timeoutSec int) ([]Update, error) {
-	url := c.url("getUpdates") +
-		"?offset=" + strconv.FormatInt(offset, 10) +
-		"&timeout=" + strconv.Itoa(timeoutSec)
+func (c *Client) GetUpdates(marker int64, timeoutSec int) ([]Update, int64, error) {
+	url := maxBaseURL + "/updates" +
+		"?timeout=" + strconv.Itoa(timeoutSec) +
+		"&limit=100" +
+		"&marker=" + strconv.FormatInt(marker, 10)
 
-	resp, err := c.pollingClient.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("max getUpdates: http: %w", err)
+		return nil, marker, fmt.Errorf("max getUpdates: new request: %w", err)
 	}
-	defer resp.Body.Close()
+	c.addAuth(req)
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := c.exec(req, c.pollingClient, "GET /updates")
 	if err != nil {
-		return nil, fmt.Errorf("max getUpdates: read: %w", err)
+		return nil, marker, err
 	}
 
 	var r getUpdatesResponse
 	if err := json.Unmarshal(body, &r); err != nil {
-		return nil, fmt.Errorf("max getUpdates: unmarshal: %w", err)
+		return nil, marker, fmt.Errorf("max getUpdates: unmarshal: %w", err)
 	}
-	if !r.OK {
-		return nil, fmt.Errorf("max getUpdates: api error")
-	}
-	return r.Result, nil
+	return r.Updates, r.Marker, nil
 }

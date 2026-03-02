@@ -59,6 +59,6 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	return handlers.HandlerResult{
 		Message:     msg,
 		Keyboard:    kb.Keyboard(rows),
-		EditMessage: params.MessageID > 0,
+		EditMessage: params.MessageID != "",
 	}, nil
 }

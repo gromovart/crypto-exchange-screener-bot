@@ -1,58 +1,57 @@
 // internal/delivery/max/types.go
-// MAX Bot API types — совместимы с Telegram Bot API (тот же формат JSON)
 package max
 
 import "time"
 
-// Update — входящее обновление от MAX Bot API
+// Update — входящее обновление от MAX API (GET /updates)
 type Update struct {
-	UpdateID      int64          `json:"update_id"`
-	Message       *Message       `json:"message,omitempty"`
-	CallbackQuery *CallbackQuery `json:"callback_query,omitempty"`
+	UpdateType string    `json:"update_type"` // "message_created", "message_callback", "bot_started"
+	Timestamp  int64     `json:"timestamp"`
+	Message    *Message  `json:"message,omitempty"`
+	Callback   *Callback `json:"callback,omitempty"`
+	// bot_started
+	ChatID int64 `json:"chat_id,omitempty"`
+	User   *User `json:"user,omitempty"`
 }
 
-// Message — сообщение от пользователя
+// Message — входящее сообщение (update_type: message_created)
 type Message struct {
-	MessageID int64  `json:"message_id"`
-	From      User   `json:"from"`
-	Chat      Chat   `json:"chat"`
-	Text      string `json:"text"`
-	Date      int64  `json:"date"`
+	Sender    User        `json:"sender"`
+	Recipient Recipient   `json:"recipient"`
+	Timestamp int64       `json:"timestamp"`
+	Body      MessageBody `json:"body"`
 }
 
-// CallbackQuery — callback от inline-кнопки
-type CallbackQuery struct {
-	ID      string   `json:"id"`
-	From    User     `json:"from"`
-	Message *Message `json:"message,omitempty"`
-	Data    string   `json:"data"`
+// MessageBody — тело сообщения
+type MessageBody struct {
+	Mid  string `json:"mid"`
+	Text string `json:"text"`
+	Seq  int64  `json:"seq"`
+}
+
+// Recipient — получатель сообщения
+type Recipient struct {
+	ChatID   int64  `json:"chat_id"`
+	ChatType string `json:"chat_type"`
+	UserID   int64  `json:"user_id,omitempty"`
+}
+
+// Callback — callback от inline-кнопки (update_type: message_callback)
+type Callback struct {
+	Timestamp  int64    `json:"timestamp"`
+	CallbackID string   `json:"callback_id"`
+	User       User     `json:"user"`
+	Payload    string   `json:"payload"` // данные кнопки
+	Message    *Message `json:"message,omitempty"`
 }
 
 // User — пользователь MAX
 type User struct {
-	ID        int64  `json:"id"`
-	IsBot     bool   `json:"is_bot"`
+	UserID    int64  `json:"user_id"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name,omitempty"`
 	Username  string `json:"username,omitempty"`
-}
-
-// Chat — чат MAX
-type Chat struct {
-	ID   int64  `json:"id"`
-	Type string `json:"type"`
-}
-
-// InlineKeyboardButton — кнопка inline-клавиатуры
-type InlineKeyboardButton struct {
-	Text         string `json:"text"`
-	CallbackData string `json:"callback_data,omitempty"`
-	URL          string `json:"url,omitempty"`
-}
-
-// InlineKeyboardMarkup — разметка inline-клавиатуры
-type InlineKeyboardMarkup struct {
-	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
+	IsBot     bool   `json:"is_bot,omitempty"`
 }
 
 // BotCommand — команда бота
@@ -61,25 +60,17 @@ type BotCommand struct {
 	Description string `json:"description"`
 }
 
-// apiResponse — базовый ответ MAX Bot API
-type apiResponse struct {
-	OK          bool   `json:"ok"`
-	Description string `json:"description,omitempty"`
-}
-
-// sendMessageResponse — ответ sendMessage с message_id
-type sendMessageResponse struct {
-	OK     bool `json:"ok"`
-	Result *struct {
-		MessageID int64 `json:"message_id"`
-	} `json:"result,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-// getUpdatesResponse — ответ getUpdates
+// getUpdatesResponse — ответ GET /updates
 type getUpdatesResponse struct {
-	OK     bool     `json:"ok"`
-	Result []Update `json:"result"`
+	Updates []Update `json:"updates"`
+	Marker  int64    `json:"marker"`
+}
+
+// sendMessageResponse — ответ POST /messages
+type sendMessageResponse struct {
+	Recipient Recipient   `json:"recipient"`
+	Timestamp int64       `json:"timestamp"`
+	Body      MessageBody `json:"body"`
 }
 
 // RateLimiter — простой ограничитель частоты запросов

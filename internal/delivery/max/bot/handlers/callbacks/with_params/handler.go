@@ -39,14 +39,14 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 			return handlers.HandlerResult{
 				Message:     "📈 Настройка порога роста",
 				Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbSignalsMenu)}}),
-				EditMessage: params.MessageID > 0,
+				EditMessage: params.MessageID != "",
 			}, nil
 
 		case kb.CbSignalSetFallThreshold:
 			return handlers.HandlerResult{
 				Message:     "📉 Настройка порога падения",
 				Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbSignalsMenu)}}),
-				EditMessage: params.MessageID > 0,
+				EditMessage: params.MessageID != "",
 			}, nil
 		}
 	}
@@ -55,6 +55,6 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	return handlers.HandlerResult{
 		Message:     "❓ Неизвестная команда",
 		Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.MainMenu, kb.CbMenuMain)}}),
-		EditMessage: params.MessageID > 0,
+		EditMessage: params.MessageID != "",
 	}, nil
 }

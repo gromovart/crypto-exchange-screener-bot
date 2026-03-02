@@ -45,7 +45,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		return handlers.HandlerResult{
 			Message:     fmt.Sprintf("❌ Ошибка: %v", err),
 			Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbPeriodsMenu)}}),
-			EditMessage: params.MessageID > 0,
+			EditMessage: params.MessageID != "",
 		}, nil
 	}
 
@@ -54,6 +54,6 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	return handlers.HandlerResult{
 		Message:     msg,
 		Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbPeriodsMenu)}}),
-		EditMessage: params.MessageID > 0,
+		EditMessage: params.MessageID != "",
 	}, nil
 }

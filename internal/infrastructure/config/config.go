@@ -741,9 +741,8 @@ func (c *Config) validate() error {
 		if c.MAX.BotToken == "" {
 			validationErrors = append(validationErrors, "MAX_BOT_TOKEN is required when MAX is enabled")
 		}
-		if c.MAX.ChatID == 0 {
-			validationErrors = append(validationErrors, "MAX_CHAT_ID is required when MAX is enabled")
-		}
+		// MAX_CHAT_ID опционален — нужен только для широковещательных сигналов
+		// Если не задан, сигналы не будут отправляться в чат, но интерактивный бот работает
 	}
 
 	// Проверка Counter Analyzer если включен

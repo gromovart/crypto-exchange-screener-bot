@@ -38,6 +38,11 @@ func (c *Controller) GetSubscribedEvents() []types.EventType {
 
 // HandleEvent обрабатывает событие сигнала
 func (c *Controller) HandleEvent(event types.Event) error {
+	// Пропускаем если chatID не настроен (широковещание отключено)
+	if c.chatID == 0 {
+		return nil
+	}
+
 	dataMap, ok := event.Data.(map[string]interface{})
 	if !ok {
 		return fmt.Errorf("max controller: неверный формат данных события")

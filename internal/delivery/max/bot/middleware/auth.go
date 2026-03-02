@@ -29,50 +29,75 @@ func (m *AuthMiddleware) ProcessUpdate(upd maxpkg.Update) (handlers.HandlerParam
 	}
 
 	var (
-		userID    int64
-		username  string
-		firstName string
-		lastName  string
-		chatID    int64
-		text      string
-		data      string
-		updateID  string
+		userID     int64
+		username   string
+		firstName  string
+		lastName   string
+		chatID     int64
+		text       string
+		data       string
+		updateID   string
 		callbackID string
-		messageID  int64
+		messageID  string
 	)
 
-	updateID = strconv.FormatInt(upd.UpdateID, 10)
+	updateID = strconv.FormatInt(upd.Timestamp, 10)
 
-	switch {
-	case upd.Message != nil:
+	switch upd.UpdateType {
+	case "message_created":
 		msg := upd.Message
-		userID = msg.From.ID
-		username = msg.From.Username
-		firstName = msg.From.FirstName
-		lastName = msg.From.LastName
-		chatID = msg.Chat.ID
-		text = msg.Text
-		messageID = msg.MessageID
-		logger.Info("🔍 MAX Auth: Message от user=%d chat=%d text=%q", userID, chatID, text)
-
-	case upd.CallbackQuery != nil:
-		cb := upd.CallbackQuery
-		userID = cb.From.ID
-		username = cb.From.Username
-		firstName = cb.From.FirstName
-		lastName = cb.From.LastName
-		data = cb.Data
-		callbackID = cb.ID
-		if cb.Message != nil {
-			chatID = cb.Message.Chat.ID
-			messageID = cb.Message.MessageID
-		} else {
+		if msg == nil {
+			return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: message_created без message")
+		}
+		userID = msg.Sender.UserID
+		username = msg.Sender.Username
+		firstName = msg.Sender.FirstName
+		lastName = msg.Sender.LastName
+		chatID = msg.Recipient.ChatID
+		if chatID == 0 {
 			chatID = userID
 		}
-		logger.Info("🔍 MAX Auth: Callback от user=%d chat=%d data=%q", userID, chatID, data)
+		text = msg.Body.Text
+		messageID = msg.Body.Mid
+		logger.Info("🔍 MAX Auth: message от user=%d chat=%d text=%q", userID, chatID, text)
+
+	case "message_callback":
+		cb := upd.Callback
+		if cb == nil {
+			return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: message_callback без callback")
+		}
+		userID = cb.User.UserID
+		username = cb.User.Username
+		firstName = cb.User.FirstName
+		lastName = cb.User.LastName
+		data = cb.Payload
+		callbackID = cb.CallbackID
+		if cb.Message != nil {
+			chatID = cb.Message.Recipient.ChatID
+			messageID = cb.Message.Body.Mid
+		}
+		if chatID == 0 {
+			chatID = userID
+		}
+		logger.Info("🔍 MAX Auth: callback от user=%d chat=%d payload=%q", userID, chatID, data)
+
+	case "bot_started":
+		if upd.User == nil {
+			return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: bot_started без user")
+		}
+		userID = upd.User.UserID
+		username = upd.User.Username
+		firstName = upd.User.FirstName
+		lastName = upd.User.LastName
+		chatID = upd.ChatID
+		if chatID == 0 {
+			chatID = userID
+		}
+		text = "/start"
+		logger.Info("🔍 MAX Auth: bot_started от user=%d chat=%d", userID, chatID)
 
 	default:
-		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: неизвестный тип обновления")
+		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: неизвестный update_type: %s", upd.UpdateType)
 	}
 
 	// Получаем или создаём пользователя (тот же user store что и у Telegram)

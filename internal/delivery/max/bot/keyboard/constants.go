@@ -152,9 +152,7 @@ var Btn = struct {
 
 // Btn1Row — одна кнопка в строке
 func Btn1Row(text, cb string) [][]map[string]string {
-	return [][]map[string]string{{{
-		"text": text, "callback_data": cb,
-	}}}
+	return [][]map[string]string{{B(text, cb)}}
 }
 
 // BtnRow — несколько кнопок в одной строке
@@ -162,14 +160,14 @@ func BtnRow(buttons ...map[string]string) []map[string]string {
 	return buttons
 }
 
-// B — создаёт кнопку
+// B — callback-кнопка (MAX API: type=callback, payload=data)
 func B(text, cb string) map[string]string {
-	return map[string]string{"text": text, "callback_data": cb}
+	return map[string]string{"type": "callback", "text": text, "payload": cb}
 }
 
-// BUrl — кнопка с URL
+// BUrl — кнопка-ссылка (MAX API: type=link)
 func BUrl(text, url string) map[string]string {
-	return map[string]string{"text": text, "url": url}
+	return map[string]string{"type": "link", "text": text, "url": url}
 }
 
 // BackRow — строка с кнопкой «Назад»
@@ -177,7 +175,30 @@ func BackRow(target string) []map[string]string {
 	return BtnRow(B(Btn.Back, target))
 }
 
-// Keyboard оборачивает 2D массив в map для reply_markup
+// Keyboard преобразует 2D массив кнопок в MAX attachments format:
+// []interface{}{ {"type":"inline_keyboard","payload":{"buttons":[[...]]}} }
 func Keyboard(rows [][]map[string]string) interface{} {
-	return map[string]interface{}{"inline_keyboard": rows}
+	if len(rows) == 0 {
+		return nil
+	}
+	// Конвертируем [][]map[string]string → [][][]interface{} для правильного JSON
+	buttons := make([][]map[string]interface{}, len(rows))
+	for i, row := range rows {
+		buttons[i] = make([]map[string]interface{}, len(row))
+		for j, btn := range row {
+			m := make(map[string]interface{}, len(btn))
+			for k, v := range btn {
+				m[k] = v
+			}
+			buttons[i][j] = m
+		}
+	}
+	return []interface{}{
+		map[string]interface{}{
+			"type": "inline_keyboard",
+			"payload": map[string]interface{}{
+				"buttons": buttons,
+			},
+		},
+	}
 }

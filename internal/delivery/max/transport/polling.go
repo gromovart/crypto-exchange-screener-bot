@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	pollingTimeout  = 30 // секунд — long-polling timeout
-	pollingInterval = 1 * time.Second
+	pollingTimeout  = 30              // секунд — long-polling timeout
+	pollingInterval = 3 * time.Second // пауза при ошибке
 )
 
-// UpdateHandler функция-обработчик входящих обновлений
+// UpdateHandler — функция-обработчик входящих обновлений
 type UpdateHandler func(update max.Update)
 
-// Poller реализует long-polling для MAX Bot API
+// Poller — long-polling цикл для MAX API (использует marker вместо offset)
 type Poller struct {
 	client  *max.Client
 	handler UpdateHandler
@@ -33,7 +33,7 @@ func NewPoller(client *max.Client, handler UpdateHandler) *Poller {
 
 // Run запускает цикл опроса. Блокирует до отмены ctx.
 func (p *Poller) Run(ctx context.Context) {
-	var offset int64
+	var marker int64
 	logger.Info("🔄 MAX Polling запущен (timeout=%ds)", pollingTimeout)
 
 	for {
@@ -44,7 +44,7 @@ func (p *Poller) Run(ctx context.Context) {
 		default:
 		}
 
-		updates, err := p.client.GetUpdates(offset, pollingTimeout)
+		updates, newMarker, err := p.client.GetUpdates(marker, pollingTimeout)
 		if err != nil {
 			logger.Warn("⚠️ MAX getUpdates error: %v — повтор через %s", err, pollingInterval)
 			select {
@@ -55,11 +55,12 @@ func (p *Poller) Run(ctx context.Context) {
 			}
 		}
 
+		// Обновляем маркер только если он изменился
+		if newMarker > marker {
+			marker = newMarker
+		}
+
 		for _, upd := range updates {
-			if upd.UpdateID >= offset {
-				offset = upd.UpdateID + 1
-			}
-			// Обрабатываем каждое обновление в отдельной горутине
 			go p.handler(upd)
 		}
 	}
