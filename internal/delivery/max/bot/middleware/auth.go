@@ -116,11 +116,20 @@ func (m *AuthMiddleware) ProcessUpdate(upd maxpkg.Update) (handlers.HandlerParam
 		logger.Warn("⚠️ MAX Auth: UpdateUser LastLoginAt: %v", err)
 	}
 
-	// Сохраняем ChatID если не сохранён
-	if user.ChatID == "" {
+	// Сохраняем ChatID если не сохранён (только для message_created/bot_started, где chatID точный)
+	if user.ChatID == "" && upd.UpdateType != "message_callback" {
 		user.ChatID = strconv.FormatInt(chatID, 10)
 		if err := m.userService.UpdateUser(user); err != nil {
 			logger.Warn("⚠️ MAX Auth: UpdateUser ChatID: %v", err)
+		}
+	}
+
+	// Для message_callback: MAX API не возвращает chat_id напрямую, если cb.Message == nil.
+	// Используем сохранённый ChatID пользователя (был сохранён при /start или message_created).
+	if upd.UpdateType == "message_callback" && chatID == userID && user.ChatID != "" {
+		if storedChatID, err := strconv.ParseInt(user.ChatID, 10, 64); err == nil && storedChatID != 0 {
+			chatID = storedChatID
+			logger.Debug("🔑 MAX Auth: callback chatID из профиля: %d", chatID)
 		}
 	}
 
