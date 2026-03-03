@@ -240,6 +240,7 @@ func signalKeyboard(symbol string, hasSession bool, expiresAt time.Time) interfa
 			kb.BUrl("🛒 Торговать", tradeURL),
 			kb.BUrl("📊 График", chartURL),
 		},
+		{kb.B(kb.Btn.MainMenu, kb.CbMenuMain)},
 		{sessionBtn},
 	})
 }

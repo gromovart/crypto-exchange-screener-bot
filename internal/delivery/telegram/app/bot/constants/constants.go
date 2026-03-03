@@ -12,8 +12,9 @@ var ButtonTexts = struct {
 	Status        string
 	Help          string
 	Back          string
-	Documentation string // новое
-	Support       string // новое
+	MainMenu      string
+	Documentation string
+	Support       string
 }{
 	Chart:         "📊 График",
 	Trade:         "💱 Торговать",
@@ -24,6 +25,7 @@ var ButtonTexts = struct {
 	Status:        "📊 Статус",
 	Help:          "📋 Помощь",
 	Back:          "🔙 Назад",
+	MainMenu:      "🏠 Главное меню",
 	Documentation: "📚 Полная документация",
 	Support:       "📧 Поддержка",
 }

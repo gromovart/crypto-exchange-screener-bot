@@ -56,7 +56,7 @@ type Dependencies struct {
 // RegisterAll регистрирует все команды и callback-хэндлеры в роутере
 func RegisterAll(r router.Router, deps Dependencies) {
 	// ── Команды ──────────────────────────────────────────────
-	r.RegisterCommand("start", cmdStart.NewHandler())
+	r.RegisterCommand("start", cmdStart.NewHandler(deps.SessionService))
 	r.RegisterCommand("help", cmdHelp.NewHandler())
 	r.RegisterCommand("menu", cbMenuMain.New(deps.SessionService))
 	r.RegisterCommand("link", cmdLink.New(deps.UserService))

@@ -5,8 +5,10 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/formatters"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 	periodPkg "crypto-exchange-screener-bot/pkg/period"
@@ -17,13 +19,14 @@ import (
 )
 
 type serviceImpl struct {
-	userService         *users.Service
-	subscriptionService *subscription.Service
-	formatter           *formatters.FormatterProvider
-	messageSender       message_sender.MessageSender
-	buttonBuilder       *buttons.ButtonBuilder
-	notificationGuard   *SymbolNotificationGuard
-	guardMu             sync.RWMutex
+	userService           *users.Service
+	subscriptionService   *subscription.Service
+	formatter             *formatters.FormatterProvider
+	messageSender         message_sender.MessageSender
+	buttonBuilder         *buttons.ButtonBuilder
+	tradingSessionService trading_session.Service
+	notificationGuard     *SymbolNotificationGuard
+	guardMu               sync.RWMutex
 }
 
 func NewService(
@@ -32,14 +35,16 @@ func NewService(
 	formatter *formatters.FormatterProvider,
 	messageSender message_sender.MessageSender,
 	buttonBuilder *buttons.ButtonBuilder,
+	tradingSessionService trading_session.Service,
 ) Service {
 	return &serviceImpl{
-		userService:         userService,
-		subscriptionService: subscriptionService,
-		formatter:           formatter,
-		messageSender:       messageSender,
-		buttonBuilder:       buttonBuilder,
-		notificationGuard:   NewSymbolNotificationGuard(),
+		userService:           userService,
+		subscriptionService:   subscriptionService,
+		formatter:             formatter,
+		messageSender:         messageSender,
+		buttonBuilder:         buttonBuilder,
+		tradingSessionService: tradingSessionService,
+		notificationGuard:     NewSymbolNotificationGuard(),
 	}
 }
 
@@ -123,7 +128,19 @@ func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatte
 
 	var keyboard interface{} = nil
 	if s.buttonBuilder != nil {
-		keyboard = s.buttonBuilder.CreateSignalKeyboard(data.Symbol)
+		sessionText := constants.SessionButtonTexts.Start
+		sessionCb := constants.CallbackSessionStart
+		if s.tradingSessionService != nil {
+			if session, ok := s.tradingSessionService.GetActive(user.ID, "telegram"); ok {
+				remaining := time.Until(session.ExpiresAt)
+				sessionText = fmt.Sprintf("%s (%s)",
+					constants.SessionButtonTexts.Stop,
+					formatSessionRemaining(remaining),
+				)
+				sessionCb = constants.CallbackSessionStop
+			}
+		}
+		keyboard = s.buttonBuilder.CreateSignalKeyboard(data.Symbol, sessionText, sessionCb)
 	}
 
 	if s.messageSender != nil {
@@ -141,9 +158,9 @@ func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatte
 		s.logSuccessfulNotification(user, data.Symbol, data.Direction, signalPeriod, rateLimitPeriod, currentCount+1, limit)
 
 		return nil
-	} else {
-		return fmt.Errorf("message sender not initialized")
 	}
+
+	return fmt.Errorf("message sender not initialized")
 }
 
 func (s *serviceImpl) logSuccessfulNotification(user *models.User, symbol, direction string, signalPeriod, rateLimitPeriod time.Duration, newCount, limit int) {
@@ -334,4 +351,17 @@ func (s *serviceImpl) applyNormalRateLimit(userID int64, symbol, direction strin
 		userID, symbol, direction, signalPeriod, rateLimitPeriod, currentCount, limit, allowed)
 
 	return allowed, signalPeriod, rateLimitPeriod, currentCount, timeUntilNext, limit
+}
+
+// formatSessionRemaining форматирует оставшееся время сессии: "Xч Yм" или "Yм"
+func formatSessionRemaining(d time.Duration) string {
+	if d <= 0 {
+		return "0м"
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dч %dм", h, m)
+	}
+	return fmt.Sprintf("%dм", m)
 }

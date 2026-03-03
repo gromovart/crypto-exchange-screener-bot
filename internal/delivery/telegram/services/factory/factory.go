@@ -13,6 +13,7 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session" // ← ДОБАВИТЬ этот импорт
 	subscription_repo "crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/repository/subscription"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -21,20 +22,23 @@ import (
 type ServiceFactory struct {
 	userService         *users.Service
 	subscriptionService *subscription.Service
-	paymentCoreService  *payment.PaymentService // ⭐ Изменено с StarsService на PaymentService
+	paymentCoreService  *payment.PaymentService
 	messageSender       message_sender.MessageSender
 	buttonBuilder       *buttons.ButtonBuilder
 	formatterProvider   *formatters.FormatterProvider
+	// Добавляем tradingSessionService
+	tradingSessionService trading_session.Service // ← ДОБАВИТЬ поле
 }
 
 // ServiceDependencies зависимости для фабрики сервисов
 type ServiceDependencies struct {
-	UserService         *users.Service
-	SubscriptionService *subscription.Service
-	PaymentCoreService  *payment.PaymentService // ⭐ Изменено
-	MessageSender       message_sender.MessageSender
-	ButtonBuilder       *buttons.ButtonBuilder
-	FormatterProvider   *formatters.FormatterProvider
+	UserService           *users.Service
+	SubscriptionService   *subscription.Service
+	PaymentCoreService    *payment.PaymentService
+	MessageSender         message_sender.MessageSender
+	ButtonBuilder         *buttons.ButtonBuilder
+	FormatterProvider     *formatters.FormatterProvider
+	TradingSessionService trading_session.Service // ← ДОБАВИТЬ поле
 }
 
 // NewServiceFactory создает фабрику сервисов
@@ -42,12 +46,13 @@ func NewServiceFactory(deps ServiceDependencies) *ServiceFactory {
 	logger.Info("🏭 Создание фабрики сервисов Telegram-пакета...")
 
 	return &ServiceFactory{
-		userService:         deps.UserService,
-		subscriptionService: deps.SubscriptionService,
-		paymentCoreService:  deps.PaymentCoreService,
-		messageSender:       deps.MessageSender,
-		buttonBuilder:       deps.ButtonBuilder,
-		formatterProvider:   deps.FormatterProvider,
+		userService:           deps.UserService,
+		subscriptionService:   deps.SubscriptionService,
+		paymentCoreService:    deps.PaymentCoreService,
+		messageSender:         deps.MessageSender,
+		buttonBuilder:         deps.ButtonBuilder,
+		formatterProvider:     deps.FormatterProvider,
+		tradingSessionService: deps.TradingSessionService, // ← ДОБАВИТЬ инициализацию
 	}
 }
 
@@ -58,12 +63,14 @@ func (f *ServiceFactory) CreateProfileService() profile.Service {
 
 // CreateCounterService создает CounterService
 func (f *ServiceFactory) CreateCounterService() counter.Service {
+	// ✅ ИСПРАВЛЕНО: добавляем tradingSessionService как 6-й аргумент
 	return counter.NewService(
 		f.userService,
 		f.subscriptionService,
 		f.formatterProvider,
 		f.messageSender,
 		f.buttonBuilder,
+		f.tradingSessionService, // ← ДОБАВЛЯЕМ этот аргумент
 	)
 }
 
@@ -86,7 +93,7 @@ func (f *ServiceFactory) CreatePaymentService() payment_service.Service {
 
 	// Создаем зависимости для payment service
 	deps := payment_service.Dependencies{
-		PaymentService:      f.paymentCoreService, // ⭐ Передаем PaymentService
+		PaymentService:      f.paymentCoreService,
 		SubscriptionService: f.subscriptionService,
 		UserService:         f.userService,
 	}
@@ -133,6 +140,11 @@ func (f *ServiceFactory) GetSubscriptionService() *subscription.Service {
 	return f.subscriptionService
 }
 
+// GetTradingSessionService возвращает TradingSessionService
+func (f *ServiceFactory) GetTradingSessionService() trading_session.Service {
+	return f.tradingSessionService
+}
+
 // GetSubscriptionRepository возвращает SubscriptionRepository через сервис
 func (f *ServiceFactory) GetSubscriptionRepository() subscription_repo.SubscriptionRepository {
 	if f.subscriptionService == nil {
@@ -141,6 +153,5 @@ func (f *ServiceFactory) GetSubscriptionRepository() subscription_repo.Subscript
 	}
 
 	// Получаем репозиторий через сервис
-	// Нужно добавить метод GetRepository() в subscription.Service
 	return f.subscriptionService.GetRepository()
 }

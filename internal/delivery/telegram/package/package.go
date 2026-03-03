@@ -10,11 +10,13 @@ import (
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	core_factory "crypto-exchange-screener-bot/internal/core/package"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot"
+	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	components_factory "crypto-exchange-screener-bot/internal/delivery/telegram/components/factory"
 	controllers_factory "crypto-exchange-screener-bot/internal/delivery/telegram/controllers/factory"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/queue"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
+	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/transport"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -36,6 +38,9 @@ type TelegramDeliveryPackage struct {
 	userService         *users.Service
 	subscriptionService *subscription.Service
 	paymentService      *payment.PaymentService // ⭐ Новый сервис платежей
+
+	// Сервис торговых сессий (создаётся один раз, разделяется между ботом и CounterService)
+	tradingSessionService trading_session.Service
 
 	// Подфабрики
 	componentFactory  *components_factory.ComponentFactory
@@ -217,14 +222,20 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 		logger.Error("❌ PaymentService не создан, будет использоваться заглушка")
 	}
 
+	// Создаём сервис торговых сессий один раз — используется и ботом, и CounterService
+	ms := message_sender.NewMessageSender(p.config)
+	p.tradingSessionService = trading_session.NewService(userService, ms)
+	logger.Info("✅ TradingSessionService создан")
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
-			UserService:         userService,
-			SubscriptionService: subscriptionService,
-			PaymentCoreService:  paymentSvc, // ⭐ Передаем PaymentService
-			MessageSender:       p.components.MessageSender,
-			ButtonBuilder:       p.components.ButtonBuilder,
-			FormatterProvider:   p.components.FormatterProvider,
+			UserService:           userService,
+			SubscriptionService:   subscriptionService,
+			PaymentCoreService:    paymentSvc,
+			MessageSender:         p.components.MessageSender,
+			ButtonBuilder:         p.components.ButtonBuilder,
+			FormatterProvider:     p.components.FormatterProvider,
+			TradingSessionService: p.tradingSessionService,
 		},
 	)
 

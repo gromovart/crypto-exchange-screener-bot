@@ -16,8 +16,9 @@ func NewButtonBuilder() *ButtonBuilder {
 	return &ButtonBuilder{}
 }
 
-// CreateSignalKeyboard создает клавиатуру для сигнала
-func (b *ButtonBuilder) CreateSignalKeyboard(symbol string) telegram.InlineKeyboardMarkup {
+// CreateSignalKeyboard создает клавиатуру для сигнала.
+// sessionText и sessionCb — текст и callback_data кнопки торговой сессии (зависят от состояния сессии пользователя).
+func (b *ButtonBuilder) CreateSignalKeyboard(symbol, sessionText, sessionCb string) telegram.InlineKeyboardMarkup {
 	return telegram.InlineKeyboardMarkup{
 		InlineKeyboard: [][]telegram.InlineKeyboardButton{
 			{
@@ -28,6 +29,18 @@ func (b *ButtonBuilder) CreateSignalKeyboard(symbol string) telegram.InlineKeybo
 				{
 					Text: constants.ButtonTexts.Chart,
 					URL:  b.getCoinglassURL(symbol),
+				},
+			},
+			{
+				{
+					Text:         constants.ButtonTexts.MainMenu,
+					CallbackData: constants.CallbackMenuMain,
+				},
+			},
+			{
+				{
+					Text:         sessionText,
+					CallbackData: sessionCb,
 				},
 			},
 		},

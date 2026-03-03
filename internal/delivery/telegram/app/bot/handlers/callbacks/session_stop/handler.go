@@ -1,9 +1,9 @@
+// internal/delivery/telegram/app/bot/handlers/callbacks/session_stop/handler.go
 package session_stop
 
 import (
 	"fmt"
 
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -20,8 +20,8 @@ func newSessionStopHandler(service trading_session.Service) handlers.Handler {
 	return &sessionStopHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "session_stop_handler",
-			Command: constants.SessionButtonTexts.Stop + "*", // Добавляем * для паттерн-матчинга
-			Type:    handlers.TypeMessage,
+			Command: constants.CallbackSessionStop,
+			Type:    handlers.TypeCallback,
 		},
 		service: service,
 	}
@@ -33,12 +33,10 @@ func (h *sessionStopHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
 	}
 
-	startKeyboard := telegram.ReplyKeyboardMarkup{
-		Keyboard: [][]telegram.ReplyKeyboardButton{
-			{{Text: constants.SessionButtonTexts.Start}},
+	startKeyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{{"text": constants.SessionButtonTexts.Start, "callback_data": constants.CallbackSessionStart}},
 		},
-		ResizeKeyboard: true,
-		IsPersistent:   true,
 	}
 
 	if !h.service.IsActive(params.User.ID, "telegram") {

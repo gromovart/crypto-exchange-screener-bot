@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -50,24 +49,23 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 
 	expiresAtStr := formatInUserTZ(session.ExpiresAt, params.User.Timezone)
 
-	// Возвращаем кнопку "🔴 Завершить сессию (до ЧЧ:ММ)" в reply keyboard
-	stopButtonText := fmt.Sprintf("%s (до %s)",
+	// Inline-кнопка завершения сессии
+	remaining := time.Until(session.ExpiresAt)
+	stopButtonText := fmt.Sprintf("%s (%s)",
 		constants.SessionButtonTexts.Stop,
-		expiresAtStr,
+		formatRemaining(remaining),
 	)
-	stopKeyboard := telegram.ReplyKeyboardMarkup{
-		Keyboard: [][]telegram.ReplyKeyboardButton{
-			{{Text: stopButtonText}},
+	stopKeyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{{"text": stopButtonText, "callback_data": constants.CallbackSessionStop}},
 		},
-		ResizeKeyboard: true,
-		IsPersistent:   true,
 	}
 
 	message := fmt.Sprintf(
 		"🟢 *Сессия запущена!*\n\n"+
 			"⏱ Длительность: *%s*\n"+
 			"🕐 Завершится в: *%s*\n\n"+
-			"✅ Уведомления включены. Кнопка управления сессией обновлена.",
+			"✅ Уведомления включены.",
 		label,
 		expiresAtStr,
 	)
@@ -80,6 +78,19 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 			"expires_at":      session.ExpiresAt,
 		},
 	}, nil
+}
+
+// formatRemaining форматирует оставшееся время в формате "Xч Yм" или "Yм"
+func formatRemaining(d time.Duration) string {
+	if d <= 0 {
+		return "0м"
+	}
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dч %dм", h, m)
+	}
+	return fmt.Sprintf("%dм", m)
 }
 
 // formatInUserTZ форматирует время в часовом поясе пользователя

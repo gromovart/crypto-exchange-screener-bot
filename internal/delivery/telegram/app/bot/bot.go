@@ -112,7 +112,16 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 
 	notificationsToggleService := notifications_toggle.NewService(userService)
 	signalSettingsService := signal_settings_service.NewServiceWithDependencies(userService)
-	tradingSessionService := trading_session.NewService(userService, ms)
+
+	// Получаем TradingSessionService из ServiceFactory (единственный экземпляр)
+	var tradingSessionService trading_session.Service
+	if deps.ServiceFactory != nil {
+		tradingSessionService = deps.ServiceFactory.GetTradingSessionService()
+	}
+	if tradingSessionService == nil {
+		// Fallback: создаём если фабрика недоступна
+		tradingSessionService = trading_session.NewService(userService, ms)
+	}
 
 	// Получаем PaymentService из ServiceFactory
 	var paymentService payment_service.Service

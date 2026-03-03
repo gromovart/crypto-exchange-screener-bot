@@ -20,8 +20,8 @@ func newSessionStartHandler(service trading_session.Service) handlers.Handler {
 	return &sessionStartHandler{
 		BaseHandler: &base.BaseHandler{
 			Name:    "session_start_handler",
-			Command: constants.SessionButtonTexts.Start,
-			Type:    handlers.TypeMessage,
+			Command: constants.CallbackSessionStart,
+			Type:    handlers.TypeCallback,
 		},
 		service: service,
 	}
@@ -33,40 +33,7 @@ func (h *sessionStartHandler) Execute(params handlers.HandlerParams) (handlers.H
 		return handlers.HandlerResult{}, fmt.Errorf("пользователь не авторизован")
 	}
 
-	// Если сессия уже активна — сообщаем об этом
-	if h.service.IsActive(params.User.ID, "telegram") {
-		session, _ := h.service.GetActive(params.User.ID, "telegram")
-		remaining := session.ExpiresAt.Sub(session.StartedAt)
-		_ = remaining
-
-		keyboard := map[string]interface{}{
-			"inline_keyboard": [][]map[string]string{
-				{
-					{"text": constants.SessionButtonTexts.Duration2h, "callback_data": "session_duration:2h"},
-					{"text": constants.SessionButtonTexts.Duration4h, "callback_data": "session_duration:4h"},
-				},
-				{
-					{"text": constants.SessionButtonTexts.Duration8h, "callback_data": "session_duration:8h"},
-					{"text": constants.SessionButtonTexts.DurationDay, "callback_data": "session_duration:day"},
-				},
-			},
-		}
-
-		message := fmt.Sprintf(
-			"⚡ *Сессия уже активна*\n\n"+
-				"Истекает: *%s*\n\n"+
-				"Вы можете выбрать новую длительность (сессия перезапустится):",
-			session.ExpiresAt.Format("15:04"),
-		)
-
-		return handlers.HandlerResult{
-			Message:  message,
-			Keyboard: keyboard,
-		}, nil
-	}
-
-	// Показываем выбор длительности
-	keyboard := map[string]interface{}{
+	durationKeyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{
 				{"text": constants.SessionButtonTexts.Duration2h, "callback_data": "session_duration:2h"},
@@ -79,8 +46,26 @@ func (h *sessionStartHandler) Execute(params handlers.HandlerParams) (handlers.H
 		},
 	}
 
+	// Если сессия уже активна — сообщаем об этом
+	if h.service.IsActive(params.User.ID, "telegram") {
+		session, _ := h.service.GetActive(params.User.ID, "telegram")
+
+		message := fmt.Sprintf(
+			"⚡ *Сессия уже активна*\n\n"+
+				"Истекает: *%s*\n\n"+
+				"Вы можете выбрать новую длительность (сессия перезапустится):",
+			session.ExpiresAt.Format("15:04"),
+		)
+
+		return handlers.HandlerResult{
+			Message:  message,
+			Keyboard: durationKeyboard,
+		}, nil
+	}
+
+	// Показываем выбор длительности
 	return handlers.HandlerResult{
 		Message:  "⏱ *Выберите длительность торговой сессии:*\n\nПосле старта уведомления включатся автоматически.",
-		Keyboard: keyboard,
+		Keyboard: durationKeyboard,
 	}, nil
 }

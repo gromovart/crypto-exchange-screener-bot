@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -258,7 +257,6 @@ func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.Hand
 			"▫️ Биржа: *Bybit*  •  Обновление: *10-20 сек*\n"+
 			"▫️ Символы: фьючерсы USDT\n"+
 			"▫️ Сигналы: рост / падение / объёмы / OI\n\n"+
-			"📚 [Полная документация](https://teletype.in/@gromovart/pj2UIVlmr55)\n"+
 			"✉️ Поддержка: support@gromovart.ru\n\n"+
 			"━━━ ⚠️ ВАЖНОЕ ПРЕДУПРЕЖДЕНИЕ ━━━\n\n"+
 			"▫️ *Рыночные риски* — рынок криптовалют высоко волатилен, торговля связана с риском потери капитала\n\n"+
@@ -277,7 +275,7 @@ func (h *startHandlerImpl) handleStandardStart(user *models.User) (handlers.Hand
 		subscriptionStatus,
 	)
 
-	keyboard := h.createSessionReplyKeyboard(user.ID, user.Timezone)
+	keyboard := h.createStartKeyboard(user.ID, user.Timezone)
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -304,37 +302,49 @@ func (h *startHandlerImpl) createBuyKeyboard() interface{} {
 	}
 }
 
-// createSessionReplyKeyboard создает reply keyboard с кнопкой сессии
-func (h *startHandlerImpl) createSessionReplyKeyboard(userID int, timezone string) interface{} {
-	buttonText := constants.SessionButtonTexts.Start
+// createStartKeyboard создает inline-клавиатуру приветственного сообщения.
+// Содержит: Главное меню, Документация, кнопку сессии (старт/стоп с временем).
+func (h *startHandlerImpl) createStartKeyboard(userID int, timezone string) interface{} {
+	// Кнопка торговой сессии
+	sessionText := constants.SessionButtonTexts.Start
+	sessionCb := constants.CallbackSessionStart
 	if h.tradingSessionService != nil {
 		if session, ok := h.tradingSessionService.GetActive(userID, "telegram"); ok {
-			buttonText = fmt.Sprintf("%s (до %s)",
+			remaining := time.Until(session.ExpiresAt)
+			sessionText = fmt.Sprintf("%s (%s)",
 				constants.SessionButtonTexts.Stop,
-				formatInUserTZ(session.ExpiresAt, timezone),
+				formatRemaining(remaining),
 			)
+			sessionCb = constants.CallbackSessionStop
 		}
 	}
 
-	return telegram.ReplyKeyboardMarkup{
-		Keyboard: [][]telegram.ReplyKeyboardButton{
-			{{Text: buttonText}},
+	return map[string]interface{}{
+		"inline_keyboard": [][]map[string]interface{}{
+			{
+				{"text": "🏠 Главное меню", "callback_data": constants.CallbackMenuMain},
+			},
+			{
+				{"text": "📚 Документация", "url": "https://teletype.in/@gromovart/pj2UIVlmr55"},
+			},
+			{
+				{"text": sessionText, "callback_data": sessionCb},
+			},
 		},
-		ResizeKeyboard: true,
-		IsPersistent:   true,
 	}
 }
 
-// formatInUserTZ форматирует время в часовом поясе пользователя
-func formatInUserTZ(t time.Time, timezone string) string {
-	if timezone == "" {
-		timezone = "Europe/Moscow"
+// formatRemaining форматирует оставшееся время в формате "Xч Yм" или "Yм"
+func formatRemaining(d time.Duration) string {
+	if d <= 0 {
+		return "0м"
 	}
-	loc, err := time.LoadLocation(timezone)
-	if err != nil {
-		return t.Format("15:04")
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dч %dм", h, m)
 	}
-	return t.In(loc).Format("15:04")
+	return fmt.Sprintf("%dм", m)
 }
 
 // parseUserID парсит user_id из строки

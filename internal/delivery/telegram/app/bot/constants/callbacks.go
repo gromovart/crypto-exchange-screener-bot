@@ -82,6 +82,8 @@ const (
 	CallbackSignalTest               = "signal_test"                 // ⚡ Тестовый сигнал
 
 	// ============== SESSION ==============
+	CallbackSessionStart    = "session_start"     // 🟢 Начать торговую сессию
+	CallbackSessionStop     = "session_stop"      // 🔴 Завершить сессию
 	CallbackSessionDuration = "session_duration:" // session_duration:{2h|4h|8h|day}
 
 	// ============== TEST & DEBUG ==============
