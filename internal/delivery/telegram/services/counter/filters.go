@@ -119,6 +119,12 @@ func (s *serviceImpl) checkBasicConditions(user *models.User, data RawCounterDat
 		return false
 	}
 
+	// Пропускаем MAX-only пользователей (они обрабатываются MAX контроллером)
+	if user.IsMaxOnlyUser() {
+		logger.Debug("🔍 Пропуск user=%d: MAX-only пользователь (обрабатывается MAX контроллером)", user.ID)
+		return false
+	}
+
 	// Проверяем ChatID
 	if user.ChatID == "" {
 		logger.Debug("🔍 Пропуск user=%d: пустой chat_id", user.ID)

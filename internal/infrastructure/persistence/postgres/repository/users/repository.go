@@ -246,13 +246,13 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11,
-			$12, $13,
-			$14, $15, $16,
-			$17, $18, $19,
-			$20, $21, $22,
-			$23, $24,
-			$25, $26
+			$8, $9, $10, $11, $12,
+			$13, $14,
+			$15, $16, $17,
+			$18, $19, $20,
+			$21, $22, $23,
+			$24, $25,
+			$26, $27
 		)
 		RETURNING id
 	`
@@ -261,7 +261,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		query,
 		user.TelegramID, user.Username, user.FirstName, user.LastName, user.ChatID,
 		user.Email, user.Phone,
-		user.NotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
+		user.NotificationsEnabled, user.MaxNotificationsEnabled, user.NotifyGrowth, user.NotifyFall, user.NotifyContinuous,
 		user.MinGrowthThreshold, user.MinFallThreshold,
 		pq.Array(user.PreferredPeriods), user.MinVolumeFilter, pq.Array(user.ExcludePatterns),
 		user.Language, user.Timezone, user.DisplayMode,
