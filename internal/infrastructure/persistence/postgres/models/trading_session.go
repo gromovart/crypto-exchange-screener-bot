@@ -8,6 +8,7 @@ type TradingSession struct {
 	ID        int       `db:"id"         json:"id"`
 	UserID    int       `db:"user_id"    json:"user_id"`
 	ChatID    int64     `db:"chat_id"    json:"chat_id"`
+	Platform  string    `db:"platform"   json:"platform"`  // "telegram" | "max"
 	StartedAt time.Time `db:"started_at" json:"started_at"`
 	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
 	IsActive  bool      `db:"is_active"  json:"is_active"`

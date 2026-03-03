@@ -1,0 +1,100 @@
+// internal/delivery/max/bot/handlers/callbacks/signal_set_fall_threshold/handler.go
+package signal_set_fall_threshold
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
+	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/base"
+	kb "crypto-exchange-screener-bot/internal/delivery/max/bot/keyboard"
+	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+)
+
+// Handler — обработчик установки порога падения
+type Handler struct {
+	*base.BaseHandler
+	service signalSvc.Service
+}
+
+// New создаёт обработчик
+func New(svc signalSvc.Service) handlers.Handler {
+	return &Handler{
+		BaseHandler: base.New("signal_set_fall_threshold", kb.CbSignalSetFallThreshold, handlers.TypeCallback),
+		service:     svc,
+	}
+}
+
+// Execute выполняет обработку
+func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
+	user := params.User
+	if user == nil {
+		return handlers.HandlerResult{Message: "❌ Пользователь не найден"}, nil
+	}
+
+	// Проверяем, есть ли значение в data (формат: "signal_set_fall_threshold:2.5")
+	if strings.Contains(params.Data, ":") {
+		parts := strings.SplitN(params.Data, ":", 2)
+		if len(parts) == 2 {
+			val, err := strconv.ParseFloat(parts[1], 64)
+			if err == nil {
+				result, err := h.service.Exec(signalSvc.SignalSettingsParams{
+					Action: "set_fall_threshold",
+					UserID: user.ID,
+					Value:  val,
+				})
+				if err != nil {
+					return handlers.HandlerResult{
+						Message:     fmt.Sprintf("❌ Ошибка: %v", err),
+						Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbSignalsMenu)}}),
+						EditMessage: params.MessageID != "",
+					}, nil
+				}
+				return handlers.HandlerResult{
+					Message: fmt.Sprintf("✅ Порог падения обновлён\n\n%s\n\nТеперь вы будете получать уведомления только при падении цены на %.1f%% и более.", result.Message, val),
+					Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbSignalsMenu)}}),
+					EditMessage: params.MessageID != "",
+				}, nil
+			}
+		}
+	}
+
+	// Показываем варианты порогов
+	current := user.MinFallThreshold
+	msg := fmt.Sprintf(
+		"📉 Установка порога падения\n\n"+
+			"Текущий порог: %.1f%%\n\n"+
+			"Рекомендуемые значения:\n"+
+			"· 1.0%% — высокая чувствительность\n"+
+			"· 2.0%% — средняя чувствительность\n"+
+			"· 3.0%% — низкая чувствительность\n\n"+
+			"Диапазон: 0.1%% — 50.0%%",
+		current,
+	)
+
+	thresholds := []float64{0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0}
+	var rows [][]map[string]string
+
+	var row []map[string]string
+	for i, t := range thresholds {
+		marker := ""
+		if t == current {
+			marker = "✅ "
+		}
+		btn := kb.B(fmt.Sprintf("%s%.1f%%", marker, t),
+			fmt.Sprintf("%s:%.1f", kb.CbSignalSetFallThreshold, t))
+		row = append(row, btn)
+		if len(row) == 2 || i == len(thresholds)-1 {
+			rows = append(rows, row)
+			row = nil
+		}
+	}
+	rows = append(rows, kb.BackRow(kb.CbSignalsMenu))
+
+	return handlers.HandlerResult{
+		Message:     msg,
+		Keyboard:    kb.Keyboard(rows),
+		EditMessage: params.MessageID != "",
+	}, nil
+}

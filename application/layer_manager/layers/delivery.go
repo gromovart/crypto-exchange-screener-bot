@@ -2,20 +2,30 @@
 package layers
 
 import (
+	"context"
+	"fmt"
+
+	max_package "crypto-exchange-screener-bot/internal/delivery/max"
+	max_bot "crypto-exchange-screener-bot/internal/delivery/max/bot"
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
+	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
-	"fmt"
 )
 
-// DeliveryLayer слой доставки (Telegram)
+// DeliveryLayer слой доставки (Telegram + MAX)
 type DeliveryLayer struct {
 	*BaseLayer
 	config          *config.Config
 	coreLayer       *CoreLayer
 	telegramPackage *telegram_package.TelegramDeliveryPackage
+	maxPackage      *max_package.Package
+	maxBot          *max_bot.Bot
+	maxBotCancel    context.CancelFunc
 	initialized     bool
 }
 
@@ -132,6 +142,37 @@ func (dl *DeliveryLayer) Initialize() error {
 		return fmt.Errorf("не удалось инициализировать TelegramDeliveryPackage: %w", err)
 	}
 
+	// Инициализируем MAX Package если включён
+	if dl.config.MAX.Enabled {
+		dl.maxPackage = max_package.NewPackage(dl.config.MAX.BotToken, dl.config.MAX.ChatID)
+
+		if err := dl.maxPackage.Initialize(eventBus); err != nil {
+			logger.Warn("⚠️ Не удалось инициализировать MAX Package: %v", err)
+			dl.maxPackage = nil
+		} else {
+			logger.Info("📲 MAX Package инициализирован")
+
+			// Создаём interactive-бота с UserService
+			if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
+				deps := max_bot.Dependencies{
+					UserService:    userSvc,
+					NotifyService:  notifySvc.NewServiceWithDependencies(userSvc),
+					SignalService:  signalSvc.NewServiceWithDependencies(userSvc),
+					SessionService: sessionSvc.NewService(userSvc, nil),
+				}
+				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
+				logger.Info("🤖 MAX Bot создан")
+
+				// Регистрируем UserController — per-user доставка сигналов в MAX
+				dl.maxPackage.RegisterUserController(userSvc)
+			} else {
+				logger.Warn("⚠️ MAX: не удалось получить UserService (%v) — interactive-бот не запустится", err)
+			}
+		}
+	} else {
+		logger.Info("ℹ️  MAX отключён в конфигурации, пропускаем")
+	}
+
 	// Регистрируем компоненты
 	dl.registerDeliveryComponents()
 
@@ -192,6 +233,23 @@ func (dl *DeliveryLayer) Start() error {
 		logger.Info("⚠️ Telegram отключен в конфигурации, пропускаем запуск")
 	}
 
+	// Запускаем MAX Package если инициализирован
+	if dl.maxPackage != nil {
+		if err := dl.maxPackage.Start(); err != nil {
+			logger.Warn("⚠️ Не удалось запустить MAX Package: %v", err)
+		} else {
+			logger.Info("📲 MAX Package запущен")
+		}
+	}
+
+	// Запускаем MAX Bot (polling) если создан
+	if dl.maxBot != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		dl.maxBotCancel = cancel
+		go dl.maxBot.Start(ctx)
+		logger.Info("🤖 MAX Bot запущен (polling)")
+	}
+
 	dl.running = true
 	dl.updateState(StateRunning)
 	logger.Info("✅ Слой доставки запущен")
@@ -213,6 +271,19 @@ func (dl *DeliveryLayer) Stop() error {
 			logger.Warn("⚠️ Ошибка остановки TelegramDeliveryPackage: %v", err)
 		}
 		logger.Info("🤖 Telegram бот остановлен")
+	}
+
+	// Останавливаем MAX Bot
+	if dl.maxBotCancel != nil {
+		dl.maxBotCancel()
+		dl.maxBotCancel = nil
+		logger.Info("🤖 MAX Bot остановлен")
+	}
+
+	// Останавливаем MAX Package
+	if dl.maxPackage != nil {
+		dl.maxPackage.Stop()
+		logger.Info("📲 MAX Package остановлен")
 	}
 
 	dl.running = false
@@ -238,6 +309,19 @@ func (dl *DeliveryLayer) Reset() error {
 
 	// Сбрасываем базовый слой
 	dl.BaseLayer.Reset()
+
+	// Сбрасываем MAX Bot
+	if dl.maxBotCancel != nil {
+		dl.maxBotCancel()
+		dl.maxBotCancel = nil
+	}
+	dl.maxBot = nil
+
+	// Сбрасываем MAX Package
+	if dl.maxPackage != nil {
+		dl.maxPackage.Stop()
+		dl.maxPackage = nil
+	}
 
 	dl.telegramPackage = nil
 	dl.initialized = false

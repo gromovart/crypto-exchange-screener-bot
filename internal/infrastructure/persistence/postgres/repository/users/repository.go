@@ -20,6 +20,8 @@ type UserRepository interface {
 	FindByTelegramID(telegramID int64) (*models.User, error)
 	FindByEmail(email string) (*models.User, error)
 	FindByChatID(chatID string) (*models.User, error)
+	FindByMaxUserID(maxUserID int64) (*models.User, error)
+	FindByLinkCode(code string) (*models.User, error)
 	Create(user *models.User) error
 	Update(user *models.User) error
 	Delete(id int) error
@@ -57,13 +59,14 @@ func (r *UserRepositoryImpl) GetAllActive() ([]*models.User, error) {
     SELECT
         id, telegram_id, username, first_name, last_name, chat_id,
         email, phone,
-        notifications_enabled, notify_growth, notify_fall, notify_continuous,
+        notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
         min_growth_threshold, min_fall_threshold,
         preferred_periods, min_volume_filter, exclude_patterns,
         language, timezone, display_mode,
         role, is_active, is_verified, subscription_tier,
         signals_today, max_signals_per_day,
-        created_at, updated_at, last_login_at, last_signal_at
+        created_at, updated_at, last_login_at, last_signal_at,
+        max_user_id, max_chat_id, link_code, link_code_expires_at
     FROM users
     WHERE is_active = TRUE
     ORDER BY created_at DESC
@@ -99,13 +102,14 @@ func (r *UserRepositoryImpl) GetAll(limit, offset int) ([]*models.User, error) {
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -233,7 +237,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		INSERT INTO users (
 			telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
@@ -283,13 +287,14 @@ func (r *UserRepositoryImpl) FindByID(id int) (*models.User, error) {
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		WHERE id = $1
 	`
@@ -304,13 +309,14 @@ func (r *UserRepositoryImpl) FindByTelegramID(telegramID int64) (*models.User, e
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		WHERE telegram_id = $1
 	`
@@ -325,13 +331,14 @@ func (r *UserRepositoryImpl) FindByChatID(chatID string) (*models.User, error) {
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		WHERE chat_id = $1
 	`
@@ -346,13 +353,14 @@ func (r *UserRepositoryImpl) FindByEmail(email string) (*models.User, error) {
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		WHERE email = $1
 	`
@@ -399,8 +407,13 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 			max_signals_per_day = $25,
 			last_login_at = $26,
 			last_signal_at = $27,
-			updated_at = $28
-		WHERE id = $29
+			max_user_id = $28,
+			max_chat_id = $29,
+			link_code = $30,
+			link_code_expires_at = $31,
+			max_notifications_enabled = $32,
+			updated_at = $33
+		WHERE id = $34
 	`
 
 	result, err := tx.Exec(query,
@@ -413,6 +426,9 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 		user.Role, user.IsActive, user.IsVerified,
 		user.SubscriptionTier, user.SignalsToday, user.MaxSignalsPerDay,
 		getNullTime(user.LastLoginAt), getNullTime(user.LastSignalAt),
+		user.MaxUserID, getNullString(user.MaxChatID), getNullString(user.LinkCode),
+		getNullTimePtr(user.LinkCodeExpiresAt),
+		user.MaxNotificationsEnabled,
 		time.Now(), user.ID,
 	)
 
@@ -539,13 +555,14 @@ func (r *UserRepositoryImpl) SearchUsers(query string, limit, offset int) ([]*mo
 		SELECT
 			id, telegram_id, username, first_name, last_name, chat_id,
 			email, phone,
-			notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
 			min_growth_threshold, min_fall_threshold,
 			preferred_periods, min_volume_filter, exclude_patterns,
 			language, timezone, display_mode,
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
-			created_at, updated_at, last_login_at, last_signal_at
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
 		FROM users
 		WHERE username ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1
 		ORDER BY created_at DESC
@@ -592,17 +609,21 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 	var lastLoginAt, lastSignalAt sql.NullTime
 	var preferredPeriods []sql.NullInt64
 	var excludePatterns []sql.NullString
+	var maxUserID sql.NullInt64
+	var maxChatID, linkCode sql.NullString
+	var linkCodeExpiresAt sql.NullTime
 
 	err := rows.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
-		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
+		&user.NotificationsEnabled, &user.MaxNotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
 		&user.MinGrowthThreshold, &user.MinFallThreshold,
 		pq.Array(&preferredPeriods), &user.MinVolumeFilter, pq.Array(&excludePatterns),
 		&user.Language, &user.Timezone, &user.DisplayMode,
 		&user.Role, &user.IsActive, &user.IsVerified, &user.SubscriptionTier,
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
+		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
 	)
 
 	if err != nil {
@@ -615,6 +636,22 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 	}
 	if lastSignalAt.Valid {
 		user.LastSignalAt = lastSignalAt.Time
+	}
+
+	// MAX-поля
+	if maxUserID.Valid {
+		v := maxUserID.Int64
+		user.MaxUserID = &v
+	}
+	if maxChatID.Valid {
+		user.MaxChatID = maxChatID.String
+	}
+	if linkCode.Valid {
+		user.LinkCode = linkCode.String
+	}
+	if linkCodeExpiresAt.Valid {
+		v := linkCodeExpiresAt.Time
+		user.LinkCodeExpiresAt = &v
 	}
 
 	// Конвертируем массивы
@@ -641,17 +678,21 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	var lastLoginAt, lastSignalAt sql.NullTime
 	var preferredPeriods []sql.NullInt64
 	var excludePatterns []sql.NullString
+	var maxUserID sql.NullInt64
+	var maxChatID, linkCode sql.NullString
+	var linkCodeExpiresAt sql.NullTime
 
 	err := row.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
-		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
-		&user.MinGrowthThreshold, &user.MinFallThreshold, // ⭐ ДОЛЖНО БЫТЬ 13-14 позиции
+		&user.NotificationsEnabled, &user.MaxNotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
+		&user.MinGrowthThreshold, &user.MinFallThreshold,
 		pq.Array(&preferredPeriods), &user.MinVolumeFilter, pq.Array(&excludePatterns),
 		&user.Language, &user.Timezone, &user.DisplayMode,
 		&user.Role, &user.IsActive, &user.IsVerified, &user.SubscriptionTier,
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
+		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
 	)
 
 	if err != nil {
@@ -667,6 +708,22 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	}
 	if lastSignalAt.Valid {
 		user.LastSignalAt = lastSignalAt.Time
+	}
+
+	// MAX-поля
+	if maxUserID.Valid {
+		v := maxUserID.Int64
+		user.MaxUserID = &v
+	}
+	if maxChatID.Valid {
+		user.MaxChatID = maxChatID.String
+	}
+	if linkCode.Valid {
+		user.LinkCode = linkCode.String
+	}
+	if linkCodeExpiresAt.Valid {
+		v := linkCodeExpiresAt.Time
+		user.LinkCodeExpiresAt = &v
 	}
 
 	// Конвертируем массивы
@@ -719,6 +776,65 @@ func getNullTime(t time.Time) sql.NullTime {
 	}
 }
 
+// getNullTimePtr преобразует *time.Time в sql.NullTime
+func getNullTimePtr(t *time.Time) sql.NullTime {
+	if t == nil || t.IsZero() {
+		return sql.NullTime{Valid: false}
+	}
+	return sql.NullTime{Time: *t, Valid: true}
+}
+
+// getNullString преобразует string в sql.NullString
+func getNullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+// FindByMaxUserID находит пользователя по MAX user ID
+func (r *UserRepositoryImpl) FindByMaxUserID(maxUserID int64) (*models.User, error) {
+	query := `
+		SELECT
+			id, telegram_id, username, first_name, last_name, chat_id,
+			email, phone,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			min_growth_threshold, min_fall_threshold,
+			preferred_periods, min_volume_filter, exclude_patterns,
+			language, timezone, display_mode,
+			role, is_active, is_verified, subscription_tier,
+			signals_today, max_signals_per_day,
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
+		FROM users
+		WHERE max_user_id = $1
+	`
+	row := r.db.QueryRow(query, maxUserID)
+	return r.scanUserRow(row)
+}
+
+// FindByLinkCode находит пользователя по коду привязки (не истёкший)
+func (r *UserRepositoryImpl) FindByLinkCode(code string) (*models.User, error) {
+	query := `
+		SELECT
+			id, telegram_id, username, first_name, last_name, chat_id,
+			email, phone,
+			notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
+			min_growth_threshold, min_fall_threshold,
+			preferred_periods, min_volume_filter, exclude_patterns,
+			language, timezone, display_mode,
+			role, is_active, is_verified, subscription_tier,
+			signals_today, max_signals_per_day,
+			created_at, updated_at, last_login_at, last_signal_at,
+			max_user_id, max_chat_id, link_code, link_code_expires_at
+		FROM users
+		WHERE link_code = $1
+		  AND link_code_expires_at > NOW()
+	`
+	row := r.db.QueryRow(query, code)
+	return r.scanUserRow(row)
+}
+
 // GetByTelegramID получает пользователя по Telegram ID
 func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int64) (*models.User, error) {
 	var user models.User
@@ -726,7 +842,7 @@ func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int
 
 	query := `SELECT id, telegram_id, username, first_name, last_name, chat_id,
         created_at, updated_at, min_growth_threshold, min_fall_threshold,
-        notifications_enabled, notify_growth, notify_fall, notify_continuous,
+        notifications_enabled, max_notifications_enabled, notify_growth, notify_fall, notify_continuous,
         preferred_periods, min_volume_filter,
         exclude_patterns, language, timezone, display_mode, subscription_tier,
         signals_today, max_signals_per_day, is_active, last_activity_at
@@ -735,7 +851,7 @@ func (r *UserRepositoryImpl) GetByTelegramID(ctx context.Context, telegramID int
 	err := r.db.QueryRowContext(ctx, query, telegramID).Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName, &user.LastName, &user.ChatID,
 		&user.CreatedAt, &user.UpdatedAt, &user.MinGrowthThreshold, &user.MinFallThreshold,
-		&user.NotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
+		&user.NotificationsEnabled, &user.MaxNotificationsEnabled, &user.NotifyGrowth, &user.NotifyFall, &user.NotifyContinuous,
 		pq.Array(&user.PreferredPeriods), &user.MinVolumeFilter,
 		pq.Array(&user.ExcludePatterns), &user.Language, &user.Timezone, &user.DisplayMode, &user.SubscriptionTier,
 		&user.SignalsToday, &user.MaxSignalsPerDay, &user.IsActive, &lastActivityAt, // ⭐ ДОБАВИТЬ

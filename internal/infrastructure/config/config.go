@@ -223,6 +223,15 @@ type Config struct {
 	} `mapstructure:",squash"`
 
 	// ======================
+	// MAX МЕССЕНДЖЕР
+	// ======================
+	MAX struct {
+		Enabled  bool   `mapstructure:"MAX_ENABLED"`
+		BotToken string `mapstructure:"MAX_BOT_TOKEN"`
+		ChatID   int64  `mapstructure:"MAX_CHAT_ID"`
+	} `mapstructure:",squash"`
+
+	// ======================
 	// TELEGRAM РЕЖИМ РАБОТЫ
 	// ======================
 	TelegramMode string `mapstructure:"TELEGRAM_MODE"` // "polling" или "webhook"
@@ -581,6 +590,13 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Telegram.Include24hStats = getEnvBool("INCLUDE_24H_STATS", false)
 
 	// ======================
+	// MAX МЕССЕНДЖЕР
+	// ======================
+	cfg.MAX.Enabled = getEnvBool("MAX_ENABLED", false)
+	cfg.MAX.BotToken = getEnv("MAX_BOT_TOKEN", "")
+	cfg.MAX.ChatID = getEnvInt64("MAX_CHAT_ID", 0)
+
+	// ======================
 	// TELEGRAM РЕЖИМ РАБОТЫ
 	// ======================
 	cfg.TelegramMode = getEnv("TELEGRAM_MODE", "polling")
@@ -718,6 +734,15 @@ func (c *Config) validate() error {
 		if c.Telegram.ChatID == "" {
 			validationErrors = append(validationErrors, "TG_CHAT_ID is required when Telegram is enabled")
 		}
+	}
+
+	// Проверка MAX если включен
+	if c.MAX.Enabled {
+		if c.MAX.BotToken == "" {
+			validationErrors = append(validationErrors, "MAX_BOT_TOKEN is required when MAX is enabled")
+		}
+		// MAX_CHAT_ID опционален — нужен только для широковещательных сигналов
+		// Если не задан, сигналы не будут отправляться в чат, но интерактивный бот работает
 	}
 
 	// Проверка Counter Analyzer если включен

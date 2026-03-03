@@ -65,6 +65,7 @@ func convertEventToParams(event types.Event) (counterService.CounterParams, erro
 	params.CurrentPrice = getFloat64(dataMap, "current_price")
 	params.Volume24h = getFloat64(dataMap, "volume_24h")
 	params.OpenInterest = getFloat64(dataMap, "open_interest")
+	params.OIChange24h = getFloat64(dataMap, "oi_change_24h")
 	params.FundingRate = getFloat64(dataMap, "funding_rate")
 	params.RSI = getFloat64(dataMap, "rsi")
 	params.MACDSignal = getFloat64(dataMap, "macd_signal")

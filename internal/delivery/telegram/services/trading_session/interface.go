@@ -9,14 +9,18 @@ import (
 type TradingSession struct {
 	UserID    int
 	ChatID    int64
+	Platform  string // "telegram" | "max"
 	StartedAt time.Time
 	ExpiresAt time.Time
 }
 
 // Service интерфейс для управления торговыми сессиями
+// platform — идентификатор мессенджера: "telegram" или "max".
+// Сессии разных платформ независимы: можно одновременно иметь
+// активную сессию в Telegram и активную сессию в MAX.
 type Service interface {
-	Start(userID int, chatID int64, duration time.Duration) (*TradingSession, error)
-	Stop(userID int) error
-	GetActive(userID int) (*TradingSession, bool)
-	IsActive(userID int) bool
+	Start(userID int, chatID int64, duration time.Duration, platform string) (*TradingSession, error)
+	Stop(userID int, platform string) error
+	GetActive(userID int, platform string) (*TradingSession, bool)
+	IsActive(userID int, platform string) bool
 }

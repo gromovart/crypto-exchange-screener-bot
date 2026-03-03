@@ -19,6 +19,7 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 		CurrentPrice:          params.CurrentPrice,
 		Volume24h:             params.Volume24h,
 		OpenInterest:          params.OpenInterest,
+		OIChange24h:           params.OIChange24h,
 		FundingRate:           params.FundingRate,
 		RSI:                   params.RSI,
 		MACDSignal:            params.MACDSignal,
@@ -31,7 +32,6 @@ func (s *serviceImpl) extractRawDataFromParams(params CounterParams) (RawCounter
 		ProgressPercentage: params.ProgressPercentage,
 
 		// Инициализируем остальные поля значениями по умолчанию
-		OIChange24h:       0.0,
 		NextFundingTime:   time.Time{},
 		LiquidationVolume: 0.0,
 		LongLiqVolume:     0.0,

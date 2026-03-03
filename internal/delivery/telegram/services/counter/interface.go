@@ -25,6 +25,7 @@ type CounterParams struct {
 	CurrentPrice       float64
 	Volume24h          float64
 	OpenInterest       float64
+	OIChange24h        float64
 	FundingRate        float64
 	RSI                float64
 	MACDSignal         float64

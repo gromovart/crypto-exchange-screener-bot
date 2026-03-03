@@ -20,11 +20,18 @@ type User struct {
 	Email string `db:"email" json:"email,omitempty"`
 	Phone string `db:"phone" json:"phone,omitempty"`
 
+	// Привязка к MAX мессенджеру
+	MaxUserID          *int64     `db:"max_user_id"          json:"max_user_id,omitempty"`
+	MaxChatID          string     `db:"max_chat_id"          json:"max_chat_id,omitempty"`
+	LinkCode           string     `db:"link_code"            json:"link_code,omitempty"`
+	LinkCodeExpiresAt  *time.Time `db:"link_code_expires_at" json:"link_code_expires_at,omitempty"`
+
 	// Настройки уведомлений (плоские поля для маппинга с БД)
-	NotificationsEnabled bool `db:"notifications_enabled" json:"notifications_enabled"`
-	NotifyGrowth         bool `db:"notify_growth" json:"notify_growth"`
-	NotifyFall           bool `db:"notify_fall" json:"notify_fall"`
-	NotifyContinuous     bool `db:"notify_continuous" json:"notify_continuous"`
+	NotificationsEnabled    bool `db:"notifications_enabled"     json:"notifications_enabled"`
+	MaxNotificationsEnabled bool `db:"max_notifications_enabled" json:"max_notifications_enabled"` // MAX-специфичный флаг
+	NotifyGrowth            bool `db:"notify_growth"             json:"notify_growth"`
+	NotifyFall              bool `db:"notify_fall"               json:"notify_fall"`
+	NotifyContinuous        bool `db:"notify_continuous"         json:"notify_continuous"`
 
 	// Настройки анализа (плоские поля для маппинга с БД)
 	MinGrowthThreshold float64 `db:"min_growth_threshold" json:"min_growth_threshold"`
@@ -182,6 +189,17 @@ func (u *User) ShouldReceiveSignal(signalType string, changePercent float64) boo
 // IsAdmin проверяет, является ли пользователь администратором
 func (u *User) IsAdmin() bool {
 	return u.Role == RoleAdmin
+}
+
+// IsMaxOnlyUser возвращает true, если пользователь зарегистрирован только через MAX
+// (telegram_id совпадает с max_user_id — способ хранения до привязки TG-аккаунта)
+func (u *User) IsMaxOnlyUser() bool {
+	return u.MaxUserID != nil && int64(u.TelegramID) == *u.MaxUserID
+}
+
+// HasLinkedTelegram возвращает true, если MAX-пользователь привязал Telegram-аккаунт
+func (u *User) HasLinkedTelegram() bool {
+	return u.MaxUserID != nil && int64(u.TelegramID) != *u.MaxUserID
 }
 
 // IsPremium проверяет, имеет ли пользователь премиум-статус

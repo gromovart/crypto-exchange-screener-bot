@@ -92,7 +92,6 @@ func (p *FormatterProvider) FormatCounterSignal(data CounterData) string {
 
 	// 1. ЗАГОЛОВОК
 	// 🔴 ПАДЕНИЕ -60.00% 🚨
-	// 💰 $0.07388
 	builder.WriteString(p.SignalFormatter.FormatSignalHeader(
 		data.Direction,
 		data.ChangePercent,

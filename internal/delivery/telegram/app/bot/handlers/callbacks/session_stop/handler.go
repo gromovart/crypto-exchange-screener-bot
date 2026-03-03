@@ -41,14 +41,14 @@ func (h *sessionStopHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 		IsPersistent:   true,
 	}
 
-	if !h.service.IsActive(params.User.ID) {
+	if !h.service.IsActive(params.User.ID, "telegram") {
 		return handlers.HandlerResult{
 			Message:  "ℹ️ Активной торговой сессии нет.",
 			Keyboard: startKeyboard,
 		}, nil
 	}
 
-	if err := h.service.Stop(params.User.ID); err != nil {
+	if err := h.service.Stop(params.User.ID, "telegram"); err != nil {
 		return handlers.HandlerResult{}, fmt.Errorf("ошибка завершения сессии: %w", err)
 	}
 

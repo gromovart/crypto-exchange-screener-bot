@@ -541,6 +541,24 @@ func (a *CounterAnalyzer) CreateCounterEventData(signal analysis.Signal, period 
 	oi := a.GetOI(signal.Symbol)
 	eventData["open_interest"] = oi
 
+	// Получаем изменение OI за 24ч из метрик хранилища
+	oiChange24h := 0.0
+	if a.deps.Storage != nil {
+		type symbolMetricsGetter interface {
+			GetSymbolMetrics(string) (map[string]interface{}, bool)
+		}
+		if mg, ok := a.deps.Storage.(symbolMetricsGetter); ok {
+			if metrics, exists := mg.GetSymbolMetrics(signal.Symbol); exists {
+				if v, ok := metrics["OIChange24h"]; ok {
+					if f, ok := v.(float64); ok {
+						oiChange24h = f
+					}
+				}
+			}
+		}
+	}
+	eventData["oi_change_24h"] = oiChange24h
+
 	// Получаем реальную ставку фандинга
 	fundingRate := 0.0
 	if a.deps.Storage != nil {

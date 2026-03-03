@@ -18,25 +18,49 @@ func NewMetricsFormatter() *MetricsFormatter {
 	}
 }
 
-// FormatOIWithChange форматирует открытый интерес с процентным изменением
+// FormatOIWithChange форматирует открытый интерес с процентным изменением.
+// Формат аналогичен FormatVolumeDelta: [valueEmoji]$OI ([changeEmoji][sign]X.X%[strength])
+// valueEmoji — направление изменения OI: 🟢 рост, 🔴 падение
+// strength — ⚡ сильное (>5%), ↗️ умеренное (>2%), пусто для слабого
 func (f *MetricsFormatter) FormatOIWithChange(oi float64, change float64) string {
-	// Если OI недоступен
 	if oi <= 0 {
 		return "─"
 	}
 
 	oiStr := f.numberFormatter.FormatDollarValue(oi)
 
-	// Если есть изменение, добавляем его с цветным индикатором
-	if change != 0 {
-		changeIcon := "🟢"
-		if change < 0 {
-			changeIcon = "🔴"
-		}
-		return fmt.Sprintf("$%s (%s%+.1f%%)", oiStr, changeIcon, math.Abs(change))
+	if change == 0 {
+		return fmt.Sprintf("$%s", oiStr)
 	}
 
-	return fmt.Sprintf("$%s", oiStr)
+	absChange := math.Abs(change)
+
+	// Эмодзи перед значением OI — отражает направление изменения
+	var valueIcon string
+	if change > 0 {
+		valueIcon = "🟢"
+	} else {
+		valueIcon = "🔴"
+	}
+
+	// Эмодзи и знак для процентного изменения
+	changeIcon := "🟢"
+	changeSign := "+"
+	if change < 0 {
+		changeIcon = "🔴"
+		changeSign = "-"
+	}
+
+	// Индикатор силы изменения (как у дельты)
+	var strength string
+	switch {
+	case absChange > 5:
+		strength = " ⚡"
+	case absChange > 2:
+		strength = " ↗️"
+	}
+
+	return fmt.Sprintf("%s$%s (%s%s%.1f%%%s)", valueIcon, oiStr, changeIcon, changeSign, absChange, strength)
 }
 
 // FormatVolumeDelta форматирует дельту объемов с процентом изменения
