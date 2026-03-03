@@ -14,10 +14,25 @@ import (
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
+// timerKey возвращает строковый ключ таймера: "userID:platform"
+func timerKey(userID int, platform string) string {
+	return fmt.Sprintf("%d:%s", userID, platform)
+}
+
+// notifKey возвращает ключ настройки уведомлений для платформы.
+// "telegram" → "notifications_enabled"
+// "max"      → "max_notifications_enabled"
+func notifKey(platform string) string {
+	if platform == "max" {
+		return "max_notifications_enabled"
+	}
+	return "notifications_enabled"
+}
+
 // serviceImpl реализация Service с хранением в БД
 type serviceImpl struct {
 	mu     sync.Mutex
-	timers map[int]*time.Timer
+	timers map[string]*time.Timer // ключ: "userID:platform"
 
 	userService   *users.Service
 	messageSender message_sender.MessageSender
@@ -26,7 +41,7 @@ type serviceImpl struct {
 // NewService создает сервис с хранением в БД
 func NewService(userService *users.Service, ms message_sender.MessageSender) Service {
 	svc := &serviceImpl{
-		timers:        make(map[int]*time.Timer),
+		timers:        make(map[string]*time.Timer),
 		userService:   userService,
 		messageSender: ms,
 	}
@@ -42,27 +57,20 @@ func (s *serviceImpl) toDTO(m *models.TradingSession) *TradingSession {
 	return &TradingSession{
 		UserID:    m.UserID,
 		ChatID:    m.ChatID,
+		Platform:  m.Platform,
 		StartedAt: m.StartedAt,
 		ExpiresAt: m.ExpiresAt,
 	}
 }
 
-// toModel конвертирует TradingSession в models.TradingSession
-func (s *serviceImpl) toModel(dto *TradingSession) *models.TradingSession {
-	if dto == nil {
-		return nil
+// Start запускает торговую сессию для пользователя на указанной платформе.
+// Каждая платформа управляет своим флагом уведомлений независимо:
+//   - "telegram" → notifications_enabled
+//   - "max"      → max_notifications_enabled
+func (s *serviceImpl) Start(userID int, chatID int64, duration time.Duration, platform string) (*TradingSession, error) {
+	if platform == "" {
+		platform = "telegram"
 	}
-	return &models.TradingSession{
-		UserID:    dto.UserID,
-		ChatID:    dto.ChatID,
-		StartedAt: dto.StartedAt,
-		ExpiresAt: dto.ExpiresAt,
-		IsActive:  true,
-	}
-}
-
-// Start запускает торговую сессию для пользователя
-func (s *serviceImpl) Start(userID int, chatID int64, duration time.Duration) (*TradingSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -70,36 +78,39 @@ func (s *serviceImpl) Start(userID int, chatID int64, duration time.Duration) (*
 		return nil, fmt.Errorf("userService не доступен")
 	}
 
-	// Останавливаем таймер если был
-	s.cancelTimerLocked(userID)
+	// Останавливаем предыдущий таймер этой платформы
+	s.cancelTimerLocked(userID, platform)
 
 	session := &models.TradingSession{
 		UserID:    userID,
 		ChatID:    chatID,
+		Platform:  platform,
 		StartedAt: time.Now(),
 		ExpiresAt: time.Now().Add(duration),
 		IsActive:  true,
 	}
 
-	// Сохраняем в БД через userService
 	if err := s.userService.SaveTradingSession(session); err != nil {
 		return nil, fmt.Errorf("не удалось сохранить сессию: %w", err)
 	}
 
-	// Запускаем таймер автозавершения
 	s.scheduleExpiryLocked(session)
 
-	// Включаем уведомления
+	// Включаем уведомления для этой платформы
 	_ = s.userService.UpdateSettings(userID, map[string]interface{}{
-		"notifications_enabled": true,
+		notifKey(platform): true,
 	})
 
-	logger.Info("✅ Торговая сессия запущена для пользователя %d", userID)
+	logger.Info("✅ Торговая сессия запущена: user=%d platform=%s", userID, platform)
 	return s.toDTO(session), nil
 }
 
-// Stop завершает торговую сессию пользователя
-func (s *serviceImpl) Stop(userID int) error {
+// Stop завершает торговую сессию пользователя на указанной платформе
+// и отключает уведомления ТОЛЬКО для этой платформы.
+func (s *serviceImpl) Stop(userID int, platform string) error {
+	if platform == "" {
+		platform = "telegram"
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -107,24 +118,26 @@ func (s *serviceImpl) Stop(userID int) error {
 		return fmt.Errorf("userService не доступен")
 	}
 
-	s.cancelTimerLocked(userID)
+	s.cancelTimerLocked(userID, platform)
 
-	// Деактивируем в БД через userService
-	if err := s.userService.DeactivateTradingSession(userID); err != nil {
+	if err := s.userService.DeactivateTradingSessionByPlatform(userID, platform); err != nil {
 		return fmt.Errorf("не удалось деактивировать сессию: %w", err)
 	}
 
-	// Отключаем уведомления
+	// Отключаем уведомления только этой платформы
 	_ = s.userService.UpdateSettings(userID, map[string]interface{}{
-		"notifications_enabled": false,
+		notifKey(platform): false,
 	})
 
-	logger.Info("✅ Торговая сессия завершена для пользователя %d", userID)
+	logger.Info("✅ Торговая сессия завершена: user=%d platform=%s", userID, platform)
 	return nil
 }
 
-// GetActive возвращает активную сессию пользователя
-func (s *serviceImpl) GetActive(userID int) (*TradingSession, bool) {
+// GetActive возвращает активную сессию пользователя на указанной платформе
+func (s *serviceImpl) GetActive(userID int, platform string) (*TradingSession, bool) {
+	if platform == "" {
+		platform = "telegram"
+	}
 	if s.userService == nil {
 		logger.Warn("⚠️ userService не доступен")
 		return nil, false
@@ -137,16 +150,16 @@ func (s *serviceImpl) GetActive(userID int) (*TradingSession, bool) {
 	}
 
 	for _, session := range rows {
-		if session.UserID == userID {
+		if session.UserID == userID && session.Platform == platform {
 			return s.toDTO(session), true
 		}
 	}
 	return nil, false
 }
 
-// IsActive проверяет наличие активной сессии
-func (s *serviceImpl) IsActive(userID int) bool {
-	_, ok := s.GetActive(userID)
+// IsActive проверяет наличие активной сессии на указанной платформе
+func (s *serviceImpl) IsActive(userID int, platform string) bool {
+	_, ok := s.GetActive(userID, platform)
 	return ok
 }
 
@@ -175,48 +188,49 @@ func (s *serviceImpl) restore() {
 	}
 }
 
-// scheduleExpiryLocked планирует автозавершение
+// scheduleExpiryLocked планирует автозавершение (mu уже захвачен)
 func (s *serviceImpl) scheduleExpiryLocked(session *models.TradingSession) {
 	delay := time.Until(session.ExpiresAt)
 	if delay < 0 {
 		delay = 0
 	}
 
-	s.timers[session.UserID] = time.AfterFunc(delay, func() {
-		s.expire(session.UserID, session.ChatID)
+	key := timerKey(session.UserID, session.Platform)
+	s.timers[key] = time.AfterFunc(delay, func() {
+		s.expire(session.UserID, session.ChatID, session.Platform)
 	})
 }
 
-// cancelTimerLocked отменяет таймер
-func (s *serviceImpl) cancelTimerLocked(userID int) {
-	if timer, ok := s.timers[userID]; ok {
+// cancelTimerLocked отменяет таймер для конкретной платформы (mu уже захвачен)
+func (s *serviceImpl) cancelTimerLocked(userID int, platform string) {
+	key := timerKey(userID, platform)
+	if timer, ok := s.timers[key]; ok {
 		timer.Stop()
-		delete(s.timers, userID)
+		delete(s.timers, key)
 	}
 }
 
 // expire автоматически завершает сессию по истечении времени
-func (s *serviceImpl) expire(userID int, chatID int64) {
-	logger.Info("⏰ Торговая сессия истекла для пользователя %d", userID)
+func (s *serviceImpl) expire(userID int, chatID int64, platform string) {
+	logger.Info("⏰ Торговая сессия истекла: user=%d platform=%s", userID, platform)
 
 	s.mu.Lock()
-	delete(s.timers, userID)
+	delete(s.timers, timerKey(userID, platform))
 	s.mu.Unlock()
 
 	if s.userService != nil {
-		// Деактивируем в БД
-		if err := s.userService.DeactivateTradingSession(userID); err != nil {
+		if err := s.userService.DeactivateTradingSessionByPlatform(userID, platform); err != nil {
 			logger.Warn("⚠️ Не удалось деактивировать истекшую сессию: %v", err)
 		}
 
-		// Отключаем уведомления
+		// Отключаем уведомления только этой платформы
 		_ = s.userService.UpdateSettings(userID, map[string]interface{}{
-			"notifications_enabled": false,
+			notifKey(platform): false,
 		})
 	}
 
-	// Отправляем уведомление
-	if s.messageSender != nil {
+	// Отправляем уведомление только для Telegram (MAX уведомляет через UserController)
+	if s.messageSender != nil && platform == "telegram" {
 		keyboard := telegram.ReplyKeyboardMarkup{
 			Keyboard: [][]telegram.ReplyKeyboardButton{
 				{{Text: constants.SessionButtonTexts.Start}},

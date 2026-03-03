@@ -54,11 +54,6 @@ type User struct {
 	IsBot     bool   `json:"is_bot,omitempty"`
 }
 
-// BotCommand — команда бота
-type BotCommand struct {
-	Command     string `json:"command"`
-	Description string `json:"description"`
-}
 
 // getUpdatesResponse — ответ GET /updates
 type getUpdatesResponse struct {

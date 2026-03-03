@@ -43,7 +43,11 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		}, nil
 	}
 
-	msg := fmt.Sprintf("📈 *Сигналы роста*\n\n%s", result.Message)
+	msg := fmt.Sprintf(
+		"📈 *Настройки сигналов роста*\n\n%s\n\n"+
+			"Для изменения других настроек вернитесь в меню сигналов.",
+		result.Message,
+	)
 
 	return handlers.HandlerResult{
 		Message:     msg,

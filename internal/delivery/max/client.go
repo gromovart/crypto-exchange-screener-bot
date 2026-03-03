@@ -7,9 +7,21 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 )
+
+// stripMarkdown убирает *bold* → bold, `code` → code
+// чтобы Telegram-разметка не отображалась как символы в MAX
+var reBold = regexp.MustCompile(`\*([^*]+)\*`)
+var reCode = regexp.MustCompile("`([^`]+)`")
+
+func stripMarkdown(s string) string {
+	s = reBold.ReplaceAllString(s, "$1")
+	s = reCode.ReplaceAllString(s, "$1")
+	return s
+}
 
 const (
 	maxBaseURL    = "https://platform-api.max.ru"
@@ -50,6 +62,11 @@ func (c *Client) doPost(path string, payload interface{}) ([]byte, error) {
 // doPut выполняет PUT-запрос к path с JSON-телом
 func (c *Client) doPut(path string, payload interface{}) ([]byte, error) {
 	return c.doJSON(http.MethodPut, path, payload)
+}
+
+// doPatch выполняет PATCH-запрос к path с JSON-телом
+func (c *Client) doPatch(path string, payload interface{}) ([]byte, error) {
+	return c.doJSON(http.MethodPatch, path, payload)
 }
 
 // doDelete выполняет DELETE-запрос к path
@@ -115,7 +132,7 @@ func (c *Client) SendMessageWithKeyboard(chatID int64, text string, keyboard int
 // keyboard должен быть []interface{} (attachments array) из kb.Keyboard()
 func (c *Client) SendMessageGetID(chatID int64, text string, keyboard interface{}) (string, error) {
 	payload := map[string]interface{}{
-		"text": text,
+		"text": stripMarkdown(text),
 	}
 	if keyboard != nil {
 		payload["attachments"] = keyboard
@@ -144,7 +161,7 @@ func (c *Client) EditMessageText(mid, text string, keyboard interface{}) error {
 		return fmt.Errorf("max EditMessage: пустой mid")
 	}
 	payload := map[string]interface{}{
-		"text": text,
+		"text": stripMarkdown(text),
 	}
 	if keyboard != nil {
 		payload["attachments"] = keyboard
@@ -186,13 +203,6 @@ func (c *Client) AnswerCallbackQuery(callbackID, notification string) error {
 }
 
 // ───────────────────────────────────────────────
-// SetMyCommands — MAX API не поддерживает это программно
-// ───────────────────────────────────────────────
-
-func (c *Client) SetMyCommands(_ []BotCommand) error {
-	// MAX API не имеет аналога setMyCommands — команды задаются в панели бота
-	return nil
-}
 
 // ───────────────────────────────────────────────
 // GetUpdates — long-polling
@@ -203,6 +213,7 @@ func (c *Client) GetUpdates(marker int64, timeoutSec int) ([]Update, int64, erro
 	url := maxBaseURL + "/updates" +
 		"?timeout=" + strconv.Itoa(timeoutSec) +
 		"&limit=100" +
+		"&update_types=message_created,message_callback,bot_started" +
 		"&marker=" + strconv.FormatInt(marker, 10)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)

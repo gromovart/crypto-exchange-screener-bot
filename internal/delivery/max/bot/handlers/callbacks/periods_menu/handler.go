@@ -44,9 +44,11 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	// Текущие периоды
 	var periodNames []string
 	periodMap := map[int]string{1: "1m", 5: "5m", 15: "15m", 30: "30m", 60: "1h", 240: "4h", 1440: "1d"}
-	for _, p := range user.PreferredPeriods {
-		if name, ok := periodMap[p]; ok {
-			periodNames = append(periodNames, name)
+	if user != nil {
+		for _, p := range user.PreferredPeriods {
+			if name, ok := periodMap[p]; ok {
+				periodNames = append(periodNames, name)
+			}
 		}
 	}
 	periodsStr := strings.Join(periodNames, ", ")
@@ -55,9 +57,18 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	}
 
 	msg := fmt.Sprintf(
-		"⏱️ *Периоды анализа*\n\n"+
-			"Активные: %s\n\n"+
-			"Нажмите на период для включения/выключения:",
+		"⏱️ Периоды анализа\n\n"+
+			"Текущие периоды: %s\n\n"+
+			"Как работают периоды:\n"+
+			"· 1m — сверхкраткосрочные\n"+
+			"· 5m — краткосрочные\n"+
+			"· 15m — среднесрочные тренды\n"+
+			"· 30m — долгосрочные\n"+
+			"· 1h — анализ по часам\n"+
+			"· 4h — внутридневной\n"+
+			"· 1d — дневной\n\n"+
+			"Нажмите на период, чтобы добавить/удалить.\n"+
+			"✅ — выбран · ○ — не выбран",
 		periodsStr,
 	)
 

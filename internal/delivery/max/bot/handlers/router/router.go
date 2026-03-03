@@ -83,10 +83,10 @@ func (r *routerImpl) Handle(command string, params handlers.HandlerParams) (hand
 		}
 	}
 
-	// 5. Поиск по префиксу с :
+	// 5. Поиск по префиксу с : (signal_set_growth_threshold:1.0 → signal_set_growth_threshold)
 	if strings.Contains(command, ":") {
 		prefix := strings.SplitN(command, ":", 2)[0]
-		if h, ok := r.handlers[prefix+":"]; ok {
+		if h, ok := r.handlers[prefix]; ok {
 			params.Data = command
 			return r.exec(h, command, params)
 		}

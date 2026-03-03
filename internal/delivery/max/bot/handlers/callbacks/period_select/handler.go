@@ -49,7 +49,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		}, nil
 	}
 
-	msg := fmt.Sprintf("⏱️ *Периоды*\n\n%s", result.Message)
+	msg := fmt.Sprintf("✅ *Период обновлен*\n\n%s", result.Message)
 
 	return handlers.HandlerResult{
 		Message:     msg,

@@ -56,6 +56,14 @@ const (
 
 	// With params
 	CbWithParams = "with_params"
+
+	// Linking Telegram account
+	CbLinkTelegram = "link_telegram"
+
+	// Trading session
+	CbSessionStart    = "session_start"
+	CbSessionStop     = "session_stop"
+	CbSessionDuration = "session_duration"
 )
 
 // ──────────────────────────────────────────────
@@ -109,6 +117,17 @@ var Btn = struct {
 	// Reset
 	ResetAll      string
 	ResetSettings string
+
+	// Linking
+	LinkTelegram string
+
+	// Trading session
+	SessionStart  string
+	SessionStop   string
+	Duration2h    string
+	Duration4h    string
+	Duration8h    string
+	DurationDay   string
 }{
 	Back:     "🔙 Назад",
 	MainMenu: "🏠 Главное меню",
@@ -148,6 +167,15 @@ var Btn = struct {
 
 	ResetAll:      "🗑️ Сбросить всё",
 	ResetSettings: "⚙️ Сбросить настройки",
+
+	LinkTelegram: "🔗 Привязать Telegram",
+
+	SessionStart: "🟢 Начать торговую сессию",
+	SessionStop:  "🔴 Завершить сессию",
+	Duration2h:   "⏱ 2 часа",
+	Duration4h:   "⏱ 4 часа",
+	Duration8h:   "⏱ 8 часов",
+	DurationDay:  "🕐 Весь день",
 }
 
 // Btn1Row — одна кнопка в строке

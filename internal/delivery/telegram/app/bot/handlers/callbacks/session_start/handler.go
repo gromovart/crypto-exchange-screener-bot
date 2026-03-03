@@ -34,8 +34,8 @@ func (h *sessionStartHandler) Execute(params handlers.HandlerParams) (handlers.H
 	}
 
 	// Если сессия уже активна — сообщаем об этом
-	if h.service.IsActive(params.User.ID) {
-		session, _ := h.service.GetActive(params.User.ID)
+	if h.service.IsActive(params.User.ID, "telegram") {
+		session, _ := h.service.GetActive(params.User.ID, "telegram")
 		remaining := session.ExpiresAt.Sub(session.StartedAt)
 		_ = remaining
 

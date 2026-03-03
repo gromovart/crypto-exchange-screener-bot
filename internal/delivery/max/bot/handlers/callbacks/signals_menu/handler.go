@@ -3,6 +3,7 @@ package signals_menu
 
 import (
 	"fmt"
+	"strings"
 
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/base"
@@ -48,12 +49,28 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	growthBtn := fmt.Sprintf(kb.Btn.ThresholdFormat, "📈", growthThreshold)
 	fallBtn := fmt.Sprintf(kb.Btn.ThresholdFormat, "📉", fallThreshold)
 
+	var signalTypes []string
+	if user != nil && user.NotifyGrowth {
+		signalTypes = append(signalTypes, "📈 Рост")
+	}
+	if user != nil && user.NotifyFall {
+		signalTypes = append(signalTypes, "📉 Падение")
+	}
+	signalsStatus := "❌ Нет активных сигналов"
+	if len(signalTypes) > 0 {
+		signalsStatus = strings.Join(signalTypes, " и ")
+	}
+
 	msg := fmt.Sprintf(
-		"📈 *Настройки сигналов*\n\n"+
-			"Рост: %s (порог: %.1f%%)\n"+
-			"Падение: %s (порог: %.1f%%)\n\n"+
+		"📈 Сигналы\n\n"+
+			"📊 Статус отслеживания:\n"+
+			"· Типы сигналов: %s\n"+
+			"· Мин. рост: %.1f%%\n"+
+			"· Мин. падение: %.1f%%\n\n"+
 			"Выберите действие:",
-		growthStr, growthThreshold, fallStr, fallThreshold,
+		signalsStatus,
+		growthThreshold,
+		fallThreshold,
 	)
 
 	rows := [][]map[string]string{

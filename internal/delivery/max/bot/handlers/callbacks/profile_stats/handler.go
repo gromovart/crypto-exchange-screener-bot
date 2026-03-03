@@ -46,7 +46,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	}
 
 	msg := fmt.Sprintf(
-		"📊 *Статистика*\n\n"+
+		"📊 Статистика\n\n"+
 			"👤 @%s\n"+
 			"🆔 ID: %d\n\n"+
 			"📈 Сигналов сегодня: %d / %d\n"+

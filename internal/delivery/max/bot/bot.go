@@ -79,8 +79,10 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 		return
 	}
 
-	// Редактируем или отправляем новое сообщение
-	if result.EditMessage && params.MessageID != "" {
+	// Редактируем или отправляем новое сообщение.
+	// EditMessage выполняем только для callback-ов (params.CallbackID != ""),
+	// чтобы не пытаться редактировать сообщение пользователя при вводе команды.
+	if result.EditMessage && params.MessageID != "" && params.CallbackID != "" {
 		if editErr := b.sender.EditMessageText(params.MessageID, result.Message, result.Keyboard); editErr != nil {
 			logger.Warn("⚠️ MAX EditMessage failed (%v), sending new", editErr)
 			_ = b.sender.SendMenuMessage(params.ChatID, result.Message, result.Keyboard)
@@ -93,24 +95,10 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 // Start запускает long-polling. Блокирует до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
 	logger.Info("🤖 MAX Bot запущен")
-	b.SetMyCommands()
 	b.poller.Run(ctx)
 	logger.Info("🤖 MAX Bot остановлен")
 }
 
-// SetMyCommands регистрирует команды в меню бота
-func (b *Bot) SetMyCommands() {
-	cmds := []maxpkg.BotCommand{
-		{Command: "start", Description: "Главное меню"},
-		{Command: "help", Description: "Помощь"},
-		{Command: "menu", Description: "Открыть меню"},
-	}
-	if err := b.client.SetMyCommands(cmds); err != nil {
-		logger.Warn("⚠️ MAX SetMyCommands: %v", err)
-	} else {
-		logger.Info("✅ MAX: команды бота зарегистрированы")
-	}
-}
 
 // resolveCommand определяет строку-команду для роутера из входящего Update
 func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
@@ -129,13 +117,14 @@ func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
 		if text == "" {
 			return ""
 		}
-		// Команда начинается с /
+		// Команда с \/: "/help", "/start", "/notifications" и т.п.
 		if strings.HasPrefix(text, "/") {
-			cmd := strings.SplitN(text, "@", 2)[0]
+			// Убираем "@botname" и аргументы для чистого имени команды
+			cmd := strings.SplitN(text, "@", 2)[0]  // "/help@bot" → "/help"
+			cmd = strings.SplitN(cmd, " ", 2)[0]    // "/start arg" → "/start"
 			return cmd
 		}
-		// Обычный текст — обрабатываем как текст
-		return text
+		return ""
 
 	case "bot_started":
 		// Пользователь нажал START — маршрутизируем как /start

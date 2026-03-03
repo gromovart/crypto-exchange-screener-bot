@@ -3,6 +3,7 @@ package users
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -335,6 +336,10 @@ func (s *Service) UpdateSettings(userID int, settings map[string]interface{}) er
 		case "notifications_enabled":
 			if val, ok := value.(bool); ok {
 				user.NotificationsEnabled = val
+			}
+		case "max_notifications_enabled":
+			if val, ok := value.(bool); ok {
+				user.MaxNotificationsEnabled = val
 			}
 		case "notify_growth":
 			if val, ok := value.(bool); ok {
@@ -793,6 +798,178 @@ func (s *Service) invalidateUserCache(user *models.User) {
 	s.cache.DeleteMulti(ctx, keys...)
 }
 
+// ───────────────────────────────────────────────
+// MAX мессенджер — методы объединения аккаунтов
+// ───────────────────────────────────────────────
+
+// GetOrCreateUserByMaxID ищет пользователя по max_user_id. Если не найден —
+// создаёт нового пользователя, используя maxUserID как telegram_id (backward compat)
+// и устанавливает max_user_id = maxUserID.
+func (s *Service) GetOrCreateUserByMaxID(maxUserID int64, username, firstName, lastName string) (*models.User, error) {
+	cacheKey := s.cachePrefix + fmt.Sprintf("max:%d", maxUserID)
+	var cachedUser models.User
+	if err := s.cache.Get(context.Background(), cacheKey, &cachedUser); err == nil {
+		return &cachedUser, nil
+	}
+
+	// 1. Ищем по max_user_id
+	user, err := s.repo.FindByMaxUserID(maxUserID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("GetOrCreateUserByMaxID: FindByMaxUserID: %w", err)
+	}
+
+	if user == nil {
+		// 2. Backward compat: ищем по telegram_id == maxUserID (старые MAX-записи)
+		user, err = s.repo.FindByTelegramID(maxUserID)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, fmt.Errorf("GetOrCreateUserByMaxID: FindByTelegramID: %w", err)
+		}
+		if user != nil && user.MaxUserID == nil {
+			// Устанавливаем max_user_id на уже существующей записи
+			user.MaxUserID = &maxUserID
+			if err := s.repo.Update(user); err != nil {
+				return nil, fmt.Errorf("GetOrCreateUserByMaxID: Update: %w", err)
+			}
+		}
+	}
+
+	if user == nil {
+		// 3. Создаём нового MAX-пользователя
+		now := time.Now()
+		user = &models.User{
+			TelegramID:           maxUserID,
+			MaxUserID:            &maxUserID,
+			Username:             username,
+			FirstName:            firstName,
+			LastName:             lastName,
+			IsActive:             true,
+			Role:                 models.RoleUser,
+			SubscriptionTier:     models.TierFree,
+			NotificationsEnabled: true,
+			NotifyGrowth:         true,
+			NotifyFall:           true,
+			NotifyContinuous:     true,
+			MinGrowthThreshold:   s.config.UserDefaults.MinGrowthThreshold,
+			MinFallThreshold:     s.config.UserDefaults.MinFallThreshold,
+			MinVolumeFilter:      100000,
+			Language:             "ru",
+			Timezone:             "Europe/Moscow",
+			DisplayMode:          "compact",
+			PreferredPeriods:     []int{5, 15, 30},
+			ExcludePatterns:      []string{},
+			MaxSignalsPerDay:     1500,
+			CreatedAt:            now,
+			UpdatedAt:            now,
+		}
+		if err := s.repo.Create(user); err != nil {
+			return nil, fmt.Errorf("GetOrCreateUserByMaxID: Create: %w", err)
+		}
+		logger.Info("✅ Новый MAX-пользователь создан: id=%d maxUserID=%d", user.ID, maxUserID)
+	}
+
+	s.cacheUserByMaxID(user)
+	return user, nil
+}
+
+// GenerateLinkCode генерирует 6-символьный код привязки для Telegram-пользователя.
+// Код действителен 15 минут.
+func (s *Service) GenerateLinkCode(telegramID int64) (string, error) {
+	user, err := s.repo.FindByTelegramID(telegramID)
+	if err != nil {
+		return "", fmt.Errorf("GenerateLinkCode: %w", err)
+	}
+	if user == nil {
+		return "", fmt.Errorf("GenerateLinkCode: пользователь не найден")
+	}
+
+	code := generateCode()
+	expires := time.Now().Add(15 * time.Minute)
+	user.LinkCode = code
+	user.LinkCodeExpiresAt = &expires
+
+	if err := s.repo.Update(user); err != nil {
+		return "", fmt.Errorf("GenerateLinkCode: Update: %w", err)
+	}
+	s.invalidateUserCache(user)
+	return code, nil
+}
+
+// LinkMaxAccount привязывает MAX-аккаунт (maxUserID) к существующему Telegram-аккаунту
+// по коду linkCode. Возвращает объединённого пользователя.
+func (s *Service) LinkMaxAccount(maxUserID int64, maxChatID, linkCode string) (*models.User, error) {
+	// 1. Ищем TG-пользователя по коду
+	tgUser, err := s.repo.FindByLinkCode(linkCode)
+	if err != nil {
+		return nil, fmt.Errorf("LinkMaxAccount: FindByLinkCode: %w", err)
+	}
+	if tgUser == nil {
+		return nil, fmt.Errorf("LinkMaxAccount: неверный или истёкший код")
+	}
+
+	// 2. Ищем MAX-пользователя (может уже существовать как отдельная запись)
+	maxUser, err := s.repo.FindByMaxUserID(maxUserID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("LinkMaxAccount: FindByMaxUserID: %w", err)
+	}
+
+	// 3. Если MAX-пользователь существует как отдельная запись — удалять не будем,
+	//    просто обнуляем его max_user_id (данные уйдут в TG-запись).
+	//    Это избегает сложной миграции данных при слиянии записей.
+	if maxUser != nil && maxUser.ID != tgUser.ID {
+		maxUser.MaxUserID = nil
+		maxUser.MaxChatID = ""
+		_ = s.repo.Update(maxUser)
+		s.invalidateUserCache(maxUser)
+		// Инвалидируем кэш по MAX-ключу
+		s.cache.Delete(context.Background(), s.cachePrefix+fmt.Sprintf("max:%d", maxUserID))
+	}
+
+	// 4. Привязываем MAX к TG-пользователю
+	tgUser.MaxUserID = &maxUserID
+	tgUser.MaxChatID = maxChatID
+	tgUser.LinkCode = ""
+	tgUser.LinkCodeExpiresAt = nil
+
+	if err := s.repo.Update(tgUser); err != nil {
+		return nil, fmt.Errorf("LinkMaxAccount: Update: %w", err)
+	}
+	s.invalidateUserCache(tgUser)
+	s.cacheUserByMaxID(tgUser)
+
+	logger.Info("🔗 MAX-аккаунт %d привязан к TG-пользователю id=%d", maxUserID, tgUser.ID)
+	return tgUser, nil
+}
+
+// cacheUserByMaxID кэширует пользователя по MAX-ключу
+func (s *Service) cacheUserByMaxID(user *models.User) {
+	if user.MaxUserID == nil {
+		return
+	}
+	data, err := json.Marshal(user)
+	if err != nil {
+		return
+	}
+	key := s.cachePrefix + fmt.Sprintf("max:%d", *user.MaxUserID)
+	s.cache.Set(context.Background(), key, string(data), s.cacheTTL)
+}
+
+// generateCode генерирует случайный 6-символьный буквенно-цифровой код
+func generateCode() string {
+	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	buf := make([]byte, 6)
+	if _, err := cryptorand.Read(buf); err != nil {
+		// fallback на time-based если crypto/rand недоступен
+		for i := range buf {
+			buf[i] = chars[time.Now().UnixNano()%int64(len(chars))]
+		}
+		return string(buf)
+	}
+	for i, b := range buf {
+		buf[i] = chars[b%byte(len(chars))]
+	}
+	return string(buf)
+}
+
 func (s *Service) logUserActivity(user *models.User, activityType, description string, metadata map[string]interface{}) {
 	if metadata == nil {
 		metadata = make(map[string]interface{})
@@ -899,9 +1076,14 @@ func (s *Service) SaveTradingSession(session *models.TradingSession) error {
 	return s.tradingSessionRepo.Save(session)
 }
 
-// DeactivateTradingSession деактивирует торговую сессию
+// DeactivateTradingSession деактивирует все торговые сессии пользователя (все платформы)
 func (s *Service) DeactivateTradingSession(userID int) error {
 	return s.tradingSessionRepo.Deactivate(userID)
+}
+
+// DeactivateTradingSessionByPlatform деактивирует торговую сессию пользователя на указанной платформе
+func (s *Service) DeactivateTradingSessionByPlatform(userID int, platform string) error {
+	return s.tradingSessionRepo.DeactivateByPlatform(userID, platform)
 }
 
 // FindAllActiveTradingSessions возвращает все активные сессии

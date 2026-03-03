@@ -38,6 +38,7 @@ import (
 	buy_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/buy"
 	commands_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/commands"
 	help_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/help"
+	link_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/link"
 	notifications_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/notifications"
 	paysupport_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/paysupport"
 	periods_command "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/commands/periods"
@@ -55,6 +56,7 @@ import (
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -66,6 +68,7 @@ type Services struct {
 	profileService             profile_service.Service
 	tradingSessionService      trading_session_service.Service
 	starsClient                *telegram_http.StarsClient
+	userService                *users.Service
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -83,6 +86,9 @@ func InitHandlerFactory(
 	})
 	factory.RegisterHandlerCreator("help", func() handlers.Handler {
 		return help_command.NewHandler()
+	})
+	factory.RegisterHandlerCreator("link", func() handlers.Handler {
+		return link_command.NewHandler(services.userService)
 	})
 	factory.RegisterHandlerCreator("terms", func() handlers.Handler {
 		return terms_command.NewHandler()

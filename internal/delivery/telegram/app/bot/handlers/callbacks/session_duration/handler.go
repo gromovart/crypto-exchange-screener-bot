@@ -43,7 +43,7 @@ func (h *sessionDurationHandler) Execute(params handlers.HandlerParams) (handler
 	}
 
 	// Запускаем сессию
-	session, err := h.service.Start(params.User.ID, params.ChatID, duration)
+	session, err := h.service.Start(params.User.ID, params.ChatID, duration, "telegram")
 	if err != nil {
 		return handlers.HandlerResult{}, fmt.Errorf("не удалось запустить сессию: %w", err)
 	}

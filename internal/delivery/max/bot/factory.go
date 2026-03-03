@@ -28,20 +28,29 @@ import (
 	cbSignalsMenu "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/signals_menu"
 	cbStats "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/stats"
 	cbThresholdsMenu "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/thresholds_menu"
+	cbLinkTelegram "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/link_telegram"
+	cbSessionDuration "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_duration"
+	cbSessionStart "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_start"
+	cbSessionStop "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_stop"
 	cbWithParams "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
-	cmdHelp "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
-	cmdStart "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/start"
+	cmdHelp       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
+	cmdLink       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/link"
+	cmdPaysupport "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/paysupport"
+	cmdStart      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/start"
+	cmdTerms      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/terms"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	kb "crypto-exchange-screener-bot/internal/delivery/max/bot/keyboard"
 	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 )
 
 // Dependencies — зависимости для регистрации хэндлеров
 type Dependencies struct {
-	UserService   *users.Service
-	NotifyService notifySvc.Service
-	SignalService signalSvc.Service
+	UserService    *users.Service
+	NotifyService  notifySvc.Service
+	SignalService  signalSvc.Service
+	SessionService sessionSvc.Service
 }
 
 // RegisterAll регистрирует все команды и callback-хэндлеры в роутере
@@ -49,10 +58,20 @@ func RegisterAll(r router.Router, deps Dependencies) {
 	// ── Команды ──────────────────────────────────────────────
 	r.RegisterCommand("start", cmdStart.NewHandler())
 	r.RegisterCommand("help", cmdHelp.NewHandler())
-	r.RegisterCommand("menu", cbMenuMain.New())
+	r.RegisterCommand("menu", cbMenuMain.New(deps.SessionService))
+	r.RegisterCommand("link", cmdLink.New(deps.UserService))
+	r.RegisterCommand("settings", cbSettingsMain.New())
+	r.RegisterCommand("notifications", cbNotificationsMenu.New())
+	r.RegisterCommand("signals", cbSignalsMenu.New())
+	r.RegisterCommand("periods", cbPeriodsMenu.New())
+	r.RegisterCommand("thresholds", cbThresholdsMenu.New())
+	r.RegisterCommand("profile", cbProfileMain.New())
+	r.RegisterCommand("stats", cbStats.New())
+	r.RegisterCommand("paysupport", cmdPaysupport.NewHandler())
+	r.RegisterCommand("terms", cmdTerms.NewHandler())
 
 	// ── Callback: навигация ──────────────────────────────────
-	r.RegisterCallback(kb.CbMenuMain, cbMenuMain.New())
+	r.RegisterCallback(kb.CbMenuMain, cbMenuMain.New(deps.SessionService))
 	r.RegisterCallback(kb.CbSettingsMain, cbSettingsMain.New())
 	r.RegisterCallback(kb.CbHelp, cbHelp.New())
 	r.RegisterCallback(kb.CbStats, cbStats.New())
@@ -99,6 +118,14 @@ func RegisterAll(r router.Router, deps Dependencies) {
 	r.RegisterCallback(kb.CbResetMenu, cbResetMenu.New())
 	r.RegisterCallback(kb.CbResetSettings, cbResetSettings.New(deps.UserService))
 	r.RegisterCallback(kb.CbResetAll, cbResetAll.New(deps.UserService))
+
+	// ── Callback: привязка Telegram ─────────────────────────
+	r.RegisterCallback(kb.CbLinkTelegram, cbLinkTelegram.New())
+
+	// ── Callback: торговая сессия (inline-кнопки) ───────────
+	r.RegisterCallback(kb.CbSessionStart, cbSessionStart.New(deps.SessionService))
+	r.RegisterCallback(kb.CbSessionStop, cbSessionStop.New(deps.SessionService))
+	r.RegisterCallback(kb.CbSessionDuration, cbSessionDuration.New(deps.SessionService))
 
 	// ── Callback: with_params (fallback для параметризованных callback) ───
 	r.RegisterCallback(kb.CbWithParams, cbWithParams.New())

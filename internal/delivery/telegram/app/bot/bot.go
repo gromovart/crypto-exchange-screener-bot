@@ -131,6 +131,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		profileService:             profileSvc,
 		starsClient:                starsClient,
 		tradingSessionService:      tradingSessionService,
+		userService:                userService,
 	}
 
 	// Инициализируем фабрику с сервисами

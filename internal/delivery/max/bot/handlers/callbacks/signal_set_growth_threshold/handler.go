@@ -54,7 +54,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 					}, nil
 				}
 				return handlers.HandlerResult{
-					Message:     fmt.Sprintf("📈 *Порог роста*\n\n%s", result.Message),
+					Message: fmt.Sprintf("✅ Порог роста обновлён\n\n%s\n\nТеперь вы будете получать уведомления только при росте цены на %.1f%% и более.", result.Message, val),
 					Keyboard:    kb.Keyboard([][]map[string]string{{kb.B(kb.Btn.Back, kb.CbSignalsMenu)}}),
 					EditMessage: params.MessageID != "",
 				}, nil
@@ -65,7 +65,13 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	// Показываем варианты порогов
 	current := user.MinGrowthThreshold
 	msg := fmt.Sprintf(
-		"📈 *Порог роста*\n\nТекущий порог: %.1f%%\n\nВыберите новое значение:",
+		"📈 Установка порога роста\n\n"+
+			"Текущий порог: %.1f%%\n\n"+
+			"Рекомендуемые значения:\n"+
+			"· 1.0%% — высокая чувствительность\n"+
+			"· 2.0%% — средняя чувствительность\n"+
+			"· 3.0%% — низкая чувствительность\n\n"+
+			"Диапазон: 0.1%% — 50.0%%",
 		current,
 	)
 

@@ -24,30 +24,27 @@ func New() handlers.Handler {
 // Execute выполняет обработку
 func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	user := params.User
+	isAuth := user != nil && user.ID > 0
 
-	notifyStatus := "❌ Выключены"
-	growthStatus := "❌"
-	fallStatus := "❌"
-
-	if user != nil {
-		if user.NotificationsEnabled {
-			notifyStatus = "✅ Включены"
+	var msg string
+	if isAuth {
+		firstName := user.FirstName
+		if firstName == "" {
+			firstName = "Гость"
 		}
-		if user.NotifyGrowth {
-			growthStatus = "✅"
-		}
-		if user.NotifyFall {
-			fallStatus = "✅"
-		}
+		msg = fmt.Sprintf(
+			"🏠 Главное меню\n\n"+
+				"Привет, %s! 👋\n\n"+
+				"Выберите раздел для управления ботом:",
+			firstName,
+		)
+	} else {
+		msg = "🏠 Главное меню\n\n" +
+			"Добро пожаловать! 👋\n\n" +
+			"Вы можете использовать основные функции бота.\n" +
+			"Для доступа ко всем функциям выполните авторизацию.\n\n" +
+			"Выберите раздел:"
 	}
-
-	msg := fmt.Sprintf(
-		"⚙️ *Настройки*\n\n"+
-			"🔔 Уведомления: %s\n"+
-			"📈 Рост: %s | 📉 Падение: %s\n\n"+
-			"Выберите раздел для настройки:",
-		notifyStatus, growthStatus, fallStatus,
-	)
 
 	rows := [][]map[string]string{
 		{kb.B(kb.Btn.Notifications, kb.CbNotificationsMenu)},

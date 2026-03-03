@@ -30,7 +30,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		name = ", " + user.FirstName + "!"
 	}
 
-	msg := "✅ *Вы авторизованы" + name + "*\n\nДобро пожаловать в Crypto Screener Bot."
+	msg := "✅ Вы авторизованы" + name + "\n\nДобро пожаловать в Crypto Screener Bot."
 
 	rows := [][]map[string]string{
 		{kb.B(kb.Btn.MainMenu, kb.CbMenuMain)},

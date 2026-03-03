@@ -5,19 +5,21 @@ import (
 	"fmt"
 	"sync"
 
+	"crypto-exchange-screener-bot/internal/core/domain/users"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // Package упаковывает всё необходимое для доставки сигналов через MAX
 type Package struct {
-	mu          sync.RWMutex
-	client      *Client
-	controller  *Controller
-	chatID      int64
-	eventBus    *events.EventBus
-	initialized bool
-	running     bool
+	mu             sync.RWMutex
+	client         *Client
+	controller     *Controller
+	userController *UserController
+	chatID         int64
+	eventBus       *events.EventBus
+	initialized    bool
+	running        bool
 }
 
 // NewPackage создаёт новый пакет доставки MAX
@@ -76,7 +78,38 @@ func (p *Package) Start() error {
 	return nil
 }
 
-// Stop останавливает пакет и отписывает контроллер
+// RegisterUserController создаёт UserController и подписывает его на EventBus.
+// Должен вызываться после Initialize.
+func (p *Package) RegisterUserController(userSvc *users.Service) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.initialized {
+		logger.Warn("⚠️ MAX: RegisterUserController вызван до Initialize, пропускаем")
+		return
+	}
+	if userSvc == nil {
+		logger.Warn("⚠️ MAX: RegisterUserController — userSvc == nil, пропускаем")
+		return
+	}
+	if p.userController != nil {
+		logger.Warn("⚠️ MAX: UserController уже зарегистрирован")
+		return
+	}
+
+	p.userController = NewUserController(p.client, userSvc)
+
+	if p.eventBus != nil {
+		for _, eventType := range p.userController.GetSubscribedEvents() {
+			p.eventBus.Subscribe(eventType, p.userController)
+			logger.Debug("📬 MAX: UserController подписан на событие %s", eventType)
+		}
+	}
+
+	logger.Info("✅ MAX UserController зарегистрирован")
+}
+
+// Stop останавливает пакет и отписывает контроллеры
 func (p *Package) Stop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -88,6 +121,12 @@ func (p *Package) Stop() {
 	if p.eventBus != nil && p.controller != nil {
 		for _, eventType := range p.controller.GetSubscribedEvents() {
 			p.eventBus.Unsubscribe(eventType, p.controller)
+		}
+	}
+
+	if p.eventBus != nil && p.userController != nil {
+		for _, eventType := range p.userController.GetSubscribedEvents() {
+			p.eventBus.Unsubscribe(eventType, p.userController)
 		}
 	}
 

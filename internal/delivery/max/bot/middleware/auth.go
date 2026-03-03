@@ -72,13 +72,19 @@ func (m *AuthMiddleware) ProcessUpdate(upd maxpkg.Update) (handlers.HandlerParam
 		lastName = cb.User.LastName
 		data = cb.Payload
 		callbackID = cb.CallbackID
-		if cb.Message != nil {
+
+		// Приоритет: chatID из сообщения → chatID из update → 0 (резолвим после GetOrCreateUser)
+		if cb.Message != nil && cb.Message.Recipient.ChatID != 0 {
 			chatID = cb.Message.Recipient.ChatID
+		} else if upd.ChatID != 0 {
+			chatID = upd.ChatID
+		}
+		// chatID == 0 → резолвим из user.ChatID в БД после GetOrCreateUser
+
+		if cb.Message != nil {
 			messageID = cb.Message.Body.Mid
 		}
-		if chatID == 0 {
-			chatID = userID
-		}
+
 		logger.Info("🔍 MAX Auth: callback от user=%d chat=%d payload=%q", userID, chatID, data)
 
 	case "bot_started":
@@ -100,37 +106,56 @@ func (m *AuthMiddleware) ProcessUpdate(upd maxpkg.Update) (handlers.HandlerParam
 		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: неизвестный update_type: %s", upd.UpdateType)
 	}
 
-	// Получаем или создаём пользователя (тот же user store что и у Telegram)
-	user, err := m.userService.GetOrCreateUser(userID, username, firstName, lastName)
+	// Получаем или создаём пользователя по MAX user ID
+	user, err := m.userService.GetOrCreateUserByMaxID(userID, username, firstName, lastName)
 	if err != nil {
-		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: GetOrCreateUser: %w", err)
+		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: GetOrCreateUserByMaxID: %w", err)
 	}
 
 	if !user.IsActive {
 		return handlers.HandlerParams{}, fmt.Errorf("MAX Auth: аккаунт деактивирован")
 	}
 
+	// Если chatID не определён из update — берём MaxChatID (MAX dialog ID) из профиля.
+	// ВАЖНО: нельзя использовать user.ChatID — после привязки TG это Telegram chat ID.
+	if chatID == 0 && user.MaxChatID != "" {
+		if stored, err := strconv.ParseInt(user.MaxChatID, 10, 64); err == nil && stored != 0 {
+			chatID = stored
+			logger.Info("🔍 MAX Auth: chatID=%d взят из MaxChatID для user=%d", chatID, userID)
+		}
+	}
+	// Последний резерв — userID (вероятно не сработает, но лучше, чем 0)
+	if chatID == 0 {
+		chatID = userID
+		logger.Warn("⚠️ MAX Auth: chatID не определён, используем userID=%d как fallback", userID)
+	}
+
 	// Обновляем LastLoginAt
 	user.LastLoginAt = time.Now()
+
+	// Сохраняем/обновляем chatID
+	if chatID != 0 {
+		chatIDStr := strconv.FormatInt(chatID, 10)
+		// MaxChatID — всегда обновляем для MAX-пользователей
+		if user.MaxChatID != chatIDStr {
+			user.MaxChatID = chatIDStr
+		}
+		// ChatID обновляем только для MAX-only пользователей (без привязанного TG)
+		// Для привязанных пользователей ChatID = TG chat ID, менять нельзя
+		if user.IsMaxOnlyUser() {
+			if chatID != userID {
+				storedChatID, _ := strconv.ParseInt(user.ChatID, 10, 64)
+				if storedChatID != chatID {
+					user.ChatID = chatIDStr
+				}
+			} else if user.ChatID == "" && upd.UpdateType != "message_callback" {
+				user.ChatID = chatIDStr
+			}
+		}
+	}
+
 	if err := m.userService.UpdateUser(user); err != nil {
-		logger.Warn("⚠️ MAX Auth: UpdateUser LastLoginAt: %v", err)
-	}
-
-	// Сохраняем ChatID если не сохранён (только для message_created/bot_started, где chatID точный)
-	if user.ChatID == "" && upd.UpdateType != "message_callback" {
-		user.ChatID = strconv.FormatInt(chatID, 10)
-		if err := m.userService.UpdateUser(user); err != nil {
-			logger.Warn("⚠️ MAX Auth: UpdateUser ChatID: %v", err)
-		}
-	}
-
-	// Для message_callback: MAX API не возвращает chat_id напрямую, если cb.Message == nil.
-	// Используем сохранённый ChatID пользователя (был сохранён при /start или message_created).
-	if upd.UpdateType == "message_callback" && chatID == userID && user.ChatID != "" {
-		if storedChatID, err := strconv.ParseInt(user.ChatID, 10, 64); err == nil && storedChatID != 0 {
-			chatID = storedChatID
-			logger.Debug("🔑 MAX Auth: callback chatID из профиля: %d", chatID)
-		}
+		logger.Warn("⚠️ MAX Auth: UpdateUser: %v", err)
 	}
 
 	return handlers.HandlerParams{

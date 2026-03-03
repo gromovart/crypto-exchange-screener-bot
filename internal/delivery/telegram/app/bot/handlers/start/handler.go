@@ -308,7 +308,7 @@ func (h *startHandlerImpl) createBuyKeyboard() interface{} {
 func (h *startHandlerImpl) createSessionReplyKeyboard(userID int, timezone string) interface{} {
 	buttonText := constants.SessionButtonTexts.Start
 	if h.tradingSessionService != nil {
-		if session, ok := h.tradingSessionService.GetActive(userID); ok {
+		if session, ok := h.tradingSessionService.GetActive(userID, "telegram"); ok {
 			buttonText = fmt.Sprintf("%s (до %s)",
 				constants.SessionButtonTexts.Stop,
 				formatInUserTZ(session.ExpiresAt, timezone),

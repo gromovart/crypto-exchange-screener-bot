@@ -20,20 +20,41 @@ func NewHandler() handlers.Handler {
 }
 
 func (h *helpHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	msg := "📋 *Помощь*\n\n" +
-		"Бот отправляет сигналы об изменении цен криптовалют.\n\n" +
-		"*Команды:*\n" +
-		"• /start — главное меню\n" +
-		"• /help — эта справка\n" +
-		"• /menu — открыть меню\n\n" +
-		"*Настройки:*\n" +
-		"• Уведомления — вкл/выкл сигналы роста/падения\n" +
-		"• Сигналы — пороги срабатывания\n" +
-		"• Периоды — временные интервалы анализа"
-
 	keyboard := kb.Keyboard([][]map[string]string{
+		{kb.BUrl("📚 Документация", "https://teletype.in/@gromovart/pj2UIVlmr55")},
 		{kb.B(kb.Btn.MainMenu, kb.CbMenuMain)},
 	})
+	return handlers.HandlerResult{Message: HelpText(), Keyboard: keyboard}, nil
+}
 
-	return handlers.HandlerResult{Message: msg, Keyboard: keyboard}, nil
+// HelpText — общий текст справки, используется в command и callback хэндлерах.
+func HelpText() string {
+	return "📋 *Справка по командам*\n\n" +
+		"━━━ 🤖 КОМАНДЫ ━━━\n\n" +
+		"/start — 🏠 Главное меню\n" +
+		"/help — 📋 Эта справка\n" +
+		"/menu — 📋 Открыть меню\n" +
+		"/profile — 👤 Ваш профиль\n" +
+		"/settings — ⚙️ Настройки\n" +
+		"/notifications — 🔔 Уведомления\n" +
+		"/signals — 📈 Сигналы\n" +
+		"/periods — ⏱️ Периоды\n" +
+		"/thresholds — 🎯 Пороги срабатывания\n" +
+		"/stats — 📊 Статистика\n" +
+		"/link — 🔗 Привязать Telegram-аккаунт\n" +
+		"/paysupport — 🛟 Поддержка\n" +
+		"/terms — 📜 Условия использования\n\n" +
+		"━━━ 📊 КАК РАБОТАЕТ БОТ ━━━\n\n" +
+		"1️⃣ Анализирует рынок фьючерсов Bybit в реальном времени\n" +
+		"2️⃣ Обнаруживает сильные движения цен (рост/падение)\n" +
+		"3️⃣ Отправляет уведомления при превышении заданных порогов\n" +
+		"4️⃣ Считает сигналы по выбранным периодам\n\n" +
+		"━━━ 📐 НАСТРОЙКИ ПО УМОЛЧАНИЮ ━━━\n\n" +
+		"📈 Рост: 2.0%\n" +
+		"📉 Падение: 2.0%\n" +
+		"⏱️ Периоды: 5м, 15м, 30м\n" +
+		"🔔 Уведомления: включены\n\n" +
+		"━━━ 📞 ПОДДЕРЖКА ━━━\n\n" +
+		"📧 Email: support@gromovart.ru\n" +
+		"💬 Telegram: @artemgrrr"
 }

@@ -25,29 +25,68 @@ func New() handlers.Handler {
 func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	user := params.User
 
-	name := "Пользователь"
-	username := ""
-	tier := "Free"
+	if user == nil {
+		return handlers.HandlerResult{Message: "❌ Пользователь не найден"}, nil
+	}
 
-	if user != nil {
-		if user.FirstName != "" {
-			name = user.FirstName
-		}
-		if user.Username != "" {
-			username = "@" + user.Username
-		}
-		if user.SubscriptionTier != "" {
-			tier = user.SubscriptionTier
-		}
+	displayName := user.FirstName
+	if displayName == "" {
+		displayName = "Гость"
+	}
+
+	displayUsername := "не указан"
+	if user.Username != "" {
+		displayUsername = "@" + user.Username
+	}
+
+	planName := user.SubscriptionTier
+	if planName == "" {
+		planName = "Free"
+	}
+	planEmoji := "🆓"
+	if planName != "free" && planName != "Free" {
+		planEmoji = "💎"
+	}
+
+	roleDisplay := getRoleDisplay(user.Role)
+
+	lastLoginDisplay := "ещё не входил"
+	if !user.LastLoginAt.IsZero() {
+		lastLoginDisplay = user.LastLoginAt.Format("02.01.2006 15:04")
+	}
+
+	growthMin := user.MinGrowthThreshold
+	if growthMin == 0 {
+		growthMin = 2.0
+	}
+	fallMin := user.MinFallThreshold
+	if fallMin == 0 {
+		fallMin = 2.0
 	}
 
 	msg := fmt.Sprintf(
-		"👤 *Профиль*\n\n"+
-			"Имя: %s\n"+
-			"%s\n"+
-			"Подписка: %s\n\n"+
-			"Выберите раздел:",
-		name, username, tier,
+		"🔑 Профиль\n\n"+
+			"🆔 ID: %d\n"+
+			"👤 Имя: %s\n"+
+			"📧 Username: %s\n"+
+			"⭐ Роль: %s\n"+
+			"💰 Подписка: %s %s\n\n"+
+			"📊 Статистика:\n"+
+			"· Сигналов сегодня: %d\n"+
+			"· Мин. рост: %.2f%%\n"+
+			"· Мин. падение: %.2f%%\n\n"+
+			"📅 Регистрация: %s\n"+
+			"🔐 Последний вход: %s",
+		user.ID,
+		displayName,
+		displayUsername,
+		roleDisplay,
+		planEmoji, planName,
+		user.SignalsToday,
+		growthMin,
+		fallMin,
+		user.CreatedAt.Format("02.01.2006"),
+		lastLoginDisplay,
 	)
 
 	rows := [][]map[string]string{
@@ -61,4 +100,17 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		Keyboard:    kb.Keyboard(rows),
 		EditMessage: params.MessageID != "",
 	}, nil
+}
+
+func getRoleDisplay(role string) string {
+	switch role {
+	case "admin":
+		return "👑 Администратор"
+	case "moderator":
+		return "🛡️ Модератор"
+	case "premium":
+		return "💎 Премиум"
+	default:
+		return "👤 Пользователь"
+	}
 }

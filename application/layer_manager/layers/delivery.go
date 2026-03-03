@@ -10,6 +10,7 @@ import (
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
 	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -154,12 +155,16 @@ func (dl *DeliveryLayer) Initialize() error {
 			// Создаём interactive-бота с UserService
 			if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
 				deps := max_bot.Dependencies{
-					UserService:   userSvc,
-					NotifyService: notifySvc.NewServiceWithDependencies(userSvc),
-					SignalService: signalSvc.NewServiceWithDependencies(userSvc),
+					UserService:    userSvc,
+					NotifyService:  notifySvc.NewServiceWithDependencies(userSvc),
+					SignalService:  signalSvc.NewServiceWithDependencies(userSvc),
+					SessionService: sessionSvc.NewService(userSvc, nil),
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 				logger.Info("🤖 MAX Bot создан")
+
+				// Регистрируем UserController — per-user доставка сигналов в MAX
+				dl.maxPackage.RegisterUserController(userSvc)
 			} else {
 				logger.Warn("⚠️ MAX: не удалось получить UserService (%v) — interactive-бот не запустится", err)
 			}

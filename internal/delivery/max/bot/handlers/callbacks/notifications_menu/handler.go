@@ -25,34 +25,26 @@ func New() handlers.Handler {
 func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	user := params.User
 
-	enabled := false
-	growthOnly := false
-	fallOnly := false
+	notifyGrowthText := h.GetToggleText("📈 Рост", false)
+	notifyFallText := h.GetToggleText("📉 Падение", false)
+	enabledStr := h.GetBoolDisplay(false)
 
 	if user != nil {
-		enabled = user.NotificationsEnabled
-		growthOnly = user.NotifyGrowth && !user.NotifyFall
-		fallOnly = !user.NotifyGrowth && user.NotifyFall
-	}
-
-	enabledStr := "❌ Выключены"
-	if enabled {
-		enabledStr = "✅ Включены"
-	}
-
-	typeStr := "📊 Все сигналы"
-	if growthOnly {
-		typeStr = "📈 Только рост"
-	} else if fallOnly {
-		typeStr = "📉 Только падение"
+		notifyGrowthText = h.GetToggleText("📈 Рост", user.NotifyGrowth)
+		notifyFallText = h.GetToggleText("📉 Падение", user.NotifyFall)
+		enabledStr = h.GetBoolDisplay(user.NotificationsEnabled)
 	}
 
 	msg := fmt.Sprintf(
-		"🔔 *Уведомления*\n\n"+
-			"Статус: %s\n"+
-			"Тип: %s\n\n"+
-			"Управление уведомлениями:",
-		enabledStr, typeStr,
+		"🔔 Уведомления\n\n"+
+			"Текущие настройки:\n\n"+
+			"🔊 Общие уведомления: %s\n"+
+			"%s\n"+
+			"%s\n\n"+
+			"Выберите настройку для изменения:",
+		enabledStr,
+		notifyGrowthText,
+		notifyFallText,
 	)
 
 	rows := [][]map[string]string{

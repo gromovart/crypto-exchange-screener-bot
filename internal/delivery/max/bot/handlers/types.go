@@ -36,10 +36,10 @@ type HandlerParams struct {
 
 // HandlerResult — результат хэндлера
 type HandlerResult struct {
-	Message  string
-	Keyboard interface{}
-	NextStep string
-	Metadata map[string]interface{}
+	Message     string
+	Keyboard    interface{} // inline-клавиатура (прикрепляется к сообщению)
+	NextStep    string
+	Metadata    map[string]interface{}
 	// EditMessage — если true, редактировать существующее сообщение вместо нового
 	EditMessage bool
 }

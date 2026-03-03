@@ -48,12 +48,16 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		}, nil
 	}
 
-	status := "выключены ❌"
+	statusMsg := "Уведомления выключены ❌"
 	if newState {
-		status = "включены ✅"
+		statusMsg = "Уведомления включены ✅"
 	}
 
-	msg := fmt.Sprintf("🔔 *Уведомления*\n\nУведомления %s", status)
+	msg := fmt.Sprintf(
+		"🔔 *Настройки уведомлений*\n\n%s\n\n"+
+			"Настройки для конкретных типов сигналов можно изменить в меню уведомлений.",
+		statusMsg,
+	)
 
 	return handlers.HandlerResult{
 		Message:     msg,
