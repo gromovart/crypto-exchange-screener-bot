@@ -20,6 +20,7 @@ INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="crypto-screener"
 BACKUP_DIR="/opt/${APP_NAME}_backups"
 CERTS_DIR="/etc/crypto-bot/certs"
+MAX_CERTS_DIR="/etc/crypto-bot/max-certs"
 
 # Переменные состояния
 backup_only=false
@@ -297,6 +298,16 @@ else
     echo "  ℹ️  Директория SSL сертификатов не существует"
 fi
 
+# Копирование MAX SSL сертификатов если есть
+echo "   Копирование MAX SSL сертификатов..."
+if [ -d "\${MAX_CERTS_DIR}" ]; then
+    mkdir -p "\${BACKUP_PATH}/max_ssl_certs"
+    cp -r "\${MAX_CERTS_DIR}"/* "\${BACKUP_PATH}/max_ssl_certs/" 2>/dev/null || echo "  ⚠️  Не удалось скопировать MAX сертификаты"
+    echo "  ✅ MAX SSL сертификаты скопированы"
+else
+    echo "  ℹ️  Директория MAX SSL сертификатов не существует"
+fi
+
 # Создание дампа базы данных
 echo "4. Создание дампа базы данных..."
 if command -v pg_dump >/dev/null 2>&1 && [ -f "\${INSTALL_DIR}/.env" ]; then
@@ -473,6 +484,15 @@ if [ -n "\${backup_subdir}" ]; then
         cp -r "\${backup_subdir}/ssl_certs"/* "\${CERTS_DIR}/" 2>/dev/null || true
         chown -R cryptoapp:cryptoapp "\${CERTS_DIR}" 2>/dev/null || true
         echo "  ✅ SSL сертификаты восстановлены"
+    fi
+
+    # Восстановление MAX SSL сертификатов
+    if [ -d "\${backup_subdir}/max_ssl_certs" ]; then
+        echo "  🔐 Восстановление MAX SSL сертификатов..."
+        mkdir -p "\${MAX_CERTS_DIR}"
+        cp -r "\${backup_subdir}/max_ssl_certs"/* "\${MAX_CERTS_DIR}/" 2>/dev/null || true
+        chown -R cryptoapp:cryptoapp "\${MAX_CERTS_DIR}" 2>/dev/null || true
+        echo "  ✅ MAX SSL сертификаты восстановлены"
     fi
 
     # Восстановление дампа БД (опционально)

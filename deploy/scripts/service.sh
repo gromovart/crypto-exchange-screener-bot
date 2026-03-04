@@ -54,12 +54,15 @@ show_help() {
     echo "  config-check        Проверить конфигурацию"
     echo "  health              Проверить здоровье системы"
     echo "  restart-app         Перезапуск только приложения (без зависимостей)"
-    echo "  webhook-info        Информация о настройках webhook"
+    echo "  webhook-info        Информация о настройках webhook (Telegram)"
     echo "  webhook-setup       Установить/обновить webhook в Telegram"
     echo "  webhook-remove      Удалить webhook из Telegram"
     echo "  webhook-check       Проверить статус webhook в Telegram"
-    echo "  ssl-check           Проверить SSL сертификаты"
-    echo "  ssl-renew           Обновить SSL сертификаты (только Let's Encrypt)"
+    echo "  max-webhook-info    Информация о настройках webhook (MAX)"
+    echo "  ssl-check           Проверить SSL сертификаты (Telegram)"
+    echo "  ssl-renew           Обновить SSL сертификаты (Telegram Let's Encrypt)"
+    echo "  max-ssl-check       Проверить SSL сертификаты (MAX)"
+    echo "  max-ssl-renew       Обновить SSL сертификаты (MAX Let's Encrypt)"
     echo ""
     echo "Опции:"
     echo "  --ip=IP_ADDRESS     IP адрес сервера (по умолчанию: 95.142.40.244)"
@@ -1636,13 +1639,305 @@ echo "=== ОБНОВЛЕНИЕ ЗАВЕРШЕНО ==="
 EOF
 }
 
+# MAX Webhook и SSL функции
+service_max_webhook_info() {
+    echo "Информация о настройках MAX webhook:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+echo "=== ИНФОРМАЦИЯ О MAX WEBHOOK ==="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+# Получаем настройки
+MAX_MODE=$(grep "^MAX_MODE=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "webhook")
+MAX_WEBHOOK_DOMAIN=$(grep "^MAX_WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+MAX_WEBHOOK_PORT=$(grep "^MAX_WEBHOOK_PORT=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "8444")
+MAX_WEBHOOK_PATH=$(grep "^MAX_WEBHOOK_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "/webhook")
+MAX_WEBHOOK_SECRET_TOKEN=$(grep "^MAX_WEBHOOK_SECRET_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+MAX_WEBHOOK_USE_TLS=$(grep "^MAX_WEBHOOK_USE_TLS=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "true")
+MAX_BOT_TOKEN=$(grep "^MAX_BOT_TOKEN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+echo "1. 📋 ОСНОВНЫЕ НАСТРОЙКИ:"
+echo "   Режим MAX: ${MAX_MODE}"
+echo "   Домен: ${MAX_WEBHOOK_DOMAIN}"
+echo "   Порт: ${MAX_WEBHOOK_PORT}"
+echo "   Путь: ${MAX_WEBHOOK_PATH}"
+echo "   Использовать TLS: ${MAX_WEBHOOK_USE_TLS}"
+echo "   Секретный токен: $(if [ -n "${MAX_WEBHOOK_SECRET_TOKEN}" ]; then echo 'установлен'; else echo 'не установлен'; fi)"
+echo "   MAX API ключ: $(if [ -n "${MAX_BOT_TOKEN}" ]; then echo 'установлен'; else echo 'не установлен'; fi)"
+echo ""
+
+echo "2. 🌐 WEBHOOK URL:"
+if [ -n "${MAX_WEBHOOK_DOMAIN}" ]; then
+    if [ "${MAX_WEBHOOK_USE_TLS}" = "true" ]; then
+        echo "   https://${MAX_WEBHOOK_DOMAIN}:${MAX_WEBHOOK_PORT}${MAX_WEBHOOK_PATH}"
+    else
+        echo "   http://${MAX_WEBHOOK_DOMAIN}:${MAX_WEBHOOK_PORT}${MAX_WEBHOOK_PATH}"
+    fi
+else
+    echo "   ⚠️  Домен не настроен"
+fi
+echo ""
+
+echo "3. 🔐 SSL СЕРТИФИКАТЫ:"
+if [ "${MAX_WEBHOOK_USE_TLS}" = "true" ]; then
+    CERT_PATH=$(grep "^MAX_WEBHOOK_TLS_CERT_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+    KEY_PATH=$(grep "^MAX_WEBHOOK_TLS_KEY_PATH=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+    echo "   Путь к сертификату: ${CERT_PATH}"
+    echo "   Путь к ключу: ${KEY_PATH}"
+
+    if [ -f "${CERT_PATH}" ]; then
+        echo "   ✅ Сертификат найден"
+        echo "   Срок действия: $(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2 || echo "неизвестно")"
+        echo "   Subject: $(openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/subject=//' || echo "неизвестно")"
+    else
+        echo "   ❌ Сертификат не найден"
+    fi
+
+    if [ -f "${KEY_PATH}" ]; then
+        echo "   ✅ Ключ найден"
+    else
+        echo "   ❌ Ключ не найден"
+    fi
+else
+    echo "   ℹ️  TLS отключен, сертификаты не требуются"
+fi
+echo ""
+
+echo "=== ИНФОРМАЦИЯ ЗАВЕРШЕНА ==="
+EOF
+}
+
+service_max_ssl_check() {
+    echo "Проверка MAX SSL сертификатов:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+
+echo "=== ПРОВЕРКА MAX SSL СЕРТИФИКАТОВ ==="
+echo ""
+
+MAX_CERTS_DIR="/etc/crypto-bot/max-certs"
+APP_SSL_DIR="/opt/crypto-screener-bot/ssl-max"
+
+# Проверка директорий
+echo "1. ДИРЕКТОРИИ:"
+if [ -d "${MAX_CERTS_DIR}" ]; then
+    echo "   ✅ ${MAX_CERTS_DIR} существует"
+else
+    echo "   ❌ ${MAX_CERTS_DIR} не существует"
+fi
+
+if [ -d "${APP_SSL_DIR}" ]; then
+    echo "   ✅ ${APP_SSL_DIR} существует"
+else
+    echo "   ❌ ${APP_SSL_DIR} не существует"
+fi
+echo ""
+
+# Проверка основных сертификатов
+echo "2. ОСНОВНЫЕ СЕРТИФИКАТЫ (${MAX_CERTS_DIR}):"
+CERT_PATH="${MAX_CERTS_DIR}/cert.pem"
+KEY_PATH="${MAX_CERTS_DIR}/key.pem"
+
+if [ -f "${CERT_PATH}" ]; then
+    echo "   ✅ Сертификат найден: ${CERT_PATH}"
+
+    echo "   Subject: $(openssl x509 -in "${CERT_PATH}" -noout -subject 2>/dev/null | sed 's/subject=//')"
+    echo "   Issuer: $(openssl x509 -in "${CERT_PATH}" -noout -issuer 2>/dev/null | sed 's/issuer=//')"
+    echo "   Valid from: $(openssl x509 -in "${CERT_PATH}" -noout -startdate 2>/dev/null | cut -d= -f2)"
+    echo "   Valid until: $(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2)"
+
+    if openssl x509 -in "${CERT_PATH}" -noout -checkend 0 >/dev/null 2>&1; then
+        echo "   ✅ Сертификат действителен"
+
+        if openssl x509 -in "${CERT_PATH}" -noout -checkend 2592000 >/dev/null 2>&1; then
+            echo "   ✅ Срок действия > 30 дней"
+        else
+            echo "   ⚠️  Сертификат истекает менее чем через 30 дней"
+        fi
+    else
+        echo "   ❌ Сертификат просрочен"
+    fi
+else
+    echo "   ❌ Сертификат не найден: ${CERT_PATH}"
+fi
+
+if [ -f "${KEY_PATH}" ]; then
+    echo "   ✅ Ключ найден: ${KEY_PATH}"
+else
+    echo "   ❌ Ключ не найден: ${KEY_PATH}"
+fi
+echo ""
+
+# Проверка домена из конфига
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+if [ -f "${CONFIG_FILE}" ]; then
+    MAX_WEBHOOK_DOMAIN=$(grep "^MAX_WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+    if [ -n "${MAX_WEBHOOK_DOMAIN}" ]; then
+        echo ""
+        echo "5. 🔗 ПРОВЕРКА СООТВЕТСТВИЯ ДОМЕНУ:"
+        if echo "${SUBJECT} ${SAN}" | grep -q "${MAX_WEBHOOK_DOMAIN}"; then
+            echo "   ✅ Сертификат содержит домен: ${MAX_WEBHOOK_DOMAIN}"
+        else
+            echo "   ⚠️  Сертификат не содержит домен: ${MAX_WEBHOOK_DOMAIN}"
+            echo "   Рекомендуется выпустить новый сертификат для этого домена"
+        fi
+    fi
+fi
+
+# Рекомендации
+if [ ! -f "${CERT_PATH}" ] || [ ! -f "${KEY_PATH}" ]; then
+    echo ""
+    echo "📝 РЕКОМЕНДАЦИИ:"
+    echo "1. Запустите setup_max_ssl_certificates в deploy.sh"
+    echo "2. Или скопируйте существующие сертификаты:"
+    echo "   mkdir -p ${MAX_CERTS_DIR}"
+    echo "   cp /path/to/cert.pem ${MAX_CERTS_DIR}/cert.pem"
+    echo "   cp /path/to/key.pem ${MAX_CERTS_DIR}/key.pem"
+    echo "3. Или установите Let's Encrypt:"
+    echo "   apt-get install certbot"
+    echo "   certbot certonly --standalone -d max-bot.gromovart.ru --non-interactive --agree-tos --email admin@example.com"
+fi
+
+echo ""
+echo "=== ПРОВЕРКА ЗАВЕРШЕНА ==="
+EOF
+}
+
+service_max_ssl_renew() {
+    echo "Обновление MAX SSL сертификатов Let's Encrypt:"
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+CONFIG_FILE="/opt/crypto-screener-bot/.env"
+
+echo "=== ОБНОВЛЕНИЕ MAX SSL СЕРТИФИКАТОВ LET'S ENCRYPT ==="
+echo ""
+
+if [ ! -f "${CONFIG_FILE}" ]; then
+    echo "❌ Файл конфигурации не найден"
+    exit 1
+fi
+
+MAX_WEBHOOK_DOMAIN=$(grep "^MAX_WEBHOOK_DOMAIN=" "${CONFIG_FILE}" | cut -d= -f2 2>/dev/null || echo "")
+
+if [ -z "${MAX_WEBHOOK_DOMAIN}" ]; then
+    echo "❌ MAX_WEBHOOK_DOMAIN не настроен"
+    exit 1
+fi
+
+echo "Домен: ${MAX_WEBHOOK_DOMAIN}"
+echo ""
+
+# Проверяем установлен ли certbot
+if ! command -v certbot >/dev/null 2>&1; then
+    echo "❌ certbot не установлен"
+    echo ""
+    echo "Установите certbot:"
+    echo "apt-get update"
+    echo "apt-get install -y certbot"
+    exit 1
+fi
+
+echo "✅ certbot установлен"
+echo ""
+
+# Проверяем существующие сертификаты
+if [ -d "/etc/letsencrypt/live/${MAX_WEBHOOK_DOMAIN}" ]; then
+    echo "📋 Существующие сертификаты найдены:"
+    echo "   Путь: /etc/letsencrypt/live/${MAX_WEBHOOK_DOMAIN}/"
+
+    CERT_PATH="/etc/letsencrypt/live/${MAX_WEBHOOK_DOMAIN}/fullchain.pem"
+    if [ -f "${CERT_PATH}" ]; then
+        NOT_AFTER=$(openssl x509 -in "${CERT_PATH}" -noout -enddate 2>/dev/null | cut -d= -f2)
+        echo "   Срок действия: ${NOT_AFTER}"
+
+        CURRENT_TIME=$(date +%s)
+        NOT_AFTER_TIME=$(date -d "${NOT_AFTER}" +%s 2>/dev/null || date -j -f "%b %d %T %Y %Z" "${NOT_AFTER}" +%s 2>/dev/null || echo 0)
+        DAYS_LEFT=$(((NOT_AFTER_TIME - CURRENT_TIME) / 86400))
+
+        echo "   Осталось дней: ${DAYS_LEFT}"
+
+        if [ ${DAYS_LEFT} -gt 30 ]; then
+            echo "   ✅ Сертификат еще действителен долгое время"
+            echo "   Обновление не требуется"
+            exit 0
+        fi
+    fi
+fi
+
+echo ""
+echo "🔄 Обновление/получение сертификатов..."
+echo "   Остановка сервиса для освобождения порта 80/443..."
+
+systemctl stop crypto-screener.service 2>/dev/null || echo "⚠️  Не удалось остановить сервис"
+
+# Обновляем сертификаты
+if certbot renew --force-renewal --cert-name "${MAX_WEBHOOK_DOMAIN}" --non-interactive --agree-tos 2>/dev/null; then
+    echo "✅ Сертификаты успешно обновлены"
+else
+    echo "⚠️  Не удалось обновить существующие сертификаты"
+    echo "   Пробуем получить новые..."
+
+    if certbot certonly --standalone -d "${MAX_WEBHOOK_DOMAIN}" --non-interactive --agree-tos --email "admin@${MAX_WEBHOOK_DOMAIN}" 2>/dev/null; then
+        echo "✅ Новые сертификаты успешно получены"
+    else
+        echo "❌ Не удалось получить сертификаты"
+        echo "   Запускаем сервис обратно..."
+        systemctl start crypto-screener.service 2>/dev/null || true
+        exit 1
+    fi
+fi
+
+echo ""
+echo "📋 Копирование сертификатов..."
+MAX_CERTS_DIR="/etc/crypto-bot/max-certs"
+mkdir -p "${MAX_CERTS_DIR}"
+
+CERT_SOURCE="/etc/letsencrypt/live/${MAX_WEBHOOK_DOMAIN}/fullchain.pem"
+KEY_SOURCE="/etc/letsencrypt/live/${MAX_WEBHOOK_DOMAIN}/privkey.pem"
+
+if [ -f "${CERT_SOURCE}" ] && [ -f "${KEY_SOURCE}" ]; then
+    cp "${CERT_SOURCE}" "${MAX_CERTS_DIR}/cert.pem"
+    cp "${KEY_SOURCE}" "${MAX_CERTS_DIR}/key.pem"
+
+    mkdir -p "/opt/crypto-screener-bot/ssl-max"
+    cp "${CERT_SOURCE}" "/opt/crypto-screener-bot/ssl-max/fullchain.pem"
+    cp "${KEY_SOURCE}" "/opt/crypto-screener-bot/ssl-max/privkey.pem"
+
+    echo "✅ Сертификаты скопированы в:"
+    echo "   ${MAX_CERTS_DIR}/cert.pem"
+    echo "   ${MAX_CERTS_DIR}/key.pem"
+    echo "   /opt/crypto-screener-bot/ssl-max/fullchain.pem"
+    echo "   /opt/crypto-screener-bot/ssl-max/privkey.pem"
+else
+    echo "❌ Не удалось скопировать сертификаты"
+fi
+
+echo ""
+echo "🔄 Запуск сервиса..."
+systemctl start crypto-screener.service
+
+echo "✅ Сервис запущен"
+echo ""
+
+echo "=== ОБНОВЛЕНИЕ ЗАВЕРШЕНО ==="
+EOF
+}
+
 # Парсинг аргументов
 parse_args() {
     command=""
 
     for arg in "$@"; do
         case $arg in
-            start|stop|restart|status|logs|logs-error|logs-follow|logs-follow-error|logs-follow-webhook|monitor|backup|cleanup|config-show|config-check|health|restart-app|webhook-info|webhook-setup|webhook-remove|webhook-check|ssl-check|ssl-renew)
+            start|stop|restart|status|logs|logs-error|logs-follow|logs-follow-error|logs-follow-webhook|monitor|backup|cleanup|config-show|config-check|health|restart-app|webhook-info|webhook-setup|webhook-remove|webhook-check|ssl-check|ssl-renew|max-webhook-info|max-ssl-check|max-ssl-renew)
                 command="$arg"
                 shift
                 ;;
@@ -1757,6 +2052,15 @@ main() {
             ;;
         ssl-renew)
             service_ssl_renew
+            ;;
+        max-webhook-info)
+            service_max_webhook_info
+            ;;
+        max-ssl-check)
+            service_max_ssl_check
+            ;;
+        max-ssl-renew)
+            service_max_ssl_renew
             ;;
         *)
             log_error "Неизвестная команда: $command"
