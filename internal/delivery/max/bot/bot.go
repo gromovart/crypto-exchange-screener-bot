@@ -7,20 +7,22 @@ import (
 
 	maxpkg "crypto-exchange-screener-bot/internal/delivery/max"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
+	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/middleware"
-	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	"crypto-exchange-screener-bot/internal/delivery/max/transport"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
-// Bot — оркестратор MAX бота: polling + маршрутизация
+// Bot — оркестратор MAX бота: polling/webhook + маршрутизация
 type Bot struct {
 	client         *maxpkg.Client
 	sender         message_sender.MessageSender
 	router         router.Router
 	authMiddleware *middleware.AuthMiddleware
 	poller         *transport.Poller
+	webhookServer  *transport.WebhookServer
+	mode           string // "polling" или "webhook"
 }
 
 // NewBot создаёт MAX бота с зарегистрированными хэндлерами
@@ -30,15 +32,23 @@ func NewBot(client *maxpkg.Client, deps Dependencies) *Bot {
 		sender:         message_sender.NewSender(client, true),
 		router:         router.NewRouter(),
 		authMiddleware: middleware.NewAuthMiddleware(deps.UserService),
+		mode:           "polling", // По умолчанию polling
 	}
 
 	// Регистрируем все хэндлеры
 	RegisterAll(b.router, deps)
 
-	// Создаём поллер
+	// Создаём поллер для polling режима
 	b.poller = transport.NewPoller(client, b.HandleUpdate)
 
 	return b
+}
+
+// SetWebhookMode настраивает бота для работы в режиме webhook
+func (b *Bot) SetWebhookMode(config transport.WebhookConfig) error {
+	b.mode = "webhook"
+	b.webhookServer = transport.NewWebhookServer(config, b.client, b.HandleUpdate)
+	return nil
 }
 
 // HandleUpdate обрабатывает одно входящее обновление
@@ -57,7 +67,7 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 		return
 	}
 
-	logger.Info("📨 MAX HandleUpdate: route='%s' user=%d", command, params.User.ID)
+	logger.Info("📨 MAX HandleUpdate: route='%s' user=%d mode=%s", command, params.User.ID, b.mode)
 
 	// Маршрутизируем
 	result, err := b.router.Handle(command, params)
@@ -92,13 +102,36 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 	}
 }
 
-// Start запускает long-polling. Блокирует до отмены ctx.
+// Start запускает бот в соответствующем режиме. Блокирует до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
-	logger.Info("🤖 MAX Bot запущен")
-	b.poller.Run(ctx)
+	if b.mode == "webhook" {
+		if b.webhookServer == nil {
+			logger.Error("❌ MAX Bot: webhook сервер не инициализирован")
+			return
+		}
+		logger.Info("🤖 MAX Bot запущен (режим: webhook)")
+		if err := b.webhookServer.Start(); err != nil {
+			logger.Error("❌ Не удалось запустить MAX webhook: %v", err)
+			return
+		}
+		// Блокируем до отмены контекста
+		<-ctx.Done()
+		logger.Info("🛑 Остановка MAX webhook сервера...")
+		b.webhookServer.Stop()
+	} else {
+		logger.Info("🤖 MAX Bot запущен (режим: polling)")
+		b.poller.Run(ctx)
+	}
 	logger.Info("🤖 MAX Bot остановлен")
 }
 
+// Stop останавливает бота
+func (b *Bot) Stop() error {
+	if b.mode == "webhook" && b.webhookServer != nil {
+		return b.webhookServer.Stop()
+	}
+	return nil
+}
 
 // resolveCommand определяет строку-команду для роутера из входящего Update
 func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
@@ -120,8 +153,8 @@ func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
 		// Команда с \/: "/help", "/start", "/notifications" и т.п.
 		if strings.HasPrefix(text, "/") {
 			// Убираем "@botname" и аргументы для чистого имени команды
-			cmd := strings.SplitN(text, "@", 2)[0]  // "/help@bot" → "/help"
-			cmd = strings.SplitN(cmd, " ", 2)[0]    // "/start arg" → "/start"
+			cmd := strings.SplitN(text, "@", 2)[0] // "/help@bot" → "/help"
+			cmd = strings.SplitN(cmd, " ", 2)[0]   // "/start arg" → "/start"
 			return cmd
 		}
 		return ""

@@ -223,12 +223,17 @@ type Config struct {
 	} `mapstructure:",squash"`
 
 	// ======================
+	// MAX РЕЖИМ РАБОТЫ
+	// ======================
+	MAXMode string `mapstructure:"MAX_MODE"` // "polling" или "webhook"
+
+	// ======================
 	// TELEGRAM РЕЖИМ РАБОТЫ
 	// ======================
 	TelegramMode string `mapstructure:"TELEGRAM_MODE"` // "polling" или "webhook"
 
 	// ======================
-	// ВЕБХУК КОНФИГУРАЦИЯ
+	// ВЕБХУК КОНФИГУРАЦИЯ (TELEGRAM)
 	// ======================
 	Webhook struct {
 		Domain      string `mapstructure:"WEBHOOK_DOMAIN"`
@@ -239,6 +244,20 @@ type Config struct {
 		TLSCertPath string `mapstructure:"WEBHOOK_TLS_CERT_PATH"`
 		TLSKeyPath  string `mapstructure:"WEBHOOK_TLS_KEY_PATH"`
 		MaxBodySize int64  `mapstructure:"WEBHOOK_MAX_BODY_SIZE"`
+	} `mapstructure:",squash"`
+
+	// ======================
+	// ВЕБХУК КОНФИГУРАЦИЯ (MAX)
+	// ======================
+	MAXWebhook struct {
+		Domain      string `mapstructure:"MAX_WEBHOOK_DOMAIN"`
+		Port        int    `mapstructure:"MAX_WEBHOOK_PORT"`
+		Path        string `mapstructure:"MAX_WEBHOOK_PATH"`
+		SecretToken string `mapstructure:"MAX_WEBHOOK_SECRET_TOKEN"`
+		UseTLS      bool   `mapstructure:"MAX_WEBHOOK_USE_TLS"`
+		TLSCertPath string `mapstructure:"MAX_WEBHOOK_TLS_CERT_PATH"`
+		TLSKeyPath  string `mapstructure:"MAX_WEBHOOK_TLS_KEY_PATH"`
+		MaxBodySize int64  `mapstructure:"MAX_WEBHOOK_MAX_BODY_SIZE"`
 	} `mapstructure:",squash"`
 
 	// ======================

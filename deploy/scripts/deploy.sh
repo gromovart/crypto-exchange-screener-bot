@@ -36,12 +36,19 @@ REDIS_PORT="6379"
 REDIS_PASSWORD=""  # Добавляем переменную для пароля Redis
 REDIS_ENABLED="true"  # Добавляем флаг включения Redis
 
-# Webhook параметры по умолчанию
+# Webhook параметры по умолчанию (Telegram)
 WEBHOOK_DOMAIN="bot.gromovart.ru"
 WEBHOOK_PORT="8443"
 WEBHOOK_USE_TLS="true"
 WEBHOOK_SECRET_TOKEN=""
 TELEGRAM_MODE="webhook"  # По умолчанию webhook режим
+
+# MAX Webhook параметры по умолчанию
+MAX_WEBHOOK_DOMAIN="max-bot.gromovart.ru"
+MAX_WEBHOOK_PORT="8444"
+MAX_WEBHOOK_USE_TLS="true"
+MAX_WEBHOOK_SECRET_TOKEN=""
+MAX_MODE="webhook"  # По умолчанию webhook режим
 
 # Функции для вывода
 log_info() {
@@ -852,6 +859,160 @@ ss -tln | grep -E ':(22|${WEBHOOK_PORT}|8080)' | sort
 EOF
 
     log_info "Брандмауэр настроен с поддержкой webhook"
+}
+
+# Настройка SSL сертификатов для MAX webhook
+setup_max_ssl_certificates() {
+    log_step "Проверка и настройка SSL сертификатов для MAX webhook (домен: ${MAX_WEBHOOK_DOMAIN})..."
+
+    ssh -i "${SSH_KEY}" "${SERVER_USER}@${SERVER_IP}" << 'EOF'
+#!/bin/bash
+set -e
+
+DOMAIN="$MAX_WEBHOOK_DOMAIN"
+IP="$SERVER_IP"
+INSTALL_DIR="/opt/crypto-screener-bot"
+MAX_CERTS_DIR="/etc/crypto-bot/max-certs"
+
+echo "🔍 Проверка SSL сертификатов для MAX домена: ${DOMAIN}"
+echo ""
+
+# Создаем директории для сертификатов
+echo "Создание директорий для MAX сертификатов..."
+mkdir -p "${MAX_CERTS_DIR}"
+mkdir -p "${INSTALL_DIR}/ssl-max"
+
+# Проверяем существующие сертификаты
+echo "1. Проверка существующих сертификатов для MAX..."
+CERT_VALID=false
+
+# Проверка 1: Let's Encrypt сертификаты
+if [ -d "/etc/letsencrypt/live/${DOMAIN}" ]; then
+    echo "   ✅ Let's Encrypt сертификаты найдены"
+
+    if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && \
+       [ -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]; then
+        echo "   ✅ Let's Encrypt файлы сертификатов найдены"
+
+        # Копируем Let's Encrypt сертификаты
+        echo "   📋 Копирование Let's Encrypt сертификатов..."
+        cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${MAX_CERTS_DIR}/cert.pem"
+        cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${MAX_CERTS_DIR}/key.pem"
+
+        # Копируем в директорию приложения
+        cp "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${INSTALL_DIR}/ssl-max/fullchain.pem"
+        cp "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${INSTALL_DIR}/ssl-max/privkey.pem"
+
+        CERT_VALID=true
+        CERT_SOURCE="Let's Encrypt"
+    fi
+fi
+
+# Проверка 2: Существующие сертификаты в MAX_CERTS_DIR
+if [ "${CERT_VALID}" = "false" ] && \
+   [ -f "${MAX_CERTS_DIR}/cert.pem" ] && \
+   [ -f "${MAX_CERTS_DIR}/key.pem" ]; then
+    echo "   ✅ Существующие сертификаты найдены в ${MAX_CERTS_DIR}"
+
+    # Проверяем валидность существующего сертификата
+    if openssl x509 -in "${MAX_CERTS_DIR}/cert.pem" -noout -checkend 86400 >/dev/null 2>&1; then
+        echo "   ✅ Сертификат валиден (действителен минимум 24 часа)"
+
+        # Копируем в директорию приложения
+        cp "${MAX_CERTS_DIR}/cert.pem" "${INSTALL_DIR}/ssl-max/fullchain.pem"
+        cp "${MAX_CERTS_DIR}/key.pem" "${INSTALL_DIR}/ssl-max/privkey.pem"
+
+        CERT_VALID=true
+        CERT_SOURCE="существующие"
+    else
+        echo "   ⚠️  Сертификат просрочен или невалиден"
+    fi
+fi
+
+# Если нет валидных сертификатов, создаем новые
+if [ "${CERT_VALID}" = "false" ]; then
+    echo "2. Создание новых самоподписанных сертификатов для MAX..."
+
+    # Переходим в директорию сертификатов
+    cd "${MAX_CERTS_DIR}"
+
+    # Удаляем старые сертификаты если есть
+    rm -f cert.pem key.pem cert.cnf 2>/dev/null || true
+
+    # Создаем конфиг для сертификата
+    cat > cert.cnf << CONFIG
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+x509_extensions = v3_req
+distinguished_name = dn
+
+[dn]
+C = RU
+ST = Moscow
+L = Moscow
+O = CryptoBot MAX
+CN = ${DOMAIN}
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${DOMAIN}
+IP.1 = ${IP}
+CONFIG
+
+    # Генерируем новый сертификат
+    echo "   Генерация самоподписанного сертификата..."
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout key.pem \
+        -out cert.pem \
+        -days 365 \
+        -nodes \
+        -config cert.cnf
+
+    # Копируем в директорию приложения
+    cp cert.pem "${INSTALL_DIR}/ssl-max/fullchain.pem"
+    cp key.pem "${INSTALL_DIR}/ssl-max/privkey.pem"
+
+    CERT_SOURCE="самоподписанные"
+
+    # Очищаем временный файл
+    rm -f cert.cnf
+fi
+
+# Настраиваем права доступа
+echo "3. Настройка прав доступа..."
+chmod 644 "${MAX_CERTS_DIR}/cert.pem" 2>/dev/null || true
+chmod 600 "${MAX_CERTS_DIR}/key.pem" 2>/dev/null || true
+chmod 644 "${INSTALL_DIR}/ssl-max/fullchain.pem" 2>/dev/null || true
+chmod 600 "${INSTALL_DIR}/ssl-max/privkey.pem" 2>/dev/null || true
+
+chown -R cryptoapp:cryptoapp "${MAX_CERTS_DIR}" 2>/dev/null || chown -R root:root "${MAX_CERTS_DIR}"
+chown -R cryptoapp:cryptoapp "${INSTALL_DIR}/ssl-max" 2>/dev/null || true
+
+echo ""
+echo "✅ MAX SSL сертификаты настроены"
+echo "   Источник: ${CERT_SOURCE}"
+echo "   Пути:"
+echo "     - ${MAX_CERTS_DIR}/cert.pem (основной)"
+echo "     - ${INSTALL_DIR}/ssl-max/fullchain.pem (для приложения)"
+echo "     - ${INSTALL_DIR}/ssl-max/privkey.pem (для приложения)"
+echo ""
+
+# Проверяем сертификат
+if [ -f "${MAX_CERTS_DIR}/cert.pem" ]; then
+    echo "🔍 Проверка MAX сертификата:"
+    openssl x509 -in "${MAX_CERTS_DIR}/cert.pem" -noout -dates -subject 2>/dev/null || echo "Не удалось проверить сертификат"
+fi
+
+echo ""
+EOF
+
+    log_info "MAX SSL сертификаты настроены"
 }
 
 # Создание правильной структуры директорий
@@ -1852,6 +2013,7 @@ main() {
     setup_postgresql_permissions
     setup_redis
     setup_ssl_certificates  # ОБНОВЛЕННАЯ ФУНКЦИЯ
+    setup_max_ssl_certificates  # Сертификаты для MAX
     setup_firewall
     create_directory_structure
     setup_logging

@@ -7,6 +7,7 @@ import (
 
 	max_package "crypto-exchange-screener-bot/internal/delivery/max"
 	max_bot "crypto-exchange-screener-bot/internal/delivery/max/bot"
+	max_transport "crypto-exchange-screener-bot/internal/delivery/max/transport"
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
 	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
 	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
@@ -161,7 +162,27 @@ func (dl *DeliveryLayer) Initialize() error {
 					SessionService: sessionSvc.NewService(userSvc, nil),
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
-				logger.Info("🤖 MAX Bot создан")
+
+				// Настраиваем режим работы (polling или webhook)
+				if dl.config.MAXMode == "webhook" {
+					webhookConfig := max_transport.WebhookConfig{
+						Domain:      dl.config.MAXWebhook.Domain,
+						Port:        dl.config.MAXWebhook.Port,
+						Path:        dl.config.MAXWebhook.Path,
+						SecretToken: dl.config.MAXWebhook.SecretToken,
+						UseTLS:      dl.config.MAXWebhook.UseTLS,
+						TLSCertPath: dl.config.MAXWebhook.TLSCertPath,
+						TLSKeyPath:  dl.config.MAXWebhook.TLSKeyPath,
+						MaxBodySize: dl.config.MAXWebhook.MaxBodySize,
+					}
+					if err := dl.maxBot.SetWebhookMode(webhookConfig); err != nil {
+						logger.Warn("⚠️ Не удалось настроить MAX webhook: %v", err)
+					} else {
+						logger.Info("🌐 MAX Bot настроен в режиме webhook")
+					}
+				} else {
+					logger.Info("🔄 MAX Bot настроен в режиме polling")
+				}
 
 				// Регистрируем UserController — per-user доставка сигналов в MAX
 				dl.maxPackage.RegisterUserController(userSvc)
