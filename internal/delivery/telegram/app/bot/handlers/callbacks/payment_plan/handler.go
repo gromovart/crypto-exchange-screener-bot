@@ -11,20 +11,24 @@ import (
 
 // Dependencies зависимости хэндлера
 type Dependencies struct {
-	IsDev bool
+	IsDev        bool
+	TBankEnabled bool
 }
 
 // paymentPlanHandler обработчик выбора платежного плана
 type paymentPlanHandler struct {
 	*base.BaseHandler
-	isDev bool
+	isDev        bool
+	tBankEnabled bool
 }
 
 // NewHandler создает новый обработчик выбора плана
 func NewHandler(deps ...Dependencies) handlers.Handler {
 	isDev := false
+	tBankEnabled := false
 	if len(deps) > 0 {
 		isDev = deps[0].IsDev
+		tBankEnabled = deps[0].TBankEnabled
 	}
 	return &paymentPlanHandler{
 		BaseHandler: &base.BaseHandler{
@@ -32,7 +36,8 @@ func NewHandler(deps ...Dependencies) handlers.Handler {
 			Command: constants.PaymentConstants.CallbackPaymentPlan,
 			Type:    handlers.TypeCallback,
 		},
-		isDev: isDev,
+		isDev:        isDev,
+		tBankEnabled: tBankEnabled,
 	}
 }
 
@@ -157,20 +162,30 @@ func (h *paymentPlanHandler) createConfirmationMessage(plan *SubscriptionPlan) s
 func (h *paymentPlanHandler) createConfirmationKeyboard(planID string) interface{} {
 	callbackConfirm := fmt.Sprintf("%s%s",
 		constants.PaymentConstants.CallbackPaymentConfirm, planID)
+	callbackTBank := fmt.Sprintf("%s%s",
+		constants.PaymentConstants.CallbackPaymentTBank, planID)
+
+	rows := [][]map[string]string{
+		{
+			{"text": "⭐ Telegram Stars", "callback_data": callbackConfirm},
+		},
+	}
+
+	if h.tBankEnabled {
+		rows = append(rows, []map[string]string{
+			{"text": "💳 Т-Банк (СБП / карта)", "callback_data": callbackTBank},
+		})
+	}
+
+	rows = append(rows,
+		[]map[string]string{
+			{"text": constants.PaymentButtonTexts.BackToPlans, "callback_data": constants.PaymentConstants.CommandBuy},
+			{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+		},
+	)
 
 	return map[string]interface{}{
-		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.PaymentButtonTexts.PayNow, "callback_data": callbackConfirm},
-			},
-			{
-				{"text": "📜 Условия использования", "callback_data": "/terms"}, // ⭐ ДОБАВИТЬ
-				{"text": constants.PaymentButtonTexts.BackToPlans, "callback_data": constants.PaymentConstants.CommandBuy},
-			},
-			{
-				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-			},
-		},
+		"inline_keyboard": rows,
 	}
 }
 

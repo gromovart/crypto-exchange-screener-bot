@@ -286,6 +286,17 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.TelegramStars.ProviderToken = getEnv("TELEGRAM_STARS_PROVIDER_TOKEN", "")
 	cfg.TelegramStars.BotUsername = getEnv("TELEGRAM_STARS_BOT_USERNAME", "")
 
+	// =============================
+	// Т-БАНК ЭКВАЙРИНГ
+	// =============================
+	cfg.TBank.Enabled = getEnvBool("TBANK_ENABLED", false)
+	cfg.TBank.TerminalKey = getEnv("TBANK_TERMINAL_KEY", "")
+	cfg.TBank.Password = getEnv("TBANK_PASSWORD", "")
+	cfg.TBank.NotifyURL = getEnv("TBANK_NOTIFY_URL", "")
+	cfg.TBank.NotifyPort = getEnvInt("TBANK_NOTIFY_PORT", 8082)
+	cfg.TBank.SuccessURL = getEnv("TBANK_SUCCESS_URL", "")
+	cfg.TBank.FailURL = getEnv("TBANK_FAIL_URL", "")
+
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
 	// ======================

@@ -377,6 +377,7 @@ var PaymentConstants = struct {
 	CommandBuy             string
 	CallbackPaymentPlan    string
 	CallbackPaymentConfirm string
+	CallbackPaymentTBank   string // оплата через Т-Банк (СБП, карта)
 	CallbackPaymentSuccess string
 	CallbackPaymentFailed  string
 	CallbackPaymentCancel  string
@@ -387,6 +388,7 @@ var PaymentConstants = struct {
 	CommandBuy:             "buy",
 	CallbackPaymentPlan:    "payment_plan:",
 	CallbackPaymentConfirm: "payment_confirm:",
+	CallbackPaymentTBank:   "payment_tbank:",
 	CallbackPaymentSuccess: "payment_success:",
 	CallbackPaymentFailed:  "payment_failed:",
 	CallbackPaymentCancel:  "payment_cancel",

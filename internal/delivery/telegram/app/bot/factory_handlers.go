@@ -15,6 +15,8 @@ import (
 	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
 	payment_confirm_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm"
 	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
+	payment_tbank_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_sbp"
+	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
 	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
@@ -69,6 +71,7 @@ type Services struct {
 	tradingSessionService      trading_session_service.Service
 	starsClient                *telegram_http.StarsClient
 	userService                *users.Service
+	tbankService               tbank_service.Service
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -352,13 +355,23 @@ func InitHandlerFactory(
 
 	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
-		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{IsDev: cfg.IsDev()})
+		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{
+			IsDev:        cfg.IsDev(),
+			TBankEnabled: cfg.TBank.Enabled,
+		})
 	})
 
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
 		return payment_confirm_handler.NewHandler(payment_confirm_handler.Dependencies{
 			Config:      cfg,
 			StarsClient: services.starsClient,
+		})
+	})
+
+	// Оплата через Т-Банк (СБП, карта)
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentTBank, func() handlers.Handler {
+		return payment_tbank_handler.NewHandler(payment_tbank_handler.Dependencies{
+			TBankService: services.tbankService,
 		})
 	})
 
