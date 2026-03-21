@@ -23,7 +23,7 @@ type InitResponse struct {
 	OrderId     string `json:"OrderId"`
 	Success     bool   `json:"Success"`
 	Status      string `json:"Status"`
-	PaymentId   int64  `json:"PaymentId"`
+	PaymentId   string `json:"PaymentId"`
 	ErrorCode   string `json:"ErrorCode"`
 	Message     string `json:"Message"`
 	Details     string `json:"Details"`
@@ -36,7 +36,7 @@ type Notification struct {
 	OrderId     string `json:"OrderId"`
 	Success     bool   `json:"Success"`
 	Status      string `json:"Status"` // CONFIRMED, REJECTED, AUTHORIZED и др.
-	PaymentId   int64  `json:"PaymentId"`
+	PaymentId   string `json:"PaymentId"`
 	ErrorCode   string `json:"ErrorCode"`
 	Amount      int64  `json:"Amount"`
 	CardId      string `json:"CardId,omitempty"`

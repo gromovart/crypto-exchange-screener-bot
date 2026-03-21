@@ -119,7 +119,7 @@ func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID stri
 		return nil, fmt.Errorf("Т-Банк отклонил платёж: [%s] %s", resp.ErrorCode, resp.Message)
 	}
 
-	logger.Info("✅ Платёж Т-Банк создан: OrderId=%s, PaymentId=%d", orderId, resp.PaymentId)
+	logger.Info("✅ Платёж Т-Банк создан: OrderId=%s, PaymentId=%s", orderId, resp.PaymentId)
 
 	return &PaymentResult{
 		OrderId:    orderId,
