@@ -359,6 +359,51 @@ func (s *Service) UpgradeSubscription(ctx context.Context, userID int, newPlanCo
 	return existing, nil
 }
 
+// ExtendSubscription продлевает активную подписку — добавляет период поверх текущего срока
+func (s *Service) ExtendSubscription(ctx context.Context, userID int, planCode string, paymentID *int64) (*models.UserSubscription, error) {
+	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка получения подписки: %w", err)
+	}
+	if existing == nil {
+		return nil, errors.New("активная подписка не найдена")
+	}
+
+	period, err := s.GetSubscriptionPeriod(planCode)
+	if err != nil {
+		return nil, err
+	}
+
+	// Накапливаем время: продлеваем от текущего конца периода
+	base := time.Now()
+	if existing.CurrentPeriodEnd != nil && existing.CurrentPeriodEnd.After(base) {
+		base = *existing.CurrentPeriodEnd
+	}
+	newEnd := base.Add(period)
+
+	existing.CurrentPeriodEnd = &newEnd
+	existing.PaymentID = paymentID
+	existing.Status = models.StatusActive
+	existing.CancelAtPeriodEnd = false
+
+	if existing.Metadata == nil {
+		existing.Metadata = make(map[string]interface{})
+	}
+	existing.Metadata["extended_at"] = time.Now().Format(time.RFC3339)
+	existing.Metadata["extended_by_days"] = int(period.Hours() / 24)
+
+	if err := s.subRepo.Update(ctx, existing); err != nil {
+		return nil, fmt.Errorf("ошибка обновления подписки: %w", err)
+	}
+
+	s.invalidateSubscriptionCache(userID)
+
+	logger.Info("➕ Продлена подписка: пользователь %d, план %s, новый конец %s",
+		userID, planCode, newEnd.Format("2006-01-02"))
+
+	return existing, nil
+}
+
 // CancelSubscription отменяет подписку
 func (s *Service) CancelSubscription(ctx context.Context, userID int, cancelAtPeriodEnd bool) error {
 	// Получаем активную подписку
