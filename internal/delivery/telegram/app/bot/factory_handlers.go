@@ -59,7 +59,7 @@ import (
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
-	"crypto-exchange-screener-bot/internal/core/domain/subscription"
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
@@ -76,7 +76,7 @@ type Services struct {
 	userService                *users.Service
 	tbankService               tbank_service.Service
 	currencyClient             *currency_client.Client
-	subscriptionService        *subscription.Service
+	paymentCoreService         *payment.PaymentService
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -364,7 +364,7 @@ func InitHandlerFactory(
 	// ИСТОРИЯ ПЛАТЕЖЕЙ
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentHistory, func() handlers.Handler {
 		return payment_history_handler.NewHandler(payment_history_handler.Dependencies{
-			SubscriptionService: services.subscriptionService,
+			PaymentCoreService: services.paymentCoreService,
 		})
 	})
 

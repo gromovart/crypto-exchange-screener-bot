@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"crypto-exchange-screener-bot/internal/core/domain/subscription"
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -15,18 +15,18 @@ import (
 
 // Dependencies зависимости хэндлера
 type Dependencies struct {
-	SubscriptionService *subscription.Service
+	PaymentCoreService *payment.PaymentService
 }
 
 type paymentHistoryHandler struct {
 	*base.BaseHandler
-	subscriptionService *subscription.Service
+	paymentCoreService *payment.PaymentService
 }
 
 func NewHandler(deps ...Dependencies) handlers.Handler {
-	var svc *subscription.Service
+	var svc *payment.PaymentService
 	if len(deps) > 0 {
-		svc = deps[0].SubscriptionService
+		svc = deps[0].PaymentCoreService
 	}
 	return &paymentHistoryHandler{
 		BaseHandler: &base.BaseHandler{
@@ -34,59 +34,52 @@ func NewHandler(deps ...Dependencies) handlers.Handler {
 			Command: constants.PaymentConstants.CallbackPaymentHistory,
 			Type:    handlers.TypeCallback,
 		},
-		subscriptionService: svc,
+		paymentCoreService: svc,
 	}
 }
 
 func (h *paymentHistoryHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	if h.subscriptionService == nil {
+	if h.paymentCoreService == nil {
 		return handlers.HandlerResult{
 			Message:  "⚠️ История платежей временно недоступна.",
 			Keyboard: h.backKeyboard(),
 		}, nil
 	}
 
-	subs, err := h.subscriptionService.GetRepository().GetAllByUserID(context.Background(), params.User.ID)
+	filter := models.NewPaymentFilter()
+	filter.UserID = int64(params.User.ID)
+	filter.Limit = 20
+
+	payments, err := h.paymentCoreService.GetUserPayments(context.Background(), int64(params.User.ID), filter)
 	if err != nil {
-		return handlers.HandlerResult{}, fmt.Errorf("ошибка получения истории: %w", err)
+		return handlers.HandlerResult{}, fmt.Errorf("ошибка получения истории платежей: %w", err)
 	}
 
-	message := h.buildMessage(subs)
+	message := h.buildMessage(payments)
 	return handlers.HandlerResult{
 		Message:  message,
 		Keyboard: h.backKeyboard(),
 	}, nil
 }
 
-func (h *paymentHistoryHandler) buildMessage(subs []*models.UserSubscription) string {
-	if len(subs) == 0 {
+func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string {
+	if len(payments) == 0 {
 		return "📋 *История платежей*\n\nПлатежей пока нет."
 	}
 
 	var sb strings.Builder
 	sb.WriteString("📋 *История платежей*\n\n")
 
-	for i, sub := range subs {
-		planName := sub.PlanName
-		if planName == "" {
-			planName = sub.PlanCode
-		}
-		if planName == "" {
-			planName = "Неизвестный план"
-		}
+	for i, p := range payments {
+		date := p.CreatedAt.Format("02.01.2006")
+		status := formatStatus(p.Status)
+		provider := formatProvider(p.Provider)
+		amount := formatAmount(p)
 
-		status := h.formatStatus(sub.Status)
-		date := sub.CreatedAt.Format("02.01.2006")
-
-		sb.WriteString(fmt.Sprintf("%d. *%s*\n", i+1, planName))
-		sb.WriteString(fmt.Sprintf("   📅 %s  %s\n", date, status))
-
-		if amount := formatAmount(sub.Metadata); amount != "" {
-			sb.WriteString(fmt.Sprintf("   💰 %s\n", amount))
-		}
-
-		if sub.CurrentPeriodEnd != nil {
-			sb.WriteString(fmt.Sprintf("   ⏳ до %s\n", sub.CurrentPeriodEnd.Format("02.01.2006")))
+		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, provider, status))
+		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
+		if p.Description != "" {
+			sb.WriteString(fmt.Sprintf("   %s\n", p.Description))
 		}
 		sb.WriteString("\n")
 	}
@@ -94,47 +87,45 @@ func (h *paymentHistoryHandler) buildMessage(subs []*models.UserSubscription) st
 	return sb.String()
 }
 
-func formatAmount(meta map[string]interface{}) string {
-	if meta == nil {
-		return ""
-	}
-	// Сумма от Т-Банк (в рублях)
-	if rub, ok := meta["amount_rub"]; ok {
-		switch v := rub.(type) {
-		case float64:
-			return fmt.Sprintf("%d ₽", int64(v))
-		case int64:
-			return fmt.Sprintf("%d ₽", v)
-		case int:
-			return fmt.Sprintf("%d ₽", v)
+func formatAmount(p *models.Payment) string {
+	switch p.Currency {
+	case models.CurrencyRUB:
+		return fmt.Sprintf("%d ₽", int64(p.Amount*90)) // amount хранится в USD, конвертируем обратно
+	case models.CurrencyUSD:
+		return fmt.Sprintf("$%.2f", p.Amount)
+	default:
+		if p.FiatAmount > 0 {
+			return fmt.Sprintf("%d ₽", int64(p.FiatAmount)/10)
 		}
+		return fmt.Sprintf("%.2f %s", p.Amount, p.Currency)
 	}
-	// Fallback: копейки → рубли
-	if kopecks, ok := meta["amount_kopecks"]; ok {
-		switch v := kopecks.(type) {
-		case float64:
-			return fmt.Sprintf("%d ₽", int64(v)/100)
-		case int64:
-			return fmt.Sprintf("%d ₽", v/100)
-		}
-	}
-	return ""
 }
 
-func (h *paymentHistoryHandler) formatStatus(status string) string {
+func formatStatus(status models.PaymentStatus) string {
 	switch status {
-	case models.StatusActive:
-		return "✅ Активна"
-	case models.StatusTrialing:
-		return "🔄 Пробная"
-	case models.StatusCanceled:
-		return "❌ Отменена"
-	case models.StatusExpired:
-		return "⌛ Истекла"
-	case models.StatusPastDue:
-		return "⚠️ Просрочена"
+	case models.PaymentStatusCompleted:
+		return "✅"
+	case models.PaymentStatusPending, models.PaymentStatusProcessing:
+		return "⏳"
+	case models.PaymentStatusFailed:
+		return "❌"
+	case models.PaymentStatusRefunded:
+		return "↩️"
+	case models.PaymentStatusCancelled:
+		return "🚫"
 	default:
-		return status
+		return "❓"
+	}
+}
+
+func formatProvider(provider string) string {
+	switch provider {
+	case "tbank":
+		return "💳 Т-Банк"
+	case "stars", "telegram":
+		return "⭐ Telegram Stars"
+	default:
+		return "💳 " + provider
 	}
 }
 

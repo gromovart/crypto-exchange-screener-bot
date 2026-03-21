@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	message_sender "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/message_sender"
 	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
+	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -51,6 +53,7 @@ type Dependencies struct {
 	TBankClient         *tbank_client.Client
 	SubscriptionService *subscription.Service
 	UserService         *users.Service
+	PaymentCoreService  *payment.PaymentService
 	MessageSender       message_sender.MessageSender
 	Password            string
 	NotifyURL           string
@@ -62,6 +65,7 @@ type serviceImpl struct {
 	client              *tbank_client.Client
 	subscriptionService *subscription.Service
 	userService         *users.Service
+	paymentCoreService  *payment.PaymentService
 	messageSender       message_sender.MessageSender
 	password            string
 	notifyURL           string
@@ -75,6 +79,7 @@ func NewService(deps Dependencies) Service {
 		client:              deps.TBankClient,
 		subscriptionService: deps.SubscriptionService,
 		userService:         deps.UserService,
+		paymentCoreService:  deps.PaymentCoreService,
 		messageSender:       deps.MessageSender,
 		password:            deps.Password,
 		notifyURL:           deps.NotifyURL,
@@ -120,6 +125,28 @@ func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID stri
 	}
 
 	logger.Info("✅ Платёж Т-Банк создан: OrderId=%s, PaymentId=%s", orderId, resp.PaymentId)
+
+	// Сохраняем Invoice в БД
+	if s.paymentCoreService != nil {
+		invoice := &models.Invoice{
+			UserID:      int64(userID),
+			PlanID:      planID,
+			ExternalID:  orderId,
+			Title:       fmt.Sprintf("Подписка: %s", planName),
+			Description: fmt.Sprintf("Оплата через Т-Банк, PaymentId=%s", resp.PaymentId),
+			AmountUSD:   float64(amount) / 100 / 90,
+			FiatAmount:  int(amount / 10),
+			Currency:    "RUB",
+			Status:      models.InvoiceStatusPending,
+			Provider:    models.InvoiceProviderManual,
+			InvoiceURL:  resp.PaymentURL,
+			Payload:     orderId,
+			ExpiresAt:   time.Now().Add(24 * time.Hour),
+		}
+		if err2 := s.paymentCoreService.SaveInvoice(ctx, invoice); err2 != nil {
+			logger.Warn("⚠️ Не удалось сохранить Invoice: %v", err2)
+		}
+	}
 
 	return &PaymentResult{
 		OrderId:    orderId,
@@ -189,13 +216,38 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 	}
 
 	// Извлекаем сумму платежа из уведомления
+	var amountKopecks int64
+	if amountStr, ok := params["Amount"]; ok {
+		amountKopecks, _ = strconv.ParseInt(amountStr, 10, 64)
+	}
+
 	paymentMeta := map[string]interface{}{
 		"payment_method": "tbank",
+		"amount_kopecks": amountKopecks,
+		"amount_rub":     amountKopecks / 100,
 	}
-	if amountStr, ok := params["Amount"]; ok {
-		if kopecks, err2 := strconv.ParseInt(amountStr, 10, 64); err2 == nil {
-			paymentMeta["amount_kopecks"] = kopecks
-			paymentMeta["amount_rub"] = kopecks / 100
+
+	// Сохраняем Payment и помечаем Invoice оплаченным
+	if s.paymentCoreService != nil {
+		now := time.Now()
+		p := &models.Payment{
+			UserID:      int64(userID),
+			ExternalID:  orderId,
+			Amount:      float64(amountKopecks) / 100 / 90,
+			Currency:    models.CurrencyRUB,
+			FiatAmount:  int(amountKopecks / 10),
+			PaymentType: models.PaymentTypeBankCard,
+			Status:      models.PaymentStatusCompleted,
+			Provider:    "tbank",
+			Description: fmt.Sprintf("Подписка: %s", planNames[planID]),
+			Payload:     orderId,
+			PaidAt:      &now,
+		}
+		if err2 := s.paymentCoreService.SavePayment(ctx, p); err2 != nil {
+			logger.Warn("⚠️ Не удалось сохранить Payment: %v", err2)
+		}
+		if err2 := s.paymentCoreService.MarkInvoicePaid(ctx, orderId); err2 != nil {
+			logger.Warn("⚠️ Не удалось обновить Invoice: %v", err2)
 		}
 	}
 

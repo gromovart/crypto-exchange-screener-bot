@@ -148,6 +148,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 			TBankClient:         tbankHTTPClient,
 			SubscriptionService: subscriptionService,
 			UserService:         userService,
+			PaymentCoreService:  deps.ServiceFactory.GetPaymentCoreService(),
 			MessageSender:       ms,
 			Password:            config.TBank.Password,
 			NotifyURL:           config.TBank.NotifyURL,
@@ -170,7 +171,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		userService:                userService,
 		tbankService:               tbankSvc,
 		currencyClient:             currencyClient,
-		subscriptionService:        subscriptionService,
+		paymentCoreService:         deps.ServiceFactory.GetPaymentCoreService(),
 	}
 
 	// Инициализируем фабрику с сервисами
