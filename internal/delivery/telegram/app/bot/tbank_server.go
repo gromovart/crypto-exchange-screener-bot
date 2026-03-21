@@ -117,6 +117,8 @@ func (s *TBankNotifyServer) handleNotification(w http.ResponseWriter, r *http.Re
 	}
 
 	logger.Info("📩 Уведомление от Т-Банк: OrderId=%s, Status=%s", params["OrderId"], params["Status"])
+	logger.Info("🔍 [DEBUG] Тело уведомления: %s", string(body))
+	logger.Info("🔍 [DEBUG] Параметры после конвертации: %v", params)
 
 	ctx := context.Background()
 	if err := s.service.HandleNotification(ctx, params); err != nil {
