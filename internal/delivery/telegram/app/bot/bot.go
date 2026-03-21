@@ -19,6 +19,7 @@ import (
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
@@ -135,6 +136,10 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		paymentService = nil
 	}
 
+	// Создаем CurrencyClient для актуального курса USD/RUB от ЦБ РФ
+	currencyClient := currency_client.NewClient()
+	logger.Info("💱 CurrencyClient создан (резервный курс: %.0f ₽/$)", currency_client.FallbackRate)
+
 	// Создаем TBankService если Т-Банк настроен
 	var tbankSvc tbank_service.Service
 	if config.TBank.Enabled && config.TBank.TerminalKey != "" && config.TBank.Password != "" {
@@ -164,6 +169,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		tradingSessionService:      tradingSessionService,
 		userService:                userService,
 		tbankService:               tbankSvc,
+		currencyClient:             currencyClient,
 	}
 
 	// Инициализируем фабрику с сервисами

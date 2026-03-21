@@ -60,6 +60,7 @@ import (
 	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -72,6 +73,7 @@ type Services struct {
 	starsClient                *telegram_http.StarsClient
 	userService                *users.Service
 	tbankService               tbank_service.Service
+	currencyClient             *currency_client.Client
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -98,7 +100,10 @@ func InitHandlerFactory(
 	})
 
 	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
-		return buy_command.NewHandler(buy_command.Dependencies{IsDev: cfg.IsDev()})
+		return buy_command.NewHandler(buy_command.Dependencies{
+			IsDev:          cfg.IsDev(),
+			CurrencyClient: services.currencyClient,
+		})
 	})
 
 	// Команды, требующие подписки (будут обернуты middleware)
@@ -356,8 +361,9 @@ func InitHandlerFactory(
 	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
 		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{
-			IsDev:        cfg.IsDev(),
-			TBankEnabled: cfg.TBank.Enabled,
+			IsDev:          cfg.IsDev(),
+			TBankEnabled:   cfg.TBank.Enabled,
+			CurrencyClient: services.currencyClient,
 		})
 	})
 
