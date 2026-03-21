@@ -53,6 +53,12 @@ func (c *Client) Init(ctx context.Context, req InitRequest) (*InitResponse, erro
 	if req.NotificationURL != "" {
 		params["NotificationURL"] = req.NotificationURL
 	}
+	if req.SuccessURL != "" {
+		params["SuccessURL"] = req.SuccessURL
+	}
+	if req.FailURL != "" {
+		params["FailURL"] = req.FailURL
+	}
 	if req.PayType != "" {
 		params["PayType"] = req.PayType
 	}
