@@ -203,7 +203,7 @@ func (s *serviceImpl) notifyUser(userID int, planID string) {
 		return
 	}
 
-	user, err := s.userService.GetUserByTelegramID(int64(userID))
+	user, err := s.userService.GetUserByID(userID)
 	if err != nil {
 		logger.Error("❌ Не удалось найти пользователя %d для уведомления: %v", userID, err)
 		return
