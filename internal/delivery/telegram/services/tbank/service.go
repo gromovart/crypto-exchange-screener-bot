@@ -144,6 +144,15 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 
 	logger.Info("📩 Уведомление Т-Банк: OrderId=%s, Status=%s, Success=%s", orderId, status, successStr)
 
+	// Обрабатываем отклонённые платежи
+	if status == "REJECTED" {
+		planID, userID, err := parseOrderId(orderId)
+		if err == nil {
+			go s.notifyPaymentFailed(userID, planID, params["ErrorCode"])
+		}
+		return nil
+	}
+
 	// Нас интересуют только подтверждённые платежи
 	if successStr != "true" || status != "CONFIRMED" {
 		logger.Info("ℹ️ Платёж %s не подтверждён (статус: %s)", orderId, status)
@@ -245,5 +254,71 @@ func (s *serviceImpl) notifyUser(userID int, planID string) {
 
 	if err := s.messageSender.SendTextMessage(chatID, text, keyboard); err != nil {
 		logger.Error("❌ Не удалось отправить уведомление об оплате пользователю %d: %v", userID, err)
+	}
+}
+
+// notifyPaymentFailed отправляет уведомление об отклонённом платеже
+func (s *serviceImpl) notifyPaymentFailed(userID int, planID string, errorCode string) {
+	if s.messageSender == nil || s.userService == nil {
+		return
+	}
+
+	user, err := s.userService.GetUserByID(userID)
+	if err != nil || user == nil {
+		return
+	}
+
+	chatID := int64(0)
+	if user.ChatID != "" {
+		chatID, _ = strconv.ParseInt(user.ChatID, 10, 64)
+	}
+	if chatID == 0 {
+		chatID = int64(userID)
+	}
+
+	reason := rejectionReason(errorCode)
+	planName := planNames[planID]
+	if planName == "" {
+		planName = planID
+	}
+
+	text := "❌ *Не получилось оплатить*\n\n"
+	text += fmt.Sprintf("📋 Тариф: *%s*\n", planName)
+	text += fmt.Sprintf("💬 Причина: %s\n\n", reason)
+	text += "Попробуйте ещё раз или выберите другой способ оплаты."
+
+	keyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{{"text": "🔄 Попробовать снова", "callback_data": "payment_plan:" + planID}},
+			{{"text": "🏠 Главное меню", "callback_data": "menu_main"}},
+		},
+	}
+
+	if err := s.messageSender.SendTextMessage(chatID, text, keyboard); err != nil {
+		logger.Error("❌ Не удалось отправить уведомление об ошибке оплаты пользователю %d: %v", userID, err)
+	}
+}
+
+// rejectionReason возвращает понятную причину отклонения по коду ошибки Т-Банк
+func rejectionReason(errorCode string) string {
+	switch errorCode {
+	case "1051":
+		return "На карте недостаточно средств"
+	case "1033", "1054":
+		return "Срок действия карты истёк"
+	case "1041":
+		return "Карта утеряна"
+	case "1043":
+		return "Карта украдена"
+	case "1082":
+		return "Неверный CVV"
+	case "1006", "1012", "1057":
+		return "Операция не разрешена для данной карты"
+	case "1089":
+		return "Ошибка аутентификации 3DS"
+	case "1091":
+		return "Банк-эмитент недоступен"
+	default:
+		return "Банк отклонил платёж"
 	}
 }
