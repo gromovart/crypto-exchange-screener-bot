@@ -179,12 +179,19 @@ func (dl *DeliveryLayer) Initialize() error {
 					logger.Info("ℹ️  MAX: TBankService не создан (TBANK_ENABLED=false или ключ не задан)")
 				}
 
+				// Создаём subscription service для MAX бота
+				maxSubSvc, subErr := coreFactory.CreateSubscriptionService()
+				if subErr != nil {
+					logger.Warn("⚠️ MAX: не удалось создать SubscriptionService: %v", subErr)
+				}
+
 				deps := max_bot.Dependencies{
-					UserService:    userSvc,
-					NotifyService:  notifySvc.NewServiceWithDependencies(userSvc),
-					SignalService:  signalSvc.NewServiceWithDependencies(userSvc),
-					SessionService: sessionSvc.NewService(userSvc, nil),
-					TBankService:   maxTBankService,
+					UserService:         userSvc,
+					NotifyService:       notifySvc.NewServiceWithDependencies(userSvc),
+					SignalService:       signalSvc.NewServiceWithDependencies(userSvc),
+					SessionService:      sessionSvc.NewService(userSvc, nil),
+					TBankService:        maxTBankService,
+					SubscriptionService: maxSubSvc,
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 
