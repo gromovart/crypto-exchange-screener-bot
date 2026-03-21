@@ -73,7 +73,7 @@ func (h *helpCommandHandler) createHelpMessage() string {
 
 			"*Поддержка:*\n" +
 			"📧 Email: support@gromovart.ru\n" +
-			"💬 Telegram: @artemgrrr\n\n" +
+			"💬 Telegram: @crypto_exchange_screener\n\n" +
 
 			"Используйте команды выше или меню для настройки.",
 	)

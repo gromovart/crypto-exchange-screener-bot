@@ -292,6 +292,25 @@ func (s *PaymentService) GetUserPayments(ctx context.Context, userID int64, filt
 	return s.paymentRepo.GetByUserID(ctx, userID, filter)
 }
 
+// SaveInvoice сохраняет Invoice напрямую (для внешних провайдеров, напр. Т-Банк)
+func (s *PaymentService) SaveInvoice(ctx context.Context, invoice *models.Invoice) error {
+	return s.invoiceRepo.Create(ctx, invoice)
+}
+
+// SavePayment сохраняет Payment напрямую (для внешних провайдеров, напр. Т-Банк)
+func (s *PaymentService) SavePayment(ctx context.Context, p *models.Payment) error {
+	return s.paymentRepo.Create(ctx, p)
+}
+
+// MarkInvoicePaid помечает инвойс оплаченным по ExternalID
+func (s *PaymentService) MarkInvoicePaid(ctx context.Context, externalID string) error {
+	invoice, err := s.invoiceRepo.GetByExternalID(ctx, externalID)
+	if err != nil || invoice == nil {
+		return err
+	}
+	return s.invoiceRepo.UpdateStatus(ctx, invoice.ID, models.InvoiceStatusPaid)
+}
+
 // Вспомогательная функция
 func parseInt64(s string) int64 {
 	var i int64

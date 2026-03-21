@@ -14,7 +14,10 @@ import (
 	notify_fall_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only"
 	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
 	payment_confirm_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm"
+	payment_history_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_history"
 	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
+	payment_tbank_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_sbp"
+	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
 	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
@@ -56,8 +59,10 @@ import (
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
@@ -69,6 +74,9 @@ type Services struct {
 	tradingSessionService      trading_session_service.Service
 	starsClient                *telegram_http.StarsClient
 	userService                *users.Service
+	tbankService               tbank_service.Service
+	currencyClient             *currency_client.Client
+	paymentCoreService         *payment.PaymentService
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -95,7 +103,10 @@ func InitHandlerFactory(
 	})
 
 	factory.RegisterHandlerCreator("buy", func() handlers.Handler {
-		return buy_command.NewHandler(buy_command.Dependencies{IsDev: cfg.IsDev()})
+		return buy_command.NewHandler(buy_command.Dependencies{
+			IsDev:          cfg.IsDev(),
+			CurrencyClient: services.currencyClient,
+		})
 	})
 
 	// Команды, требующие подписки (будут обернуты middleware)
@@ -350,15 +361,33 @@ func InitHandlerFactory(
 		return handler
 	})
 
+	// ИСТОРИЯ ПЛАТЕЖЕЙ
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentHistory, func() handlers.Handler {
+		return payment_history_handler.NewHandler(payment_history_handler.Dependencies{
+			PaymentCoreService: services.paymentCoreService,
+		})
+	})
+
 	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentPlan, func() handlers.Handler {
-		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{IsDev: cfg.IsDev()})
+		return payment_plan_handler.NewHandler(payment_plan_handler.Dependencies{
+			IsDev:          cfg.IsDev(),
+			TBankEnabled:   cfg.TBank.Enabled,
+			CurrencyClient: services.currencyClient,
+		})
 	})
 
 	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentConfirm, func() handlers.Handler {
 		return payment_confirm_handler.NewHandler(payment_confirm_handler.Dependencies{
 			Config:      cfg,
 			StarsClient: services.starsClient,
+		})
+	})
+
+	// Оплата через Т-Банк (СБП, карта)
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentTBank, func() handlers.Handler {
+		return payment_tbank_handler.NewHandler(payment_tbank_handler.Dependencies{
+			TBankService: services.tbankService,
 		})
 	})
 

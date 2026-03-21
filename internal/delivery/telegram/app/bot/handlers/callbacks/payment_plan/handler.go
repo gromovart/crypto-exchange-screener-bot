@@ -2,29 +2,40 @@
 package payment_plan
 
 import (
+	"context"
 	"fmt"
+	"math"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 )
 
 // Dependencies зависимости хэндлера
 type Dependencies struct {
-	IsDev bool
+	IsDev          bool
+	TBankEnabled   bool
+	CurrencyClient *currency_client.Client
 }
 
 // paymentPlanHandler обработчик выбора платежного плана
 type paymentPlanHandler struct {
 	*base.BaseHandler
-	isDev bool
+	isDev          bool
+	tBankEnabled   bool
+	currencyClient *currency_client.Client
 }
 
 // NewHandler создает новый обработчик выбора плана
 func NewHandler(deps ...Dependencies) handlers.Handler {
 	isDev := false
+	tBankEnabled := false
+	var cc *currency_client.Client
 	if len(deps) > 0 {
 		isDev = deps[0].IsDev
+		tBankEnabled = deps[0].TBankEnabled
+		cc = deps[0].CurrencyClient
 	}
 	return &paymentPlanHandler{
 		BaseHandler: &base.BaseHandler{
@@ -32,26 +43,26 @@ func NewHandler(deps ...Dependencies) handlers.Handler {
 			Command: constants.PaymentConstants.CallbackPaymentPlan,
 			Type:    handlers.TypeCallback,
 		},
-		isDev: isDev,
+		isDev:          isDev,
+		tBankEnabled:   tBankEnabled,
+		currencyClient: cc,
 	}
 }
 
 // Execute выполняет обработку выбора плана
 func (h *paymentPlanHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	// Извлекаем ID плана из callback_data (формат: payment_plan:basic)
 	planID := h.extractPlanID(params.Data)
 	if planID == "" {
 		return handlers.HandlerResult{}, fmt.Errorf("неверный формат callback: %s", params.Data)
 	}
 
-	// Получаем информацию о плане
 	plan := h.getPlanByID(planID)
 	if plan == nil {
 		return handlers.HandlerResult{}, fmt.Errorf("план не найден: %s", planID)
 	}
 
-	// Создаем сообщение с подтверждением
-	message := h.createConfirmationMessage(plan)
+	usdRubRate := h.getRate()
+	message := h.createConfirmationMessage(plan, usdRubRate)
 	keyboard := h.createConfirmationKeyboard(planID)
 
 	return handlers.HandlerResult{
@@ -60,14 +71,19 @@ func (h *paymentPlanHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 		Metadata: map[string]interface{}{
 			"plan_id":      planID,
 			"user_id":      params.User.ID,
-			"stars_amount": h.calculateStars(plan.PriceCents),
+			"stars_amount": calculateStars(plan.PriceRub, usdRubRate),
 		},
 	}, nil
 }
 
-// extractPlanID извлекает ID плана из callback_data
+func (h *paymentPlanHandler) getRate() float64 {
+	if h.currencyClient != nil {
+		return h.currencyClient.GetUSDRUB(context.Background())
+	}
+	return currency_client.FallbackRate
+}
+
 func (h *paymentPlanHandler) extractPlanID(callbackData string) string {
-	// Формат: payment_plan:basic
 	prefix := constants.PaymentConstants.CallbackPaymentPlan
 	if len(callbackData) <= len(prefix) {
 		return ""
@@ -75,118 +91,112 @@ func (h *paymentPlanHandler) extractPlanID(callbackData string) string {
 	return callbackData[len(prefix):]
 }
 
-// getPlanByID возвращает план по ID
 func (h *paymentPlanHandler) getPlanByID(planID string) *SubscriptionPlan {
-	// Тестовый план только в dev
 	if planID == "test" && !h.isDev {
 		return nil
 	}
 	plans := map[string]*SubscriptionPlan{
-		"test": { // ⭐ ТЕСТОВЫЙ ПЛАН
+		"test": {
 			ID:          "test",
-			Name:        "🧪 Тестовый доступ (2⭐)",
+			Name:        "🧪 Тестовый доступ",
 			Description: "Для проверки работы платежей",
-			PriceCents:  6, // 2 Stars = 6 центов
+			PriceRub:    10,
 			Features: []string{
-				"✅ Проверка оплаты через Stars",
+				"✅ Проверка оплаты",
 				"✅ Доступ на 5 минут",
-				"✅ Не влияет на основную подписку",
 			},
 		},
 		"basic": {
 			ID:          "basic",
-			Name:        "📱 Доступ на 1 месяц",
+			Name:        "📱 1 месяц",
 			Description: "Идеально для начала",
-			PriceCents:  1500,
+			PriceRub:    1490,
 			Features: []string{
-				"✅ Неограниченные сигналы",
+				"✅ Все сигналы",
 				"✅ Все виды уведомлений",
 			},
 		},
 		"pro": {
 			ID:          "pro",
-			Name:        "🚀 Доступ на 3 месяца",
+			Name:        "🚀 3 месяца",
 			Description: "Для активных трейдеров",
-			PriceCents:  3000,
+			PriceRub:    2490,
 			Features: []string{
-				"✅ Неограниченные сигналы",
+				"✅ Все сигналы",
 				"✅ Все виды уведомлений",
 				"✅ Приоритетная поддержка",
 			},
 		},
 		"enterprise": {
 			ID:          "enterprise",
-			Name:        "🏢 Доступ на 12 месяцев",
+			Name:        "🏢 12 месяцев",
 			Description: "Максимальные возможности",
-			PriceCents:  7500,
+			PriceRub:    5990,
 			Features: []string{
-				"✅ Неограниченные сигналы",
+				"✅ Все сигналы",
 				"✅ Все виды уведомлений",
 				"✅ Кастомные настройки",
-				"✅ Приоритетная поддержка 24/7",
+				"✅ Поддержка 24/7",
 			},
 		},
 	}
-
 	return plans[planID]
 }
 
-// createConfirmationMessage создает сообщение с подтверждением
-func (h *paymentPlanHandler) createConfirmationMessage(plan *SubscriptionPlan) string {
-	starsAmount := h.calculateStars(plan.PriceCents)
-	usdPrice := float64(plan.PriceCents) / 100
+func (h *paymentPlanHandler) createConfirmationMessage(plan *SubscriptionPlan, usdRubRate float64) string {
+	stars := calculateStars(plan.PriceRub, usdRubRate)
 
-	message := fmt.Sprintf("✅ *Подтверждение выбора*\n\n")
-	message += fmt.Sprintf("Вы выбрали план: *%s*\n\n", plan.Name)
-	message += fmt.Sprintf("💰 Стоимость: *%d Stars* ($%.2f)\n", starsAmount, usdPrice)
-	message += fmt.Sprintf("📋 Описание: %s\n\n", plan.Description)
+	message := "✅ *Подтверждение выбора*\n\n"
+	message += fmt.Sprintf("Тариф: *%s*\n", plan.Name)
+	message += fmt.Sprintf("💰 Стоимость: *%d ₽*\n", plan.PriceRub)
+	message += fmt.Sprintf("⭐ или *%d Stars*\n\n", stars)
+	message += fmt.Sprintf("📋 %s\n\n", plan.Description)
 	message += "🔍 *Включено:*\n"
-	for i, feature := range plan.Features {
-		message += fmt.Sprintf("%d. %s\n", i+1, feature)
+	for _, feature := range plan.Features {
+		message += feature + "\n"
 	}
-	message += "\nℹ️ *После оплаты:*\n"
-	message += "• Подписка активируется автоматически\n"
-	message += "• Вы получите уведомление в Telegram\n"
-	message += "• Доступ к функциям откроется сразу\n\n"
-	message += "Для оплаты нажмите кнопку ниже:"
-
+	message += "\nВыберите способ оплаты:"
 	return message
 }
 
-// createConfirmationKeyboard создает клавиатуру подтверждения
 func (h *paymentPlanHandler) createConfirmationKeyboard(planID string) interface{} {
-	callbackConfirm := fmt.Sprintf("%s%s",
-		constants.PaymentConstants.CallbackPaymentConfirm, planID)
+	callbackConfirm := fmt.Sprintf("%s%s", constants.PaymentConstants.CallbackPaymentConfirm, planID)
+	callbackTBank := fmt.Sprintf("%s%s", constants.PaymentConstants.CallbackPaymentTBank, planID)
 
-	return map[string]interface{}{
-		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.PaymentButtonTexts.PayNow, "callback_data": callbackConfirm},
-			},
-			{
-				{"text": "📜 Условия использования", "callback_data": "/terms"}, // ⭐ ДОБАВИТЬ
-				{"text": constants.PaymentButtonTexts.BackToPlans, "callback_data": constants.PaymentConstants.CommandBuy},
-			},
-			{
-				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-			},
+	rows := [][]map[string]string{
+		{{"text": "⭐ Telegram Stars", "callback_data": callbackConfirm}},
+	}
+
+	if h.tBankEnabled {
+		rows = append(rows, []map[string]string{
+			{"text": "💳 Т-Банк (СБП / карта)", "callback_data": callbackTBank},
+		})
+	}
+
+	rows = append(rows,
+		[]map[string]string{
+			{"text": constants.PaymentButtonTexts.BackToPlans, "callback_data": constants.PaymentConstants.CommandBuy},
+			{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
 		},
-	}
+	)
+
+	return map[string]interface{}{"inline_keyboard": rows}
 }
 
-// calculateStars рассчитывает количество Stars с учетом комиссии
-func (h *paymentPlanHandler) calculateStars(usdCents int) int {
-	if usdCents == 6 { // тестовый план
-		return 2
+// calculateStars: ceil((₽ / курс) / $0.013)
+func calculateStars(priceRub int, usdRubRate float64) int {
+	if usdRubRate <= 0 {
+		usdRubRate = currency_client.FallbackRate
 	}
-	return usdCents / 3
+	usd := float64(priceRub) / usdRubRate
+	return int(math.Ceil(usd / 0.013))
 }
 
-// Вспомогательный тип
+// SubscriptionPlan вспомогательный тип
 type SubscriptionPlan struct {
 	ID          string
 	Name        string
 	Description string
-	PriceCents  int
+	PriceRub    int
 	Features    []string
 }

@@ -16,8 +16,11 @@ import (
 	payment_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/payment"
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
+	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"fmt"
 	"strings"
@@ -50,6 +53,7 @@ type TelegramBot struct {
 	// Режимы работы
 	pollingHandler *PollingClient
 	webhookServer  *WebhookServer
+	tbankServer    *TBankNotifyServer
 	mu             sync.RWMutex
 	startupTime    time.Time
 	currentMode    string // "polling" или "webhook"
@@ -132,6 +136,30 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		paymentService = nil
 	}
 
+	// Создаем CurrencyClient для актуального курса USD/RUB от ЦБ РФ
+	currencyClient := currency_client.NewClient()
+	logger.Info("💱 CurrencyClient создан (резервный курс: %.0f ₽/$)", currency_client.FallbackRate)
+
+	// Создаем TBankService если Т-Банк настроен
+	var tbankSvc tbank_service.Service
+	if config.TBank.Enabled && config.TBank.TerminalKey != "" && config.TBank.Password != "" {
+		tbankHTTPClient := tbank_client.NewClient(config.TBank.TerminalKey, config.TBank.Password)
+		tbankSvc = tbank_service.NewService(tbank_service.Dependencies{
+			TBankClient:         tbankHTTPClient,
+			SubscriptionService: subscriptionService,
+			UserService:         userService,
+			PaymentCoreService:  deps.ServiceFactory.GetPaymentCoreService(),
+			MessageSender:       ms,
+			Password:            config.TBank.Password,
+			NotifyURL:           config.TBank.NotifyURL,
+			SuccessURL:          config.TBank.SuccessURL,
+			FailURL:             config.TBank.FailURL,
+		})
+		logger.Info("✅ TBankService создан (терминал: %s)", config.TBank.TerminalKey)
+	} else {
+		logger.Info("ℹ️ Т-Банк не настроен (TBANK_ENABLED=false или отсутствуют ключи)")
+	}
+
 	// Создаем структуру сервисов
 	services := &Services{
 		signalSettingsService:      signalSettingsService,
@@ -141,6 +169,9 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		starsClient:                starsClient,
 		tradingSessionService:      tradingSessionService,
 		userService:                userService,
+		tbankService:               tbankSvc,
+		currencyClient:             currencyClient,
+		paymentCoreService:         deps.ServiceFactory.GetPaymentCoreService(),
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -178,6 +209,12 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		logger.Info("🌐 WebhookServer создан")
 	}
 
+	// Создаем сервер уведомлений Т-Банк если сервис настроен
+	if tbankSvc != nil {
+		bot.tbankServer = NewTBankNotifyServer(tbankSvc, config.TBank.NotifyPort)
+		logger.Info("🏦 TBankNotifyServer создан (порт: %d)", config.TBank.NotifyPort)
+	}
+
 	// Устанавливаем меню команд Telegram
 	if err := bot.SetMyCommands(); err != nil {
 		logger.Warn("Не удалось установить меню команд: %v", err)
@@ -194,6 +231,9 @@ func (b *TelegramBot) Start() error {
 
 	logger.Info("🚀 Запуск Telegram бота (режим: %s)", b.currentMode)
 
+	// Запускаем сервер уведомлений Т-Банк (независимо от режима)
+	b.startTBankServer()
+
 	if b.currentMode == "polling" {
 		return b.startPolling()
 	} else {
@@ -208,10 +248,32 @@ func (b *TelegramBot) Stop() error {
 
 	logger.Info("🛑 Остановка Telegram бота (режим: %s)", b.currentMode)
 
+	b.stopTBankServer()
+
 	if b.currentMode == "polling" {
 		return b.stopPolling()
 	} else {
 		return b.stopWebhook()
+	}
+}
+
+// startTBankServer запускает сервер уведомлений Т-Банк если настроен
+func (b *TelegramBot) startTBankServer() {
+	if b.tbankServer != nil {
+		if err := b.tbankServer.Start(); err != nil {
+			logger.Error("❌ Ошибка запуска TBankNotifyServer: %v", err)
+		} else {
+			logger.Info("✅ TBankNotifyServer запущен")
+		}
+	}
+}
+
+// stopTBankServer останавливает сервер уведомлений Т-Банк
+func (b *TelegramBot) stopTBankServer() {
+	if b.tbankServer != nil {
+		if err := b.tbankServer.Stop(); err != nil {
+			logger.Warn("⚠️ Ошибка остановки TBankNotifyServer: %v", err)
+		}
 	}
 }
 
@@ -368,6 +430,14 @@ func (b *TelegramBot) GetMessageSender() message_sender.MessageSender {
 	return b.messageSender
 }
 
+// GetTBankService возвращает T-Bank сервис (для регистрации MAX sender после инициализации)
+func (b *TelegramBot) GetTBankService() tbank_service.Service {
+	if b.tbankServer == nil {
+		return nil
+	}
+	return b.tbankServer.GetService()
+}
+
 // GetConfig возвращает конфигурацию
 func (b *TelegramBot) GetConfig() *config.Config {
 	return b.config
@@ -414,6 +484,8 @@ func (b *TelegramBot) StartPolling() error {
 	if b.currentMode != "polling" {
 		return fmt.Errorf("бот работает в режиме %s, нельзя запустить polling", b.currentMode)
 	}
+
+	b.startTBankServer()
 
 	return b.startPolling()
 }

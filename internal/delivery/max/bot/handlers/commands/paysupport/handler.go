@@ -31,7 +31,7 @@ func (h *paysupportHandler) Execute(params handlers.HandlerParams) (handlers.Han
 		"🛟 *Поддержка*\n\n"+
 			"Если у вас возникли вопросы или проблемы, обратитесь следующими способами:\n\n"+
 			"📧 *Email:* support@gromovart.ru\n\n"+
-			"💬 *Telegram:* @artemgrrr\n\n"+
+			"💬 *Telegram:* @crypto_exchange_screener\n\n"+
 			"⚠️ *При обращении укажите ваш ID:* `%d`\n\n"+
 			"🕐 Мы обрабатываем запросы в течение 24 часов.",
 		userID,

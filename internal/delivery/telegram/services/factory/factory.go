@@ -146,6 +146,10 @@ func (f *ServiceFactory) GetTradingSessionService() trading_session.Service {
 }
 
 // GetSubscriptionRepository возвращает SubscriptionRepository через сервис
+func (f *ServiceFactory) GetPaymentCoreService() *payment.PaymentService {
+	return f.paymentCoreService
+}
+
 func (f *ServiceFactory) GetSubscriptionRepository() subscription_repo.SubscriptionRepository {
 	if f.subscriptionService == nil {
 		logger.Warn("⚠️ GetSubscriptionRepository: subscriptionService is nil")

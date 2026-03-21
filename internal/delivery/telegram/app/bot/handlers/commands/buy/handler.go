@@ -1,16 +1,17 @@
 // internal/delivery/telegram/app/bot/handlers/commands/buy/handler.go
-// Добавляем проверку на дублирование
-
 package buy
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
+	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -19,25 +20,29 @@ import (
 var (
 	lastBuyCommand     = make(map[int]time.Time)
 	lastBuyCommandLock sync.RWMutex
-	duplicateThreshold = 2 * time.Second // Защита от дублирования в течение 2 секунд
+	duplicateThreshold = 2 * time.Second
 )
 
 // Dependencies зависимости хэндлера
 type Dependencies struct {
-	IsDev bool
+	IsDev          bool
+	CurrencyClient *currency_client.Client
 }
 
 // buyCommandHandler реализация обработчика команды /buy
 type buyCommandHandler struct {
 	*base.BaseHandler
-	isDev bool
+	isDev          bool
+	currencyClient *currency_client.Client
 }
 
 // NewHandler создает новый обработчик команды /buy
 func NewHandler(deps ...Dependencies) handlers.Handler {
 	isDev := false
+	var cc *currency_client.Client
 	if len(deps) > 0 {
 		isDev = deps[0].IsDev
+		cc = deps[0].CurrencyClient
 	}
 	return &buyCommandHandler{
 		BaseHandler: &base.BaseHandler{
@@ -45,37 +50,31 @@ func NewHandler(deps ...Dependencies) handlers.Handler {
 			Command: constants.PaymentConstants.CommandBuy,
 			Type:    handlers.TypeCommand,
 		},
-		isDev: isDev,
+		isDev:          isDev,
+		currencyClient: cc,
 	}
 }
 
 // Execute выполняет обработку команды /buy
 func (h *buyCommandHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	// Проверка на дублирование команды
 	if h.isDuplicateCommand(params.User.ID) {
 		logger.Debug("Пропускаем дублирующую команду /buy от пользователя %d", params.User.ID)
 		return handlers.HandlerResult{
 			Message: "⏳ *Команда уже обрабатывается...*\n\nПожалуйста, подождите несколько секунд.",
 		}, nil
 	}
-
-	// Помечаем команду как обработанную
 	h.markCommandProcessed(params.User.ID)
 
-	// Проверяем авторизацию пользователя
 	if params.User == nil || params.User.ID == 0 {
 		return h.createUnauthorizedMessage()
 	}
 
-	// Получаем доступные планы
+	usdRubRate := h.getRate()
 	plans := h.getAvailablePlans()
-
-	// Проверяем текущую подписку пользователя
 	currentSubscription := h.getUserSubscription(params.User.ID)
 
-	// Создаем сообщение
-	message := h.createPlansMessage(params.User, plans, currentSubscription)
-	keyboard := h.createPlansKeyboard(plans, currentSubscription)
+	message := h.createPlansMessage(params.User, plans, currentSubscription, usdRubRate)
+	keyboard := h.createPlansKeyboard(plans, usdRubRate)
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -84,32 +83,35 @@ func (h *buyCommandHandler) Execute(params handlers.HandlerParams) (handlers.Han
 			"user_id":          params.User.ID,
 			"plans_count":      len(plans),
 			"has_subscription": currentSubscription != nil,
+			"usd_rub_rate":     usdRubRate,
 			"timestamp":        time.Now(),
 		},
 	}, nil
 }
 
-// isDuplicateCommand проверяет дублирование команды
+func (h *buyCommandHandler) getRate() float64 {
+	if h.currencyClient != nil {
+		return h.currencyClient.GetUSDRUB(context.Background())
+	}
+	return currency_client.FallbackRate
+}
+
 func (h *buyCommandHandler) isDuplicateCommand(userID int) bool {
 	lastBuyCommandLock.RLock()
 	lastTime, exists := lastBuyCommand[userID]
 	lastBuyCommandLock.RUnlock()
-
 	if !exists {
 		return false
 	}
-
 	return time.Since(lastTime) < duplicateThreshold
 }
 
-// markCommandProcessed помечает команду как обработанную
 func (h *buyCommandHandler) markCommandProcessed(userID int) {
 	lastBuyCommandLock.Lock()
 	lastBuyCommand[userID] = time.Now()
 	lastBuyCommandLock.Unlock()
 }
 
-// createUnauthorizedMessage создает сообщение для неавторизованных пользователей
 func (h *buyCommandHandler) createUnauthorizedMessage() (handlers.HandlerResult, error) {
 	message := "🔒 *Авторизация требуется*\n\n" +
 		"Для покупки подписки необходимо авторизоваться.\n\n" +
@@ -117,135 +119,105 @@ func (h *buyCommandHandler) createUnauthorizedMessage() (handlers.HandlerResult,
 
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
-			{
-				{"text": constants.AuthButtonTexts.Login, "callback_data": constants.CallbackAuthLogin},
-			},
-			{
-				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-			},
+			{{"text": constants.AuthButtonTexts.Login, "callback_data": constants.CallbackAuthLogin}},
+			{{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain}},
 		},
 	}
-
-	return handlers.HandlerResult{
-		Message:  message,
-		Keyboard: keyboard,
-	}, nil
+	return handlers.HandlerResult{Message: message, Keyboard: keyboard}, nil
 }
 
-// getAvailablePlans возвращает доступные планы
 func (h *buyCommandHandler) getAvailablePlans() []*SubscriptionPlan {
 	var plans []*SubscriptionPlan
-	logger.Info("Получение доступных планов для пользователя (isDev=%v)", h.isDev)
 	if h.isDev {
 		plans = append(plans, &SubscriptionPlan{
 			ID:          "test",
-			Name:        "🧪 Тестовый доступ (2⭐)",
-			Description: "• Проверка платежей\n• Действует 5 минут\n• Не влияет на основную подписку",
-			PriceCents:  6, // 2 Stars = 6 центов
-			Features:    []string{"test_payment", "5_minutes"},
+			Name:        "🧪 Тестовый доступ",
+			Description: "• Проверка платежей\n• Действует 5 минут",
+			PriceRub:    10,
 		})
 	}
-	plans = append(plans, &SubscriptionPlan{
-		ID:          "basic",
-		Name:        "📱 Доступ на 1 месяц",
-		Description: "• Получение сигналов в течении 1 месяца\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
-		PriceCents:  1500,
-		Features:    []string{"10_symbols", "50_signals", "basic_notifications"},
-	})
-	plans = append(plans, &SubscriptionPlan{
-		ID:          "pro",
-		Name:        "🚀 Доступ на 3 месяца",
-		Description: "• Получение сигналов в течении 3 месяцев\n• После завершения периода требуется ручное продление\n• Все виды уведомлений",
-		PriceCents:  3000,
-		Features:    []string{"50_symbols", "200_signals", "advanced_notifications", "priority_support"},
-	})
-	plans = append(plans, &SubscriptionPlan{
-		ID:          "enterprise",
-		Name:        "🏢 Доступ на 12 месяцев",
-		Description: "• Неограниченные символы\n• После завершения периода требуется ручное продление\n• Кастомные настройки\n• Все виды уведомлений",
-		PriceCents:  7500,
-		Features:    []string{"unlimited_symbols", "1000_signals", "custom_settings", "api_access"},
-	})
+	plans = append(plans,
+		&SubscriptionPlan{
+			ID:          "basic",
+			Name:        "📱 1 месяц",
+			Description: "• Все сигналы\n• Все виды уведомлений",
+			PriceRub:    1490,
+		},
+		&SubscriptionPlan{
+			ID:          "pro",
+			Name:        "🚀 3 месяца",
+			Description: "• Все сигналы\n• Все виды уведомлений\n• Приоритетная поддержка",
+			PriceRub:    2490,
+		},
+		&SubscriptionPlan{
+			ID:          "enterprise",
+			Name:        "🏢 12 месяцев",
+			Description: "• Все сигналы\n• Кастомные настройки\n• Поддержка 24/7",
+			PriceRub:    5990,
+		},
+	)
 	return plans
 }
 
-// getUserSubscription возвращает текущую подписку пользователя
 func (h *buyCommandHandler) getUserSubscription(userID int) *UserSubscription {
-	// TODO: Получить из базы данных
 	return nil
 }
 
-// createPlansMessage создает сообщение со списком планов
 func (h *buyCommandHandler) createPlansMessage(
 	user *models.User,
 	plans []*SubscriptionPlan,
 	currentSubscription *UserSubscription,
+	usdRubRate float64,
 ) string {
 	message := "💎 *Выберите тарифный план*\n\n"
 
-	// Если есть текущая подписка
 	if currentSubscription != nil {
 		message += fmt.Sprintf("Ваш текущий план: *%s*\n", currentSubscription.PlanName)
 		message += fmt.Sprintf("Действует до: %s\n\n", currentSubscription.ExpiresAt)
 	}
 
 	for _, plan := range plans {
-		// Расчет стоимости в Stars
-		starsAmount := h.calculateStars(plan.PriceCents)
-		usdPrice := float64(plan.PriceCents) / 100
-
-		message += fmt.Sprintf("📋 *%s*\n", plan.Name)
-		message += fmt.Sprintf("💰 *%d Stars* ($%.2f)\n", starsAmount, usdPrice)
+		stars := calculateStars(plan.PriceRub, usdRubRate)
+		message += fmt.Sprintf("*%s* — %d ₽\n", plan.Name, plan.PriceRub)
+		message += fmt.Sprintf("⭐ %d Stars\n", stars)
 		message += fmt.Sprintf("%s\n\n", plan.Description)
 	}
 
-	message += "ℹ️ *Информация о платежах:*\n"
-	message += "• 1 Star ≈ $0.03\n"
-	message += "• Комиссия Telegram: 5%\n"
-	message += "• Подписка продляется автоматически\n"
-	message += "• Можно отменить в любой момент\n\n"
-	message += "Выберите план для продолжения:"
-
+	message += fmt.Sprintf("💱 Курс: %.2f ₽/$\n", usdRubRate)
+	message += "\nВыберите план для продолжения:"
 	return message
 }
 
-// createPlansKeyboard создает клавиатуру с планами
-func (h *buyCommandHandler) createPlansKeyboard(
-	plans []*SubscriptionPlan,
-	currentSubscription *UserSubscription,
-) interface{} {
+func (h *buyCommandHandler) createPlansKeyboard(plans []*SubscriptionPlan, usdRubRate float64) interface{} {
 	var keyboard [][]map[string]string
 
-	// Кнопки для каждого плана
 	for _, plan := range plans {
-		buttonText := fmt.Sprintf("📋 %s - %d Stars", plan.Name, h.calculateStars(plan.PriceCents))
+		buttonText := fmt.Sprintf("%s — %d ₽", plan.Name, plan.PriceRub)
 		callbackData := fmt.Sprintf("%s%s", constants.PaymentConstants.CallbackPaymentPlan, plan.ID)
-
 		keyboard = append(keyboard, []map[string]string{
 			{"text": buttonText, "callback_data": callbackData},
 		})
 	}
 
-	// Дополнительные кнопки
-	keyboard = append(keyboard, []map[string]string{
-		{"text": constants.PaymentButtonTexts.History, "callback_data": constants.PaymentConstants.CallbackPaymentHistory},
-	})
-	keyboard = append(keyboard, []map[string]string{
-		{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
-	})
+	keyboard = append(keyboard,
+		[]map[string]string{
+			{"text": constants.PaymentButtonTexts.History, "callback_data": constants.PaymentConstants.CallbackPaymentHistory},
+		},
+		[]map[string]string{
+			{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+		},
+	)
 
-	return map[string]interface{}{
-		"inline_keyboard": keyboard,
-	}
+	return map[string]interface{}{"inline_keyboard": keyboard}
 }
 
-// calculateStars рассчитывает количество Stars с учетом комиссии
-func (h *buyCommandHandler) calculateStars(usdCents int) int {
-	// USD центы → Stars (1 Star = $0.03 = 3 цента)
-	// 1500 центов ($15) / 3 = 500 Stars
-	// 3000 центов ($30) / 3 = 1000 Stars
-	// 7500 центов ($75) / 3 = 2500 Stars
-	return usdCents / 3
+// calculateStars рассчитывает кол-во Stars: ceil((₽ / курс) / $0.013)
+func calculateStars(priceRub int, usdRubRate float64) int {
+	if usdRubRate <= 0 {
+		usdRubRate = currency_client.FallbackRate
+	}
+	usd := float64(priceRub) / usdRubRate
+	return int(math.Ceil(usd / 0.013))
 }
 
 // Вспомогательные типы
@@ -253,8 +225,7 @@ type SubscriptionPlan struct {
 	ID          string
 	Name        string
 	Description string
-	PriceCents  int
-	Features    []string
+	PriceRub    int
 }
 
 type UserSubscription struct {

@@ -66,6 +66,9 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		}
 	}
 
+	// Кнопка покупки подписки
+	rows = append(rows, []map[string]string{kb.B(kb.Btn.Buy, kb.CbBuy)})
+
 	// Кнопка привязки Telegram для MAX-only пользователей
 	if user != nil && user.IsMaxOnlyUser() {
 		rows = append(rows, []map[string]string{kb.B(kb.Btn.LinkTelegram, kb.CbLinkTelegram)})

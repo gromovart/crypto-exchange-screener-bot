@@ -42,6 +42,7 @@ func HelpText() string {
 		"/thresholds — 🎯 Пороги срабатывания\n" +
 		"/stats — 📊 Статистика\n" +
 		"/link — 🔗 Привязать Telegram-аккаунт\n" +
+		"/buy — 💎 Купить подписку\n" +
 		"/paysupport — 🛟 Поддержка\n" +
 		"/terms — 📜 Условия использования\n\n" +
 		"━━━ 📊 КАК РАБОТАЕТ БОТ ━━━\n\n" +
@@ -56,5 +57,5 @@ func HelpText() string {
 		"🔔 Уведомления: включены\n\n" +
 		"━━━ 📞 ПОДДЕРЖКА ━━━\n\n" +
 		"📧 Email: support@gromovart.ru\n" +
-		"💬 Telegram: @artemgrrr"
+		"💬 Telegram: @crypto_exchange_screener"
 }
