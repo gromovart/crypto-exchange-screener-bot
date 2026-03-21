@@ -166,9 +166,9 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 	_, err = s.subscriptionService.CreateSubscription(ctx, userID, planID, nil, false)
 	if err != nil {
 		if strings.Contains(err.Error(), "уже есть активная подписка") {
-			// Подписка уже есть — продлеваем/обновляем период
-			logger.Info("🔄 Продление подписки: план=%s, пользователь=%d", planID, userID)
-			_, err = s.subscriptionService.UpgradeSubscription(ctx, userID, planID, nil)
+			// Подписка уже есть — накапливаем время поверх текущего срока
+			logger.Info("➕ Накопление подписки: план=%s, пользователь=%d", planID, userID)
+			_, err = s.subscriptionService.ExtendSubscription(ctx, userID, planID, nil)
 			if err != nil {
 				return fmt.Errorf("ошибка продления подписки: %w", err)
 			}
