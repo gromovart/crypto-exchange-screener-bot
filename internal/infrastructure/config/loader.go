@@ -296,6 +296,8 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.TBank.NotifyPort = getEnvInt("TBANK_NOTIFY_PORT", 8082)
 	cfg.TBank.SuccessURL = getEnv("TBANK_SUCCESS_URL", "")
 	cfg.TBank.FailURL = getEnv("TBANK_FAIL_URL", "")
+	cfg.TBank.MaxSuccessURL = getEnv("MAX_TBANK_SUCCESS_URL", "")
+	cfg.TBank.MaxFailURL = getEnv("MAX_TBANK_FAIL_URL", "")
 
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ

@@ -281,13 +281,15 @@ type Config struct {
 	// Т-БАНК ЭКВАЙРИНГ
 	// =============================
 	TBank struct {
-		Enabled     bool   `mapstructure:"TBANK_ENABLED"`
-		TerminalKey string `mapstructure:"TBANK_TERMINAL_KEY"`
-		Password    string `mapstructure:"TBANK_PASSWORD"`
-		NotifyURL   string `mapstructure:"TBANK_NOTIFY_URL"`   // URL для уведомлений от Т-Банк
-		NotifyPort  int    `mapstructure:"TBANK_NOTIFY_PORT"`  // порт для сервера уведомлений
-		SuccessURL  string `mapstructure:"TBANK_SUCCESS_URL"`  // URL редиректа при успехе (опционально)
-		FailURL     string `mapstructure:"TBANK_FAIL_URL"`     // URL редиректа при ошибке (опционально)
+		Enabled       bool   `mapstructure:"TBANK_ENABLED"`
+		TerminalKey   string `mapstructure:"TBANK_TERMINAL_KEY"`
+		Password      string `mapstructure:"TBANK_PASSWORD"`
+		NotifyURL     string `mapstructure:"TBANK_NOTIFY_URL"`       // URL для уведомлений от Т-Банк
+		NotifyPort    int    `mapstructure:"TBANK_NOTIFY_PORT"`      // порт для сервера уведомлений
+		SuccessURL    string `mapstructure:"TBANK_SUCCESS_URL"`      // Telegram: редирект при успехе
+		FailURL       string `mapstructure:"TBANK_FAIL_URL"`         // Telegram: редирект при ошибке
+		MaxSuccessURL string `mapstructure:"MAX_TBANK_SUCCESS_URL"`  // MAX: редирект при успехе
+		MaxFailURL    string `mapstructure:"MAX_TBANK_FAIL_URL"`     // MAX: редирект при ошибке
 	}
 
 	// ======================

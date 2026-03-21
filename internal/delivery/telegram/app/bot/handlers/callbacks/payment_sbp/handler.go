@@ -55,7 +55,7 @@ func (h *paymentTBankHandler) Execute(params handlers.HandlerParams) (handlers.H
 	}
 
 	ctx := context.Background()
-	result, err := h.tbankService.CreatePayment(ctx, params.User.ID, planID)
+	result, err := h.tbankService.CreatePayment(ctx, params.User.ID, planID, "", "")
 	if err != nil {
 		logger.Error("❌ Ошибка создания платежа Т-Банк: план=%s, пользователь=%d, ошибка: %v",
 			planID, params.User.ID, err)
