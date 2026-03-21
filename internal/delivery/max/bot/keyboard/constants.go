@@ -64,6 +64,11 @@ const (
 	CbSessionStart    = "session_start"
 	CbSessionStop     = "session_stop"
 	CbSessionDuration = "session_duration"
+
+	// Payment
+	CbBuy                  = "buy"
+	CbPaymentTBankBase     = "payment_tbank_"
+	CbPaymentTBankWildcard = "payment_tbank_*"
 )
 
 // ──────────────────────────────────────────────
@@ -128,6 +133,9 @@ var Btn = struct {
 	Duration4h    string
 	Duration8h    string
 	DurationDay   string
+
+	// Payment
+	Buy string
 }{
 	Back:     "🔙 Назад",
 	MainMenu: "🏠 Главное меню",
@@ -169,6 +177,8 @@ var Btn = struct {
 	ResetSettings: "⚙️ Сбросить настройки",
 
 	LinkTelegram: "🔗 Привязать Telegram",
+
+	Buy: "💎 Купить подписку",
 
 	SessionStart: "🟢 Начать торговую сессию",
 	SessionStop:  "🔴 Завершить сессию",

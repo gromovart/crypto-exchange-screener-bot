@@ -9,9 +9,11 @@ import (
 	max_bot "crypto-exchange-screener-bot/internal/delivery/max/bot"
 	max_transport "crypto-exchange-screener-bot/internal/delivery/max/transport"
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
-	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
-	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	notifySvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signalSvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	tbankSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
@@ -155,11 +157,34 @@ func (dl *DeliveryLayer) Initialize() error {
 
 			// Создаём interactive-бота с UserService
 			if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
+				// Создаём T-Bank сервис для MAX если настроен
+				var maxTBankService tbankSvc.Service
+				if dl.config.TBank.Enabled && dl.config.TBank.TerminalKey != "" {
+					tbankHTTPClient := tbank_client.NewClient(dl.config.TBank.TerminalKey, dl.config.TBank.Password)
+					subSvc, _ := coreFactory.CreateSubscriptionService()
+					paymentSvc, _ := coreFactory.CreatePaymentService()
+					maxTBankService = tbankSvc.NewService(tbankSvc.Dependencies{
+						TBankClient:         tbankHTTPClient,
+						SubscriptionService: subSvc,
+						UserService:         userSvc,
+						PaymentCoreService:  paymentSvc,
+						MessageSender:       nil, // MAX-уведомления через MAX бот не реализованы
+						Password:            dl.config.TBank.Password,
+						NotifyURL:           dl.config.TBank.NotifyURL,
+						SuccessURL:          dl.config.TBank.SuccessURL,
+						FailURL:             dl.config.TBank.FailURL,
+					})
+					logger.Info("✅ MAX: TBankService создан")
+				} else {
+					logger.Info("ℹ️  MAX: TBankService не создан (TBANK_ENABLED=false или ключ не задан)")
+				}
+
 				deps := max_bot.Dependencies{
 					UserService:    userSvc,
 					NotifyService:  notifySvc.NewServiceWithDependencies(userSvc),
 					SignalService:  signalSvc.NewServiceWithDependencies(userSvc),
 					SessionService: sessionSvc.NewService(userSvc, nil),
+					TBankService:   maxTBankService,
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 

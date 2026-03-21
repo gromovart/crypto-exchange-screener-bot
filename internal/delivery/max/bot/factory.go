@@ -32,16 +32,19 @@ import (
 	cbSessionDuration "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_duration"
 	cbSessionStart "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_start"
 	cbSessionStop "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_stop"
-	cbWithParams "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
-	cmdHelp       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
+	cbBuy          "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
+	cbPaymentTBank "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
+	cbWithParams   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
+	cmdHelp        "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
 	cmdLink       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/link"
 	cmdPaysupport "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/paysupport"
 	cmdStart      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/start"
 	cmdTerms      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/terms"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	kb "crypto-exchange-screener-bot/internal/delivery/max/bot/keyboard"
-	notifySvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
-	signalSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	notifySvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signalSvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	tbankSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 )
 
@@ -51,6 +54,7 @@ type Dependencies struct {
 	NotifyService  notifySvc.Service
 	SignalService  signalSvc.Service
 	SessionService sessionSvc.Service
+	TBankService   tbankSvc.Service // nil — если Т-Банк не настроен
 }
 
 // RegisterAll регистрирует все команды и callback-хэндлеры в роутере
@@ -129,4 +133,9 @@ func RegisterAll(r router.Router, deps Dependencies) {
 
 	// ── Callback: with_params (fallback для параметризованных callback) ───
 	r.RegisterCallback(kb.CbWithParams, cbWithParams.New())
+
+	// ── Callback: платежи (Т-Банк) ──────────────────────────
+	r.RegisterCommand("buy", cbBuy.New())
+	r.RegisterCallback(kb.CbBuy, cbBuy.New())
+	r.RegisterCallback(kb.CbPaymentTBankWildcard, cbPaymentTBank.New(deps.TBankService))
 }
