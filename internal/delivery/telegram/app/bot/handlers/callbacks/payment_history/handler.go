@@ -79,7 +79,7 @@ func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string 
 		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, provider, status))
 		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
 		if p.Description != "" {
-			sb.WriteString(fmt.Sprintf("   %s\n", p.Description))
+			sb.WriteString(fmt.Sprintf("   %s\n", escapeMD(p.Description)))
 		}
 		sb.WriteString("\n")
 	}
@@ -116,6 +116,15 @@ func formatStatus(status models.PaymentStatus) string {
 	default:
 		return "❓"
 	}
+}
+
+// escapeMD экранирует символы Markdown v1 в произвольном тексте
+func escapeMD(s string) string {
+	s = strings.ReplaceAll(s, "_", "\\_")
+	s = strings.ReplaceAll(s, "*", "\\*")
+	s = strings.ReplaceAll(s, "`", "\\`")
+	s = strings.ReplaceAll(s, "[", "\\[")
+	return s
 }
 
 func formatProvider(provider string) string {
