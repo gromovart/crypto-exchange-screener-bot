@@ -76,11 +76,8 @@ func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string 
 		provider := formatProvider(p.Provider)
 		amount := formatAmount(p)
 
-		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, provider, status))
+		sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, provider, status))
 		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
-		if p.Description != "" {
-			sb.WriteString(fmt.Sprintf("   %s\n", escapeMD(p.Description)))
-		}
 		sb.WriteString("\n")
 	}
 
