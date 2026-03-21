@@ -102,6 +102,11 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 	}
 }
 
+// GetSender возвращает message sender MAX бота (для уведомлений из других сервисов)
+func (b *Bot) GetSender() message_sender.MessageSender {
+	return b.sender
+}
+
 // Start запускает бот в соответствующем режиме. Блокирует до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
 	if b.mode == "webhook" {
