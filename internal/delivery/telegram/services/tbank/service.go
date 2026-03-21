@@ -158,10 +158,10 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 		planID, userID, err := parseOrderId(orderId)
 		if err == nil {
 			if s.subscriptionService != nil {
-				if cancelErr := s.subscriptionService.CancelSubscription(ctx, userID, false); cancelErr != nil {
-					logger.Warn("⚠️ Не удалось отменить подписку при возврате: пользователь=%d, ошибка=%v", userID, cancelErr)
+				if cancelErr := s.subscriptionService.DeductSubscription(ctx, userID, planID); cancelErr != nil {
+					logger.Warn("⚠️ Не удалось скорректировать подписку при возврате: пользователь=%d, ошибка=%v", userID, cancelErr)
 				} else {
-					logger.Info("🔄 Подписка отменена при возврате: пользователь=%d", userID)
+					logger.Info("➖ Подписка скорректирована при возврате: пользователь=%d", userID)
 				}
 			}
 			go s.notifyRefunded(userID, planID)
