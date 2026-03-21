@@ -58,14 +58,15 @@ func (h *paymentHistoryHandler) Execute(params handlers.HandlerParams) (handlers
 
 	message := h.buildMessage(payments)
 	msgBytes := []byte(message)
-	logger.Debug("[payment_history] total=%d bytes, payments=%d\nMESSAGE:\n%s", len(msgBytes), len(payments), message)
+	logger.Warn("[payment_history] total=%d bytes, payments=%d", len(msgBytes), len(payments))
+	logger.Warn("[payment_history] MESSAGE:\n%s", message)
 	end := len(msgBytes)
 	if end > 540 {
 		end = 540
 	}
 	start := 455
 	if start < len(msgBytes) {
-		logger.Debug("[payment_history] bytes[455:%d] = %q", end, string(msgBytes[start:end]))
+		logger.Warn("[payment_history] bytes[455:%d] = %q", end, string(msgBytes[start:end]))
 	}
 	return handlers.HandlerResult{
 		Message:  message,
@@ -87,7 +88,7 @@ func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string 
 		provider := formatProvider(p.Provider)
 		amount := formatAmount(p)
 
-		logger.Debug("[payment_history] #%d provider=%q currency=%q amount=%v fiat=%d", i+1, p.Provider, p.Currency, p.Amount, p.FiatAmount)
+		logger.Warn("[payment_history] #%d provider=%q currency=%q amount=%v fiat=%d", i+1, p.Provider, p.Currency, p.Amount, p.FiatAmount)
 
 		sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, provider, status))
 		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
