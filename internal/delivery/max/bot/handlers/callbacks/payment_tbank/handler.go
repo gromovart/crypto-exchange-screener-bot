@@ -31,13 +31,18 @@ var planAmounts = map[string]string{
 type Handler struct {
 	*base.BaseHandler
 	tbankService tbank_service.Service
+	successURL   string // MAX-specific redirect после успешной оплаты
+	failURL      string // MAX-specific redirect после неудачной оплаты
 }
 
-// New создаёт обработчик платежа через Т-Банк
-func New(svc tbank_service.Service) handlers.Handler {
+// New создаёт обработчик платежа через Т-Банк.
+// successURL/failURL — URL редиректа после оплаты (пустая строка = использовать дефолт сервиса).
+func New(svc tbank_service.Service, successURL, failURL string) handlers.Handler {
 	return &Handler{
 		BaseHandler:  base.New("payment_tbank_handler", kb.CbPaymentTBankWildcard, handlers.TypeCallback),
 		tbankService: svc,
+		successURL:   successURL,
+		failURL:      failURL,
 	}
 }
 
@@ -56,7 +61,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		return handlers.HandlerResult{}, fmt.Errorf("не удалось извлечь planID из: %s", params.Data)
 	}
 
-	result, err := h.tbankService.CreatePayment(context.Background(), params.User.ID, planID)
+	result, err := h.tbankService.CreatePayment(context.Background(), params.User.ID, planID, h.successURL, h.failURL)
 	if err != nil {
 		logger.Error("❌ MAX payment_tbank: план=%s, user=%d: %v", planID, params.User.ID, err)
 		return handlers.HandlerResult{

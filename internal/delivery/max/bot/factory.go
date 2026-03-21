@@ -59,6 +59,8 @@ type Dependencies struct {
 	SessionService      sessionSvc.Service
 	TBankService        tbankSvc.Service        // nil — если Т-Банк не настроен
 	SubscriptionService *subscription.Service   // nil — если проверка подписки отключена
+	MaxTBankSuccessURL  string                  // URL редиректа после успешной оплаты (MAX)
+	MaxTBankFailURL     string                  // URL редиректа после неудачной оплаты (MAX)
 }
 
 // RegisterAll регистрирует все команды и callback-хэндлеры в роутере
@@ -159,5 +161,5 @@ func RegisterAll(r router.Router, deps Dependencies) {
 
 	// ── Callback: платежи Т-Банк (свободные) ────────────────
 	r.RegisterCallback(kb.CbBuy, cbBuy.New())
-	r.RegisterCallback(kb.CbPaymentTBankWildcard, cbPaymentTBank.New(deps.TBankService))
+	r.RegisterCallback(kb.CbPaymentTBankWildcard, cbPaymentTBank.New(deps.TBankService, deps.MaxTBankSuccessURL, deps.MaxTBankFailURL))
 }

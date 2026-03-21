@@ -49,7 +49,9 @@ type NotificationSender interface {
 
 // Service интерфейс сервиса Т-Банк платежей
 type Service interface {
-	CreatePayment(ctx context.Context, userID int, planID string) (*PaymentResult, error)
+	// CreatePayment создаёт платёж. successURL/failURL — переопределяют настроенные дефолты.
+	// Передавайте пустые строки, чтобы использовать значения из конфигурации.
+	CreatePayment(ctx context.Context, userID int, planID string, successURL, failURL string) (*PaymentResult, error)
 	HandleNotification(ctx context.Context, params map[string]string) error
 	// SetMaxSender регистрирует MAX message sender для уведомлений MAX-пользователей
 	SetMaxSender(sender NotificationSender)
@@ -96,8 +98,9 @@ func NewService(deps Dependencies) Service {
 	}
 }
 
-// CreatePayment создаёт платёж через Т-Банк и возвращает ссылку на форму оплаты
-func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID string) (*PaymentResult, error) {
+// CreatePayment создаёт платёж через Т-Банк и возвращает ссылку на форму оплаты.
+// successURL/failURL — переопределяют значения из конфигурации; пустая строка = использовать дефолт.
+func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID string, successURL, failURL string) (*PaymentResult, error) {
 	amount, ok := planPrices[planID]
 	if !ok {
 		return nil, fmt.Errorf("неизвестный план: %s", planID)
@@ -105,6 +108,16 @@ func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID stri
 
 	planName := planNames[planID]
 	orderId := fmt.Sprintf("tbank_%s_%d_%d", planID, userID, time.Now().Unix())
+
+	// Выбираем URL: сначала переданный override, затем дефолт из конфига
+	resolvedSuccessURL := successURL
+	if resolvedSuccessURL == "" {
+		resolvedSuccessURL = s.successURL
+	}
+	resolvedFailURL := failURL
+	if resolvedFailURL == "" {
+		resolvedFailURL = s.failURL
+	}
 
 	req := tbank_client.InitRequest{
 		Amount:      amount,
@@ -116,11 +129,11 @@ func (s *serviceImpl) CreatePayment(ctx context.Context, userID int, planID stri
 	if s.notifyURL != "" {
 		req.NotificationURL = s.notifyURL
 	}
-	if s.successURL != "" {
-		req.SuccessURL = s.successURL
+	if resolvedSuccessURL != "" {
+		req.SuccessURL = resolvedSuccessURL
 	}
-	if s.failURL != "" {
-		req.FailURL = s.failURL
+	if resolvedFailURL != "" {
+		req.FailURL = resolvedFailURL
 	}
 
 	resp, err := s.client.Init(ctx, req)

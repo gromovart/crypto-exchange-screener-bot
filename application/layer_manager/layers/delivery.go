@@ -192,6 +192,8 @@ func (dl *DeliveryLayer) Initialize() error {
 					SessionService:      sessionSvc.NewService(userSvc, nil),
 					TBankService:        maxTBankService,
 					SubscriptionService: maxSubSvc,
+					MaxTBankSuccessURL:  dl.config.TBank.MaxSuccessURL,
+					MaxTBankFailURL:     dl.config.TBank.MaxFailURL,
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 
