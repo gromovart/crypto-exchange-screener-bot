@@ -404,6 +404,52 @@ func (s *Service) ExtendSubscription(ctx context.Context, userID int, planCode s
 	return existing, nil
 }
 
+// DeductSubscription вычитает один период из активной подписки при возврате.
+// Если после вычета срок уже истёк — отменяет подписку полностью.
+func (s *Service) DeductSubscription(ctx context.Context, userID int, planCode string) error {
+	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("ошибка получения подписки: %w", err)
+	}
+	if existing == nil {
+		return nil // подписки нет — ничего не делаем
+	}
+
+	period, err := s.GetSubscriptionPeriod(planCode)
+	if err != nil {
+		return err
+	}
+
+	if existing.CurrentPeriodEnd == nil {
+		return s.CancelSubscription(ctx, userID, false)
+	}
+
+	newEnd := existing.CurrentPeriodEnd.Add(-period)
+
+	if !newEnd.After(time.Now()) {
+		logger.Info("🔄 Возврат: срок подписки истёк после вычета — отмена. Пользователь %d", userID)
+		return s.CancelSubscription(ctx, userID, false)
+	}
+
+	existing.CurrentPeriodEnd = &newEnd
+	if existing.Metadata == nil {
+		existing.Metadata = make(map[string]interface{})
+	}
+	existing.Metadata["deducted_at"] = time.Now().Format(time.RFC3339)
+	existing.Metadata["deducted_days"] = int(period.Hours() / 24)
+
+	if err := s.subRepo.Update(ctx, existing); err != nil {
+		return fmt.Errorf("ошибка обновления подписки: %w", err)
+	}
+
+	s.invalidateSubscriptionCache(userID)
+
+	logger.Info("➖ Вычтен период подписки: пользователь %d, план %s, новый конец %s",
+		userID, planCode, newEnd.Format("2006-01-02"))
+
+	return nil
+}
+
 // CancelSubscription отменяет подписку
 func (s *Service) CancelSubscription(ctx context.Context, userID int, cancelAtPeriodEnd bool) error {
 	// Получаем активную подписку
