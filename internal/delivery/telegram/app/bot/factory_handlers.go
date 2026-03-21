@@ -14,6 +14,7 @@ import (
 	notify_fall_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_fall_only"
 	notify_growth_only_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/notify_growth_only"
 	payment_confirm_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_confirm"
+	payment_history_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_history"
 	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
 	payment_tbank_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_sbp"
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
@@ -58,6 +59,7 @@ import (
 	profile_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/profile"
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	trading_session_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
@@ -74,6 +76,7 @@ type Services struct {
 	userService                *users.Service
 	tbankService               tbank_service.Service
 	currencyClient             *currency_client.Client
+	subscriptionService        *subscription.Service
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -356,6 +359,13 @@ func InitHandlerFactory(
 			return subscriptionMiddleware.RequireSubscription(handler)
 		}
 		return handler
+	})
+
+	// ИСТОРИЯ ПЛАТЕЖЕЙ
+	factory.RegisterHandlerCreator(constants.PaymentConstants.CallbackPaymentHistory, func() handlers.Handler {
+		return payment_history_handler.NewHandler(payment_history_handler.Dependencies{
+			SubscriptionService: services.subscriptionService,
+		})
 	})
 
 	// ПЛАТЕЖНЫЕ CALLBACK ОБРАБОТЧИКИ (без подписки - доступны всем)
