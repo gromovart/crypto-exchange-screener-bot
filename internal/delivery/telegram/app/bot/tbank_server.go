@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
@@ -107,7 +108,7 @@ func (s *TBankNotifyServer) handleNotification(w http.ResponseWriter, r *http.Re
 				params[k] = "false"
 			}
 		case float64:
-			params[k] = fmt.Sprintf("%v", val)
+			params[k] = strconv.FormatInt(int64(val), 10)
 		case json.Number:
 			params[k] = val.String()
 		default:
