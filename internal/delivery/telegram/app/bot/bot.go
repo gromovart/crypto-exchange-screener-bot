@@ -469,6 +469,8 @@ func (b *TelegramBot) StartPolling() error {
 		return fmt.Errorf("бот работает в режиме %s, нельзя запустить polling", b.currentMode)
 	}
 
+	b.startTBankServer()
+
 	return b.startPolling()
 }
 
