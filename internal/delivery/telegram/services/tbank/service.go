@@ -153,6 +153,22 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 		return nil
 	}
 
+	// Обрабатываем возврат
+	if status == "REFUNDED" {
+		planID, userID, err := parseOrderId(orderId)
+		if err == nil {
+			if s.subscriptionService != nil {
+				if cancelErr := s.subscriptionService.CancelSubscription(ctx, userID, false); cancelErr != nil {
+					logger.Warn("⚠️ Не удалось отменить подписку при возврате: пользователь=%d, ошибка=%v", userID, cancelErr)
+				} else {
+					logger.Info("🔄 Подписка отменена при возврате: пользователь=%d", userID)
+				}
+			}
+			go s.notifyRefunded(userID, planID)
+		}
+		return nil
+	}
+
 	// Нас интересуют только подтверждённые платежи
 	if successStr != "true" || status != "CONFIRMED" {
 		logger.Info("ℹ️ Платёж %s не подтверждён (статус: %s)", orderId, status)
@@ -296,6 +312,47 @@ func (s *serviceImpl) notifyPaymentFailed(userID int, planID string, errorCode s
 
 	if err := s.messageSender.SendTextMessage(chatID, text, keyboard); err != nil {
 		logger.Error("❌ Не удалось отправить уведомление об ошибке оплаты пользователю %d: %v", userID, err)
+	}
+}
+
+// notifyRefunded отправляет уведомление о возврате средств
+func (s *serviceImpl) notifyRefunded(userID int, planID string) {
+	if s.messageSender == nil || s.userService == nil {
+		return
+	}
+
+	user, err := s.userService.GetUserByID(userID)
+	if err != nil || user == nil {
+		return
+	}
+
+	chatID := int64(0)
+	if user.ChatID != "" {
+		chatID, _ = strconv.ParseInt(user.ChatID, 10, 64)
+	}
+	if chatID == 0 {
+		chatID = int64(userID)
+	}
+
+	planName := planNames[planID]
+	if planName == "" {
+		planName = planID
+	}
+
+	text := "↩️ *Средства возвращены*\n\n"
+	text += fmt.Sprintf("📋 Тариф: *%s*\n", planName)
+	text += "💳 Деньги будут зачислены на карту в течение нескольких дней.\n\n"
+	text += "⚠️ Подписка деактивирована."
+
+	keyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]string{
+			{{"text": "🛒 Купить снова", "callback_data": "payment_plan:" + planID}},
+			{{"text": "🏠 Главное меню", "callback_data": "menu_main"}},
+		},
+	}
+
+	if err := s.messageSender.SendTextMessage(chatID, text, keyboard); err != nil {
+		logger.Error("❌ Не удалось отправить уведомление о возврате пользователю %d: %v", userID, err)
 	}
 }
 
