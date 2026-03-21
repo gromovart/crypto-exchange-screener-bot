@@ -31,7 +31,7 @@ func (h *paysupportCommandHandler) Execute(params handlers.HandlerParams) (handl
 		"🛟 *Поддержка по платежам*\n\n"+
 			"Если у вас возникли вопросы или проблемы с оплатой, вы можете обратиться следующими способами:\n\n"+
 			"📧 *Email:* `support@gromovart.ru`\n\n"+
-			"💬 *Telegram:* @artemgrrr\n\n"+
+			"💬 *Telegram:* @crypto_exchange_screener\n\n"+
 			"⚠️ *Важно:*\n"+
 			"• При обращении укажите ваш ID: `%d`\n"+
 			"• Если у вас есть чек об оплате (receipt), прикрепите его скриншот\n"+

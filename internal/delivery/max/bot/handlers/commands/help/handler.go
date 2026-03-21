@@ -56,5 +56,5 @@ func HelpText() string {
 		"🔔 Уведомления: включены\n\n" +
 		"━━━ 📞 ПОДДЕРЖКА ━━━\n\n" +
 		"📧 Email: support@gromovart.ru\n" +
-		"💬 Telegram: @artemgrrr"
+		"💬 Telegram: @crypto_exchange_screener"
 }

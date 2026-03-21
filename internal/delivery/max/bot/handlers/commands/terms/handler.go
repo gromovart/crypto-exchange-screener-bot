@@ -47,7 +47,7 @@ func (h *termsHandler) Execute(params handlers.HandlerParams) (handlers.HandlerR
 
 		"*6. Контакты*\n" +
 		"📧 Email: support@gromovart.ru\n" +
-		"💬 Telegram: @artemgrrr"
+		"💬 Telegram: @crypto_exchange_screener"
 
 	keyboard := kb.Keyboard([][]map[string]string{
 		{kb.B(kb.Btn.Help, kb.CbHelp), kb.B(kb.Btn.MainMenu, kb.CbMenuMain)},
