@@ -188,6 +188,14 @@ func (dl *DeliveryLayer) Initialize() error {
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 
+				// Регистрируем MAX sender в Telegram T-Bank сервисе для уведомлений MAX пользователей
+				if tgBot := dl.telegramPackage.GetBot(); tgBot != nil {
+					if tbankSvc := tgBot.GetTBankService(); tbankSvc != nil {
+						tbankSvc.SetMaxSender(dl.maxBot.GetSender())
+						logger.Info("✅ MAX sender зарегистрирован в Telegram TBankService")
+					}
+				}
+
 				// Настраиваем режим работы (polling или webhook)
 				if dl.config.MAXMode == "webhook" {
 					webhookConfig := max_transport.WebhookConfig{

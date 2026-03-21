@@ -430,6 +430,14 @@ func (b *TelegramBot) GetMessageSender() message_sender.MessageSender {
 	return b.messageSender
 }
 
+// GetTBankService возвращает T-Bank сервис (для регистрации MAX sender после инициализации)
+func (b *TelegramBot) GetTBankService() tbank_service.Service {
+	if b.tbankServer == nil {
+		return nil
+	}
+	return b.tbankServer.GetService()
+}
+
 // GetConfig возвращает конфигурацию
 func (b *TelegramBot) GetConfig() *config.Config {
 	return b.config

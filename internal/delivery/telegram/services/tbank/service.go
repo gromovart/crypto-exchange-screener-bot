@@ -42,10 +42,17 @@ type PaymentResult struct {
 	UserID     int
 }
 
+// NotificationSender минимальный интерфейс отправки уведомлений (Telegram и MAX реализуют его)
+type NotificationSender interface {
+	SendTextMessage(chatID int64, text string, keyboard interface{}) error
+}
+
 // Service интерфейс сервиса Т-Банк платежей
 type Service interface {
 	CreatePayment(ctx context.Context, userID int, planID string) (*PaymentResult, error)
 	HandleNotification(ctx context.Context, params map[string]string) error
+	// SetMaxSender регистрирует MAX message sender для уведомлений MAX-пользователей
+	SetMaxSender(sender NotificationSender)
 }
 
 // Dependencies зависимости сервиса
@@ -67,6 +74,7 @@ type serviceImpl struct {
 	userService         *users.Service
 	paymentCoreService  *payment.PaymentService
 	messageSender       message_sender.MessageSender
+	maxSender           NotificationSender // nil, если MAX не инициализирован
 	password            string
 	notifyURL           string
 	successURL          string
@@ -290,9 +298,15 @@ func parseOrderId(orderId string) (planID string, userID int, err error) {
 	return planID, uid, nil
 }
 
-// notifyUser отправляет уведомление пользователю в Telegram после успешной оплаты
+// SetMaxSender устанавливает MAX message sender для уведомлений MAX-пользователей
+func (s *serviceImpl) SetMaxSender(sender NotificationSender) {
+	s.maxSender = sender
+	logger.Info("✅ TBankService: MAX sender зарегистрирован")
+}
+
+// notifyUser отправляет уведомление пользователю после успешной оплаты
 func (s *serviceImpl) notifyUser(userID int, planID string) {
-	if s.messageSender == nil || s.userService == nil {
+	if s.userService == nil {
 		return
 	}
 
@@ -306,6 +320,33 @@ func (s *serviceImpl) notifyUser(userID int, planID string) {
 		return
 	}
 
+	planName := planNames[planID]
+	if planName == "" {
+		planName = planID
+	}
+
+	text := "✅ Платёж успешно получен!\n\n"
+	text += fmt.Sprintf("Тариф: %s\n", planName)
+	text += "Ваша подписка активирована!\n\n"
+	text += "Теперь вам доступны все функции выбранного тарифа."
+
+	// MAX пользователь — отправляем через MAX
+	if s.maxSender != nil && user.MaxChatID != "" {
+		maxChatID, _ := strconv.ParseInt(user.MaxChatID, 10, 64)
+		if maxChatID != 0 {
+			if err := s.maxSender.SendTextMessage(maxChatID, text, nil); err != nil {
+				logger.Error("❌ Не удалось отправить MAX уведомление об оплате пользователю %d: %v", userID, err)
+			} else {
+				logger.Info("✅ MAX уведомление об оплате отправлено пользователю %d (chatID=%d)", userID, maxChatID)
+			}
+			return
+		}
+	}
+
+	// Telegram пользователь
+	if s.messageSender == nil {
+		return
+	}
 	chatID := int64(0)
 	if user.ChatID != "" {
 		chatID, _ = strconv.ParseInt(user.ChatID, 10, 64)
@@ -314,31 +355,25 @@ func (s *serviceImpl) notifyUser(userID int, planID string) {
 		chatID = int64(userID)
 	}
 
-	planName := planNames[planID]
-	if planName == "" {
-		planName = planID
-	}
-
-	text := "✅ *Платёж успешно получен!*\n\n"
-	text += fmt.Sprintf("📋 Тариф: *%s*\n", planName)
-	text += "🎉 Ваша подписка активирована!\n\n"
-	text += "Теперь вам доступны все функции выбранного тарифа."
-
 	keyboard := map[string]interface{}{
 		"inline_keyboard": [][]map[string]string{
 			{{"text": "👤 Мой профиль", "callback_data": "profile_main"}},
 			{{"text": "🏠 Главное меню", "callback_data": "menu_main"}},
 		},
 	}
+	tgText := "✅ *Платёж успешно получен!*\n\n"
+	tgText += fmt.Sprintf("📋 Тариф: *%s*\n", planName)
+	tgText += "🎉 Ваша подписка активирована!\n\n"
+	tgText += "Теперь вам доступны все функции выбранного тарифа."
 
-	if err := s.messageSender.SendTextMessage(chatID, text, keyboard); err != nil {
+	if err := s.messageSender.SendTextMessage(chatID, tgText, keyboard); err != nil {
 		logger.Error("❌ Не удалось отправить уведомление об оплате пользователю %d: %v", userID, err)
 	}
 }
 
 // notifyPaymentFailed отправляет уведомление об отклонённом платеже
 func (s *serviceImpl) notifyPaymentFailed(userID int, planID string, errorCode string) {
-	if s.messageSender == nil || s.userService == nil {
+	if s.userService == nil {
 		return
 	}
 
@@ -347,18 +382,35 @@ func (s *serviceImpl) notifyPaymentFailed(userID int, planID string, errorCode s
 		return
 	}
 
+	reason := rejectionReason(errorCode)
+	planName := planNames[planID]
+	if planName == "" {
+		planName = planID
+	}
+
+	// MAX пользователь
+	if s.maxSender != nil && user.MaxChatID != "" {
+		maxChatID, _ := strconv.ParseInt(user.MaxChatID, 10, 64)
+		if maxChatID != 0 {
+			text := "❌ Не получилось оплатить\n\n"
+			text += fmt.Sprintf("Тариф: %s\n", planName)
+			text += fmt.Sprintf("Причина: %s\n\n", reason)
+			text += "Попробуйте ещё раз."
+			_ = s.maxSender.SendTextMessage(maxChatID, text, nil)
+			return
+		}
+	}
+
+	// Telegram пользователь
+	if s.messageSender == nil {
+		return
+	}
 	chatID := int64(0)
 	if user.ChatID != "" {
 		chatID, _ = strconv.ParseInt(user.ChatID, 10, 64)
 	}
 	if chatID == 0 {
 		chatID = int64(userID)
-	}
-
-	reason := rejectionReason(errorCode)
-	planName := planNames[planID]
-	if planName == "" {
-		planName = planID
 	}
 
 	text := "❌ *Не получилось оплатить*\n\n"
@@ -380,7 +432,7 @@ func (s *serviceImpl) notifyPaymentFailed(userID int, planID string, errorCode s
 
 // notifyRefunded отправляет уведомление о возврате средств
 func (s *serviceImpl) notifyRefunded(userID int, planID string) {
-	if s.messageSender == nil || s.userService == nil {
+	if s.userService == nil {
 		return
 	}
 
@@ -389,17 +441,34 @@ func (s *serviceImpl) notifyRefunded(userID int, planID string) {
 		return
 	}
 
+	planName := planNames[planID]
+	if planName == "" {
+		planName = planID
+	}
+
+	// MAX пользователь
+	if s.maxSender != nil && user.MaxChatID != "" {
+		maxChatID, _ := strconv.ParseInt(user.MaxChatID, 10, 64)
+		if maxChatID != 0 {
+			text := "↩️ Средства возвращены\n\n"
+			text += fmt.Sprintf("Тариф: %s\n", planName)
+			text += "Деньги будут зачислены на карту в течение нескольких дней.\n\n"
+			text += "Подписка деактивирована."
+			_ = s.maxSender.SendTextMessage(maxChatID, text, nil)
+			return
+		}
+	}
+
+	// Telegram пользователь
+	if s.messageSender == nil {
+		return
+	}
 	chatID := int64(0)
 	if user.ChatID != "" {
 		chatID, _ = strconv.ParseInt(user.ChatID, 10, 64)
 	}
 	if chatID == 0 {
 		chatID = int64(userID)
-	}
-
-	planName := planNames[planID]
-	if planName == "" {
-		planName = planID
 	}
 
 	text := "↩️ *Средства возвращены*\n\n"

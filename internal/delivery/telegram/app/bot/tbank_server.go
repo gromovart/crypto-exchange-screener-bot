@@ -61,6 +61,11 @@ func (s *TBankNotifyServer) Start() error {
 	return nil
 }
 
+// GetService возвращает T-Bank сервис
+func (s *TBankNotifyServer) GetService() tbank_service.Service {
+	return s.service
+}
+
 // Stop останавливает сервер
 func (s *TBankNotifyServer) Stop() error {
 	if s.server != nil {
