@@ -8,6 +8,7 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
+	"crypto-exchange-screener-bot/pkg/logger"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
@@ -64,17 +65,19 @@ func (h *paymentHistoryHandler) Execute(params handlers.HandlerParams) (handlers
 
 func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string {
 	if len(payments) == 0 {
-		return "📋 *История платежей*\n\nПлатежей пока нет."
+		return "📋 История платежей\n\nПлатежей пока нет."
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 *История платежей*\n\n")
+	sb.WriteString("📋 История платежей\n\n")
 
 	for i, p := range payments {
 		date := p.CreatedAt.Format("02.01.2006")
 		status := formatStatus(p.Status)
 		provider := formatProvider(p.Provider)
 		amount := formatAmount(p)
+
+		logger.Debug("[payment_history] #%d provider=%q currency=%q amount=%v fiat=%d", i+1, p.Provider, p.Currency, p.Amount, p.FiatAmount)
 
 		sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, provider, status))
 		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
