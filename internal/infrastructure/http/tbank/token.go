@@ -51,21 +51,5 @@ func VerifyToken(params map[string]string, password string) bool {
 	}
 
 	expected := GenerateToken(clean, password)
-	if !strings.EqualFold(received, expected) {
-		// Временный debug-лог для диагностики
-		keys := make([]string, 0, len(clean))
-		for k := range clean {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		var sb strings.Builder
-		for _, k := range keys {
-			sb.WriteString(k + "=" + clean[k] + " ")
-		}
-		println("[DEBUG TOKEN] params:", sb.String())
-		println("[DEBUG TOKEN] received:", received)
-		println("[DEBUG TOKEN] expected:", expected)
-		return false
-	}
-	return true
+	return strings.EqualFold(received, expected)
 }

@@ -208,6 +208,10 @@ func (s *serviceImpl) notifyUser(userID int, planID string) {
 		logger.Error("❌ Не удалось найти пользователя %d для уведомления: %v", userID, err)
 		return
 	}
+	if user == nil {
+		logger.Error("❌ Пользователь %d не найден для уведомления", userID)
+		return
+	}
 
 	chatID := int64(0)
 	if user.ChatID != "" {
