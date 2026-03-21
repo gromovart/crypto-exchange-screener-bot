@@ -57,6 +57,16 @@ func (h *paymentHistoryHandler) Execute(params handlers.HandlerParams) (handlers
 	}
 
 	message := h.buildMessage(payments)
+	msgBytes := []byte(message)
+	logger.Debug("[payment_history] total=%d bytes, payments=%d\nMESSAGE:\n%s", len(msgBytes), len(payments), message)
+	end := len(msgBytes)
+	if end > 540 {
+		end = 540
+	}
+	start := 455
+	if start < len(msgBytes) {
+		logger.Debug("[payment_history] bytes[455:%d] = %q", end, string(msgBytes[start:end]))
+	}
 	return handlers.HandlerResult{
 		Message:  message,
 		Keyboard: h.backKeyboard(),
