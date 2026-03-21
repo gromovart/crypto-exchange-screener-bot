@@ -103,6 +103,6 @@ func (d PaymentEventData) ToMap() map[string]interface{} {
 // ⭐ НОВЫЙ ИНТЕРФЕЙС: SubscriptionService для работы с подписками
 type SubscriptionService interface {
 	GetActiveSubscription(ctx context.Context, userID int) (*models.UserSubscription, error)
-	CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error)
+	CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool, extraMeta ...map[string]interface{}) (*models.UserSubscription, error)
 	UpgradeSubscription(ctx context.Context, userID int, newPlanCode string, paymentID *int64) (*models.UserSubscription, error)
 }

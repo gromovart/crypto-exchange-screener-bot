@@ -150,7 +150,7 @@ func (s *Service) GetSubscriptionPeriod(planCode string) (time.Duration, error) 
 }
 
 // CreateSubscription создает подписку для пользователя
-func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool) (*models.UserSubscription, error) {
+func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, isTrial bool, extraMeta ...map[string]interface{}) (*models.UserSubscription, error) {
 	if s == nil || s.planRepo == nil {
 		return nil, fmt.Errorf("сервис подписок не инициализирован")
 	}
@@ -228,6 +228,13 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, planCode s
 			"payment_method": "stars",
 			"created_at":     now.Format(time.RFC3339),
 		},
+	}
+
+	// Merge extra metadata (e.g. amount from T-Bank)
+	if len(extraMeta) > 0 && extraMeta[0] != nil {
+		for k, v := range extraMeta[0] {
+			subscription.Metadata[k] = v
+		}
 	}
 
 	// Для free плана добавляем дополнительную метку
@@ -360,7 +367,7 @@ func (s *Service) UpgradeSubscription(ctx context.Context, userID int, newPlanCo
 }
 
 // ExtendSubscription продлевает активную подписку — добавляет период поверх текущего срока
-func (s *Service) ExtendSubscription(ctx context.Context, userID int, planCode string, paymentID *int64) (*models.UserSubscription, error) {
+func (s *Service) ExtendSubscription(ctx context.Context, userID int, planCode string, paymentID *int64, extraMeta ...map[string]interface{}) (*models.UserSubscription, error) {
 	existing, err := s.subRepo.GetActiveByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка получения подписки: %w", err)
@@ -391,6 +398,13 @@ func (s *Service) ExtendSubscription(ctx context.Context, userID int, planCode s
 	}
 	existing.Metadata["extended_at"] = time.Now().Format(time.RFC3339)
 	existing.Metadata["extended_by_days"] = int(period.Hours() / 24)
+
+	// Merge extra metadata
+	if len(extraMeta) > 0 && extraMeta[0] != nil {
+		for k, v := range extraMeta[0] {
+			existing.Metadata[k] = v
+		}
+	}
 
 	if err := s.subRepo.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("ошибка обновления подписки: %w", err)

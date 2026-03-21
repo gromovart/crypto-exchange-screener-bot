@@ -188,12 +188,23 @@ func (s *serviceImpl) HandleNotification(ctx context.Context, params map[string]
 		return fmt.Errorf("SubscriptionService не настроен")
 	}
 
-	_, err = s.subscriptionService.CreateSubscription(ctx, userID, planID, nil, false)
+	// Извлекаем сумму платежа из уведомления
+	paymentMeta := map[string]interface{}{
+		"payment_method": "tbank",
+	}
+	if amountStr, ok := params["Amount"]; ok {
+		if kopecks, err2 := strconv.ParseInt(amountStr, 10, 64); err2 == nil {
+			paymentMeta["amount_kopecks"] = kopecks
+			paymentMeta["amount_rub"] = kopecks / 100
+		}
+	}
+
+	_, err = s.subscriptionService.CreateSubscription(ctx, userID, planID, nil, false, paymentMeta)
 	if err != nil {
 		if strings.Contains(err.Error(), "уже есть активная подписка") {
 			// Подписка уже есть — накапливаем время поверх текущего срока
 			logger.Info("➕ Накопление подписки: план=%s, пользователь=%d", planID, userID)
-			_, err = s.subscriptionService.ExtendSubscription(ctx, userID, planID, nil)
+			_, err = s.subscriptionService.ExtendSubscription(ctx, userID, planID, nil, paymentMeta)
 			if err != nil {
 				return fmt.Errorf("ошибка продления подписки: %w", err)
 			}

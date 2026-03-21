@@ -81,6 +81,10 @@ func (h *paymentHistoryHandler) buildMessage(subs []*models.UserSubscription) st
 		sb.WriteString(fmt.Sprintf("%d. *%s*\n", i+1, planName))
 		sb.WriteString(fmt.Sprintf("   📅 %s  %s\n", date, status))
 
+		if amount := formatAmount(sub.Metadata); amount != "" {
+			sb.WriteString(fmt.Sprintf("   💰 %s\n", amount))
+		}
+
 		if sub.CurrentPeriodEnd != nil {
 			sb.WriteString(fmt.Sprintf("   ⏳ до %s\n", sub.CurrentPeriodEnd.Format("02.01.2006")))
 		}
@@ -88,6 +92,33 @@ func (h *paymentHistoryHandler) buildMessage(subs []*models.UserSubscription) st
 	}
 
 	return sb.String()
+}
+
+func formatAmount(meta map[string]interface{}) string {
+	if meta == nil {
+		return ""
+	}
+	// Сумма от Т-Банк (в рублях)
+	if rub, ok := meta["amount_rub"]; ok {
+		switch v := rub.(type) {
+		case float64:
+			return fmt.Sprintf("%d ₽", int64(v))
+		case int64:
+			return fmt.Sprintf("%d ₽", v)
+		case int:
+			return fmt.Sprintf("%d ₽", v)
+		}
+	}
+	// Fallback: копейки → рубли
+	if kopecks, ok := meta["amount_kopecks"]; ok {
+		switch v := kopecks.(type) {
+		case float64:
+			return fmt.Sprintf("%d ₽", int64(v)/100)
+		case int64:
+			return fmt.Sprintf("%d ₽", v/100)
+		}
+	}
+	return ""
 }
 
 func (h *paymentHistoryHandler) formatStatus(status string) string {
