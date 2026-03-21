@@ -131,10 +131,10 @@ func formatProvider(provider string) string {
 	switch provider {
 	case "tbank":
 		return "💳 Т-Банк"
-	case "stars", "telegram":
+	case "stars", "telegram", "telegram_stars":
 		return "⭐ Telegram Stars"
 	default:
-		return "💳 " + provider
+		return "💳 " + escapeMD(provider)
 	}
 }
 
