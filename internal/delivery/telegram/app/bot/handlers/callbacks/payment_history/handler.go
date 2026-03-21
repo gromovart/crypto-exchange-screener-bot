@@ -8,7 +8,6 @@ import (
 
 	"crypto-exchange-screener-bot/internal/core/domain/payment"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
-	"crypto-exchange-screener-bot/pkg/logger"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
@@ -57,17 +56,6 @@ func (h *paymentHistoryHandler) Execute(params handlers.HandlerParams) (handlers
 	}
 
 	message := h.buildMessage(payments)
-	msgBytes := []byte(message)
-	logger.Warn("[payment_history] total=%d bytes, payments=%d", len(msgBytes), len(payments))
-	logger.Warn("[payment_history] MESSAGE:\n%s", message)
-	end := len(msgBytes)
-	if end > 540 {
-		end = 540
-	}
-	start := 455
-	if start < len(msgBytes) {
-		logger.Warn("[payment_history] bytes[455:%d] = %q", end, string(msgBytes[start:end]))
-	}
 	return handlers.HandlerResult{
 		Message:  message,
 		Keyboard: h.backKeyboard(),
@@ -88,14 +76,14 @@ func (h *paymentHistoryHandler) buildMessage(payments []*models.Payment) string 
 		provider := formatProvider(p.Provider)
 		amount := formatAmount(p)
 
-		logger.Warn("[payment_history] #%d provider=%q currency=%q amount=%v fiat=%d", i+1, p.Provider, p.Currency, p.Amount, p.FiatAmount)
-
 		sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, provider, status))
 		sb.WriteString(fmt.Sprintf("   📅 %s  💰 %s\n", date, amount))
 		sb.WriteString("\n")
 	}
 
-	return sb.String()
+	// Экранируем весь текст — данные из БД могут содержать
+	// символы Markdown (_  *  `  [), которые ломают парсер Telegram
+	return escapeMD(sb.String())
 }
 
 func formatAmount(p *models.Payment) string {
