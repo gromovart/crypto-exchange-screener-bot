@@ -157,9 +157,9 @@ func resolveCommand(upd maxpkg.Update, params handlers.HandlerParams) string {
 		}
 		// Команда с \/: "/help", "/start", "/notifications" и т.п.
 		if strings.HasPrefix(text, "/") {
-			// Убираем "@botname" и аргументы для чистого имени команды
-			cmd := strings.SplitN(text, "@", 2)[0] // "/help@bot" → "/help"
-			cmd = strings.SplitN(cmd, " ", 2)[0]   // "/start arg" → "/start"
+			// Убираем "@botname", но сохраняем аргументы для роутера
+			// "/help@bot" → "/help", "/link ABC123" → "/link ABC123"
+			cmd := strings.SplitN(text, "@", 2)[0]
 			return cmd
 		}
 		return ""
