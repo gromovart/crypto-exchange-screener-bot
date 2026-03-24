@@ -185,6 +185,16 @@ func (dl *DeliveryLayer) Initialize() error {
 					logger.Warn("⚠️ MAX: не удалось создать SubscriptionService: %v", subErr)
 				}
 
+				var authCfg *max_bot.AuthConfig
+				if dl.config.Auth.Enabled && dl.config.Auth.Secret != "" {
+					authCfg = &max_bot.AuthConfig{
+						Enabled:   true,
+						Port:      dl.config.Auth.Port,
+						Secret:    dl.config.Auth.Secret,
+						OTPTTLSec: dl.config.Auth.OTPTTLSec,
+					}
+				}
+
 				deps := max_bot.Dependencies{
 					UserService:         userSvc,
 					NotifyService:       notifySvc.NewServiceWithDependencies(userSvc),
@@ -194,6 +204,7 @@ func (dl *DeliveryLayer) Initialize() error {
 					SubscriptionService: maxSubSvc,
 					MaxTBankSuccessURL:  dl.config.TBank.MaxSuccessURL,
 					MaxTBankFailURL:     dl.config.TBank.MaxFailURL,
+					AuthConfig:          authCfg,
 				}
 				dl.maxBot = max_bot.NewBot(dl.maxPackage.GetClient(), deps)
 

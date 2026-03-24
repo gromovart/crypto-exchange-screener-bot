@@ -292,6 +292,16 @@ type Config struct {
 		MaxFailURL    string `mapstructure:"MAX_TBANK_FAIL_URL"`     // MAX: редирект при ошибке
 	}
 
+	// ============================
+	// AUTH OTP SERVER
+	// ============================
+	Auth struct {
+		Enabled  bool          `mapstructure:"AUTH_ENABLED"`
+		Port     int           `mapstructure:"AUTH_PORT"`
+		Secret   string        `mapstructure:"AUTH_INTERNAL_SECRET"`
+		OTPTTLSec int          `mapstructure:"AUTH_OTP_TTL_SEC"` // TTL кода в секундах (default 300)
+	}
+
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
 	// ======================
