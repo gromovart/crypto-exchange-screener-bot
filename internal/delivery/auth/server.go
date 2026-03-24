@@ -129,6 +129,10 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "аккаунт деактивирован")
 		return
 	}
+	if !user.IsPremium() && !user.IsAdmin() {
+		writeError(w, http.StatusForbidden, "доступ только для пользователей с активной подпиской")
+		return
+	}
 
 	// Определяем chatID для отправки
 	chatID, err := maxChatIDFrom(user)
