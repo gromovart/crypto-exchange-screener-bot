@@ -73,7 +73,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	msg := fmt.Sprintf(
 		"🔑 Профиль\n\n"+
 			"🆔 MAX ID: %s\n"+
-			"🔢 ID: %d\n"+
+			"🔢 USER_ID: %d\n"+
 			"👤 Имя: %s\n"+
 			"📧 Username: %s\n"+
 			"⭐ Роль: %s\n"+
