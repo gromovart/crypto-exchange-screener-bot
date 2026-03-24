@@ -73,6 +73,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	msg := fmt.Sprintf(
 		"🔑 Профиль\n\n"+
 			"🆔 MAX ID: %s\n"+
+			"🔢 ID: %d\n"+
 			"👤 Имя: %s\n"+
 			"📧 Username: %s\n"+
 			"⭐ Роль: %s\n"+
@@ -85,6 +86,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 			"🔐 Последний вход: %s\n\n"+
 			"💡 MAX ID используется для входа в Crypto Analyzer",
 		maxIDDisplay,
+		user.ID,
 		displayName,
 		displayUsername,
 		roleDisplay,
