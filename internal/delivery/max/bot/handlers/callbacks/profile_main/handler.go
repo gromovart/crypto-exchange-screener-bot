@@ -64,9 +64,15 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		fallMin = 2.0
 	}
 
+	// MAX User ID — нужен для входа в Crypto Analyzer
+	maxIDDisplay := "не привязан"
+	if user.MaxUserID != nil {
+		maxIDDisplay = fmt.Sprintf("%d", *user.MaxUserID)
+	}
+
 	msg := fmt.Sprintf(
 		"🔑 Профиль\n\n"+
-			"🆔 ID: %d\n"+
+			"🆔 MAX ID: %s\n"+
 			"👤 Имя: %s\n"+
 			"📧 Username: %s\n"+
 			"⭐ Роль: %s\n"+
@@ -76,8 +82,9 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 			"· Мин. рост: %.2f%%\n"+
 			"· Мин. падение: %.2f%%\n\n"+
 			"📅 Регистрация: %s\n"+
-			"🔐 Последний вход: %s",
-		user.ID,
+			"🔐 Последний вход: %s\n\n"+
+			"💡 MAX ID используется для входа в Crypto Analyzer",
+		maxIDDisplay,
 		displayName,
 		displayUsername,
 		roleDisplay,
