@@ -299,6 +299,14 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.TBank.MaxSuccessURL = getEnv("MAX_TBANK_SUCCESS_URL", "")
 	cfg.TBank.MaxFailURL = getEnv("MAX_TBANK_FAIL_URL", "")
 
+	// ============================
+	// AUTH OTP SERVER
+	// ============================
+	cfg.Auth.Enabled   = getEnvBool("AUTH_ENABLED", false)
+	cfg.Auth.Port      = getEnvInt("AUTH_PORT", 8081)
+	cfg.Auth.Secret    = getEnv("AUTH_INTERNAL_SECRET", "")
+	cfg.Auth.OTPTTLSec = getEnvInt("AUTH_OTP_TTL_SEC", 300)
+
 	// ======================
 	// ДОПОЛНИТЕЛЬНЫЙ МОНИТОРИНГ
 	// ======================

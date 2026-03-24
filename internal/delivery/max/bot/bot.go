@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	maxpkg "crypto-exchange-screener-bot/internal/delivery/max"
+	"crypto-exchange-screener-bot/internal/delivery/auth"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/message_sender"
@@ -22,16 +23,19 @@ type Bot struct {
 	authMiddleware *middleware.AuthMiddleware
 	poller         *transport.Poller
 	webhookServer  *transport.WebhookServer
+	otpServer      *auth.Server
 	mode           string // "polling" или "webhook"
 }
 
 // NewBot создаёт MAX бота с зарегистрированными хэндлерами
 func NewBot(client *maxpkg.Client, deps Dependencies) *Bot {
+	sender := message_sender.NewSender(client, true)
 	b := &Bot{
 		client:         client,
-		sender:         message_sender.NewSender(client, true),
+		sender:         sender,
 		router:         router.NewRouter(),
 		authMiddleware: middleware.NewAuthMiddleware(deps.UserService),
+		otpServer:      newOTPServer(deps.AuthConfig, deps.UserService, sender),
 		mode:           "polling", // По умолчанию polling
 	}
 
@@ -109,6 +113,15 @@ func (b *Bot) GetSender() message_sender.MessageSender {
 
 // Start запускает бот в соответствующем режиме. Блокирует до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
+	// Запускаем OTP auth-сервер (если настроен)
+	if b.otpServer != nil {
+		if err := b.otpServer.Start(); err != nil {
+			logger.Error("❌ Не удалось запустить Auth OTP-сервер: %v", err)
+		} else {
+			logger.Info("✅ Auth OTP-сервер запущен")
+		}
+	}
+
 	if b.mode == "webhook" {
 		if b.webhookServer == nil {
 			logger.Error("❌ MAX Bot: webhook сервер не инициализирован")
@@ -132,6 +145,11 @@ func (b *Bot) Start(ctx context.Context) {
 
 // Stop останавливает бота
 func (b *Bot) Stop() error {
+	if b.otpServer != nil {
+		if err := b.otpServer.Stop(); err != nil {
+			logger.Warn("⚠️ Ошибка остановки Auth OTP-сервера: %v", err)
+		}
+	}
 	if b.mode == "webhook" && b.webhookServer != nil {
 		return b.webhookServer.Stop()
 	}

@@ -62,6 +62,11 @@ type User struct {
 	LastSignalAt time.Time `db:"last_signal_at" json:"last_signal_at,omitempty"`
 }
 
+// GetMaxChatID возвращает MaxChatID пользователя (для auth сервера)
+func (u *User) GetMaxChatID() string {
+	return u.MaxChatID
+}
+
 // Константы ролей пользователей
 const (
 	RoleUser      = "user"

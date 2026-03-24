@@ -2,8 +2,12 @@
 package bot
 
 import (
+	"time"
+
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
+	"crypto-exchange-screener-bot/internal/delivery/auth"
+	"crypto-exchange-screener-bot/internal/delivery/max/bot/message_sender"
 	cbAuthLogin "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/auth_login"
 	cbAuthLogout "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/auth_logout"
 	cbHelp "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/help"
@@ -51,6 +55,14 @@ import (
 	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 )
 
+// AuthConfig — конфигурация OTP auth-сервера
+type AuthConfig struct {
+	Enabled  bool
+	Port     int
+	Secret   string
+	OTPTTLSec int
+}
+
 // Dependencies — зависимости для регистрации хэндлеров
 type Dependencies struct {
 	UserService         *users.Service
@@ -61,6 +73,22 @@ type Dependencies struct {
 	SubscriptionService *subscription.Service   // nil — если проверка подписки отключена
 	MaxTBankSuccessURL  string                  // URL редиректа после успешной оплаты (MAX)
 	MaxTBankFailURL     string                  // URL редиректа после неудачной оплаты (MAX)
+	AuthConfig          *AuthConfig             // nil — если auth-сервер отключён
+}
+
+// newOTPServer создаёт auth.Server из конфигурации и sender-а
+func newOTPServer(cfg *AuthConfig, userService *users.Service, sender message_sender.MessageSender) *auth.Server {
+	if cfg == nil || !cfg.Enabled {
+		return nil
+	}
+	if cfg.Secret == "" {
+		return nil
+	}
+	ttl := time.Duration(cfg.OTPTTLSec) * time.Second
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	return auth.NewServer(userService, sender, cfg.Port, cfg.Secret, ttl)
 }
 
 // RegisterAll регистрирует все команды и callback-хэндлеры в роутере

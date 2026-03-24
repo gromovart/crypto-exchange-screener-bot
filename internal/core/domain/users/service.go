@@ -805,6 +805,21 @@ func (s *Service) invalidateUserCache(user *models.User) {
 // GetOrCreateUserByMaxID ищет пользователя по max_user_id. Если не найден —
 // создаёт нового пользователя, используя maxUserID как telegram_id (backward compat)
 // и устанавливает max_user_id = maxUserID.
+// GetUserByMaxID возвращает пользователя по max_user_id без создания нового.
+// Возвращает nil, nil если пользователь не найден.
+func (s *Service) GetUserByMaxID(maxUserID int64) (*models.User, error) {
+	cacheKey := s.cachePrefix + fmt.Sprintf("max:%d", maxUserID)
+	var cached models.User
+	if err := s.cache.Get(context.Background(), cacheKey, &cached); err == nil {
+		return &cached, nil
+	}
+	user, err := s.repo.FindByMaxUserID(maxUserID)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, fmt.Errorf("GetUserByMaxID: %w", err)
+	}
+	return user, nil
+}
+
 func (s *Service) GetOrCreateUserByMaxID(maxUserID int64, username, firstName, lastName string) (*models.User, error) {
 	cacheKey := s.cachePrefix + fmt.Sprintf("max:%d", maxUserID)
 	var cachedUser models.User
