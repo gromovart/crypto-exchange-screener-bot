@@ -2,6 +2,7 @@
 package counter
 
 import (
+	"context"
 	"crypto-exchange-screener-bot/internal/core/domain/subscription"
 	"crypto-exchange-screener-bot/internal/core/domain/users"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/buttons"
@@ -27,6 +28,7 @@ type serviceImpl struct {
 	tradingSessionService trading_session.Service
 	notificationGuard     *SymbolNotificationGuard
 	guardMu               sync.RWMutex
+	signalPublisher       SignalPublisher // опционально, nil — публикация отключена
 }
 
 func NewService(
@@ -36,6 +38,7 @@ func NewService(
 	messageSender message_sender.MessageSender,
 	buttonBuilder *buttons.ButtonBuilder,
 	tradingSessionService trading_session.Service,
+	publisher SignalPublisher,
 ) Service {
 	return &serviceImpl{
 		userService:           userService,
@@ -45,6 +48,7 @@ func NewService(
 		buttonBuilder:         buttonBuilder,
 		tradingSessionService: tradingSessionService,
 		notificationGuard:     NewSymbolNotificationGuard(),
+		signalPublisher:       publisher,
 	}
 }
 
@@ -56,6 +60,9 @@ func (s *serviceImpl) Exec(params CounterParams) (CounterResult, error) {
 	}
 
 	counterData := s.convertToFormatterData(rawData)
+
+	// Публикуем сигнал в Redis для Analyzer (один раз, независимо от числа пользователей)
+	s.publishToAnalyzer(rawData)
 
 	usersToNotify, err := s.getUsersToNotify(rawData)
 	if err != nil {
@@ -161,6 +168,17 @@ func (s *serviceImpl) sendNotificationWithGuard(user *models.User, data formatte
 	}
 
 	return fmt.Errorf("message sender not initialized")
+}
+
+func (s *serviceImpl) publishToAnalyzer(data RawCounterData) {
+	if s.signalPublisher == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.signalPublisher.PublishSignal(ctx, data); err != nil {
+		logger.Warn("⚠️ Не удалось опубликовать сигнал для Analyzer: %v", err)
+	}
 }
 
 func (s *serviceImpl) logSuccessfulNotification(user *models.User, symbol, direction string, signalPeriod, rateLimitPeriod time.Duration, newCount, limit int) {

@@ -20,14 +20,14 @@ import (
 
 // ServiceFactory фабрика сервисов уровня пакета Telegram
 type ServiceFactory struct {
-	userService         *users.Service
-	subscriptionService *subscription.Service
-	paymentCoreService  *payment.PaymentService
-	messageSender       message_sender.MessageSender
-	buttonBuilder       *buttons.ButtonBuilder
-	formatterProvider   *formatters.FormatterProvider
-	// Добавляем tradingSessionService
-	tradingSessionService trading_session.Service // ← ДОБАВИТЬ поле
+	userService           *users.Service
+	subscriptionService   *subscription.Service
+	paymentCoreService    *payment.PaymentService
+	messageSender         message_sender.MessageSender
+	buttonBuilder         *buttons.ButtonBuilder
+	formatterProvider     *formatters.FormatterProvider
+	tradingSessionService trading_session.Service
+	signalPublisher       counter.SignalPublisher
 }
 
 // ServiceDependencies зависимости для фабрики сервисов
@@ -38,7 +38,8 @@ type ServiceDependencies struct {
 	MessageSender         message_sender.MessageSender
 	ButtonBuilder         *buttons.ButtonBuilder
 	FormatterProvider     *formatters.FormatterProvider
-	TradingSessionService trading_session.Service // ← ДОБАВИТЬ поле
+	TradingSessionService trading_session.Service
+	SignalPublisher       counter.SignalPublisher // опционально, nil — публикация отключена
 }
 
 // NewServiceFactory создает фабрику сервисов
@@ -52,7 +53,8 @@ func NewServiceFactory(deps ServiceDependencies) *ServiceFactory {
 		messageSender:         deps.MessageSender,
 		buttonBuilder:         deps.ButtonBuilder,
 		formatterProvider:     deps.FormatterProvider,
-		tradingSessionService: deps.TradingSessionService, // ← ДОБАВИТЬ инициализацию
+		tradingSessionService: deps.TradingSessionService,
+		signalPublisher:       deps.SignalPublisher,
 	}
 }
 
@@ -63,14 +65,14 @@ func (f *ServiceFactory) CreateProfileService() profile.Service {
 
 // CreateCounterService создает CounterService
 func (f *ServiceFactory) CreateCounterService() counter.Service {
-	// ✅ ИСПРАВЛЕНО: добавляем tradingSessionService как 6-й аргумент
 	return counter.NewService(
 		f.userService,
 		f.subscriptionService,
 		f.formatterProvider,
 		f.messageSender,
 		f.buttonBuilder,
-		f.tradingSessionService, // ← ДОБАВЛЯЕМ этот аргумент
+		f.tradingSessionService,
+		f.signalPublisher,
 	)
 }
 

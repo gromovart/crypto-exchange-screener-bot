@@ -16,6 +16,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/queue"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
+
 	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/transport"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
@@ -227,6 +228,14 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 	p.tradingSessionService = trading_session.NewService(userService, ms)
 	logger.Info("✅ TradingSessionService создан")
 
+	var signalPublisher counter.SignalPublisher
+	if p.redisClient != nil {
+		signalPublisher = counter.NewRedisSignalPublisher(p.redisClient)
+		logger.Info("📡 SignalPublisher: Redis Pub/Sub активирован (канал: %s)", counter.ScreenerSignalChannel)
+	} else {
+		logger.Info("ℹ️  SignalPublisher: Redis недоступен, публикация сигналов отключена")
+	}
+
 	p.serviceFactory = services_factory.NewServiceFactory(
 		services_factory.ServiceDependencies{
 			UserService:           userService,
@@ -236,6 +245,7 @@ func (p *TelegramDeliveryPackage) createServiceFactory() error {
 			ButtonBuilder:         p.components.ButtonBuilder,
 			FormatterProvider:     p.components.FormatterProvider,
 			TradingSessionService: p.tradingSessionService,
+			SignalPublisher:       signalPublisher,
 		},
 	)
 
