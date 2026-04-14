@@ -61,7 +61,7 @@ func buildMenuKeyboard(letters []string, watchlistLen int) interface{} {
 		kb.B("🔍 Найти монету", kb.CbWatchlistSearch),
 	})
 
-	const lettersPerRow = 8
+	const lettersPerRow = 4
 	for i := 0; i < len(letters); i += lettersPerRow {
 		end := i + lettersPerRow
 		if end > len(letters) {
