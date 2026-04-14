@@ -17,6 +17,7 @@ import (
 	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
+	storage "crypto-exchange-screener-bot/internal/infrastructure/persistence/redis_storage"
 	events "crypto-exchange-screener-bot/internal/infrastructure/transport/event_bus"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
@@ -95,17 +96,20 @@ func (dl *DeliveryLayer) Initialize() error {
 		}
 	}
 
-	// Создаем WatchlistService если доступны CandleSystem и UserService
+	// Создаем WatchlistService с ленивым получением priceStorage,
+	// чтобы не зависеть от момента запуска CandleSystem.
 	var watchlistService watchlistSvc.Service
-	if candleSystem := dl.coreLayer.GetCandleSystem(); candleSystem != nil {
-		if priceStorage := candleSystem.GetPriceStorage(); priceStorage != nil {
-			if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
-				watchlistService = watchlistSvc.NewService(userSvc, priceStorage)
-				logger.Info("✅ WatchlistService создан (%d символов)", len(priceStorage.GetSymbols()))
+	if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
+		coreLayer := dl.coreLayer
+		watchlistService = watchlistSvc.NewService(userSvc, func() storage.PriceStorageInterface {
+			if cs := coreLayer.GetCandleSystem(); cs != nil {
+				return cs.GetPriceStorage()
 			}
-		}
+			return nil
+		})
+		logger.Info("✅ WatchlistService создан (priceStorage будет получен лениво)")
 	} else {
-		logger.Warn("⚠️ CandleSystem недоступна, WatchlistService не создан")
+		logger.Warn("⚠️ UserService недоступен, WatchlistService не создан")
 	}
 
 	// Создаем TelegramDeliveryPackage

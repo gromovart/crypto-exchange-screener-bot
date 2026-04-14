@@ -10,15 +10,17 @@ import (
 )
 
 type serviceImpl struct {
-	userService  *users.Service
-	priceStorage storage.PriceStorageInterface
+	userService        *users.Service
+	priceStorageGetter func() storage.PriceStorageInterface
 }
 
-// NewService создаёт сервис управления вотчлистом
-func NewService(userService *users.Service, priceStorage storage.PriceStorageInterface) Service {
+// NewService создаёт сервис управления вотчлистом.
+// priceStorageGetter вызывается лениво при каждом обращении к символам,
+// что позволяет создавать сервис до того как CandleSystem запущена.
+func NewService(userService *users.Service, priceStorageGetter func() storage.PriceStorageInterface) Service {
 	return &serviceImpl{
-		userService:  userService,
-		priceStorage: priceStorage,
+		userService:        userService,
+		priceStorageGetter: priceStorageGetter,
 	}
 }
 
@@ -58,7 +60,14 @@ func (s *serviceImpl) GetUserWatchlist(userID int) ([]string, error) {
 }
 
 func (s *serviceImpl) GetAllSymbols() []string {
-	symbols := s.priceStorage.GetSymbols()
+	if s.priceStorageGetter == nil {
+		return nil
+	}
+	ps := s.priceStorageGetter()
+	if ps == nil {
+		return nil
+	}
+	symbols := ps.GetSymbols()
 	sorted := make([]string, len(symbols))
 	copy(sorted, symbols)
 	sort.Strings(sorted)
