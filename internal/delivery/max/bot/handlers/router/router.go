@@ -56,6 +56,7 @@ func (r *routerImpl) Handle(command string, params handlers.HandlerParams) (hand
 		if strings.HasSuffix(key, "*") {
 			prefix := strings.TrimSuffix(key, "*")
 			if strings.HasPrefix(command, prefix) {
+				params.Data = command
 				return r.exec(h, command, params)
 			}
 		}
