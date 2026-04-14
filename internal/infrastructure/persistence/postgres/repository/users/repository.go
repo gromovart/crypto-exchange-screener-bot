@@ -66,7 +66,8 @@ func (r *UserRepositoryImpl) GetAllActive() ([]*models.User, error) {
         role, is_active, is_verified, subscription_tier,
         signals_today, max_signals_per_day,
         created_at, updated_at, last_login_at, last_signal_at,
-        max_user_id, max_chat_id, link_code, link_code_expires_at
+        max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
     FROM users
     WHERE is_active = TRUE
     ORDER BY created_at DESC
@@ -109,7 +110,8 @@ func (r *UserRepositoryImpl) GetAll(limit, offset int) ([]*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -243,7 +245,8 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			language, timezone, display_mode,
 			role, is_active, is_verified,
 			subscription_tier, max_signals_per_day,
-			created_at, updated_at
+			created_at, updated_at,
+			watchlist_symbols
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
@@ -252,7 +255,8 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 			$18, $19, $20,
 			$21, $22, $23,
 			$24, $25,
-			$26, $27
+			$26, $27,
+			$28
 		)
 		RETURNING id
 	`
@@ -268,6 +272,7 @@ func (r *UserRepositoryImpl) Create(user *models.User) error {
 		user.Role, user.IsActive, user.IsVerified,
 		user.SubscriptionTier, user.MaxSignalsPerDay,
 		user.CreatedAt, user.UpdatedAt,
+		pq.Array(user.WatchlistSymbols),
 	).Scan(&user.ID)
 
 	if err != nil {
@@ -294,7 +299,8 @@ func (r *UserRepositoryImpl) FindByID(id int) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE id = $1
 	`
@@ -316,7 +322,8 @@ func (r *UserRepositoryImpl) FindByTelegramID(telegramID int64) (*models.User, e
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE telegram_id = $1
 	`
@@ -338,7 +345,8 @@ func (r *UserRepositoryImpl) FindByChatID(chatID string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE chat_id = $1
 	`
@@ -360,7 +368,8 @@ func (r *UserRepositoryImpl) FindByEmail(email string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE email = $1
 	`
@@ -412,8 +421,9 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 			link_code = $30,
 			link_code_expires_at = $31,
 			max_notifications_enabled = $32,
-			updated_at = $33
-		WHERE id = $34
+			watchlist_symbols = $33,
+			updated_at = $34
+		WHERE id = $35
 	`
 
 	result, err := tx.Exec(query,
@@ -429,6 +439,7 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 		user.MaxUserID, getNullString(user.MaxChatID), getNullString(user.LinkCode),
 		getNullTimePtr(user.LinkCodeExpiresAt),
 		user.MaxNotificationsEnabled,
+		pq.Array(user.WatchlistSymbols),
 		time.Now(), user.ID,
 	)
 
@@ -562,7 +573,8 @@ func (r *UserRepositoryImpl) SearchUsers(query string, limit, offset int) ([]*mo
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE username ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1
 		ORDER BY created_at DESC
@@ -612,6 +624,7 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 	var maxUserID sql.NullInt64
 	var maxChatID, linkCode sql.NullString
 	var linkCodeExpiresAt sql.NullTime
+	var watchlistSymbols []sql.NullString
 
 	err := rows.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
@@ -624,6 +637,7 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
 		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
+		pq.Array(&watchlistSymbols),
 	)
 
 	if err != nil {
@@ -669,6 +683,15 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		}
 	}
 
+	if len(watchlistSymbols) > 0 {
+		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
+		for i, v := range watchlistSymbols {
+			if v.Valid {
+				user.WatchlistSymbols[i] = v.String
+			}
+		}
+	}
+
 	return &user, nil
 }
 
@@ -681,6 +704,7 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	var maxUserID sql.NullInt64
 	var maxChatID, linkCode sql.NullString
 	var linkCodeExpiresAt sql.NullTime
+	var watchlistSymbols []sql.NullString
 
 	err := row.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
@@ -693,6 +717,7 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
 		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
+		pq.Array(&watchlistSymbols),
 	)
 
 	if err != nil {
@@ -738,6 +763,15 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	for i, v := range excludePatterns {
 		if v.Valid {
 			user.ExcludePatterns[i] = v.String
+		}
+	}
+
+	if len(watchlistSymbols) > 0 {
+		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
+		for i, v := range watchlistSymbols {
+			if v.Valid {
+				user.WatchlistSymbols[i] = v.String
+			}
 		}
 	}
 
@@ -805,7 +839,8 @@ func (r *UserRepositoryImpl) FindByMaxUserID(maxUserID int64) (*models.User, err
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE max_user_id = $1
 	`
@@ -826,7 +861,8 @@ func (r *UserRepositoryImpl) FindByLinkCode(code string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE link_code = $1
 		  AND link_code_expires_at > NOW()

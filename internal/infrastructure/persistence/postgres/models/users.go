@@ -41,6 +41,8 @@ type User struct {
 	MinVolumeFilter  float64 `db:"min_volume_filter" json:"min_volume_filter"`
 	// ИЗМЕНЕНИЕ: убираем db:"-", теперь sqlx будет маппить эти поля
 	ExcludePatterns []string `db:"exclude_patterns" json:"exclude_patterns"`
+	// Вотчлист: nil = отслеживать все монеты; непустой срез = только эти символы
+	WatchlistSymbols []string `db:"watchlist_symbols" json:"watchlist_symbols,omitempty"`
 	Language        string   `db:"language" json:"language"`
 	Timezone        string   `db:"timezone" json:"timezone"`
 	DisplayMode     string   `db:"display_mode" json:"display_mode"`
@@ -189,6 +191,25 @@ func (u *User) ShouldReceiveSignal(signalType string, changePercent float64) boo
 	}
 
 	return true
+}
+
+// HasWatchlist возвращает true, если у пользователя задан непустой вотчлист
+func (u *User) HasWatchlist() bool {
+	return len(u.WatchlistSymbols) > 0
+}
+
+// ShouldTrackSymbol возвращает true, если символ должен отслеживаться для данного пользователя.
+// При отсутствии вотчлиста (nil или пустой) отслеживаются все символы.
+func (u *User) ShouldTrackSymbol(symbol string) bool {
+	if !u.HasWatchlist() {
+		return true
+	}
+	for _, s := range u.WatchlistSymbols {
+		if s == symbol {
+			return true
+		}
+	}
+	return false
 }
 
 // IsAdmin проверяет, является ли пользователь администратором

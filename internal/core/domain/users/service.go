@@ -1105,3 +1105,58 @@ func (s *Service) DeactivateTradingSessionByPlatform(userID int, platform string
 func (s *Service) FindAllActiveTradingSessions() ([]*models.TradingSession, error) {
 	return s.tradingSessionRepo.FindAllActive()
 }
+
+// ==================== USER STATE (для FSM поиска в вотчлисте) ====================
+
+const userStateTTL = 10 * time.Minute
+
+// SetUserState сохраняет временное состояние пользователя в Redis.
+// Используется для FSM: например, состояние "watchlist_search" означает,
+// что следующее текстовое сообщение от пользователя — поисковый запрос.
+func (s *Service) SetUserState(userID int, state string) error {
+	if s.cache == nil {
+		return nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	return s.cache.Set(ctx, key, state, userStateTTL)
+}
+
+// GetUserState возвращает текущее состояние пользователя из Redis.
+// Возвращает пустую строку, если состояние не задано.
+func (s *Service) GetUserState(userID int) (string, error) {
+	if s.cache == nil {
+		return "", nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	val, err := s.cache.Get(ctx, key)
+	if err != nil {
+		return "", nil // Ключ не найден — нормальная ситуация
+	}
+	return val, nil
+}
+
+// ClearUserState удаляет состояние пользователя из Redis.
+func (s *Service) ClearUserState(userID int) error {
+	if s.cache == nil {
+		return nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	return s.cache.Delete(ctx, key)
+}
+
+// UpdateWatchlist обновляет вотчлист пользователя.
+// symbols == nil означает "отслеживать все монеты".
+func (s *Service) UpdateWatchlist(userID int, symbols []string) error {
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return fmt.Errorf("ошибка получения пользователя: %w", err)
+	}
+	if user == nil {
+		return fmt.Errorf("пользователь %d не найден", userID)
+	}
+	user.WatchlistSymbols = symbols
+	return s.repo.Update(user)
+}

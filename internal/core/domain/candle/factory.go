@@ -28,6 +28,11 @@ type CandleSystem struct {
 	eventBus      *events.EventBus
 }
 
+// GetPriceStorage возвращает хранилище цен (для доступа к списку символов из delivery layer)
+func (cs *CandleSystem) GetPriceStorage() storage.PriceStorageInterface {
+	return cs.priceStorage
+}
+
 // NewCandleSystemFactory создает новую фабрику
 func NewCandleSystemFactory() *CandleSystemFactory {
 	return &CandleSystemFactory{
