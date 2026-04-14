@@ -9,10 +9,11 @@ import (
 	max_bot "crypto-exchange-screener-bot/internal/delivery/max/bot"
 	max_transport "crypto-exchange-screener-bot/internal/delivery/max/transport"
 	telegram_package "crypto-exchange-screener-bot/internal/delivery/telegram/package"
-	notifySvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
-	signalSvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
-	tbankSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
-	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	notifySvc    "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signalSvc    "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	tbankSvc     "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
+	sessionSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	watchlistSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
 	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
 	redis_service "crypto-exchange-screener-bot/internal/infrastructure/cache/redis"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
@@ -94,11 +95,25 @@ func (dl *DeliveryLayer) Initialize() error {
 		}
 	}
 
+	// Создаем WatchlistService если доступны CandleSystem и UserService
+	var watchlistService watchlistSvc.Service
+	if candleSystem := dl.coreLayer.GetCandleSystem(); candleSystem != nil {
+		if priceStorage := candleSystem.GetPriceStorage(); priceStorage != nil {
+			if userSvc, err := coreFactory.CreateUserService(); err == nil && userSvc != nil {
+				watchlistService = watchlistSvc.NewService(userSvc, priceStorage)
+				logger.Info("✅ WatchlistService создан (%d символов)", len(priceStorage.GetSymbols()))
+			}
+		}
+	} else {
+		logger.Warn("⚠️ CandleSystem недоступна, WatchlistService не создан")
+	}
+
 	// Создаем TelegramDeliveryPackage
 	deps := telegram_package.TelegramDeliveryPackageDependencies{
-		Config:      dl.config,
-		CoreFactory: coreFactory,
-		Exchange:    "BYBIT",
+		Config:           dl.config,
+		CoreFactory:      coreFactory,
+		Exchange:         "BYBIT",
+		WatchlistService: watchlistService,
 	}
 	if redisClient != nil && redisClient.IsRunning() {
 		deps.RedisClient = redisClient.GetClient()
@@ -199,6 +214,7 @@ func (dl *DeliveryLayer) Initialize() error {
 					UserService:         userSvc,
 					NotifyService:       notifySvc.NewServiceWithDependencies(userSvc),
 					SignalService:       signalSvc.NewServiceWithDependencies(userSvc),
+					WatchlistService:    watchlistService,
 					SessionService:      sessionSvc.NewService(userSvc, nil),
 					TBankService:        maxTBankService,
 					SubscriptionService: maxSubSvc,

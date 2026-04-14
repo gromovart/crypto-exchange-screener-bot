@@ -16,6 +16,7 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/telegram/queue"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/services/counter"
 	services_factory "crypto-exchange-screener-bot/internal/delivery/telegram/services/factory"
+	watchlist_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
 
 	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/transport"
@@ -56,6 +57,9 @@ type TelegramDeliveryPackage struct {
 	// Queue worker (nil если Redis недоступен)
 	worker *queue.Worker
 
+	// Watchlist service (опционально)
+	watchlistService watchlist_service.Service
+
 	// Telegram бот и транспорт
 	bot         *bot.TelegramBot
 	transport   transport.TelegramTransport
@@ -65,10 +69,11 @@ type TelegramDeliveryPackage struct {
 
 // TelegramDeliveryPackageDependencies зависимости для создания пакета
 type TelegramDeliveryPackageDependencies struct {
-	Config      *config.Config
-	CoreFactory *core_factory.CoreServiceFactory
-	Exchange    string
-	RedisClient *goredis.Client // опционально, для Redis-очереди
+	Config           *config.Config
+	CoreFactory      *core_factory.CoreServiceFactory
+	Exchange         string
+	RedisClient      *goredis.Client           // опционально, для Redis-очереди
+	WatchlistService watchlist_service.Service // опционально, для вотчлиста
 }
 
 // NewTelegramDeliveryPackage создает новый пакет доставки Telegram
@@ -80,11 +85,12 @@ func NewTelegramDeliveryPackage(deps TelegramDeliveryPackageDependencies) *Teleg
 	}
 
 	return &TelegramDeliveryPackage{
-		config:      deps.Config,
-		coreFactory: deps.CoreFactory,
-		redisClient: deps.RedisClient,
-		services:    make(map[string]interface{}),
-		controllers: make(map[string]types.EventSubscriber),
+		config:           deps.Config,
+		coreFactory:      deps.CoreFactory,
+		redisClient:      deps.RedisClient,
+		watchlistService: deps.WatchlistService,
+		services:         make(map[string]interface{}),
+		controllers:      make(map[string]types.EventSubscriber),
 	}
 }
 
@@ -410,7 +416,8 @@ func (p *TelegramDeliveryPackage) createBotAndTransport() error {
 
 	// Создаем зависимости для бота
 	deps := &bot.Dependencies{
-		ServiceFactory: p.serviceFactory,
+		ServiceFactory:   p.serviceFactory,
+		WatchlistService: p.watchlistService,
 	}
 
 	// Создаем бота

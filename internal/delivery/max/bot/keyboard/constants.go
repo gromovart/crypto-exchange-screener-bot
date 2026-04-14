@@ -69,6 +69,14 @@ const (
 	CbBuy                  = "buy"
 	CbPaymentTBankBase     = "payment_tbank_"
 	CbPaymentTBankWildcard = "payment_tbank_*"
+
+	// Watchlist
+	CbWatchlistMenu          = "watchlist_menu"
+	CbWatchlistSearch        = "watchlist_search"
+	CbWatchlistReset         = "watchlist_reset"
+	CbWatchlistToggleWildcard = "watchlist_toggle_*"
+	CbWatchlistLetterWildcard = "watchlist_letter_*"
+	CbWatchlistPageWildcard   = "watchlist_page_*"
 )
 
 // ──────────────────────────────────────────────
@@ -136,6 +144,11 @@ var Btn = struct {
 
 	// Payment
 	Buy string
+
+	// Watchlist
+	WatchlistMenu   string
+	WatchlistSearch string
+	WatchlistReset  string
 }{
 	Back:     "🔙 Назад",
 	MainMenu: "🏠 Главное меню",
@@ -179,6 +192,10 @@ var Btn = struct {
 	LinkTelegram: "🔗 Привязать Telegram",
 
 	Buy: "💎 Купить подписку",
+
+	WatchlistMenu:   "📋 Вотчлист",
+	WatchlistSearch: "🔍 Найти монету",
+	WatchlistReset:  "🗑️ Сбросить вотчлист",
 
 	SessionStart: "🟢 Начать торговую сессию",
 	SessionStop:  "🔴 Завершить сессию",

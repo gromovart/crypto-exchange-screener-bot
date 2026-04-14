@@ -237,6 +237,13 @@ func (s *serviceImpl) applyUserFilters(user *models.User, data RawCounterData) b
 		}
 	}
 
+	// Проверяем вотчлист (если задан — отправляем только символы из списка)
+	if user.HasWatchlist() && !user.ShouldTrackSymbol(data.Symbol) {
+		logger.Debug("⚠️ User %d (%s) пропущен: символ '%s' не в вотчлисте",
+			user.ID, user.Username, data.Symbol)
+		return false
+	}
+
 	// Проверяем предпочтительные периоды
 	if len(user.PreferredPeriods) > 0 {
 		periodInt, err := period.StringToMinutes(data.Period)

@@ -9,34 +9,41 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/auth"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
+	cbWatchlistToggle "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_toggle"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/message_sender"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/middleware"
 	"crypto-exchange-screener-bot/internal/delivery/max/transport"
+	"crypto-exchange-screener-bot/internal/core/domain/users"
+	watchlistSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
 	"crypto-exchange-screener-bot/pkg/logger"
 )
 
 // Bot — оркестратор MAX бота: polling/webhook + маршрутизация
 type Bot struct {
-	client         *maxpkg.Client
-	sender         message_sender.MessageSender
-	router         router.Router
-	authMiddleware *middleware.AuthMiddleware
-	poller         *transport.Poller
-	webhookServer  *transport.WebhookServer
-	otpServer      *auth.Server
-	mode           string // "polling" или "webhook"
+	client           *maxpkg.Client
+	sender           message_sender.MessageSender
+	router           router.Router
+	authMiddleware   *middleware.AuthMiddleware
+	poller           *transport.Poller
+	webhookServer    *transport.WebhookServer
+	otpServer        *auth.Server
+	mode             string // "polling" или "webhook"
+	userService      *users.Service
+	watchlistService watchlistSvc.Service
 }
 
 // NewBot создаёт MAX бота с зарегистрированными хэндлерами
 func NewBot(client *maxpkg.Client, deps Dependencies) *Bot {
 	sender := message_sender.NewSender(client, true)
 	b := &Bot{
-		client:         client,
-		sender:         sender,
-		router:         router.NewRouter(),
-		authMiddleware: middleware.NewAuthMiddleware(deps.UserService),
-		otpServer:      newOTPServer(deps.AuthConfig, deps.UserService, sender),
-		mode:           "polling", // По умолчанию polling
+		client:           client,
+		sender:           sender,
+		router:           router.NewRouter(),
+		authMiddleware:   middleware.NewAuthMiddleware(deps.UserService),
+		otpServer:        newOTPServer(deps.AuthConfig, deps.UserService, sender),
+		mode:             "polling", // По умолчанию polling
+		userService:      deps.UserService,
+		watchlistService: deps.WatchlistService,
 	}
 
 	// Регистрируем все хэндлеры
@@ -62,6 +69,25 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 	if err != nil {
 		logger.Warn("⚠️ MAX HandleUpdate: auth: %v", err)
 		return
+	}
+
+	// ⭐ FSM: перехватываем не-командный текст если пользователь в режиме поиска вотчлиста
+	if upd.UpdateType == "message_created" && upd.Message != nil {
+		text := strings.TrimSpace(upd.Message.Body.Text)
+		if text != "" && !strings.HasPrefix(text, "/") &&
+			b.userService != nil && b.watchlistService != nil {
+			state, _ := b.userService.GetUserState(params.User.ID)
+			if state == "watchlist_search" {
+				_ = b.userService.ClearUserState(params.User.ID)
+				result, err := cbWatchlistToggle.ExecuteSearch(b.watchlistService, params.User.ID, text)
+				if err != nil {
+					_ = b.sender.SendTextMessage(params.ChatID, "Ошибка поиска: "+err.Error(), nil)
+					return
+				}
+				_ = b.sender.SendMenuMessage(params.ChatID, result.Message, result.Keyboard)
+				return
+			}
+		}
 	}
 
 	// Определяем команду/callback для маршрутизации

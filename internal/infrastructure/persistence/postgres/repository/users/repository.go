@@ -66,7 +66,8 @@ func (r *UserRepositoryImpl) GetAllActive() ([]*models.User, error) {
         role, is_active, is_verified, subscription_tier,
         signals_today, max_signals_per_day,
         created_at, updated_at, last_login_at, last_signal_at,
-        max_user_id, max_chat_id, link_code, link_code_expires_at
+        max_user_id, max_chat_id, link_code, link_code_expires_at,
+        watchlist_symbols
     FROM users
     WHERE is_active = TRUE
     ORDER BY created_at DESC
@@ -613,6 +614,7 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 	var maxChatID, linkCode sql.NullString
 	var linkCodeExpiresAt sql.NullTime
 
+	var watchlistSymbols []sql.NullString
 	err := rows.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
@@ -624,6 +626,7 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
 		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
+		pq.Array(&watchlistSymbols),
 	)
 
 	if err != nil {
@@ -669,6 +672,15 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		}
 	}
 
+	if len(watchlistSymbols) > 0 {
+		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
+		for i, v := range watchlistSymbols {
+			if v.Valid {
+				user.WatchlistSymbols[i] = v.String
+			}
+		}
+	}
+
 	return &user, nil
 }
 
@@ -682,6 +694,7 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	var maxChatID, linkCode sql.NullString
 	var linkCodeExpiresAt sql.NullTime
 
+	var watchlistSymbols []sql.NullString
 	err := row.Scan(
 		&user.ID, &user.TelegramID, &user.Username, &user.FirstName,
 		&user.LastName, &user.ChatID, &user.Email, &user.Phone,
@@ -693,6 +706,7 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 		&user.SignalsToday, &user.MaxSignalsPerDay,
 		&user.CreatedAt, &user.UpdatedAt, &lastLoginAt, &lastSignalAt,
 		&maxUserID, &maxChatID, &linkCode, &linkCodeExpiresAt,
+		pq.Array(&watchlistSymbols),
 	)
 
 	if err != nil {
@@ -738,6 +752,15 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 	for i, v := range excludePatterns {
 		if v.Valid {
 			user.ExcludePatterns[i] = v.String
+		}
+	}
+
+	if len(watchlistSymbols) > 0 {
+		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
+		for i, v := range watchlistSymbols {
+			if v.Valid {
+				user.WatchlistSymbols[i] = v.String
+			}
 		}
 	}
 

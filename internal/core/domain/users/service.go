@@ -1105,3 +1105,49 @@ func (s *Service) DeactivateTradingSessionByPlatform(userID int, platform string
 func (s *Service) FindAllActiveTradingSessions() ([]*models.TradingSession, error) {
 	return s.tradingSessionRepo.FindAllActive()
 }
+
+const userStateTTL = 10 * time.Minute
+
+// SetUserState сохраняет состояние FSM пользователя в Redis
+func (s *Service) SetUserState(userID int, state string) error {
+	if s.cache == nil {
+		return nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	return s.cache.Set(ctx, key, state, userStateTTL)
+}
+
+// GetUserState возвращает текущее состояние FSM пользователя из Redis
+func (s *Service) GetUserState(userID int) (string, error) {
+	if s.cache == nil {
+		return "", nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	var val string
+	if err := s.cache.Get(ctx, key, &val); err != nil {
+		return "", nil
+	}
+	return val, nil
+}
+
+// ClearUserState удаляет состояние FSM пользователя из Redis
+func (s *Service) ClearUserState(userID int) error {
+	if s.cache == nil {
+		return nil
+	}
+	ctx := context.Background()
+	key := fmt.Sprintf("user_state:%d", userID)
+	return s.cache.Delete(ctx, key)
+}
+
+// UpdateWatchlist обновляет список монет для отслеживания пользователя
+func (s *Service) UpdateWatchlist(userID int, symbols []string) error {
+	user, err := s.GetUserByID(userID)
+	if err != nil {
+		return fmt.Errorf("пользователь не найден: %w", err)
+	}
+	user.WatchlistSymbols = symbols
+	return s.repo.Update(user)
+}

@@ -18,6 +18,8 @@ import (
 	signal_settings_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
 	trading_session "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	watchlist_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
+	watchlist_toggle_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_toggle"
 	"crypto-exchange-screener-bot/internal/infrastructure/config"
 	currency_client "crypto-exchange-screener-bot/internal/infrastructure/http/currency"
 	tbank_client "crypto-exchange-screener-bot/internal/infrastructure/http/tbank"
@@ -30,7 +32,8 @@ import (
 
 // Dependencies зависимости для TelegramBot
 type Dependencies struct {
-	ServiceFactory *services_factory.ServiceFactory
+	ServiceFactory   *services_factory.ServiceFactory
+	WatchlistService watchlist_service.Service
 }
 
 // TelegramBot - бот для отправки уведомлений в Telegram
@@ -57,6 +60,10 @@ type TelegramBot struct {
 	mu             sync.RWMutex
 	startupTime    time.Time
 	currentMode    string // "polling" или "webhook"
+
+	// Для FSM поиска вотчлиста
+	userService      *users.Service
+	watchlistService watchlist_service.Service
 }
 
 // NewTelegramBot создает новый экземпляр TelegramBot
@@ -172,6 +179,7 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		tbankService:               tbankSvc,
 		currencyClient:             currencyClient,
 		paymentCoreService:         deps.ServiceFactory.GetPaymentCoreService(),
+		watchlistService:           deps.WatchlistService,
 	}
 
 	// Инициализируем фабрику с сервисами
@@ -190,6 +198,8 @@ func NewTelegramBot(config *config.Config, deps *Dependencies) *TelegramBot {
 		authMiddleware:         authMiddleware,
 		subscriptionMiddleware: subscriptionMiddleware,
 		startupTime:            time.Now(),
+		userService:            userService,
+		watchlistService:       services.watchlistService,
 	}
 
 	// Определяем текущий режим работы
@@ -390,6 +400,26 @@ func (b *TelegramBot) HandleUpdate(update *telegram.TelegramUpdate) error {
 	handlerParams, err := b.authMiddleware.ProcessUpdate(update)
 	if err != nil {
 		return b.sendAuthError(handlerParams.ChatID, err.Error())
+	}
+
+	// ⭐ FSM: перехватываем текст если пользователь в режиме поиска вотчлиста
+	if update.Message != nil && update.Message.Text != "" &&
+		!strings.HasPrefix(update.Message.Text, "/") &&
+		b.userService != nil && b.watchlistService != nil {
+
+		state, _ := b.userService.GetUserState(handlerParams.User.ID)
+		if state == "watchlist_search" {
+			_ = b.userService.ClearUserState(handlerParams.User.ID)
+			result, err := watchlist_toggle_handler.ExecuteSearch(
+				b.watchlistService,
+				handlerParams.User.ID,
+				update.Message.Text,
+			)
+			if err != nil {
+				return b.messageSender.SendTextMessage(handlerParams.ChatID, "Ошибка поиска: "+err.Error(), nil)
+			}
+			return b.messageSender.SendTextMessage(handlerParams.ChatID, result.Message, result.Keyboard)
+		}
 	}
 
 	var command string
