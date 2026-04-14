@@ -91,6 +91,9 @@ func (h *menuMainHandler) createMainMenuKeyboard(isAuth bool) interface{} {
 					{"text": constants.ButtonTexts.Status, "callback_data": constants.CallbackStats},
 				},
 				{
+					{"text": "📋 Мои монеты", "callback_data": constants.CallbackWatchlistMenu},
+				},
+				{
 					{"text": constants.MenuButtonTexts.Reset, "callback_data": constants.CallbackResetMenu},
 					{"text": constants.ButtonTexts.Help, "callback_data": constants.CallbackHelp},
 				},

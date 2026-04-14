@@ -53,6 +53,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		{kb.B(kb.Btn.Status, kb.CbStats)},
 		{kb.B(kb.Btn.Notifications, kb.CbNotificationsMenu), kb.B(kb.Btn.Signals, kb.CbSignalsMenu)},
 		{kb.B(kb.Btn.Periods, kb.CbPeriodsMenu), kb.B(kb.Btn.Thresholds, kb.CbThresholdsMenu)},
+		{kb.B("📋 Мои монеты", kb.CbWatchlistMenu)},
 		{kb.B(kb.Btn.Profile, kb.CbProfileMain)},
 		{kb.B(kb.Btn.Reset, kb.CbResetMenu), kb.B(kb.Btn.Help, kb.CbHelp)},
 	}
