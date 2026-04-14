@@ -110,7 +110,8 @@ func (r *UserRepositoryImpl) GetAll(limit, offset int) ([]*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		ORDER BY created_at DESC
 		LIMIT $1 OFFSET $2
@@ -295,7 +296,8 @@ func (r *UserRepositoryImpl) FindByID(id int) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE id = $1
 	`
@@ -317,7 +319,8 @@ func (r *UserRepositoryImpl) FindByTelegramID(telegramID int64) (*models.User, e
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE telegram_id = $1
 	`
@@ -339,7 +342,8 @@ func (r *UserRepositoryImpl) FindByChatID(chatID string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE chat_id = $1
 	`
@@ -361,7 +365,8 @@ func (r *UserRepositoryImpl) FindByEmail(email string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE email = $1
 	`
@@ -563,7 +568,8 @@ func (r *UserRepositoryImpl) SearchUsers(query string, limit, offset int) ([]*mo
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE username ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1 OR email ILIKE $1
 		ORDER BY created_at DESC
@@ -828,7 +834,8 @@ func (r *UserRepositoryImpl) FindByMaxUserID(maxUserID int64) (*models.User, err
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE max_user_id = $1
 	`
@@ -849,7 +856,8 @@ func (r *UserRepositoryImpl) FindByLinkCode(code string) (*models.User, error) {
 			role, is_active, is_verified, subscription_tier,
 			signals_today, max_signals_per_day,
 			created_at, updated_at, last_login_at, last_signal_at,
-			max_user_id, max_chat_id, link_code, link_code_expires_at
+			max_user_id, max_chat_id, link_code, link_code_expires_at,
+			watchlist_symbols
 		FROM users
 		WHERE link_code = $1
 		  AND link_code_expires_at > NOW()
