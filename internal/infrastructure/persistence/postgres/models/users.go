@@ -40,7 +40,7 @@ type User struct {
 	PreferredPeriods []int   `db:"preferred_periods" json:"preferred_periods"`
 	MinVolumeFilter  float64 `db:"min_volume_filter" json:"min_volume_filter"`
 	// ИЗМЕНЕНИЕ: убираем db:"-", теперь sqlx будет маппить эти поля
-	ExcludePatterns []string `db:"exclude_patterns" json:"exclude_patterns"`
+	ExcludePatterns  []string `db:"exclude_patterns" json:"exclude_patterns"`
 	// Вотчлист: nil = отслеживать все монеты; непустой срез = только эти символы
 	WatchlistSymbols []string `db:"watchlist_symbols" json:"watchlist_symbols,omitempty"`
 	Language        string   `db:"language" json:"language"`
@@ -193,6 +193,11 @@ func (u *User) ShouldReceiveSignal(signalType string, changePercent float64) boo
 	return true
 }
 
+// IsAdmin проверяет, является ли пользователь администратором
+func (u *User) IsAdmin() bool {
+	return u.Role == RoleAdmin
+}
+
 // HasWatchlist возвращает true, если у пользователя задан непустой вотчлист
 func (u *User) HasWatchlist() bool {
 	return len(u.WatchlistSymbols) > 0
@@ -210,11 +215,6 @@ func (u *User) ShouldTrackSymbol(symbol string) bool {
 		}
 	}
 	return false
-}
-
-// IsAdmin проверяет, является ли пользователь администратором
-func (u *User) IsAdmin() bool {
-	return u.Role == RoleAdmin
 }
 
 // IsMaxOnlyUser возвращает true, если пользователь зарегистрирован только через MAX

@@ -86,6 +86,17 @@ const (
 	CallbackSessionStop     = "session_stop"      // 🔴 Завершить сессию
 	CallbackSessionDuration = "session_duration:" // session_duration:{2h|4h|8h|day}
 
+	// ============== WATCHLIST ==============
+	CallbackWatchlistMenu   = "watchlist_menu"    // 📋 Вотчлист
+	CallbackWatchlistSearch = "watchlist_search"  // 🔍 Поиск монеты
+	CallbackWatchlistReset  = "watchlist_reset"   // 🗑️ Сбросить вотчлист
+	// Wildcard: watchlist_toggle:{SYMBOL}
+	CallbackWatchlistTogglePrefix = "watchlist_toggle:"
+	// Wildcard: watchlist_letter:{LETTER}:{PAGE}
+	CallbackWatchlistLetterPrefix = "watchlist_letter:"
+	// Wildcard: watchlist_page:{PAGE}
+	CallbackWatchlistPagePrefix = "watchlist_page:"
+
 	// ============== TEST & DEBUG ==============
 	CallbackTest           = "test"             // 🧪 Тестовое сообщение
 	CallbackTestOK         = "test_ok"          // ✅ Тест OK

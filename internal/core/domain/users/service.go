@@ -1106,13 +1106,9 @@ func (s *Service) FindAllActiveTradingSessions() ([]*models.TradingSession, erro
 	return s.tradingSessionRepo.FindAllActive()
 }
 
-// ==================== USER STATE (для FSM поиска в вотчлисте) ====================
-
 const userStateTTL = 10 * time.Minute
 
-// SetUserState сохраняет временное состояние пользователя в Redis.
-// Используется для FSM: например, состояние "watchlist_search" означает,
-// что следующее текстовое сообщение от пользователя — поисковый запрос.
+// SetUserState сохраняет состояние FSM пользователя в Redis
 func (s *Service) SetUserState(userID int, state string) error {
 	if s.cache == nil {
 		return nil
@@ -1122,22 +1118,21 @@ func (s *Service) SetUserState(userID int, state string) error {
 	return s.cache.Set(ctx, key, state, userStateTTL)
 }
 
-// GetUserState возвращает текущее состояние пользователя из Redis.
-// Возвращает пустую строку, если состояние не задано.
+// GetUserState возвращает текущее состояние FSM пользователя из Redis
 func (s *Service) GetUserState(userID int) (string, error) {
 	if s.cache == nil {
 		return "", nil
 	}
 	ctx := context.Background()
 	key := fmt.Sprintf("user_state:%d", userID)
-	val, err := s.cache.Get(ctx, key)
-	if err != nil {
-		return "", nil // Ключ не найден — нормальная ситуация
+	var val string
+	if err := s.cache.Get(ctx, key, &val); err != nil {
+		return "", nil
 	}
 	return val, nil
 }
 
-// ClearUserState удаляет состояние пользователя из Redis.
+// ClearUserState удаляет состояние FSM пользователя из Redis
 func (s *Service) ClearUserState(userID int) error {
 	if s.cache == nil {
 		return nil
@@ -1147,15 +1142,11 @@ func (s *Service) ClearUserState(userID int) error {
 	return s.cache.Delete(ctx, key)
 }
 
-// UpdateWatchlist обновляет вотчлист пользователя.
-// symbols == nil означает "отслеживать все монеты".
+// UpdateWatchlist обновляет список монет для отслеживания пользователя
 func (s *Service) UpdateWatchlist(userID int, symbols []string) error {
-	user, err := s.repo.FindByID(userID)
+	user, err := s.GetUserByID(userID)
 	if err != nil {
-		return fmt.Errorf("ошибка получения пользователя: %w", err)
-	}
-	if user == nil {
-		return fmt.Errorf("пользователь %d не найден", userID)
+		return fmt.Errorf("пользователь не найден: %w", err)
 	}
 	user.WatchlistSymbols = symbols
 	return s.repo.Update(user)

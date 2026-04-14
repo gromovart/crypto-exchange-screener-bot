@@ -18,6 +18,11 @@ import (
 	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
 	payment_tbank_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_sbp"
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
+	watchlist_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_menu"
+	watchlist_reset_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_reset"
+	watchlist_search_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_search"
+	watchlist_toggle_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_toggle"
+	watchlist_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
 	period_manage_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_manage"
 	period_select_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/period_select"
 	periods_menu "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/periods_menu"
@@ -77,6 +82,7 @@ type Services struct {
 	tbankService               tbank_service.Service
 	currencyClient             *currency_client.Client
 	paymentCoreService         *payment.PaymentService
+	watchlistService           watchlist_service.Service
 }
 
 // InitHandlerFactory инициализирует фабрику хэндлеров
@@ -423,6 +429,55 @@ func InitHandlerFactory(
 		logger.Info("✅ Обработчики торговых сессий зарегистрированы")
 	} else {
 		logger.Warn("⚠️ TradingSessionService не предоставлен, торговые сессии недоступны")
+	}
+
+	// ВОТЧЛИСТ (требует подписки)
+	if services.watchlistService != nil {
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistMenu, func() handlers.Handler {
+			handler := watchlist_menu_handler.NewHandler(services.watchlistService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistSearch, func() handlers.Handler {
+			handler := watchlist_search_handler.NewHandler(services.userService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistReset, func() handlers.Handler {
+			handler := watchlist_reset_handler.NewHandler(services.watchlistService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		// Wildcard: watchlist_toggle:{SYMBOL}:{LETTER}:{PAGE}
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistTogglePrefix+"*", func() handlers.Handler {
+			handler := watchlist_toggle_handler.NewHandler(services.watchlistService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		// Wildcard: watchlist_letter:{LETTER}:{PAGE}
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistLetterPrefix+"*", func() handlers.Handler {
+			handler := watchlist_toggle_handler.NewLetterHandler(services.watchlistService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		logger.Info("✅ Обработчики вотчлиста зарегистрированы")
+	} else {
+		logger.Warn("⚠️ WatchlistService не предоставлен, вотчлист недоступен")
 	}
 
 	logger.Info("✅ Инициализация создателей хэндлеров завершена")

@@ -166,6 +166,11 @@ func (c *UserController) shouldSendToUser(user *models.User, data map[string]int
 		}
 	}
 
+	// Вотчлист: если задан — пропускаем только символы из списка
+	if user.HasWatchlist() && !user.ShouldTrackSymbol(symbol) {
+		return false
+	}
+
 	// Предпочтительные периоды
 	periodStr := getString(data, "period")
 	if !c.isPeriodAllowed(user, periodStr) {

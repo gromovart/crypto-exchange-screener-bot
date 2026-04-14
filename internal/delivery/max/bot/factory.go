@@ -37,9 +37,13 @@ import (
 	cbSessionDuration "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_duration"
 	cbSessionStart "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_start"
 	cbSessionStop "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_stop"
-	cbBuy          "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
-	cbPaymentTBank "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
-	cbWithParams   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
+	cbBuy             "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
+	cbPaymentTBank    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
+	cbWithParams      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
+	cbWatchlistMenu   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_menu"
+	cbWatchlistReset  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_reset"
+	cbWatchlistSearch "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_search"
+	cbWatchlistToggle "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_toggle"
 	cmdHelp        "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
 	cmdLink       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/link"
 	cmdPaysupport "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/paysupport"
@@ -49,10 +53,11 @@ import (
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/router"
 	kb "crypto-exchange-screener-bot/internal/delivery/max/bot/keyboard"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/middleware"
-	notifySvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
-	signalSvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
-	tbankSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
-	sessionSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	notifySvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/notifications_toggle"
+	signalSvc   "crypto-exchange-screener-bot/internal/delivery/telegram/services/signal_settings"
+	tbankSvc    "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
+	sessionSvc  "crypto-exchange-screener-bot/internal/delivery/telegram/services/trading_session"
+	watchlistSvc "crypto-exchange-screener-bot/internal/delivery/telegram/services/watchlist"
 )
 
 // AuthConfig — конфигурация OTP auth-сервера
@@ -71,6 +76,7 @@ type Dependencies struct {
 	SessionService      sessionSvc.Service
 	TBankService        tbankSvc.Service        // nil — если Т-Банк не настроен
 	SubscriptionService *subscription.Service   // nil — если проверка подписки отключена
+	WatchlistService    watchlistSvc.Service    // nil — если вотчлист не настроен
 	MaxTBankSuccessURL  string                  // URL редиректа после успешной оплаты (MAX)
 	MaxTBankFailURL     string                  // URL редиректа после неудачной оплаты (MAX)
 	AuthConfig          *AuthConfig             // nil — если auth-сервер отключён
@@ -190,4 +196,13 @@ func RegisterAll(r router.Router, deps Dependencies) {
 	// ── Callback: платежи Т-Банк (свободные) ────────────────
 	r.RegisterCallback(kb.CbBuy, cbBuy.New())
 	r.RegisterCallback(kb.CbPaymentTBankWildcard, cbPaymentTBank.New(deps.TBankService, deps.MaxTBankSuccessURL, deps.MaxTBankFailURL))
+
+	// Callback: watchlist (protected)
+	if deps.WatchlistService != nil {
+		r.RegisterCallback(kb.CbWatchlistMenu, protect(cbWatchlistMenu.New(deps.WatchlistService)))
+		r.RegisterCallback(kb.CbWatchlistSearch, protect(cbWatchlistSearch.New(deps.UserService)))
+		r.RegisterCallback(kb.CbWatchlistReset, protect(cbWatchlistReset.New(deps.WatchlistService)))
+		r.RegisterCallback(kb.CbWatchlistToggleWildcard, protect(cbWatchlistToggle.New(deps.WatchlistService)))
+		r.RegisterCallback(kb.CbWatchlistLetterWildcard, protect(cbWatchlistToggle.NewLetterHandler(deps.WatchlistService)))
+	}
 }
