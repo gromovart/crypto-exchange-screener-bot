@@ -61,10 +61,12 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 		}, nil
 	}
 
+	// letter = "s"+query кодирует контекст поиска в callback-данных
+	letter := "s" + strings.ToUpper(strings.TrimSpace(query))
 	items, totalPages := watchlistService.PageSymbols(results, 0, pageSize)
 	return handlers.HandlerResult{
 		Message:  fmt.Sprintf("🔍 Результаты поиска «%s»: найдено %d монет", query, len(results)),
-		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, "", 0, totalPages),
+		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, letter, 0, totalPages),
 	}, nil
 }
 
@@ -133,13 +135,22 @@ func (h *Handler) handleLetterPage(userID int, data string, messageID string) (h
 
 func (h *Handler) buildLetterPage(userID int, letter string, page int, messageID string) (handlers.HandlerResult, error) {
 	var symbols []string
-	if letter == "" {
-		symbols = h.watchlistService.GetAllSymbols()
-	} else {
+	var title string
+	if strings.HasPrefix(letter, "s") {
+		// "s"+query — контекст поиска
+		query := letter[1:]
+		symbols = h.watchlistService.SearchSymbols(query)
+		title = fmt.Sprintf("🔍 Поиск «%s» (стр. %%d/%%d):", query)
+	} else if letter != "" {
 		symbols = h.watchlistService.GetSymbolsByLetter(letter)
+		title = fmt.Sprintf("📋 Монеты на букву %s (стр. %%d/%%d):", letter)
+	} else {
+		symbols = h.watchlistService.GetAllSymbols()
+		title = "📋 Все монеты (стр. %%d/%%d):"
 	}
 
 	items, totalPages := h.watchlistService.PageSymbols(symbols, page, pageSize)
+	title = fmt.Sprintf(title, page+1, totalPages)
 
 	watchlist, err := h.watchlistService.GetUserWatchlist(userID)
 	if err != nil {
@@ -148,13 +159,6 @@ func (h *Handler) buildLetterPage(userID int, letter string, page int, messageID
 	inWatchlist := make(map[string]bool, len(watchlist))
 	for _, s := range watchlist {
 		inWatchlist[s] = true
-	}
-
-	var title string
-	if letter != "" {
-		title = fmt.Sprintf("📋 Монеты на букву %s (стр. %d/%d):", letter, page+1, totalPages)
-	} else {
-		title = fmt.Sprintf("📋 Все монеты (стр. %d/%d):", page+1, totalPages)
 	}
 
 	return handlers.HandlerResult{

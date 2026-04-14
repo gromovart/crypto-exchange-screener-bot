@@ -72,12 +72,14 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 		}, nil
 	}
 
+	// letter = "s"+query кодирует контекст поиска в callback-данных,
+	// чтобы пагинация и toggle возвращали результаты поиска, а не все монеты.
+	letter := "s" + strings.ToUpper(strings.TrimSpace(query))
 	items, totalPages := watchlistService.PageSymbols(results, 0, pageSize)
-	_ = totalPages
 
 	return handlers.HandlerResult{
 		Message:  fmt.Sprintf("🔍 Результаты поиска *%s*: найдено %d монет", query, len(results)),
-		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, "", 0, totalPages),
+		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, letter, 0, totalPages),
 	}, nil
 }
 
@@ -157,10 +159,18 @@ func (h *watchlistToggleHandler) handleLetterPage(userID int, data string) (hand
 
 func (h *watchlistToggleHandler) buildLetterPage(userID int, letter string, page int, notice string) (handlers.HandlerResult, error) {
 	var symbols []string
-	if letter == "" {
-		symbols = h.watchlistService.GetAllSymbols()
-	} else {
+	var title string
+	if strings.HasPrefix(letter, "s") {
+		// "s"+query — контекст поиска
+		query := letter[1:]
+		symbols = h.watchlistService.SearchSymbols(query)
+		title = fmt.Sprintf("🔍 Поиск *%s*", query)
+	} else if letter != "" {
 		symbols = h.watchlistService.GetSymbolsByLetter(letter)
+		title = fmt.Sprintf("📋 Монеты на букву *%s*", letter)
+	} else {
+		symbols = h.watchlistService.GetAllSymbols()
+		title = "📋 Все монеты"
 	}
 
 	items, totalPages := h.watchlistService.PageSymbols(symbols, page, pageSize)
@@ -172,13 +182,6 @@ func (h *watchlistToggleHandler) buildLetterPage(userID int, letter string, page
 	inWatchlist := make(map[string]bool, len(watchlist))
 	for _, s := range watchlist {
 		inWatchlist[s] = true
-	}
-
-	var title string
-	if letter != "" {
-		title = fmt.Sprintf("📋 Монеты на букву *%s*", letter)
-	} else {
-		title = "📋 Все монеты"
 	}
 
 	var msg strings.Builder
