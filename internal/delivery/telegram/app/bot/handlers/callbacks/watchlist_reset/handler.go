@@ -2,8 +2,6 @@
 package watchlist_reset
 
 import (
-	"fmt"
-
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -32,42 +30,13 @@ func (h *watchlistResetHandler) Execute(params handlers.HandlerParams) (handlers
 		return handlers.HandlerResult{}, err
 	}
 
-	letters := h.watchlistService.GetAvailableLetters()
-	total := len(h.watchlistService.GetAllSymbols())
-
-	keyboard := buildMenuKeyboard(letters)
 	return handlers.HandlerResult{
-		Message:  "✅ Вотчлист сброшен. Теперь отслеживаются *все монеты* (" + itoa(total) + ").",
-		Keyboard: keyboard,
+		Message: "✅ Вотчлист очищен. Теперь отслеживаются *все монеты*.",
+		Keyboard: map[string]interface{}{
+			"inline_keyboard": [][]map[string]string{
+				{{"text": "📋 Открыть вотчлист", "callback_data": constants.CallbackWatchlistMenu}},
+				{{"text": "🔙 Главное меню", "callback_data": constants.CallbackMenuMain}},
+			},
+		},
 	}, nil
-}
-
-func buildMenuKeyboard(letters []string) interface{} {
-	var rows [][]map[string]string
-	rows = append(rows, []map[string]string{
-		{"text": "🔍 Поиск по названию", "callback_data": constants.CallbackWatchlistSearch},
-	})
-	const lettersPerRow = 8
-	for i := 0; i < len(letters); i += lettersPerRow {
-		end := i + lettersPerRow
-		if end > len(letters) {
-			end = len(letters)
-		}
-		var row []map[string]string
-		for _, l := range letters[i:end] {
-			row = append(row, map[string]string{
-				"text":          l,
-				"callback_data": constants.CallbackWatchlistLetterPrefix + l + ":0",
-			})
-		}
-		rows = append(rows, row)
-	}
-	rows = append(rows, []map[string]string{
-		{"text": "🔙 Назад", "callback_data": constants.CallbackMenuMain},
-	})
-	return map[string]interface{}{"inline_keyboard": rows}
-}
-
-func itoa(n int) string {
-	return fmt.Sprintf("%d", n)
 }
