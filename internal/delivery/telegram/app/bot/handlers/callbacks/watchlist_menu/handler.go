@@ -85,6 +85,11 @@ func (h *watchlistMenuHandler) buildKeyboard(letters []string, watchlistLen int)
 	}
 
 	// Кнопки управления вотчлистом
+	if watchlistLen > 0 {
+		rows = append(rows, []map[string]string{
+			{"text": "👁 Мой вотчлист", "callback_data": constants.CallbackWatchlistView},
+		})
+	}
 	rows = append(rows, []map[string]string{
 		{"text": "➕ Добавить все монеты", "callback_data": constants.CallbackWatchlistAddAll},
 	})

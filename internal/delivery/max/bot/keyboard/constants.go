@@ -75,6 +75,7 @@ const (
 	CbWatchlistSearch        = "watchlist_search"
 	CbWatchlistReset         = "watchlist_reset"
 	CbWatchlistAddAll        = "watchlist_add_all"
+	CbWatchlistView          = "watchlist_view"
 	CbWatchlistToggleWildcard = "watchlist_toggle_*"
 	CbWatchlistLetterWildcard = "watchlist_letter_*"
 	CbWatchlistPageWildcard   = "watchlist_page_*"
