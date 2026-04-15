@@ -1149,5 +1149,10 @@ func (s *Service) UpdateWatchlist(userID int, symbols []string) error {
 		return fmt.Errorf("пользователь не найден: %w", err)
 	}
 	user.WatchlistSymbols = symbols
-	return s.repo.Update(user)
+	if err := s.repo.Update(user); err != nil {
+		return err
+	}
+	// Инвалидируем кэш, чтобы сигналы сразу учли новое состояние фильтра
+	s.invalidateUserCache(user)
+	return nil
 }
