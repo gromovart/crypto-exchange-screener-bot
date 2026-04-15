@@ -418,8 +418,9 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 			link_code = $30,
 			link_code_expires_at = $31,
 			max_notifications_enabled = $32,
-			updated_at = $33
-		WHERE id = $34
+			watchlist_symbols = $33,
+			updated_at = $34
+		WHERE id = $35
 	`
 
 	result, err := tx.Exec(query,
@@ -435,6 +436,7 @@ func (r *UserRepositoryImpl) Update(user *models.User) error {
 		user.MaxUserID, getNullString(user.MaxChatID), getNullString(user.LinkCode),
 		getNullTimePtr(user.LinkCodeExpiresAt),
 		user.MaxNotificationsEnabled,
+		pq.Array(user.WatchlistSymbols),
 		time.Now(), user.ID,
 	)
 
