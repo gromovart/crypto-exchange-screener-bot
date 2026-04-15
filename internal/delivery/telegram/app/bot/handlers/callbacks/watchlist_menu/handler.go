@@ -84,10 +84,13 @@ func (h *watchlistMenuHandler) buildKeyboard(letters []string, watchlistLen int)
 		rows = append(rows, row)
 	}
 
-	// Кнопка сброса (только если вотчлист задан)
+	// Кнопки управления вотчлистом
+	rows = append(rows, []map[string]string{
+		{"text": "➕ Добавить все монеты", "callback_data": constants.CallbackWatchlistAddAll},
+	})
 	if watchlistLen > 0 {
 		rows = append(rows, []map[string]string{
-			{"text": "🗑️ Сбросить вотчлист (все монеты)", "callback_data": constants.CallbackWatchlistReset},
+			{"text": "🗑️ Очистить вотчлист", "callback_data": constants.CallbackWatchlistReset},
 		})
 	}
 

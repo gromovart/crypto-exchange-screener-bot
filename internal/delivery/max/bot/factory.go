@@ -40,6 +40,7 @@ import (
 	cbBuy             "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
 	cbPaymentTBank    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
 	cbWithParams      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
+	cbWatchlistAddAll "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_add_all"
 	cbWatchlistMenu   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_menu"
 	cbWatchlistReset  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_reset"
 	cbWatchlistSearch "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_search"
@@ -202,6 +203,7 @@ func RegisterAll(r router.Router, deps Dependencies) {
 		r.RegisterCallback(kb.CbWatchlistMenu, protect(cbWatchlistMenu.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistSearch, protect(cbWatchlistSearch.New(deps.UserService)))
 		r.RegisterCallback(kb.CbWatchlistReset, protect(cbWatchlistReset.New(deps.WatchlistService)))
+		r.RegisterCallback(kb.CbWatchlistAddAll, protect(cbWatchlistAddAll.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistToggleWildcard, protect(cbWatchlistToggle.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistLetterWildcard, protect(cbWatchlistToggle.NewLetterHandler(deps.WatchlistService)))
 	}

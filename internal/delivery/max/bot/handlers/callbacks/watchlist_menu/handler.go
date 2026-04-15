@@ -74,9 +74,12 @@ func buildMenuKeyboard(letters []string, watchlistLen int) interface{} {
 		rows = append(rows, row)
 	}
 
+	rows = append(rows, []map[string]string{
+		kb.B("➕ Добавить все монеты", kb.CbWatchlistAddAll),
+	})
 	if watchlistLen > 0 {
 		rows = append(rows, []map[string]string{
-			kb.B("🗑️ Сбросить вотчлист (все монеты)", kb.CbWatchlistReset),
+			kb.B("🗑️ Очистить вотчлист", kb.CbWatchlistReset),
 		})
 	}
 

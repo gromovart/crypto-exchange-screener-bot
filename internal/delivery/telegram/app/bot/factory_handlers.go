@@ -18,6 +18,7 @@ import (
 	payment_plan_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_plan"
 	payment_tbank_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/payment_sbp"
 	tbank_service "crypto-exchange-screener-bot/internal/delivery/telegram/services/tbank"
+	watchlist_add_all_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_add_all"
 	watchlist_menu_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_menu"
 	watchlist_reset_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_reset"
 	watchlist_search_handler "crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/callbacks/watchlist_search"
@@ -451,6 +452,14 @@ func InitHandlerFactory(
 
 		factory.RegisterHandlerCreator(constants.CallbackWatchlistReset, func() handlers.Handler {
 			handler := watchlist_reset_handler.NewHandler(services.watchlistService)
+			if subscriptionMiddleware != nil {
+				return subscriptionMiddleware.RequireSubscription(handler)
+			}
+			return handler
+		})
+
+		factory.RegisterHandlerCreator(constants.CallbackWatchlistAddAll, func() handlers.Handler {
+			handler := watchlist_add_all_handler.NewHandler(services.watchlistService)
 			if subscriptionMiddleware != nil {
 				return subscriptionMiddleware.RequireSubscription(handler)
 			}

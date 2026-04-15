@@ -48,6 +48,11 @@ func (s *serviceImpl) ResetWatchlist(userID int) error {
 	return s.userService.UpdateWatchlist(userID, nil)
 }
 
+func (s *serviceImpl) AddAllToWatchlist(userID int) error {
+	all := s.GetAllSymbols()
+	return s.userService.UpdateWatchlist(userID, all)
+}
+
 func (s *serviceImpl) GetUserWatchlist(userID int) ([]string, error) {
 	user, err := s.userService.GetUserByID(userID)
 	if err != nil {

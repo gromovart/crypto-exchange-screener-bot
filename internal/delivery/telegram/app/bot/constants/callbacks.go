@@ -89,7 +89,8 @@ const (
 	// ============== WATCHLIST ==============
 	CallbackWatchlistMenu   = "watchlist_menu"    // 📋 Вотчлист
 	CallbackWatchlistSearch = "watchlist_search"  // 🔍 Поиск монеты
-	CallbackWatchlistReset  = "watchlist_reset"   // 🗑️ Сбросить вотчлист
+	CallbackWatchlistReset  = "watchlist_reset"    // 🗑️ Очистить вотчлист
+	CallbackWatchlistAddAll = "watchlist_add_all"  // ➕ Добавить все монеты
 	// Wildcard: watchlist_toggle:{SYMBOL}
 	CallbackWatchlistTogglePrefix = "watchlist_toggle:"
 	// Wildcard: watchlist_letter:{LETTER}:{PAGE}
