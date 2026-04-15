@@ -7,8 +7,11 @@ type Service interface {
 	// Возвращает true если символ был добавлен, false если удалён.
 	ToggleSymbol(userID int, symbol string) (bool, error)
 
-	// ResetWatchlist сбрасывает вотчлист (nil = отслеживать все монеты без фильтра)
-	ResetWatchlist(userID int) error
+	// ClearFilter очищает список монет ([] = фильтр активен, но пуст → ноль сигналов)
+	ClearFilter(userID int) error
+
+	// DisableFilter отключает фильтр полностью (nil → все сигналы, как по умолчанию)
+	DisableFilter(userID int) error
 
 	// AddAllToWatchlist добавляет все доступные монеты явным списком
 	AddAllToWatchlist(userID int) error

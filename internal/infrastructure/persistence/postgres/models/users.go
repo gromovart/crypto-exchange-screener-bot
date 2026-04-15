@@ -198,23 +198,25 @@ func (u *User) IsAdmin() bool {
 	return u.Role == RoleAdmin
 }
 
-// HasWatchlist возвращает true, если у пользователя задан непустой вотчлист
+// HasWatchlist возвращает true, если фильтр монет активен (не nil).
+// nil  = фильтр отключён → все сигналы
+// []   = фильтр пуст     → ноль сигналов
+// [...] = только эти монеты
 func (u *User) HasWatchlist() bool {
-	return len(u.WatchlistSymbols) > 0
+	return u.WatchlistSymbols != nil
 }
 
-// ShouldTrackSymbol возвращает true, если символ должен отслеживаться для данного пользователя.
-// При отсутствии вотчлиста (nil или пустой) отслеживаются все символы.
+// ShouldTrackSymbol возвращает true, если сигнал по символу должен дойти до пользователя.
 func (u *User) ShouldTrackSymbol(symbol string) bool {
-	if !u.HasWatchlist() {
-		return true
+	if u.WatchlistSymbols == nil {
+		return true // фильтр отключён — пропускаем всё
 	}
 	for _, s := range u.WatchlistSymbols {
 		if s == symbol {
 			return true
 		}
 	}
-	return false
+	return false // в т.ч. пустой список → ни одного сигнала
 }
 
 // IsMaxOnlyUser возвращает true, если пользователь зарегистрирован только через MAX

@@ -40,12 +40,13 @@ import (
 	cbBuy             "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
 	cbPaymentTBank    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
 	cbWithParams      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
-	cbWatchlistAddAll "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_add_all"
-	cbWatchlistView   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_view"
-	cbWatchlistMenu   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_menu"
-	cbWatchlistReset  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_reset"
-	cbWatchlistSearch "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_search"
-	cbWatchlistToggle "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_toggle"
+	cbWatchlistAddAll  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_add_all"
+	cbWatchlistDisable "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_disable"
+	cbWatchlistView    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_view"
+	cbWatchlistMenu    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_menu"
+	cbWatchlistReset   "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_reset"
+	cbWatchlistSearch  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_search"
+	cbWatchlistToggle  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_toggle"
 	cmdHelp        "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/help"
 	cmdLink       "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/link"
 	cmdPaysupport "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/commands/paysupport"
@@ -205,6 +206,7 @@ func RegisterAll(r router.Router, deps Dependencies) {
 		r.RegisterCallback(kb.CbWatchlistSearch, protect(cbWatchlistSearch.New(deps.UserService)))
 		r.RegisterCallback(kb.CbWatchlistReset, protect(cbWatchlistReset.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistAddAll, protect(cbWatchlistAddAll.New(deps.WatchlistService)))
+		r.RegisterCallback(kb.CbWatchlistDisable, protect(cbWatchlistDisable.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistView, protect(cbWatchlistView.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistToggleWildcard, protect(cbWatchlistToggle.New(deps.WatchlistService)))
 		r.RegisterCallback(kb.CbWatchlistLetterWildcard, protect(cbWatchlistToggle.NewLetterHandler(deps.WatchlistService)))

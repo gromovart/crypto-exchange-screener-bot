@@ -13,7 +13,6 @@ type watchlistResetHandler struct {
 	watchlistService watchlistSvc.Service
 }
 
-// NewHandler создаёт обработчик сброса вотчлиста
 func NewHandler(watchlistService watchlistSvc.Service) handlers.Handler {
 	return &watchlistResetHandler{
 		BaseHandler: &base.BaseHandler{
@@ -26,15 +25,16 @@ func NewHandler(watchlistService watchlistSvc.Service) handlers.Handler {
 }
 
 func (h *watchlistResetHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	if err := h.watchlistService.ResetWatchlist(params.User.ID); err != nil {
+	// ClearFilter: фильтр активен, список пуст → ноль сигналов
+	if err := h.watchlistService.ClearFilter(params.User.ID); err != nil {
 		return handlers.HandlerResult{}, err
 	}
-
 	return handlers.HandlerResult{
-		Message: "✅ Вотчлист очищен. Теперь отслеживаются *все монеты*.",
+		Message: "🗑️ Фильтр очищен.\n\nСигналов не будет, пока не добавите монеты.\n\nЧтобы получать все сигналы — нажмите *«📡 Все сигналы»*.",
 		Keyboard: map[string]interface{}{
 			"inline_keyboard": [][]map[string]string{
-				{{"text": "📋 Открыть вотчлист", "callback_data": constants.CallbackWatchlistMenu}},
+				{{"text": "📡 Все сигналы", "callback_data": constants.CallbackWatchlistDisable}},
+				{{"text": "📋 Открыть фильтр", "callback_data": constants.CallbackWatchlistMenu}},
 				{{"text": "🔙 Главное меню", "callback_data": constants.CallbackMenuMain}},
 			},
 		},

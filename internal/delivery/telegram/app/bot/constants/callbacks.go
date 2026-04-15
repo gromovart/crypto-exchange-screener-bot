@@ -91,7 +91,8 @@ const (
 	CallbackWatchlistSearch = "watchlist_search"  // 🔍 Поиск монеты
 	CallbackWatchlistReset  = "watchlist_reset"    // 🗑️ Очистить вотчлист
 	CallbackWatchlistAddAll  = "watchlist_add_all"   // ➕ Добавить все монеты
-	CallbackWatchlistView    = "watchlist_view"      // 👁 Мой вотчлист
+	CallbackWatchlistView    = "watchlist_view"      // 👁 Мой фильтр
+	CallbackWatchlistDisable = "watchlist_disable"   // 📡 Все сигналы (отключить фильтр)
 	// Wildcard: watchlist_toggle:{SYMBOL}
 	CallbackWatchlistTogglePrefix = "watchlist_toggle:"
 	// Wildcard: watchlist_letter:{LETTER}:{PAGE}

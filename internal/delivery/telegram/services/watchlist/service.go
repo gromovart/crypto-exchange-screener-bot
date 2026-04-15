@@ -44,7 +44,13 @@ func (s *serviceImpl) ToggleSymbol(userID int, symbol string) (bool, error) {
 	return true, s.userService.UpdateWatchlist(userID, updated)
 }
 
-func (s *serviceImpl) ResetWatchlist(userID int) error {
+// ClearFilter — фильтр активен, но пуст → ноль сигналов
+func (s *serviceImpl) ClearFilter(userID int) error {
+	return s.userService.UpdateWatchlist(userID, []string{})
+}
+
+// DisableFilter — отключает фильтр полностью (nil → все сигналы)
+func (s *serviceImpl) DisableFilter(userID int) error {
 	return s.userService.UpdateWatchlist(userID, nil)
 }
 

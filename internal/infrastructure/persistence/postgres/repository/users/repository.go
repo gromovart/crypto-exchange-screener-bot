@@ -680,7 +680,8 @@ func (r *UserRepositoryImpl) scanUser(rows *sql.Rows) (*models.User, error) {
 		}
 	}
 
-	if len(watchlistSymbols) > 0 {
+	if watchlistSymbols != nil {
+		// nil = фильтр отключён (все сигналы); [] = фильтр пуст (нет сигналов)
 		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
 		for i, v := range watchlistSymbols {
 			if v.Valid {
@@ -763,7 +764,8 @@ func (r *UserRepositoryImpl) scanUserRow(row *sql.Row) (*models.User, error) {
 		}
 	}
 
-	if len(watchlistSymbols) > 0 {
+	if watchlistSymbols != nil {
+		// nil = фильтр отключён (все сигналы); [] = фильтр пуст (нет сигналов)
 		user.WatchlistSymbols = make([]string, len(watchlistSymbols))
 		for i, v := range watchlistSymbols {
 			if v.Valid {

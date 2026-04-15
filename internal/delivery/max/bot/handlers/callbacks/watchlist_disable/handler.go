@@ -1,5 +1,5 @@
-// internal/delivery/max/bot/handlers/callbacks/watchlist_reset/handler.go
-package watchlist_reset
+// internal/delivery/max/bot/handlers/callbacks/watchlist_disable/handler.go
+package watchlist_disable
 
 import (
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
@@ -15,23 +15,22 @@ type Handler struct {
 
 func New(watchlistService watchlistSvc.Service) handlers.Handler {
 	return &Handler{
-		BaseHandler:      base.New("watchlist_reset", kb.CbWatchlistReset, handlers.TypeCallback),
+		BaseHandler:      base.New("watchlist_disable", kb.CbWatchlistDisable, handlers.TypeCallback),
 		watchlistService: watchlistService,
 	}
 }
 
 func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
-	// ClearFilter: фильтр активен, список пуст → ноль сигналов
-	if err := h.watchlistService.ClearFilter(params.User.ID); err != nil {
+	// DisableFilter: nil → фильтр отключён → все сигналы
+	if err := h.watchlistService.DisableFilter(params.User.ID); err != nil {
 		return handlers.HandlerResult{}, err
 	}
 	rows := [][]map[string]string{
-		{kb.B("📡 Все сигналы", kb.CbWatchlistDisable)},
-		{kb.B("📋 Открыть фильтр", kb.CbWatchlistMenu)},
+		{kb.B("📋 Настроить фильтр", kb.CbWatchlistMenu)},
 		kb.BackRow(kb.CbMenuMain),
 	}
 	return handlers.HandlerResult{
-		Message:     "🗑️ Фильтр очищен.\n\nСигналов не будет, пока не добавите монеты.\n\nЧтобы получать все сигналы — нажмите «📡 Все сигналы».",
+		Message:     "📡 Фильтр отключён. Приходят сигналы по всем монетам.",
 		Keyboard:    kb.Keyboard(rows),
 		EditMessage: params.MessageID != "",
 	}, nil
