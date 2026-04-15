@@ -175,7 +175,7 @@ func (h *Handler) buildSymbolKeyboard(items []string, inWatchlist map[string]boo
 		var row []map[string]string
 		for j := i; j < i+2 && j < len(items); j++ {
 			sym := items[j]
-			icon := "⬜️"
+			icon := "❌"
 			if inWatchlist[sym] {
 				icon = "✅"
 			}

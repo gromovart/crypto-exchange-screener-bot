@@ -206,7 +206,7 @@ func (h *watchlistToggleHandler) buildSymbolKeyboard(items []string, inWatchlist
 		var row []map[string]string
 		for j := i; j < i+2 && j < len(items); j++ {
 			sym := items[j]
-			icon := "⬜️"
+			icon := "❌"
 			if inWatchlist[sym] {
 				icon = "✅"
 			}
