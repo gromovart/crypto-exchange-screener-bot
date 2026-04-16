@@ -28,6 +28,10 @@ func New(watchlistService watchlistSvc.Service) handlers.Handler {
 func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	userID := params.User.ID
 
+	filterDisabled, err := h.watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := h.watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -37,16 +41,19 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	total := len(h.watchlistService.GetAllSymbols())
 
 	var msg strings.Builder
-	msg.WriteString("📋 Вотчлист монет\n\n")
-	if len(watchlist) == 0 {
-		msg.WriteString("Сейчас отслеживаются все монеты (вотчлист не задан).\n\n")
-	} else {
-		msg.WriteString(fmt.Sprintf("Вы отслеживаете: %d монет\n\n", len(watchlist)))
+	msg.WriteString("📋 Фильтр монет\n\n")
+	switch {
+	case filterDisabled:
+		msg.WriteString("📡 Фильтр отключён — сигналы приходят по всем монетам.\n\n")
+	case len(watchlist) == 0:
+		msg.WriteString("🔇 Фильтр активен, список пуст — сигналов не будет.\n\n")
+	default:
+		msg.WriteString(fmt.Sprintf("✅ Отслеживаются: %d монет\n\n", len(watchlist)))
 	}
 	msg.WriteString(fmt.Sprintf("Всего доступно: %d монет\n\n", total))
 	msg.WriteString("Выберите букву для фильтра или используйте поиск:")
 
-	keyboard := buildMenuKeyboard(letters, len(watchlist))
+	keyboard := buildMenuKeyboard(letters, filterDisabled, len(watchlist))
 	return handlers.HandlerResult{
 		Message:     msg.String(),
 		Keyboard:    keyboard,
@@ -54,7 +61,7 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	}, nil
 }
 
-func buildMenuKeyboard(letters []string, watchlistLen int) interface{} {
+func buildMenuKeyboard(letters []string, filterDisabled bool, watchlistLen int) interface{} {
 	var rows [][]map[string]string
 
 	rows = append(rows, []map[string]string{
@@ -82,10 +89,22 @@ func buildMenuKeyboard(letters []string, watchlistLen int) interface{} {
 	rows = append(rows, []map[string]string{
 		kb.B("➕ Добавить все монеты", kb.CbWatchlistAddAll),
 	})
-	if watchlistLen > 0 {
+	// Показываем кнопки управления в зависимости от состояния фильтра
+	if filterDisabled {
+		// nil → показываем только "Очистить" (чтобы активировать пустой фильтр)
 		rows = append(rows, []map[string]string{
-			kb.B("🗑️ Очистить вотчлист", kb.CbWatchlistReset),
+			kb.B("🗑️ Активировать пустой фильтр", kb.CbWatchlistReset),
 		})
+	} else {
+		// [] или [coins] → показываем "Очистить" и "Все сигналы"
+		rows = append(rows, []map[string]string{
+			kb.B("📡 Все сигналы (откл. фильтр)", kb.CbWatchlistDisable),
+		})
+		if watchlistLen > 0 {
+			rows = append(rows, []map[string]string{
+				kb.B("🗑️ Очистить список", kb.CbWatchlistReset),
+			})
+		}
 	}
 
 	rows = append(rows, kb.BackRow(kb.CbMenuMain))

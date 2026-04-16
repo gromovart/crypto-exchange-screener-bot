@@ -42,7 +42,9 @@ type User struct {
 	// ИЗМЕНЕНИЕ: убираем db:"-", теперь sqlx будет маппить эти поля
 	ExcludePatterns  []string `db:"exclude_patterns" json:"exclude_patterns"`
 	// Вотчлист: nil = отслеживать все монеты; непустой срез = только эти символы
-	WatchlistSymbols []string `db:"watchlist_symbols" json:"watchlist_symbols,omitempty"`
+	// nil = фильтр отключён (все сигналы); [] = фильтр пуст (нет сигналов); [coins] = только эти
+	// ВАЖНО: без omitempty, чтобы nil и [] не смешивались при JSON-сериализации в Redis
+	WatchlistSymbols []string `db:"watchlist_symbols" json:"watchlist_symbols"`
 	Language        string   `db:"language" json:"language"`
 	Timezone        string   `db:"timezone" json:"timezone"`
 	DisplayMode     string   `db:"display_mode" json:"display_mode"`

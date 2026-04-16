@@ -34,6 +34,10 @@ func NewHandler(watchlistService watchlistSvc.Service) handlers.Handler {
 func (h *watchlistMenuHandler) Execute(params handlers.HandlerParams) (handlers.HandlerResult, error) {
 	userID := params.User.ID
 
+	filterDisabled, err := h.watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := h.watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -43,23 +47,26 @@ func (h *watchlistMenuHandler) Execute(params handlers.HandlerParams) (handlers.
 	total := len(h.watchlistService.GetAllSymbols())
 
 	var msg strings.Builder
-	msg.WriteString("📋 *Вотчлист монет*\n\n")
-	if len(watchlist) == 0 {
-		msg.WriteString("Сейчас отслеживаются *все монеты* (вотчлист не задан).\n\n")
-	} else {
-		msg.WriteString(fmt.Sprintf("Вы отслеживаете: *%d монет*\n\n", len(watchlist)))
+	msg.WriteString("📋 *Фильтр монет*\n\n")
+	switch {
+	case filterDisabled:
+		msg.WriteString("📡 Фильтр отключён — сигналы приходят по *всем монетам*.\n\n")
+	case len(watchlist) == 0:
+		msg.WriteString("🔇 Фильтр активен, список пуст — *сигналов не будет*.\n\n")
+	default:
+		msg.WriteString(fmt.Sprintf("✅ Отслеживаются: *%d монет*\n\n", len(watchlist)))
 	}
 	msg.WriteString(fmt.Sprintf("Всего доступно: %d монет\n\n", total))
 	msg.WriteString("Выберите букву для фильтра или воспользуйтесь поиском:")
 
-	keyboard := h.buildKeyboard(letters, len(watchlist))
+	keyboard := h.buildKeyboard(letters, filterDisabled, len(watchlist))
 	return handlers.HandlerResult{
 		Message:  msg.String(),
 		Keyboard: keyboard,
 	}, nil
 }
 
-func (h *watchlistMenuHandler) buildKeyboard(letters []string, watchlistLen int) interface{} {
+func (h *watchlistMenuHandler) buildKeyboard(letters []string, filterDisabled bool, watchlistLen int) interface{} {
 	var rows [][]map[string]string
 
 	// Кнопка поиска
@@ -84,7 +91,7 @@ func (h *watchlistMenuHandler) buildKeyboard(letters []string, watchlistLen int)
 		rows = append(rows, row)
 	}
 
-	// Кнопки управления вотчлистом
+	// Кнопки управления
 	if watchlistLen > 0 {
 		rows = append(rows, []map[string]string{
 			{"text": "👁 Мой вотчлист", "callback_data": constants.CallbackWatchlistView},
@@ -93,10 +100,21 @@ func (h *watchlistMenuHandler) buildKeyboard(letters []string, watchlistLen int)
 	rows = append(rows, []map[string]string{
 		{"text": "➕ Добавить все монеты", "callback_data": constants.CallbackWatchlistAddAll},
 	})
-	if watchlistLen > 0 {
+	if filterDisabled {
+		// nil → предлагаем активировать пустой фильтр (не будут приходить сигналы пока не добавишь монеты)
 		rows = append(rows, []map[string]string{
-			{"text": "🗑️ Очистить вотчлист", "callback_data": constants.CallbackWatchlistReset},
+			{"text": "🗑️ Активировать пустой фильтр", "callback_data": constants.CallbackWatchlistReset},
 		})
+	} else {
+		// [] или [coins] → предлагаем отключить фильтр (вернуть все сигналы)
+		rows = append(rows, []map[string]string{
+			{"text": "📡 Все сигналы (откл. фильтр)", "callback_data": constants.CallbackWatchlistDisable},
+		})
+		if watchlistLen > 0 {
+			rows = append(rows, []map[string]string{
+				{"text": "🗑️ Очистить список", "callback_data": constants.CallbackWatchlistReset},
+			})
+		}
 	}
 
 	// Назад
