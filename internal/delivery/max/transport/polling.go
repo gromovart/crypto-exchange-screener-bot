@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	pollingTimeout  = 30              // секунд — long-polling timeout
-	pollingInterval = 3 * time.Second // пауза при ошибке
+	pollingTimeout      = 30               // секунд — long-polling timeout
+	pollingRetryMin     = 3 * time.Second  // начальная пауза при ошибке
+	pollingRetryMax     = 5 * time.Minute  // максимальная пауза при ошибке
 )
 
 // UpdateHandler — функция-обработчик входящих обновлений
@@ -34,6 +35,7 @@ func NewPoller(client *max.Client, handler UpdateHandler) *Poller {
 // Run запускает цикл опроса. Блокирует до отмены ctx.
 func (p *Poller) Run(ctx context.Context) {
 	var marker int64
+	retryDelay := pollingRetryMin
 	logger.Info("🔄 MAX Polling запущен (timeout=%ds)", pollingTimeout)
 
 	for {
@@ -46,14 +48,22 @@ func (p *Poller) Run(ctx context.Context) {
 
 		updates, newMarker, err := p.client.GetUpdates(marker, pollingTimeout)
 		if err != nil {
-			logger.Warn("⚠️ MAX getUpdates error: %v — повтор через %s", err, pollingInterval)
+			logger.Warn("⚠️ MAX getUpdates error: %v — повтор через %s", err, retryDelay)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(pollingInterval):
-				continue
+			case <-time.After(retryDelay):
 			}
+			// Exponential backoff: 3s → 6s → 12s → ... → 5min
+			retryDelay *= 2
+			if retryDelay > pollingRetryMax {
+				retryDelay = pollingRetryMax
+			}
+			continue
 		}
+
+		// Успешный запрос — сбрасываем задержку
+		retryDelay = pollingRetryMin
 
 		// Обновляем маркер только если он изменился
 		if newMarker > marker {
