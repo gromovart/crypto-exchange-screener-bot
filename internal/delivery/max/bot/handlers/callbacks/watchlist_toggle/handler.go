@@ -42,6 +42,10 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 	h := &Handler{watchlistService: watchlistService}
 	results := watchlistService.SearchSymbols(query)
 
+	filterDisabled, err := watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -66,7 +70,7 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 	items, totalPages := watchlistService.PageSymbols(results, 0, pageSize)
 	return handlers.HandlerResult{
 		Message:  fmt.Sprintf("🔍 Результаты поиска «%s»: найдено %d монет", query, len(results)),
-		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, letter, 0, totalPages),
+		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, filterDisabled, letter, 0, totalPages),
 	}, nil
 }
 
@@ -152,6 +156,10 @@ func (h *Handler) buildLetterPage(userID int, letter string, page int, messageID
 	items, totalPages := h.watchlistService.PageSymbols(symbols, page, pageSize)
 	title = fmt.Sprintf(title, page+1, totalPages)
 
+	filterDisabled, err := h.watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := h.watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -163,12 +171,12 @@ func (h *Handler) buildLetterPage(userID int, letter string, page int, messageID
 
 	return handlers.HandlerResult{
 		Message:     title,
-		Keyboard:    h.buildSymbolKeyboard(items, inWatchlist, letter, page, totalPages),
+		Keyboard:    h.buildSymbolKeyboard(items, inWatchlist, filterDisabled, letter, page, totalPages),
 		EditMessage: messageID != "",
 	}, nil
 }
 
-func (h *Handler) buildSymbolKeyboard(items []string, inWatchlist map[string]bool, letter string, page, totalPages int) interface{} {
+func (h *Handler) buildSymbolKeyboard(items []string, inWatchlist map[string]bool, filterDisabled bool, letter string, page, totalPages int) interface{} {
 	var rows [][]map[string]string
 
 	for i := 0; i < len(items); i += 2 {
@@ -176,7 +184,8 @@ func (h *Handler) buildSymbolKeyboard(items []string, inWatchlist map[string]boo
 		for j := i; j < i+2 && j < len(items); j++ {
 			sym := items[j]
 			icon := "❌"
-			if inWatchlist[sym] {
+			// filterDisabled (nil) → все монеты отслеживаются → ✅
+			if filterDisabled || inWatchlist[sym] {
 				icon = "✅"
 			}
 			cb := fmt.Sprintf("watchlist_toggle_%s_%s_%d", sym, letter, page)

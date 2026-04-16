@@ -19,6 +19,9 @@ type Service interface {
 	// GetUserWatchlist возвращает текущий вотчлист пользователя
 	GetUserWatchlist(userID int) ([]string, error)
 
+	// IsFilterDisabled возвращает true если фильтр отключён (nil → все сигналы)
+	IsFilterDisabled(userID int) (bool, error)
+
 	// GetAllSymbols возвращает все доступные символы
 	GetAllSymbols() []string
 

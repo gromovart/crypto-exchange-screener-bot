@@ -51,6 +51,10 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 	h := &watchlistToggleHandler{watchlistService: watchlistService}
 	results := watchlistService.SearchSymbols(query)
 
+	filterDisabled, err := watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -79,7 +83,7 @@ func ExecuteSearch(watchlistService watchlistSvc.Service, userID int, query stri
 
 	return handlers.HandlerResult{
 		Message:  fmt.Sprintf("🔍 Результаты поиска *%s*: найдено %d монет", query, len(results)),
-		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, letter, 0, totalPages),
+		Keyboard: h.buildSymbolKeyboard(items, inWatchlist, filterDisabled, letter, 0, totalPages),
 	}, nil
 }
 
@@ -175,6 +179,10 @@ func (h *watchlistToggleHandler) buildLetterPage(userID int, letter string, page
 
 	items, totalPages := h.watchlistService.PageSymbols(symbols, page, pageSize)
 
+	filterDisabled, err := h.watchlistService.IsFilterDisabled(userID)
+	if err != nil {
+		return handlers.HandlerResult{}, err
+	}
 	watchlist, err := h.watchlistService.GetUserWatchlist(userID)
 	if err != nil {
 		return handlers.HandlerResult{}, err
@@ -191,14 +199,14 @@ func (h *watchlistToggleHandler) buildLetterPage(userID int, letter string, page
 	}
 	msg.WriteString(fmt.Sprintf("\n\nСтраница %d из %d (%d монет):", page+1, totalPages, len(symbols)))
 
-	keyboard := h.buildSymbolKeyboard(items, inWatchlist, letter, page, totalPages)
+	keyboard := h.buildSymbolKeyboard(items, inWatchlist, filterDisabled, letter, page, totalPages)
 	return handlers.HandlerResult{
 		Message:  msg.String(),
 		Keyboard: keyboard,
 	}, nil
 }
 
-func (h *watchlistToggleHandler) buildSymbolKeyboard(items []string, inWatchlist map[string]bool, letter string, page, totalPages int) interface{} {
+func (h *watchlistToggleHandler) buildSymbolKeyboard(items []string, inWatchlist map[string]bool, filterDisabled bool, letter string, page, totalPages int) interface{} {
 	var rows [][]map[string]string
 
 	// По 2 кнопки в строке
@@ -207,7 +215,8 @@ func (h *watchlistToggleHandler) buildSymbolKeyboard(items []string, inWatchlist
 		for j := i; j < i+2 && j < len(items); j++ {
 			sym := items[j]
 			icon := "❌"
-			if inWatchlist[sym] {
+			// filterDisabled (nil) → все монеты отслеживаются → ✅
+			if filterDisabled || inWatchlist[sym] {
 				icon = "✅"
 			}
 			// callback: watchlist_toggle:{SYMBOL}:{LETTER}:{PAGE}

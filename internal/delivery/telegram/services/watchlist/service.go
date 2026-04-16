@@ -70,6 +70,15 @@ func (s *serviceImpl) GetUserWatchlist(userID int) ([]string, error) {
 	return user.WatchlistSymbols, nil
 }
 
+// IsFilterDisabled возвращает true если фильтр отключён (nil → все сигналы)
+func (s *serviceImpl) IsFilterDisabled(userID int) (bool, error) {
+	user, err := s.userService.GetUserByID(userID)
+	if err != nil {
+		return false, err
+	}
+	return user.WatchlistSymbols == nil, nil
+}
+
 func (s *serviceImpl) GetAllSymbols() []string {
 	if s.priceStorageGetter == nil {
 		return nil
