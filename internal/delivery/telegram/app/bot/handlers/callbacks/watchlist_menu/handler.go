@@ -97,16 +97,14 @@ func (h *watchlistMenuHandler) buildKeyboard(letters []string, filterDisabled bo
 			{"text": "👁 Мой вотчлист", "callback_data": constants.CallbackWatchlistView},
 		})
 	}
-	rows = append(rows, []map[string]string{
-		{"text": "➕ Добавить все монеты", "callback_data": constants.CallbackWatchlistAddAll},
-	})
+	// Кнопки управления зависят от состояния фильтра
 	if filterDisabled {
-		// nil → предлагаем активировать пустой фильтр (не будут приходить сигналы пока не добавишь монеты)
+		// nil → фильтр отключён, предлагаем активировать (пустой список = нет сигналов)
 		rows = append(rows, []map[string]string{
-			{"text": "🗑️ Активировать пустой фильтр", "callback_data": constants.CallbackWatchlistReset},
+			{"text": "🔇 Включить фильтр (без монет)", "callback_data": constants.CallbackWatchlistReset},
 		})
 	} else {
-		// [] или [coins] → предлагаем отключить фильтр (вернуть все сигналы)
+		// [] или [coins] → фильтр активен, предлагаем отключить или очистить
 		rows = append(rows, []map[string]string{
 			{"text": "📡 Все сигналы (откл. фильтр)", "callback_data": constants.CallbackWatchlistDisable},
 		})

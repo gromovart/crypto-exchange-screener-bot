@@ -86,17 +86,14 @@ func buildMenuKeyboard(letters []string, filterDisabled bool, watchlistLen int) 
 			kb.B("👁 Мой вотчлист", kb.CbWatchlistView),
 		})
 	}
-	rows = append(rows, []map[string]string{
-		kb.B("➕ Добавить все монеты", kb.CbWatchlistAddAll),
-	})
-	// Показываем кнопки управления в зависимости от состояния фильтра
+	// Кнопки управления зависят от состояния фильтра
 	if filterDisabled {
-		// nil → показываем только "Очистить" (чтобы активировать пустой фильтр)
+		// nil → фильтр отключён, предлагаем активировать (пустой список = нет сигналов)
 		rows = append(rows, []map[string]string{
-			kb.B("🗑️ Активировать пустой фильтр", kb.CbWatchlistReset),
+			kb.B("🔇 Включить фильтр (без монет)", kb.CbWatchlistReset),
 		})
 	} else {
-		// [] или [coins] → показываем "Очистить" и "Все сигналы"
+		// [] или [coins] → фильтр активен, предлагаем отключить или очистить
 		rows = append(rows, []map[string]string{
 			kb.B("📡 Все сигналы (откл. фильтр)", kb.CbWatchlistDisable),
 		})
