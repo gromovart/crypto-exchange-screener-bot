@@ -99,6 +99,13 @@ func (s *OTPStore) Verify(maxUserID int64, code string) (bool, error) {
 	return true, nil
 }
 
+// Invalidate принудительно удаляет OTP для пользователя (например при смене кода)
+func (s *OTPStore) Invalidate(userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.otps, userID)
+}
+
 // generateCode генерирует 6-значный цифровой код
 func generateCode() string {
 	b := make([]byte, 3)

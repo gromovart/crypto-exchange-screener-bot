@@ -23,12 +23,13 @@ type Sender interface {
 // Server — внутренний HTTP-сервер для OTP-авторизации
 // Слушает только на 127.0.0.1, защищён X-Internal-Secret.
 type Server struct {
-	userService *users.Service
-	sender      Sender
-	store       *OTPStore
-	secret      string
-	server      *http.Server
-	port        int
+	userService   *users.Service
+	sender        Sender
+	store         *OTPStore // MAX OTP store
+	telegramStore *OTPStore // Telegram OTP store
+	secret        string
+	server        *http.Server
+	port          int
 }
 
 // NewServer создаёт auth-сервер
@@ -40,11 +41,12 @@ func NewServer(
 	otpTTL time.Duration,
 ) *Server {
 	return &Server{
-		userService: userService,
-		sender:      sender,
-		store:       NewOTPStore(otpTTL),
-		secret:      secret,
-		port:        port,
+		userService:   userService,
+		sender:        sender,
+		store:         NewOTPStore(otpTTL),
+		telegramStore: NewOTPStore(10 * time.Minute), // Telegram OTP: 10 минут
+		secret:        secret,
+		port:          port,
 	}
 }
 
@@ -53,6 +55,8 @@ func (s *Server) Start() error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/otp", s.withSecret(s.handleOTP))
 	mux.HandleFunc("/auth/verify", s.withSecret(s.handleVerify))
+	mux.HandleFunc("/auth/telegram/otp", s.withSecret(s.handleTelegramOTP))
+	mux.HandleFunc("/auth/telegram/verify", s.withSecret(s.handleTelegramVerify))
 	mux.HandleFunc("/health", s.handleHealth)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", s.port)
@@ -206,6 +210,86 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 			"username": user.Username,
 			"role":     user.Role,
 		},
+	})
+}
+
+// POST /auth/telegram/otp
+// Body: {"telegram_id": 987654321}
+// Response: {"ok": true, "expires_in": 600}
+func (s *Server) handleTelegramOTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		TelegramID int64 `json:"telegram_id"`
+	}
+	if err := readJSON(r, &req); err != nil || req.TelegramID == 0 {
+		writeError(w, http.StatusBadRequest, "telegram_id обязателен")
+		return
+	}
+
+	// Инвалидируем старый код перед генерацией нового
+	s.telegramStore.Invalidate(req.TelegramID)
+
+	code, err := s.telegramStore.Generate(req.TelegramID)
+	if err != nil {
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+
+	msg := fmt.Sprintf(
+		"🔐 Код для входа в Crypto Analyzer:\n\n*%s*\n\nКод действителен 10 минут.",
+		code,
+	)
+	if sendErr := s.sender.SendTextMessage(req.TelegramID, msg, nil); sendErr != nil {
+		logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
+		// Если бот не может инициировать чат — возвращаем понятную ошибку
+		writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
+		return
+	}
+
+	logger.Info("🔐 Telegram OTP отправлен: telegram_id=%d", req.TelegramID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":         true,
+		"expires_in": int(s.telegramStore.ttl.Seconds()),
+	})
+}
+
+// POST /auth/telegram/verify
+// Body: {"telegram_id": 987654321, "otp": "123456"}
+// Response: {"ok": true, "telegram_id": 987654321, "username": "..."}
+func (s *Server) handleTelegramVerify(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		TelegramID int64  `json:"telegram_id"`
+		OTP        string `json:"otp"`
+	}
+	if err := readJSON(r, &req); err != nil || req.TelegramID == 0 || req.OTP == "" {
+		writeError(w, http.StatusBadRequest, "telegram_id и otp обязательны")
+		return
+	}
+
+	ok, err := s.telegramStore.Verify(req.TelegramID, req.OTP)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "неверный код")
+		return
+	}
+
+	logger.Info("✅ Telegram OTP верифицирован: telegram_id=%d", req.TelegramID)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ok":          true,
+		"telegram_id": req.TelegramID,
+		"username":    "", // username не доступен без отдельного запроса к Telegram API
 	})
 }
 
