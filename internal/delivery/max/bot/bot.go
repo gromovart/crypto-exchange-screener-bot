@@ -137,6 +137,11 @@ func (b *Bot) GetSender() message_sender.MessageSender {
 	return b.sender
 }
 
+// GetOTPServer возвращает auth OTP-сервер (nil если не настроен)
+func (b *Bot) GetOTPServer() *auth.Server {
+	return b.otpServer
+}
+
 // Start запускает бот в соответствующем режиме. Блокирует до отмены ctx.
 func (b *Bot) Start(ctx context.Context) {
 	// Запускаем OTP auth-сервер (если настроен)

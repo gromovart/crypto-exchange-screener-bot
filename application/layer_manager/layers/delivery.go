@@ -234,6 +234,11 @@ func (dl *DeliveryLayer) Initialize() error {
 						tbankSvc.SetMaxSender(dl.maxBot.GetSender())
 						logger.Info("✅ MAX sender зарегистрирован в Telegram TBankService")
 					}
+					// Инжектируем Telegram sender в auth OTP-сервер для /auth/telegram/otp
+					if otpSrv := dl.maxBot.GetOTPServer(); otpSrv != nil {
+						otpSrv.SetTelegramSender(tgBot.GetMessageSender())
+						logger.Info("✅ Telegram sender зарегистрирован в auth OTP-сервере")
+					}
 				}
 
 				// Настраиваем режим работы (polling или webhook)

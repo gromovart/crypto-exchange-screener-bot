@@ -101,6 +101,12 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// SetTelegramSender позволяет инжектировать Telegram sender после создания сервера.
+// Вызывается из delivery layer после инициализации обоих ботов.
+func (s *Server) SetTelegramSender(ts TelegramSender) {
+	s.telegramSender = ts
+}
+
 // Stop останавливает сервер
 func (s *Server) Stop() error {
 	if s.server != nil {
