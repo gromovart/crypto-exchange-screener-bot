@@ -62,10 +62,11 @@ type getUpdatesResponse struct {
 }
 
 // sendMessageResponse — ответ POST /messages
+// MAX оборачивает результат в поле "message"
 type sendMessageResponse struct {
-	Recipient Recipient   `json:"recipient"`
-	Timestamp int64       `json:"timestamp"`
-	Body      MessageBody `json:"body"`
+	Message struct {
+		Body MessageBody `json:"body"`
+	} `json:"message"`
 }
 
 // RateLimiter — простой ограничитель частоты запросов

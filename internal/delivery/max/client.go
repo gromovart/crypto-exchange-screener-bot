@@ -148,11 +148,7 @@ func (c *Client) SendMessageGetID(chatID int64, text string, keyboard interface{
 	if err := json.Unmarshal(data, &r); err != nil {
 		return "", fmt.Errorf("max SendMessage: unmarshal: %w", err)
 	}
-	if r.Body.Mid == "" {
-		// Временный дебаг: смотрим сырой ответ MAX API
-		fmt.Printf("[DEBUG] MAX SendMessageGetID raw response: %s\n", string(data))
-	}
-	return r.Body.Mid, nil
+	return r.Message.Body.Mid, nil
 }
 
 // ───────────────────────────────────────────────
