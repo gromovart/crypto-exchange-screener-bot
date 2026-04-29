@@ -20,16 +20,24 @@ type Sender interface {
 	SendTextMessage(chatID int64, text string, keyboard interface{}) error
 }
 
+// TelegramSender — расширенный интерфейс для Telegram с поддержкой message_id
+type TelegramSender interface {
+	Sender
+	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (int64, error)
+	DeleteMessage(chatID, messageID int64) error
+}
+
 // Server — внутренний HTTP-сервер для OTP-авторизации
 // Слушает только на 127.0.0.1, защищён X-Internal-Secret.
 type Server struct {
-	userService   *users.Service
-	sender        Sender
-	store         *OTPStore // MAX OTP store
-	telegramStore *OTPStore // Telegram OTP store
-	secret        string
-	server        *http.Server
-	port          int
+	userService    *users.Service
+	sender         Sender
+	telegramSender TelegramSender // nil если не Telegram
+	store          *OTPStore      // MAX OTP store
+	telegramStore  *OTPStore      // Telegram OTP store
+	secret         string
+	server         *http.Server
+	port           int
 }
 
 // NewServer создаёт auth-сервер
@@ -40,13 +48,16 @@ func NewServer(
 	secret string,
 	otpTTL time.Duration,
 ) *Server {
+	// Проверяем поддерживает ли sender расширенный TelegramSender интерфейс
+	tgSender, _ := sender.(TelegramSender)
 	return &Server{
-		userService:   userService,
-		sender:        sender,
-		store:         NewOTPStore(otpTTL),
-		telegramStore: NewOTPStore(10 * time.Minute), // Telegram OTP: 10 минут
-		secret:        secret,
-		port:          port,
+		userService:    userService,
+		sender:         sender,
+		telegramSender: tgSender,
+		store:          NewOTPStore(otpTTL),
+		telegramStore:  NewOTPStore(10 * time.Minute),
+		secret:         secret,
+		port:           port,
 	}
 }
 
@@ -243,14 +254,27 @@ func (s *Server) handleTelegramOTP(w http.ResponseWriter, r *http.Request) {
 		"🔐 Код для входа в Crypto Analyzer:\n\n*%s*\n\nКод действителен 10 минут.",
 		code,
 	)
-	if sendErr := s.sender.SendTextMessage(req.TelegramID, msg, nil); sendErr != nil {
-		logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
-		// Если бот не может инициировать чат — возвращаем понятную ошибку
-		writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
-		return
+	var msgID int64
+	if s.telegramSender != nil {
+		var sendErr error
+		msgID, sendErr = s.telegramSender.SendMenuMessageWithID(req.TelegramID, msg, nil)
+		if sendErr != nil {
+			logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
+			writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
+			return
+		}
+	} else {
+		if sendErr := s.sender.SendTextMessage(req.TelegramID, msg, nil); sendErr != nil {
+			logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
+			writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
+			return
+		}
+	}
+	if msgID > 0 {
+		s.telegramStore.SetMessageID(req.TelegramID, msgID)
 	}
 
-	logger.Info("🔐 Telegram OTP отправлен: telegram_id=%d", req.TelegramID)
+	logger.Info("🔐 Telegram OTP отправлен: telegram_id=%d msg_id=%d", req.TelegramID, msgID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":         true,
 		"expires_in": int(s.telegramStore.ttl.Seconds()),
@@ -275,6 +299,9 @@ func (s *Server) handleTelegramVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Сохраняем message_id до Verify (после успеха запись удаляется из store)
+	msgID := s.telegramStore.GetMessageID(req.TelegramID)
+
 	ok, err := s.telegramStore.Verify(req.TelegramID, req.OTP)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
@@ -283,6 +310,13 @@ func (s *Server) handleTelegramVerify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "неверный код")
 		return
+	}
+
+	// Удаляем сообщение с кодом из чата
+	if msgID > 0 && s.telegramSender != nil {
+		if delErr := s.telegramSender.DeleteMessage(req.TelegramID, msgID); delErr != nil {
+			logger.Info("⚠️ не удалось удалить OTP-сообщение telegram_id=%d msg_id=%d: %v", req.TelegramID, msgID, delErr)
+		}
 	}
 
 	logger.Info("✅ Telegram OTP верифицирован: telegram_id=%d", req.TelegramID)

@@ -17,7 +17,8 @@ const (
 type otpEntry struct {
 	code      string
 	expiresAt time.Time
-	attempts  int // неудачные попытки верификации
+	attempts  int   // неудачные попытки верификации
+	messageID int64 // ID сообщения в чате (для последующего удаления)
 }
 
 type rateEntry struct {
@@ -97,6 +98,25 @@ func (s *OTPStore) Verify(maxUserID int64, code string) (bool, error) {
 	// Успех — удаляем использованный код
 	delete(s.otps, maxUserID)
 	return true, nil
+}
+
+// SetMessageID сохраняет ID сообщения с кодом для последующего удаления.
+func (s *OTPStore) SetMessageID(userID int64, msgID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.otps[userID]; ok {
+		e.messageID = msgID
+	}
+}
+
+// GetMessageID возвращает ID сообщения с кодом (0 если не задан).
+func (s *OTPStore) GetMessageID(userID int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.otps[userID]; ok {
+		return e.messageID
+	}
+	return 0
 }
 
 // Invalidate принудительно удаляет OTP для пользователя (например при смене кода)
