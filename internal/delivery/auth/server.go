@@ -27,12 +27,20 @@ type TelegramSender interface {
 	DeleteMessage(chatID, messageID int64) error
 }
 
+// MAXSender — расширенный интерфейс для MAX с поддержкой string message_id
+type MAXSender interface {
+	Sender
+	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (string, error)
+	DeleteMessage(mid string) error
+}
+
 // Server — внутренний HTTP-сервер для OTP-авторизации
 // Слушает только на 127.0.0.1, защищён X-Internal-Secret.
 type Server struct {
 	userService    *users.Service
 	sender         Sender
 	telegramSender TelegramSender // nil если не Telegram
+	maxSender      MAXSender      // nil если не MAX
 	store          *OTPStore      // MAX OTP store
 	telegramStore  *OTPStore      // Telegram OTP store
 	secret         string
@@ -48,12 +56,14 @@ func NewServer(
 	secret string,
 	otpTTL time.Duration,
 ) *Server {
-	// Проверяем поддерживает ли sender расширенный TelegramSender интерфейс
+	// Проверяем поддерживает ли sender расширенные интерфейсы
 	tgSender, _ := sender.(TelegramSender)
+	maxSnd, _ := sender.(MAXSender)
 	return &Server{
 		userService:    userService,
 		sender:         sender,
 		telegramSender: tgSender,
+		maxSender:      maxSnd,
 		store:          NewOTPStore(otpTTL),
 		telegramStore:  NewOTPStore(10 * time.Minute),
 		secret:         secret,
@@ -169,13 +179,27 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		code,
 		s.store.ttl.Minutes(),
 	)
-	if sendErr := s.sender.SendTextMessage(chatID, msg, nil); sendErr != nil {
-		logger.Error("❌ OTP: не удалось отправить код user=%d: %v", req.MaxUserID, sendErr)
-		writeError(w, http.StatusInternalServerError, "не удалось отправить код")
-		return
+	var msgIDStr string
+	if s.maxSender != nil {
+		var sendErr error
+		msgIDStr, sendErr = s.maxSender.SendMenuMessageWithID(chatID, msg, nil)
+		if sendErr != nil {
+			logger.Error("❌ OTP: не удалось отправить код user=%d: %v", req.MaxUserID, sendErr)
+			writeError(w, http.StatusInternalServerError, "не удалось отправить код")
+			return
+		}
+	} else {
+		if sendErr := s.sender.SendTextMessage(chatID, msg, nil); sendErr != nil {
+			logger.Error("❌ OTP: не удалось отправить код user=%d: %v", req.MaxUserID, sendErr)
+			writeError(w, http.StatusInternalServerError, "не удалось отправить код")
+			return
+		}
+	}
+	if msgIDStr != "" {
+		s.store.SetMessageIDStr(req.MaxUserID, msgIDStr)
 	}
 
-	logger.Info("🔐 OTP отправлен: max_user_id=%d chat_id=%d", req.MaxUserID, chatID)
+	logger.Info("🔐 OTP отправлен: max_user_id=%d chat_id=%d msg_id=%s", req.MaxUserID, chatID, msgIDStr)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":         true,
 		"expires_in": int(s.store.ttl.Seconds()),
@@ -200,6 +224,9 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Сохраняем msg_id до Verify (после успеха запись удаляется из store)
+	msgIDStr := s.store.GetMessageIDStr(req.MaxUserID)
+
 	ok, err := s.store.Verify(req.MaxUserID, req.OTP)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
@@ -208,6 +235,13 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "неверный код")
 		return
+	}
+
+	// Удаляем сообщение с кодом из чата MAX
+	if msgIDStr != "" && s.maxSender != nil {
+		if delErr := s.maxSender.DeleteMessage(msgIDStr); delErr != nil {
+			logger.Info("⚠️ не удалось удалить OTP-сообщение max_user_id=%d msg_id=%s: %v", req.MaxUserID, msgIDStr, delErr)
+		}
 	}
 
 	// Загружаем пользователя для ответа

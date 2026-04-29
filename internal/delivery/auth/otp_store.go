@@ -15,10 +15,11 @@ const (
 )
 
 type otpEntry struct {
-	code      string
-	expiresAt time.Time
-	attempts  int   // неудачные попытки верификации
-	messageID int64 // ID сообщения в чате (для последующего удаления)
+	code         string
+	expiresAt    time.Time
+	attempts     int    // неудачные попытки верификации
+	messageID    int64  // ID сообщения в Telegram (int64)
+	messageIDStr string // ID сообщения в MAX (string)
 }
 
 type rateEntry struct {
@@ -117,6 +118,25 @@ func (s *OTPStore) GetMessageID(userID int64) int64 {
 		return e.messageID
 	}
 	return 0
+}
+
+// SetMessageIDStr сохраняет строковый ID сообщения (MAX) для последующего удаления.
+func (s *OTPStore) SetMessageIDStr(userID int64, msgID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.otps[userID]; ok {
+		e.messageIDStr = msgID
+	}
+}
+
+// GetMessageIDStr возвращает строковый ID сообщения (MAX) ("" если не задан).
+func (s *OTPStore) GetMessageIDStr(userID int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.otps[userID]; ok {
+		return e.messageIDStr
+	}
+	return ""
 }
 
 // Invalidate принудительно удаляет OTP для пользователя (например при смене кода)
