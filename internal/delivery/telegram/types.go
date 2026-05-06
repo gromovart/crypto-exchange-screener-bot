@@ -90,11 +90,17 @@ type TelegramResponse struct {
 	} `json:"result"`
 }
 
+// CopyTextContent — содержимое для кнопки копирования (Telegram Bot API 7.0+)
+type CopyTextContent struct {
+	Text string `json:"text"`
+}
+
 // InlineKeyboardButton - кнопка inline клавиатуры
 type InlineKeyboardButton struct {
-	Text         string `json:"text"`
-	CallbackData string `json:"callback_data"`
-	URL          string `json:"url,omitempty"`
+	Text         string           `json:"text"`
+	CallbackData string           `json:"callback_data,omitempty"`
+	URL          string           `json:"url,omitempty"`
+	CopyText     *CopyTextContent `json:"copy_text,omitempty"`
 }
 
 // InlineKeyboardMarkup - разметка inline клавиатуры

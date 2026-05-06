@@ -98,11 +98,23 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 		lastLoginDisplay,
 	)
 
-	rows := [][]map[string]string{
-		{kb.B(kb.Btn.ProfileStats, kb.CbProfileStats)},
-		{kb.B(kb.Btn.ProfileSubscription, kb.CbProfileSubscription)},
-		kb.BackRow(kb.CbMenuMain),
+	// Кнопка копирования MAX ID (если привязан)
+	var copyRow []map[string]string
+	if user.MaxUserID != nil {
+		copyRow = []map[string]string{
+			kb.B(fmt.Sprintf("📋 Скопировать MAX ID (%d)", *user.MaxUserID), fmt.Sprintf("%s:%d", kb.CbCopyCode, *user.MaxUserID)),
+		}
 	}
+
+	rows := [][]map[string]string{}
+	if copyRow != nil {
+		rows = append(rows, copyRow)
+	}
+	rows = append(rows,
+		[]map[string]string{kb.B(kb.Btn.ProfileStats, kb.CbProfileStats)},
+		[]map[string]string{kb.B(kb.Btn.ProfileSubscription, kb.CbProfileSubscription)},
+		kb.BackRow(kb.CbMenuMain),
+	)
 
 	return handlers.HandlerResult{
 		Message:     msg,

@@ -39,6 +39,7 @@ import (
 	cbSessionStop "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/session_stop"
 	cbBuy             "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
 	cbPaymentTBank    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
+	cbCopyCode        "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/copy_code"
 	cbWithParams      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
 	cbWatchlistAddAll  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_add_all"
 	cbWatchlistDisable "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_disable"
@@ -192,6 +193,9 @@ func RegisterAll(r router.Router, deps Dependencies) {
 	r.RegisterCallback(kb.CbSessionStart, protect(cbSessionStart.New(deps.SessionService)))
 	r.RegisterCallback(kb.CbSessionStop, protect(cbSessionStop.New(deps.SessionService)))
 	r.RegisterCallback(kb.CbSessionDuration, protect(cbSessionDuration.New(deps.SessionService)))
+
+	// ── Callback: копирование (copy_code:value) ──────────────
+	r.RegisterCallback(kb.CbCopyCode, cbCopyCode.New())
 
 	// ── Callback: with_params (fallback) ────────────────────
 	r.RegisterCallback(kb.CbWithParams, cbWithParams.New())

@@ -3,8 +3,10 @@ package profile_main
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
+	tg "crypto-exchange-screener-bot/internal/delivery/telegram"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/constants"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/telegram/app/bot/handlers/base"
@@ -57,13 +59,13 @@ func (h *profileMainHandler) Execute(params handlers.HandlerParams) (handlers.Ha
 	if !profileResult.Success {
 		return handlers.HandlerResult{
 			Message:  fmt.Sprintf("❌ %s", profileResult.Message),
-			Keyboard: h.createProfileKeyboard(),
+			Keyboard: h.createProfileKeyboard(params.User.TelegramID),
 		}, nil
 	}
 
 	// Извлекаем данные для форматирования
 	message := h.formatProfileMessage(profileResult.Data)
-	keyboard := h.createProfileKeyboard()
+	keyboard := h.createProfileKeyboard(params.User.TelegramID)
 
 	return handlers.HandlerResult{
 		Message:  message,
@@ -209,16 +211,18 @@ func (h *profileMainHandler) getRoleDisplay(role string) string {
 }
 
 // createProfileKeyboard создает клавиатуру для профиля
-func (h *profileMainHandler) createProfileKeyboard() interface{} {
-	return map[string]interface{}{
-		"inline_keyboard": [][]map[string]string{
-			// {
-			// 	{"text": constants.AuthButtonTexts.Stats, "callback_data": constants.CallbackProfileStats},
-			// 	{"text": constants.AuthButtonTexts.Premium, "callback_data": constants.CallbackProfileSubscription},
-			// },
+func (h *profileMainHandler) createProfileKeyboard(telegramID int64) interface{} {
+	return tg.InlineKeyboardMarkup{
+		InlineKeyboard: [][]tg.InlineKeyboardButton{
 			{
-				{"text": constants.ButtonTexts.Settings, "callback_data": constants.CallbackSettingsMain},
-				{"text": constants.ButtonTexts.Back, "callback_data": constants.CallbackMenuMain},
+				{
+					Text:     "📋 Скопировать Telegram ID",
+					CopyText: &tg.CopyTextContent{Text: strconv.FormatInt(telegramID, 10)},
+				},
+			},
+			{
+				{Text: constants.ButtonTexts.Settings, CallbackData: constants.CallbackSettingsMain},
+				{Text: constants.ButtonTexts.Back, CallbackData: constants.CallbackMenuMain},
 			},
 		},
 	}

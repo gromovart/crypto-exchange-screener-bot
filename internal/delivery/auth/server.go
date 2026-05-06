@@ -185,17 +185,29 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		code,
 		s.store.ttl.Minutes(),
 	)
+	maxOTPKeyboard := []interface{}{
+		map[string]interface{}{
+			"type": "inline_keyboard",
+			"payload": map[string]interface{}{
+				"buttons": [][]interface{}{
+					{
+						map[string]string{"type": "callback", "text": "📋 Скопировать код", "payload": "copy_code:" + code},
+					},
+				},
+			},
+		},
+	}
 	var msgIDStr string
 	if s.maxSender != nil {
 		var sendErr error
-		msgIDStr, sendErr = s.maxSender.SendMenuMessageWithID(chatID, msg, nil)
+		msgIDStr, sendErr = s.maxSender.SendMenuMessageWithID(chatID, msg, maxOTPKeyboard)
 		if sendErr != nil {
 			logger.Error("❌ OTP: не удалось отправить код user=%d: %v", req.MaxUserID, sendErr)
 			writeError(w, http.StatusInternalServerError, "не удалось отправить код")
 			return
 		}
 	} else {
-		if sendErr := s.sender.SendTextMessage(chatID, msg, nil); sendErr != nil {
+		if sendErr := s.sender.SendTextMessage(chatID, msg, maxOTPKeyboard); sendErr != nil {
 			logger.Error("❌ OTP: не удалось отправить код user=%d: %v", req.MaxUserID, sendErr)
 			writeError(w, http.StatusInternalServerError, "не удалось отправить код")
 			return
@@ -291,20 +303,27 @@ func (s *Server) handleTelegramOTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg := fmt.Sprintf(
-		"🔐 Код для входа в Crypto Analyzer:\n\n*%s*\n\nКод действителен 10 минут.",
+		"🔐 Код для входа в Crypto Analyzer:\n\n`%s`\n\nКод действителен 10 минут.",
 		code,
 	)
+	tgOTPKeyboard := map[string]interface{}{
+		"inline_keyboard": [][]map[string]interface{}{
+			{
+				{"text": "📋 Скопировать код", "copy_text": map[string]string{"text": code}},
+			},
+		},
+	}
 	var msgID int64
 	if s.telegramSender != nil {
 		var sendErr error
-		msgID, sendErr = s.telegramSender.SendMenuMessageWithID(req.TelegramID, msg, nil)
+		msgID, sendErr = s.telegramSender.SendMenuMessageWithID(req.TelegramID, msg, tgOTPKeyboard)
 		if sendErr != nil {
 			logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
 			writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
 			return
 		}
 	} else {
-		if sendErr := s.sender.SendTextMessage(req.TelegramID, msg, nil); sendErr != nil {
+		if sendErr := s.sender.SendTextMessage(req.TelegramID, msg, tgOTPKeyboard); sendErr != nil {
 			logger.Error("❌ Telegram OTP: не удалось отправить код telegram_id=%d: %v", req.TelegramID, sendErr)
 			writeError(w, http.StatusBadRequest, "не удалось отправить код. Напишите боту /start и повторите")
 			return

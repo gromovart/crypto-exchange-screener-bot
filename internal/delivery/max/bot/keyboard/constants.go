@@ -26,6 +26,10 @@ const (
 	CbProfileStats        = "profile_stats"
 	CbProfileSubscription = "profile_subscription"
 
+	// Copy (используется для копирования ID и кодов)
+	CbCopyCode         = "copy_code"
+	CbCopyCodeWildcard = "copy_code:*"
+
 	// Notifications
 	CbNotifyToggleAll  = "notify_toggle_all"
 	CbNotifyGrowthOnly = "notify_growth_only"
