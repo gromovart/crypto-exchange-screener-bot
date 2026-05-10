@@ -40,6 +40,7 @@ import (
 	cbBuy             "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/buy"
 	cbPaymentTBank    "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/payment_tbank"
 	cbCopyCode        "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/copy_code"
+	cbCopyOTP         "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/copy_otp"
 	cbWithParams      "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/with_params"
 	cbWatchlistAddAll  "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_add_all"
 	cbWatchlistDisable "crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/callbacks/watchlist_disable"
@@ -196,6 +197,8 @@ func RegisterAll(r router.Router, deps Dependencies) {
 
 	// ── Callback: копирование (copy_code:value) ──────────────
 	r.RegisterCallback(kb.CbCopyCode, cbCopyCode.New())
+	// ── Callback: копирование OTP (редактирует оригинальное сообщение) ──
+	r.RegisterCallback(kb.CbCopyOTP, cbCopyOTP.New())
 
 	// ── Callback: with_params (fallback) ────────────────────
 	r.RegisterCallback(kb.CbWithParams, cbWithParams.New())

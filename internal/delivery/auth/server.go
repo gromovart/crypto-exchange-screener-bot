@@ -185,13 +185,15 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		code,
 		s.store.ttl.Minutes(),
 	)
+	// copy_otp редактирует оригинальное сообщение (EditMessage: true),
+	// поэтому mid сохраняется и сообщение корректно удаляется после верификации
 	maxOTPKeyboard := []interface{}{
 		map[string]interface{}{
 			"type": "inline_keyboard",
 			"payload": map[string]interface{}{
 				"buttons": [][]interface{}{
 					{
-						map[string]string{"type": "callback", "text": "📋 Скопировать код", "payload": "copy_code:" + code},
+						map[string]string{"type": "callback", "text": "📋 Скопировать код", "payload": "copy_otp:" + code},
 					},
 				},
 			},

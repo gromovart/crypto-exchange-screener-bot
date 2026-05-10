@@ -30,6 +30,10 @@ const (
 	CbCopyCode         = "copy_code"
 	CbCopyCodeWildcard = "copy_code:*"
 
+	// Copy OTP (редактирует оригинальное сообщение, чтобы оно удалялось после верификации)
+	CbCopyOTP         = "copy_otp"
+	CbCopyOTPWildcard = "copy_otp:*"
+
 	// Notifications
 	CbNotifyToggleAll  = "notify_toggle_all"
 	CbNotifyGrowthOnly = "notify_growth_only"
