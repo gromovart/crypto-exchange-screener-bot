@@ -32,6 +32,9 @@ type MAXSender interface {
 	Sender
 	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (string, error)
 	DeleteMessage(mid string) error
+	// DeleteOTPMessages удаляет из чата недавние сообщения, содержащие только OTP-код (N цифр).
+	// Используется после верификации, чтобы очистить сообщения от кнопки «Скопировать код».
+	DeleteOTPMessages(chatID int64, otpCode string, extraMid string) error
 }
 
 // Server — внутренний HTTP-сервер для OTP-авторизации
@@ -185,15 +188,15 @@ func (s *Server) handleOTP(w http.ResponseWriter, r *http.Request) {
 		code,
 		s.store.ttl.Minutes(),
 	)
-	// copy_otp редактирует оригинальное сообщение (EditMessage: true),
-	// поэтому mid сохраняется и сообщение корректно удаляется после верификации
+	// copy_code отправляет новое сообщение с кодом для удобного копирования.
+	// После верификации DeleteOTPMessages удалит и оригинальное, и копию-сообщение.
 	maxOTPKeyboard := []interface{}{
 		map[string]interface{}{
 			"type": "inline_keyboard",
 			"payload": map[string]interface{}{
 				"buttons": [][]interface{}{
 					{
-						map[string]string{"type": "callback", "text": "📋 Скопировать код", "payload": "copy_otp:" + code},
+						map[string]string{"type": "callback", "text": "📋 Скопировать код", "payload": "copy_code:" + code},
 					},
 				},
 			},
@@ -244,8 +247,9 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сохраняем msg_id до Verify (после успеха запись удаляется из store)
+	// Сохраняем msg_id и otpCode до Verify (после успеха запись удаляется из store)
 	msgIDStr := s.store.GetMessageIDStr(req.MaxUserID)
+	otpCode  := s.store.GetOTPCode(req.MaxUserID)
 
 	ok, err := s.store.Verify(req.MaxUserID, req.OTP)
 	if err != nil {
@@ -257,15 +261,19 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Удаляем сообщение с кодом из чата MAX
-	if msgIDStr != "" && s.maxSender != nil {
-		if delErr := s.maxSender.DeleteMessage(msgIDStr); delErr != nil {
-			logger.Info("⚠️ не удалось удалить OTP-сообщение max_user_id=%d msg_id=%s: %v", req.MaxUserID, msgIDStr, delErr)
+	// Загружаем пользователя для ответа и получения chatID
+	user, _ := s.userService.GetUserByMaxID(req.MaxUserID)
+
+	// Удаляем оригинальное OTP-сообщение и копию от «Скопировать код»
+	if s.maxSender != nil && user != nil {
+		if chatID, chatErr := maxChatIDFrom(user); chatErr == nil {
+			go func() {
+				if delErr := s.maxSender.DeleteOTPMessages(chatID, otpCode, msgIDStr); delErr != nil {
+					logger.Info("⚠️ DeleteOTPMessages max_user_id=%d: %v", req.MaxUserID, delErr)
+				}
+			}()
 		}
 	}
-
-	// Загружаем пользователя для ответа
-	user, _ := s.userService.GetUserByMaxID(req.MaxUserID)
 
 	logger.Info("✅ OTP верифицирован: max_user_id=%d", req.MaxUserID)
 	writeJSON(w, http.StatusOK, map[string]interface{}{

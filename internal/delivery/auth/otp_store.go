@@ -20,6 +20,7 @@ type otpEntry struct {
 	attempts     int    // неудачные попытки верификации
 	messageID    int64  // ID сообщения в Telegram (int64)
 	messageIDStr string // ID сообщения в MAX (string)
+	otpCode      string // сохранённый OTP-код для поиска копий-сообщений при удалении
 }
 
 type rateEntry struct {
@@ -69,6 +70,7 @@ func (s *OTPStore) Generate(maxUserID int64) (string, error) {
 	s.otps[maxUserID] = &otpEntry{
 		code:      code,
 		expiresAt: now.Add(s.ttl),
+		otpCode:   code,
 	}
 	return code, nil
 }
@@ -135,6 +137,16 @@ func (s *OTPStore) GetMessageIDStr(userID int64) string {
 	defer s.mu.Unlock()
 	if e, ok := s.otps[userID]; ok {
 		return e.messageIDStr
+	}
+	return ""
+}
+
+// GetOTPCode возвращает сохранённый OTP-код ("" если запись не найдена).
+func (s *OTPStore) GetOTPCode(userID int64) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.otps[userID]; ok {
+		return e.otpCode
 	}
 	return ""
 }

@@ -69,6 +69,13 @@ type sendMessageResponse struct {
 	} `json:"message"`
 }
 
+// getMessagesResponse — ответ GET /messages
+type getMessagesResponse struct {
+	Messages []struct {
+		Body MessageBody `json:"body"`
+	} `json:"messages"`
+}
+
 // RateLimiter — простой ограничитель частоты запросов
 type RateLimiter struct {
 	lastSent map[string]time.Time

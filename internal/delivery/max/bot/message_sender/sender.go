@@ -2,6 +2,8 @@
 package message_sender
 
 import (
+	"strings"
+
 	"crypto-exchange-screener-bot/internal/delivery/max"
 	"crypto-exchange-screener-bot/pkg/logger"
 	"log"
@@ -17,6 +19,7 @@ type MessageSender interface {
 	SendMenuMessageWithID(chatID int64, text string, keyboard interface{}) (string, error)
 	EditMessageText(mid, text string, keyboard interface{}) error
 	DeleteMessage(mid string) error
+	DeleteOTPMessages(chatID int64, otpCode string, extraMid string) error
 	AnswerCallback(callbackID, notification string) error
 	SetTestMode(enabled bool)
 	IsTestMode() bool
@@ -83,6 +86,45 @@ func (s *senderImpl) DeleteMessage(mid string) error {
 		return nil
 	}
 	return s.client.DeleteMessage(mid)
+}
+
+// DeleteOTPMessages удаляет из чата:
+// 1. Оригинальное OTP-сообщение по extraMid (если задан).
+// 2. Последние N сообщений чата, текст которых совпадает с otpCode
+//    (сообщение от кнопки «Скопировать код» — содержит только цифры кода).
+func (s *senderImpl) DeleteOTPMessages(chatID int64, otpCode string, extraMid string) error {
+	if !s.enabled || s.testMode {
+		return nil
+	}
+
+	// Удаляем оригинальное OTP-сообщение
+	if extraMid != "" {
+		if err := s.client.DeleteMessage(extraMid); err != nil {
+			logger.Info("⚠️ MAX DeleteOTPMessages: не удалось удалить оригинал mid=%s: %v", extraMid, err)
+		}
+	}
+
+	// Запрашиваем последние 20 сообщений и удаляем те, чей текст == otpCode
+	msgs, err := s.client.GetMessages(chatID, 20)
+	if err != nil {
+		logger.Info("⚠️ MAX DeleteOTPMessages: GetMessages: %v", err)
+		return nil // не фатально
+	}
+
+	for _, m := range msgs {
+		if m.Mid == "" || m.Mid == extraMid {
+			continue
+		}
+		// Текст сообщения должен совпадать с кодом (возможны пробелы по краям)
+		if strings.TrimSpace(m.Text) == otpCode {
+			if err := s.client.DeleteMessage(m.Mid); err != nil {
+				logger.Info("⚠️ MAX DeleteOTPMessages: не удалось удалить копию mid=%s: %v", m.Mid, err)
+			} else {
+				logger.Info("🗑️ MAX DeleteOTPMessages: удалено копия-сообщение mid=%s", m.Mid)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *senderImpl) AnswerCallback(callbackID, notification string) error {

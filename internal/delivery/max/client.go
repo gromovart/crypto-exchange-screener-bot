@@ -185,6 +185,35 @@ func (c *Client) DeleteMessage(mid string) error {
 	return err
 }
 
+// GetMessages возвращает последние сообщения из чата (GET /messages?chat_id=&count=).
+func (c *Client) GetMessages(chatID int64, count int) ([]MessageBody, error) {
+	url := maxBaseURL + "/messages" +
+		"?chat_id=" + strconv.FormatInt(chatID, 10) +
+		"&count=" + strconv.Itoa(count)
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("max GetMessages: %w", err)
+	}
+	c.addAuth(req)
+
+	body, err := c.exec(req, c.httpClient, "GET /messages")
+	if err != nil {
+		return nil, err
+	}
+
+	var r getMessagesResponse
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, fmt.Errorf("max GetMessages: unmarshal: %w", err)
+	}
+
+	msgs := make([]MessageBody, 0, len(r.Messages))
+	for _, m := range r.Messages {
+		msgs = append(msgs, m.Body)
+	}
+	return msgs, nil
+}
+
 // ───────────────────────────────────────────────
 // AnswerCallbackQuery — ответ на callback
 // POST /answers?callback_id=<id>
