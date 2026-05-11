@@ -3,6 +3,7 @@ package copy_code
 
 import (
 	"strings"
+	"time"
 
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers"
 	"crypto-exchange-screener-bot/internal/delivery/max/bot/handlers/base"
@@ -41,10 +42,11 @@ func (h *Handler) Execute(params handlers.HandlerParams) (handlers.HandlerResult
 	}
 
 	// Отправляем значение новым сообщением (не редактируем старое)
-	// Пользователь может удержать и скопировать
+	// Пользователь может удержать и скопировать; сообщение удалится автоматически через 60 сек
 	return handlers.HandlerResult{
-		Message:     value,
-		Keyboard:    nil,
-		EditMessage: false,
+		Message:         value,
+		Keyboard:        nil,
+		EditMessage:     false,
+		AutoDeleteAfter: 60 * time.Second,
 	}, nil
 }

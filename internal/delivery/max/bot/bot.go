@@ -4,6 +4,7 @@ package bot
 import (
 	"context"
 	"strings"
+	"time"
 
 	maxpkg "crypto-exchange-screener-bot/internal/delivery/max"
 	"crypto-exchange-screener-bot/internal/delivery/auth"
@@ -126,6 +127,22 @@ func (b *Bot) HandleUpdate(upd maxpkg.Update) {
 		if editErr := b.sender.EditMessageText(params.MessageID, result.Message, result.Keyboard); editErr != nil {
 			logger.Warn("⚠️ MAX EditMessage failed (%v), sending new", editErr)
 			_ = b.sender.SendMenuMessage(params.ChatID, result.Message, result.Keyboard)
+		}
+	} else if result.AutoDeleteAfter > 0 {
+		// Отправляем с получением mid, затем удаляем через заданный интервал
+		mid, err := b.sender.SendMenuMessageWithID(params.ChatID, result.Message, result.Keyboard)
+		if err != nil {
+			logger.Warn("⚠️ MAX SendMenuMessageWithID: %v", err)
+		} else if mid != "" {
+			delay := result.AutoDeleteAfter
+			go func() {
+				time.Sleep(delay)
+				if delErr := b.sender.DeleteMessage(mid); delErr != nil {
+					logger.Debug("⚠️ MAX AutoDelete: %v", delErr)
+				} else {
+					logger.Info("🗑️ MAX AutoDelete: удалено сообщение mid=%s (через %s)", mid, delay)
+				}
+			}()
 		}
 	} else {
 		_ = b.sender.SendMenuMessage(params.ChatID, result.Message, result.Keyboard)

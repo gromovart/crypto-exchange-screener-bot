@@ -4,6 +4,7 @@ package handlers
 import (
 	"crypto-exchange-screener-bot/internal/infrastructure/persistence/postgres/models"
 	"sync"
+	"time"
 )
 
 // HandlerType — тип хэндлера
@@ -42,6 +43,8 @@ type HandlerResult struct {
 	Metadata    map[string]interface{}
 	// EditMessage — если true, редактировать существующее сообщение вместо нового
 	EditMessage bool
+	// AutoDeleteAfter — если > 0, удалить отправленное сообщение через указанный интервал
+	AutoDeleteAfter time.Duration
 }
 
 // HandlerFactory — фабрика хэндлеров
