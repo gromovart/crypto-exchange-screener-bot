@@ -2,7 +2,6 @@
 package types
 
 import (
-	"sync"
 	"time"
 )
 
@@ -60,7 +59,6 @@ type EventSubscriber interface {
 
 // EventBusMetrics - метрики EventBus
 type EventBusMetrics struct {
-	Mu               sync.RWMutex
 	EventsPublished  int64             `json:"events_published"`
 	EventsProcessed  int64             `json:"events_processed"`
 	EventsFailed     int64             `json:"events_failed"`

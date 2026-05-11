@@ -10,47 +10,24 @@ import (
 	"time"
 )
 
-// LoggingMiddleware - middleware для логирования
+// LoggingMiddleware - middleware для логирования (только ошибки)
 type LoggingMiddleware struct{}
 
 func (m *LoggingMiddleware) Process(event types.Event, next HandlerFunc) error {
-	logger.Info("🔍 [LoggingMiddleware] Начало обработки %s\n", event.Type)
-	start := time.Now()
-
 	err := next(event)
-
-	duration := time.Since(start)
-
 	if err != nil {
-		logger.Info("❌ [LoggingMiddleware] Ошибка обработки %s за %v: %v\n",
-			event.Type, duration, err)
-	} else {
-		logger.Info("✅ [LoggingMiddleware] %s обработан за %v\n",
-			event.Type, duration)
+		log.Printf("❌ [LoggingMiddleware] Ошибка обработки %s: %v", event.Type, err)
 	}
-
 	return err
 }
 
-// MetricsMiddleware - middleware для сбора метрик
+// MetricsMiddleware - middleware для сбора метрик (no-op: метрики теперь в EventBus)
 type MetricsMiddleware struct {
 	metrics *types.EventBusMetrics
 }
 
 func (m *MetricsMiddleware) Process(event types.Event, next HandlerFunc) error {
-	logger.Info("🔍 [MetricsMiddleware] Обработка %s\n", event.Type)
-	start := time.Now()
-
-	err := next(event)
-
-	duration := time.Since(start)
-
-	m.metrics.Mu.Lock()
-	m.metrics.ProcessingTime += duration
-	m.metrics.Mu.Unlock()
-
-	logger.Info("✅ [MetricsMiddleware] %s обработан за %v\n", event.Type, duration)
-	return err
+	return next(event)
 }
 
 // RateLimitingMiddleware - middleware для ограничения частоты

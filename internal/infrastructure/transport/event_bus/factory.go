@@ -39,7 +39,6 @@ func (f *Factory) NewEventBusFromConfig(cfg *config.Config) *EventBus {
 	}
 
 	bus.AddMiddleware(&ValidationMiddleware{})
-	bus.AddMiddleware(&MetricsMiddleware{metrics: bus.metrics})
 
 	return bus
 }

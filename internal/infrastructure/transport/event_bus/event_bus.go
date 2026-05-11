@@ -10,15 +10,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/google/uuid"
 )
 
-// Константы для защиты от рекурсии
-const (
-	maxProcessingDepth = 15 // Максимальная глубина обработки
-	maxEventChainDepth = 3  // Максимальная глубина в цепочке событий
-)
+const maxProcessingDepth = 15
 
 // EventBus - центральная шина событий
 type EventBus struct {
@@ -26,16 +20,19 @@ type EventBus struct {
 	subscribers map[types.EventType][]types.EventSubscriber
 	middlewares []Middleware
 	eventBuffer chan types.Event
-	metrics     *types.EventBusMetrics
 	config      EventBusConfig
 	running     bool
 	stopChan    chan struct{}
 	wg          sync.WaitGroup
 
-	// 🔒 Защита от рекурсии
-	processingDepth int32          // атомарный счетчик глубины обработки
-	eventChain      map[string]int // трекинг цепочек событий (eventID -> глубина)
-	chainMu         sync.RWMutex   // для eventChain
+	// Атомарные метрики — без мьютекса
+	eventsPublished   atomic.Int64
+	eventsProcessed   atomic.Int64
+	eventsFailed      atomic.Int64
+	processingNsTotal atomic.Int64
+
+	// Защита от рекурсии — только атомарный счётчик
+	processingDepth atomic.Int32
 }
 
 // EventBusConfig - конфигурация EventBus
@@ -66,27 +63,16 @@ func NewEventBus(config ...EventBusConfig) *EventBus {
 	if len(config) > 0 {
 		cfg = config[0]
 	}
-
 	bus := &EventBus{
 		subscribers: make(map[types.EventType][]types.EventSubscriber),
 		middlewares: make([]Middleware, 0),
 		eventBuffer: make(chan types.Event, cfg.BufferSize),
-		metrics: &types.EventBusMetrics{
-			SubscribersCount: make(map[types.EventType]int),
-		},
-		config:     cfg,
-		stopChan:   make(chan struct{}),
-		running:    false,
-		eventChain: make(map[string]int), // Инициализация мапы для трекинга цепочек
+		config:      cfg,
+		stopChan:    make(chan struct{}),
 	}
-
 	if cfg.EnableMetrics {
 		bus.startMetricsCollection()
 	}
-
-	logger.Info("🔍 EventBus config: MaxRetries=%d, RetryDelay=%v",
-		cfg.MaxRetries, cfg.RetryDelay)
-
 	return bus
 }
 
@@ -95,15 +81,11 @@ func (b *EventBus) Start() {
 	if b.running {
 		return
 	}
-
 	b.running = true
-
-	// Запускаем обработчиков событий
 	for i := 0; i < b.config.WorkerCount; i++ {
 		b.wg.Add(1)
 		go b.eventWorker(i)
 	}
-
 	if b.config.EnableLogging {
 		log.Printf("🚀 EventBus запущен с %d обработчиками", b.config.WorkerCount)
 	}
@@ -114,137 +96,61 @@ func (b *EventBus) Stop() {
 	if !b.running {
 		return
 	}
-
 	b.running = false
 	close(b.stopChan)
 	b.wg.Wait()
 	close(b.eventBuffer)
-
-	// Очищаем цепочки событий
-	b.chainMu.Lock()
-	b.eventChain = make(map[string]int)
-	b.chainMu.Unlock()
-
 	if b.config.EnableLogging {
 		log.Println("🛑 EventBus остановлен")
 	}
-}
-
-// isRecursiveEvent проверяет наличие рекурсии в обработке событий
-func (b *EventBus) isRecursiveEvent(event types.Event, currentDepth int32) bool {
-	// Проверка глубины обработки
-	if currentDepth > maxProcessingDepth {
-		logger.Warn("⚠️ Достигнута максимальная глубина обработки: %d", currentDepth)
-		return true
-	}
-
-	// Проверка циклических цепочек событий
-	b.chainMu.RLock()
-	chainDepth, exists := b.eventChain[event.ID]
-	b.chainMu.RUnlock()
-
-	if exists && chainDepth > maxEventChainDepth {
-		logger.Warn("⚠️ Обнаружена циклическая цепочка событий для ID: %s (глубина: %d)",
-			event.ID, chainDepth)
-		return true
-	}
-
-	return false
 }
 
 // Subscribe подписывает обработчик на тип события
 func (b *EventBus) Subscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	// Проверяем, что подписчик подписан на этот тип события
-	subscribedEvents := subscriber.GetSubscribedEvents()
-	found := false
-	for _, et := range subscribedEvents {
+	for _, et := range subscriber.GetSubscribedEvents() {
 		if et == eventType {
-			found = true
-			break
+			b.subscribers[eventType] = append(b.subscribers[eventType], subscriber)
+			if b.config.EnableLogging {
+				log.Printf("✅ %s подписался на %s", subscriber.GetName(), eventType)
+			}
+			return
 		}
 	}
-
-	if !found {
-		log.Printf("⚠️ Подписчик %s не подписан на событие %s",
-			subscriber.GetName(), eventType)
-		return
-	}
-
-	// Добавляем подписчика
-	b.subscribers[eventType] = append(b.subscribers[eventType], subscriber)
-
-	// Обновляем метрики
-	b.metrics.SubscribersCount[eventType] = len(b.subscribers[eventType])
-
-	if b.config.EnableLogging {
-		log.Printf("✅ %s подписался на %s",
-			subscriber.GetName(), eventType)
-	}
+	log.Printf("⚠️ Подписчик %s не подписан на событие %s", subscriber.GetName(), eventType)
 }
 
 // Unsubscribe отписывает обработчик от типа события
 func (b *EventBus) Unsubscribe(eventType types.EventType, subscriber types.EventSubscriber) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	subscribers, exists := b.subscribers[eventType]
-	if !exists {
-		return
-	}
-
+	subscribers := b.subscribers[eventType]
 	for i, sub := range subscribers {
 		if sub == subscriber {
 			b.subscribers[eventType] = append(subscribers[:i], subscribers[i+1:]...)
-
-			// Обновляем метрики
-			b.metrics.SubscribersCount[eventType] = len(b.subscribers[eventType])
-
 			if b.config.EnableLogging {
-				log.Printf("❌ %s отписался от %s",
-					subscriber.GetName(), eventType)
+				log.Printf("❌ %s отписался от %s", subscriber.GetName(), eventType)
 			}
 			return
 		}
 	}
 }
 
-// Publish публикует событие
+// Publish публикует событие асинхронно
 func (b *EventBus) Publish(event types.Event) error {
 	if !b.running {
 		return fmt.Errorf("event bus is not running")
 	}
-
-	logger.Debug("[EventBus.Publish] Публикую %s от %s", event.Type, event.Source)
-
-	// Устанавливаем ID и временную метку если они не установлены
-	if event.ID == "" {
-		event.ID = uuid.New().String()
-	}
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
-
 	select {
 	case b.eventBuffer <- event:
-		// Обновляем метрики
-		b.metrics.Mu.Lock()
-		b.metrics.EventsPublished++
-		b.metrics.Mu.Unlock()
-
-		if b.config.EnableLogging && event.Type != types.EventPriceUpdated {
-			logger.Debug("📤 Опубликовано событие: %s от %s",
-				event.Type, event.Source)
-		}
-		logger.Debug("✅ [EventBus.Publish] Событие %s добавлено в буфер", event.Type)
+		b.eventsPublished.Add(1)
 		return nil
 	default:
-		// Буфер полен
-		if b.config.EnableLogging {
-			logger.Warn("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
-		}
+		logger.Warn("⚠️ Буфер событий полен, событие отброшено: %s", event.Type)
 		return fmt.Errorf("event buffer is full")
 	}
 }
@@ -258,27 +164,17 @@ func (b *EventBus) PublishSync(event types.Event) error {
 func (b *EventBus) AddMiddleware(middleware Middleware) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	b.middlewares = append(b.middlewares, middleware)
-
-	if b.config.EnableLogging {
-		log.Printf("➕ Добавлен middleware: %T", middleware)
-	}
 }
 
 // eventWorker - обработчик событий
-func (b *EventBus) eventWorker(id int) {
+func (b *EventBus) eventWorker(_ int) {
 	defer b.wg.Done()
-
-	logger.Info("🔍 [EventWorker %d] Запущен", id)
-
 	for {
 		select {
 		case event := <-b.eventBuffer:
-			logger.Debug("🔍 [EventWorker %d] Получил событие %s из буфера", id, event.Type)
 			b.processEvent(event)
 		case <-b.stopChan:
-			logger.Info("🔍 [EventWorker %d] Остановлен", id)
 			return
 		}
 	}
@@ -286,157 +182,81 @@ func (b *EventBus) eventWorker(id int) {
 
 // processEvent обрабатывает одно событие
 func (b *EventBus) processEvent(event types.Event) error {
-	depth := atomic.AddInt32(&b.processingDepth, 1)
-	defer atomic.AddInt32(&b.processingDepth, -1)
+	depth := b.processingDepth.Add(1)
+	defer b.processingDepth.Add(-1)
 
-	// 🔒 ПРОВЕРКА НА РЕКУРСИЮ ПЕРЕД ОБРАБОТКОЙ
-	if b.isRecursiveEvent(event, depth) {
-		logger.Error("❌ Обнаружена рекурсия, обработка события %s (ID: %s) прервана на глубине %d",
-			event.Type, event.ID, depth)
-		return fmt.Errorf("рекурсия обнаружена, обработка прервана")
+	if depth > maxProcessingDepth {
+		logger.Warn("⚠️ Достигнута максимальная глубина обработки: %d", depth)
+		return fmt.Errorf("max processing depth reached")
 	}
 
-	// 🔒 ДОБАВЛЕНИЕ СОБЫТИЯ В ЦЕПОЧКУ
-	b.chainMu.Lock()
-	b.eventChain[event.ID] = b.eventChain[event.ID] + 1
-	currentChainDepth := b.eventChain[event.ID]
-	b.chainMu.Unlock()
+	start := time.Now()
 
-	// 🔒 УДАЛЕНИЕ СОБЫТИЯ ИЗ ЦЕПОЧКИ ПОСЛЕ ОБРАБОТКИ
-	defer func() {
-		b.chainMu.Lock()
-		if count, exists := b.eventChain[event.ID]; exists {
-			if count <= 1 {
-				delete(b.eventChain, event.ID)
-			} else {
-				b.eventChain[event.ID] = count - 1
-			}
-		}
-		b.chainMu.Unlock()
-	}()
-
-	startTime := time.Now()
-
-	logger.Debug("🔍 EventBus.processEvent: обработка %s (ID: %s) от %s, цепочка: %d",
-		event.Type, event.ID, event.Source, currentChainDepth)
-
-	defer func() {
-		// Обновляем метрики времени обработки
-		b.metrics.Mu.Lock()
-		b.metrics.ProcessingTime += time.Since(startTime)
-		b.metrics.EventsProcessed++
-		b.metrics.Mu.Unlock()
-
-		logger.Debug("✅ EventBus.processEvent: %s обработано за %v, глубина: %d",
-			event.Type, time.Since(startTime), depth)
-	}()
-
-	// Получаем подписчиков для этого типа события
 	b.mu.RLock()
-	subscribers, exists := b.subscribers[event.Type]
+	subscribers := b.subscribers[event.Type]
 	b.mu.RUnlock()
 
-	logger.Debug("🔍 EventBus.processEvent: найдено %d подписчиков для %s",
-		len(subscribers), event.Type)
-
-	if !exists || len(subscribers) == 0 {
-		if b.config.EnableLogging {
-			logger.Warn("⚠️ Нет подписчиков для события: %s", event.Type)
-		}
+	if len(subscribers) == 0 {
 		return nil
 	}
 
-	// Создаем цепочку middleware
 	handler := b.createHandlerChain(subscribers)
+	err := b.executeWithMiddleware(event, handler)
 
-	// Запускаем обработку через middleware
-	return b.executeWithMiddleware(event, handler)
+	b.eventsProcessed.Add(1)
+	b.processingNsTotal.Add(time.Since(start).Nanoseconds())
+	if err != nil {
+		b.eventsFailed.Add(1)
+	}
+	return err
 }
 
 // createHandlerChain создает цепочку обработчиков
 func (b *EventBus) createHandlerChain(subscribers []types.EventSubscriber) HandlerFunc {
 	return func(event types.Event) error {
-		logger.Debug("🔍 [createHandlerChain] Начало обработки %s для %d подписчиков",
-			event.Type, len(subscribers))
-
-		var lastError error
-
-		for i, subscriber := range subscribers {
-			logger.Debug("🔍 [createHandlerChain] Обработка подписчика [%d] %s",
-				i, subscriber.GetName())
-
-			if err := b.handleEventWithRetry(event, subscriber); err != nil {
-				logger.Debug("❌ [createHandlerChain] Ошибка от %s: %v",
-					subscriber.GetName(), err)
-				lastError = err
-				log.Printf("❌ Ошибка обработки события %s подписчиком %s: %v",
-					event.Type, subscriber.GetName(), err)
-			} else {
-				logger.Debug("✅ [createHandlerChain] %s успешно обработал %s",
-					subscriber.GetName(), event.Type)
+		var lastErr error
+		for _, sub := range subscribers {
+			if err := sub.HandleEvent(event); err != nil {
+				lastErr = err
+				log.Printf("❌ Ошибка обработки %s подписчиком %s: %v",
+					event.Type, sub.GetName(), err)
 			}
 		}
-
-		logger.Debug("🔍 [createHandlerChain] Завершение обработки %s, ошибка: %v",
-			event.Type, lastError)
-		return lastError
+		return lastErr
 	}
-}
-
-// handleEventWithRetry обрабатывает событие с повторными попытками
-func (b *EventBus) handleEventWithRetry(event types.Event, subscriber types.EventSubscriber) error {
-	logger.Debug("🔍 [handleEventWithRetry] Вызов %s для события %s",
-		subscriber.GetName(), event.Type)
-
-	// Просто вызываем обработчик
-	err := subscriber.HandleEvent(event)
-
-	if err != nil {
-		logger.Info("❌ [handleEventWithRetry] Ошибка от %s: %v",
-			subscriber.GetName(), err)
-		b.metrics.Mu.Lock()
-		b.metrics.EventsFailed++
-		b.metrics.Mu.Unlock()
-		return err
-	}
-
-	logger.Debug("✅ [handleEventWithRetry] %s успешно обработал %s",
-		subscriber.GetName(), event.Type)
-	return nil
 }
 
 // executeWithMiddleware выполняет обработку через цепочку middleware
 func (b *EventBus) executeWithMiddleware(event types.Event, handler HandlerFunc) error {
-	// Создаем цепочку middleware
 	chain := handler
 	for i := len(b.middlewares) - 1; i >= 0; i-- {
 		mw := b.middlewares[i]
 		next := chain
-		chain = func(event types.Event) error {
-			logger.Debug("🔍 [executeWithMiddleware] Вызов middleware %T", mw)
-			return mw.Process(event, next)
-		}
+		chain = func(e types.Event) error { return mw.Process(e, next) }
 	}
-
-	logger.Debug("🔍 [executeWithMiddleware] Запуск цепочки для %s", event.Type)
-
-	// Запускаем цепочку
 	return chain(event)
 }
 
 // GetMetrics возвращает метрики
 func (b *EventBus) GetMetrics() *types.EventBusMetrics {
-	b.metrics.Mu.RLock()
-	defer b.metrics.Mu.RUnlock()
+	b.mu.RLock()
+	subscribersCount := make(map[types.EventType]int, len(b.subscribers))
+	for k, v := range b.subscribers {
+		subscribersCount[k] = len(v)
+	}
+	b.mu.RUnlock()
 
-	// Создаем копию без мьютекса
+	processed := b.eventsProcessed.Load()
+	var avgProcessing time.Duration
+	if processed > 0 {
+		avgProcessing = time.Duration(b.processingNsTotal.Load() / processed)
+	}
 	return &types.EventBusMetrics{
-		EventsPublished:  b.metrics.EventsPublished,
-		EventsProcessed:  b.metrics.EventsProcessed,
-		EventsFailed:     b.metrics.EventsFailed,
-		SubscribersCount: b.metrics.SubscribersCount,
-		ProcessingTime:   b.metrics.ProcessingTime,
-		// Не копируем Mu
+		EventsPublished:  b.eventsPublished.Load(),
+		EventsProcessed:  processed,
+		EventsFailed:     b.eventsFailed.Load(),
+		SubscribersCount: subscribersCount,
+		ProcessingTime:   avgProcessing,
 	}
 }
 
@@ -444,7 +264,6 @@ func (b *EventBus) GetMetrics() *types.EventBusMetrics {
 func (b *EventBus) GetSubscriberCount(eventType types.EventType) int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
 	return len(b.subscribers[eventType])
 }
 
@@ -452,25 +271,19 @@ func (b *EventBus) GetSubscriberCount(eventType types.EventType) int {
 func (b *EventBus) GetEventTypes() []types.EventType {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
-	var types []types.EventType
-	for eventType := range b.subscribers {
-		types = append(types, eventType)
+	var result []types.EventType
+	for et := range b.subscribers {
+		result = append(result, et)
 	}
-
-	sort.Slice(types, func(i, j int) bool {
-		return types[i] < types[j]
-	})
-
-	return types
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	return result
 }
 
-// startMetricsCollection запускает сбор метрик
+// startMetricsCollection запускает периодический лог метрик
 func (b *EventBus) startMetricsCollection() {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
@@ -482,33 +295,10 @@ func (b *EventBus) startMetricsCollection() {
 	}()
 }
 
-// logMetrics логирует метрики
 func (b *EventBus) logMetrics() {
-	metrics := b.GetMetrics()
-
-	logger.Info("📊 EventBus метрики:")
-	logger.Info("   Опубликовано: %d событий", metrics.EventsPublished)
-	logger.Info("   Обработано: %d событий", metrics.EventsProcessed)
-	logger.Info("   Ошибок: %d событий", metrics.EventsFailed)
-
-	// ИСПРАВЛЕНИЕ: проверка деления на ноль
-	var avgProcessingTime time.Duration
-	if metrics.EventsProcessed > 0 {
-		avgProcessingTime = metrics.ProcessingTime / time.Duration(metrics.EventsProcessed)
-		logger.Info("   Среднее время обработки: %v", avgProcessingTime)
-	} else {
-		logger.Info("   Среднее время обработки: нет данных (0 событий)")
-	}
-
-	// 🔒 ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ О ЦЕПОЧКАХ СОБЫТИЙ
-	b.chainMu.RLock()
-	chainCount := len(b.eventChain)
-	b.chainMu.RUnlock()
-	logger.Info("   Активных цепочек событий: %d", chainCount)
-
-	for eventType, count := range metrics.SubscribersCount {
-		logger.Info("   %s: %d подписчиков", eventType, count)
-	}
+	m := b.GetMetrics()
+	logger.Info("📊 EventBus: опубликовано=%d обработано=%d ошибок=%d avg=%v",
+		m.EventsPublished, m.EventsProcessed, m.EventsFailed, m.ProcessingTime)
 }
 
 // safeExecute безопасно выполняет функцию с обработкой паники
@@ -516,25 +306,51 @@ func (b *EventBus) safeExecute(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("⚠️ Паника восстановлена: %v\n%s", r, debug.Stack())
-
-			// Публикуем событие об ошибке
-			b.Publish(types.Event{
+			_ = b.Publish(types.Event{
 				Type:   types.EventError,
 				Source: "event_bus",
 				Data:   fmt.Sprintf("Panic recovered: %v", r),
 			})
 		}
 	}()
-
 	fn()
 }
 
-// GetMiddlewares возвращает список middleware (для отладки)
+// IsRunning возвращает true если EventBus запущен
+func (b *EventBus) IsRunning() bool { return b.running }
+
+// Name возвращает имя сервиса
+func (b *EventBus) Name() string { return "EventBus" }
+
+// HealthCheck проверяет здоровье сервиса
+func (b *EventBus) HealthCheck() bool {
+	if !b.running || b.eventBuffer == nil {
+		return false
+	}
+	select {
+	case <-b.stopChan:
+		return false
+	default:
+		return true
+	}
+}
+
+// GetMetricsMap возвращает метрики в виде map
+func (b *EventBus) GetMetricsMap() map[string]interface{} {
+	m := b.GetMetrics()
+	return map[string]interface{}{
+		"events_published": m.EventsPublished,
+		"events_processed": m.EventsProcessed,
+		"events_failed":    m.EventsFailed,
+		"processing_time":  m.ProcessingTime.String(),
+		"subscribers":      m.SubscribersCount,
+	}
+}
+
+// GetMiddlewares возвращает список middleware
 func (b *EventBus) GetMiddlewares() []Middleware {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-
-	// Создаем копию
 	result := make([]Middleware, len(b.middlewares))
 	copy(result, b.middlewares)
 	return result
@@ -544,61 +360,11 @@ func (b *EventBus) GetMiddlewares() []Middleware {
 func (b *EventBus) ClearMiddlewares() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	b.middlewares = []Middleware{}
-
-	if b.config.EnableLogging {
-		log.Println("✅ Все middleware удалены из EventBus")
-	}
 }
 
-// IsRunning возвращает true если EventBus запущен
-func (b *EventBus) IsRunning() bool {
-	return b.running
-}
+// ClearEventChain — оставлен для совместимости (no-op)
+func (b *EventBus) ClearEventChain() {}
 
-// Name возвращает имя сервиса
-func (b *EventBus) Name() string {
-	return "EventBus"
-}
-
-// HealthCheck проверяет здоровье сервиса
-func (b *EventBus) HealthCheck() bool {
-	// Базовые проверки
-	if !b.running {
-		return false
-	}
-	if b.eventBuffer == nil {
-		return false
-	}
-
-	// Проверяем что канал остановки не закрыт
-	select {
-	case <-b.stopChan:
-		return false
-	default:
-		return true
-	}
-}
-
-// GetMetricsMap возвращает метрики в виде map (для совместимости)
-func (b *EventBus) GetMetricsMap() map[string]interface{} {
-	metrics := b.GetMetrics()
-	return map[string]interface{}{
-		"events_published": metrics.EventsPublished,
-		"events_processed": metrics.EventsProcessed,
-		"events_failed":    metrics.EventsFailed,
-		"processing_time":  metrics.ProcessingTime.String(),
-		"subscribers":      metrics.SubscribersCount,
-		"event_chain_size": len(b.eventChain), // Добавляем размер цепочки событий
-	}
-}
-
-// ClearEventChain очищает цепочку событий (для тестирования)
-func (b *EventBus) ClearEventChain() {
-	b.chainMu.Lock()
-	defer b.chainMu.Unlock()
-
-	b.eventChain = make(map[string]int)
-	logger.Info("✅ Цепочка событий очищена")
-}
+// unused — подавляем предупреждение компилятора
+var _ = atomic.Int32{}
